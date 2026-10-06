@@ -2,8 +2,10 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from .database import engine, SessionLocal
+from .database import engine, SessionLocal, get_db
 from . import models
+from .routers.users import router as users_router
+from .routers.catalogs import router as catalogs_router
 
 app = FastAPI()
 
@@ -11,6 +13,10 @@ app = FastAPI()
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+app.include_router(users_router)
+app.include_router(catalogs_router)
 
 
 @app.on_event("startup")
@@ -42,6 +48,5 @@ def on_startup():
         db.close()
 
 
-app.on_event("startup")(on_startup)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
