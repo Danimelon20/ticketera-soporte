@@ -1,30 +1,32 @@
-# AGENTS.md — Ticketera de Soporte
+# Ticketera de Soporte
 
-## Project scope
-- Support ticket system with: create ticket (title+description), select category+priority, change state (Nuevo/En proceso/Resuelto/Cerrado), assign to person, add comments, list/search/filter tickets, view change history.
-- Tech stack: Python + FastAPI, SQLite/PostgreSQL, HTML/CSS/JS frontend, Docker.
-- Assistant: Open Code.
+## Fuente de verdad
+El diseño aprobado está en docs/diseno.md. No agregues tablas,
+campos, endpoints ni autenticación que no estén ahí.
+Trabaja solo en la tarea que se pida en cada mensaje.
 
-## Directory layout
-- `/` — root (this file, README, .gitignore, docs/)
-- `/docs/` — project requirements and planning
-- `/app/` — will contain the FastAPI backend and frontend frontend (created when development starts)
+## Stack
+- Backend: Python 3.12 + FastAPI
+- Base de datos: SQLite con SQLAlchemy
+- Frontend: HTML, CSS y JavaScript sin frameworks, en static/
+- Entorno: Docker y docker compose (dentro de WSL)
+- Pruebas: pytest + TestClient de FastAPI
 
-## When development begins
-- Backend entrypoint: `app/main.py` (FastAPI app)
-- Database: `app/db.py` or similar (SQLAlchemy or raw SQLite)
-- Migrations: will use Alembic when DB model is defined
-- Docker: `docker-compose.yml` will orchestrate services
-- Frontend: static files served from FastAPI or separate dev server
+## Estructura
+- app/          código del backend
+- app/routers/  endpoints por recurso
+- static/       frontend
+- tests/        pruebas
+- docs/         requisitos, diseño y bitácora
 
-## Common commands (to be added as project grows)
-- `make dev` or `uvicorn app.main:app --reload` — start dev server
-- `pytest` — run tests
-- `make lint` / `make typecheck` — code quality
-- `docker compose up` — start all services
-- `alembic migrate` — run DB migrations
+## Comandos
+- Levantar: docker compose up --build
+- Detener: docker compose down
+- Pruebas: docker compose run --rm app pytest
 
-## Notes
-- No code exists yet — this file will be updated as the project evolves.
-- See `docs/requisitos.md` for full requirement list.
-- `.env` files (DB_URL, SECRET_KEY, etc.) are loaded at runtime; never commit them (see `.gitignore`).
+## Convenciones
+- Código y nombres en inglés; textos de la interfaz en español.
+- Estados internos: new, in_progress, resolved, closed.
+- Cada cambio de status, assigned_to, priority_id o category_id
+  se registra en la tabla history.
+- No hay login: las acciones reciben actor_id (id de un usuario).
