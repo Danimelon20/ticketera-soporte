@@ -6,6 +6,7 @@ from .database import engine, SessionLocal, get_db
 from . import models
 from .routers.users import router as users_router
 from .routers.catalogs import router as catalogs_router
+from .routers.tickets import router as tickets_router
 
 app = FastAPI()
 
@@ -17,6 +18,7 @@ async def health():
 
 app.include_router(users_router)
 app.include_router(catalogs_router)
+app.include_router(tickets_router)
 
 
 @app.on_event("startup")
@@ -46,7 +48,6 @@ def on_startup():
         db.commit()
     finally:
         db.close()
-
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

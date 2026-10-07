@@ -37,3 +37,25 @@ class PriorityRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TicketCreate(BaseModel):
+    title: str
+    description: str
+    category_id: int
+    priority_id: int
+
+
+class TicketRead(BaseModel):
+    id: int
+    title: str
+    description: str
+    category_id: int
+    priority_id: int
+    status: str
+    assigned_to: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
