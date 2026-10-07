@@ -1,9 +1,84 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ticketera de Soporte</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <h1>Ticketera de Soporte</h1>
+
+    <section id="ticket-form">
+        <h2>Nuevo ticket</h2>
+        <form id="ticketForm">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="title">Título</label>
+                    <input type="text" id="title" name="title" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Descripción</label>
+                    <textarea id="description" name="description" required></textarea>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="category">Categoría</label>
+                    <select id="category" name="category"></select>
+                </div>
+                <div class="form-group">
+                    <label for="priority">Prioridad</label>
+                    <select id="priority" name="priority"></select>
+                </div>
+            </div>
+            <button type="submit" class="btn-submit">Crear ticket</button>
+        </form>
+    </section>
+
+    <section id="tickets-list">
+        <h2>Lista de tickets</h2>
+        <div class="filters">
+            <div class="form-group">
+                <label for="statusFilter">Estado</label>
+                <select id="statusFilter" name="status">
+                    <option value="">Todos</option>
+                    <option value="new">Nuevo</option>
+                    <option value="in_progress">En proceso</option>
+                    <option value="resolved">Resuelto</option>
+                    <option value="closed">Cerrado</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="categoryFilter">Categoría</label>
+                <select id="categoryFilter" name="category"></select>
+            </div>
+            <div class="form-group">
+                <label for="priorityFilter">Prioridad</label>
+                <select id="priorityFilter" name="priority"></select>
+            </div>
+            <div class="form-group">
+                <label for="search">Búsqueda</label>
+                <input type="text" id="search" name="search" placeholder="Buscar título o descripción">
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Título</th>
+                    <th>Categoría</th>
+                    <th>Prioridad</th>
+                    <th>Estado</th>
+                    <th>Creado</th>
+                </tr>
+            </thead>
+            <tbody id="ticketsBody"></tbody>
+        </table>
+    </section>
+
+    <div id="errorMessage" class="error"></div>
+
+    <script src="app.js"></script>
 </body>
 </html>
