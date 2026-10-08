@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
 
 
 class UserCreate(BaseModel):
@@ -44,6 +44,14 @@ class TicketCreate(BaseModel):
     description: str
     category_id: int
     priority_id: int
+
+
+class TicketUpdate(BaseModel):
+    actor_id: int
+    status: Optional[Literal["new", "in_progress", "resolved", "closed"]] = None
+    assigned_to: Optional[int] = None
+    priority_id: Optional[int] = None
+    category_id: Optional[int] = None
 
 
 class TicketRead(BaseModel):
