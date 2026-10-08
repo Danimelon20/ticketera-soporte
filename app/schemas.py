@@ -1,6 +1,28 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Literal
+
+
+class CommentCreate(BaseModel):
+    actor_id: int
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def not_empty_or_whitespace(cls, v):
+        if not v.strip():
+            raise ValueError("El comentario no puede estar vacío")
+        return v.strip()
+
+
+class CommentRead(BaseModel):
+    id: int
+    ticket_id: int
+    user_id: int
+    content: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserCreate(BaseModel):
@@ -83,5 +105,6 @@ class HistoryRead(BaseModel):
 
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
+    comments: list[CommentRead] = []
 
     model_config = ConfigDict(from_attributes=True)

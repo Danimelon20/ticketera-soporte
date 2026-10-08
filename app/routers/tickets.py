@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead
+from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead
 router = APIRouter(prefix="/api", tags=["tickets"])
 
 
@@ -72,11 +72,37 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
         .order_by(models.History.id.asc())
         .all()
     )
+    comments = (
+        db.query(models.Comment)
+        .filter(models.Comment.ticket_id == ticket_id)
+        .order_by(models.Comment.id.asc())
+        .all()
+    )
     return TicketDetail(
         **TicketRead.model_validate(db_ticket).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
+        comments=[CommentRead.model_validate(c) for c in comments],
     )
 
+@router.post("/tickets/{ticket_id}/comments", response_model=CommentRead)
+def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(get_db)):
+    db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not db_ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if db_ticket.status == "closed":
+        raise HTTPException(status_code=400, detail="No se puede comentar un ticket cerrado")
+    actor = db.query(models.User).filter(models.User.id == comment.actor_id).first()
+    if not actor:
+        raise HTTPException(status_code=400, detail="Invalid actor_id")
+    db_comment = models.Comment(
+        ticket_id=ticket_id,
+        user_id=comment.actor_id,
+        content=comment.content,
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    return db_comment
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)
 def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_db)):
