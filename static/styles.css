@@ -124,6 +124,60 @@ tr:hover td {
     display: none;
 }
 
+.btn-action {
+    padding: 8px 16px;
+    background-color: #48bb78;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.btn-action:hover {
+    background-color: #38a065;
+}
+
+.btn-action:last-child {
+    margin-right: 0;
+}
+
+.btn-assign {
+    padding: 8px 16px;
+    background-color: #3182ce;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 8px;
+    font-size: 14px;
+}
+
+.btn-assign:hover {
+    background-color: #2c5282;
+}
+
+.actions-section {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.assign-select {
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-right: 10px;
+}
+
+.closed-msg {
+    color: #c53030;
+    font-style: italic;
+    margin: 10px 0;
+}
+
 @media (max-width: 600px) {
     .form-row {
         grid-template-columns: 1fr;
@@ -136,5 +190,19 @@ tr:hover td {
     
     .filters input {
         width: 100%;
+    }
+    
+    .actions-section .action-buttons {
+        flex-direction: column;
+    }
+    
+    .actions-section .action-buttons button {
+        width: 100%;
+        margin: 5px 0;
+    }
+    
+    .assign-select {
+        width: 100%;
+        margin-bottom: 10px;
     }
 }

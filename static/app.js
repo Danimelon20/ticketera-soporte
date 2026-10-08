@@ -210,6 +210,163 @@ document.addEventListener('DOMContentLoaded', () => {
         tdUpdated.textContent = `Última actualización: ${formatDate(ticket.updated_at)}`;
         detailPanel.appendChild(tdUpdated);
         
+        // Acciones section
+        const actionsSection = document.createElement('div');
+        actionsSection.className = 'actions-section';
+        
+        // Create assignment selector
+        const assignmentDiv = document.createElement('div');
+        assignmentDiv.className = 'assignment-section';
+        
+        const assignLabel = document.createElement('label');
+        assignLabel.textContent = 'Asignar a:';
+        assignmentDiv.appendChild(assignLabel);
+        
+        const assignSelect = document.createElement('select');
+        assignSelect.className = 'assign-select';
+        
+        // Add default option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Seleccionar --';
+        assignSelect.appendChild(defaultOpt);
+        
+        // Add users from userMap
+        Object.keys(userMap).forEach(userId => {
+            const opt = document.createElement('option');
+            opt.value = userId;
+            opt.textContent = userMap[userId];
+            assignSelect.appendChild(opt);
+        });
+        
+        const assignBtn = document.createElement('button');
+        assignBtn.className = 'btn-assign';
+        assignBtn.textContent = 'Asignar';
+        assignmentDiv.appendChild(assignSelect);
+        assignmentDiv.appendChild(assignBtn);
+        
+        // State-based buttons
+        const state = ticket.status;
+        
+        const actionDiv = document.createElement('div');
+        actionDiv.className = 'action-buttons';
+        
+        if (state === 'new') {
+            const startBtn = document.createElement('button');
+            startBtn.className = 'btn-action';
+            startBtn.textContent = 'Iniciar trabajo';
+            actionDiv.appendChild(startBtn);
+        } else if (state === 'in_progress') {
+            const resolveBtn = document.createElement('button');
+            resolveBtn.className = 'btn-action';
+            resolveBtn.textContent = 'Marcar como resuelto';
+            actionDiv.appendChild(resolveBtn);
+        } else if (state === 'resolved') {
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'btn-action';
+            closeBtn.textContent = 'Cerrar';
+            actionDiv.appendChild(closeBtn);
+            
+            const reopenBtn = document.createElement('button');
+            reopenBtn.className = 'btn-action';
+            reopenBtn.textContent = 'Reabrir';
+            actionDiv.appendChild(reopenBtn);
+        } else if (state === 'closed') {
+            const closedMsg = document.createElement('p');
+            closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
+            closedMsg.className = 'closed-msg';
+            actionDiv.appendChild(closedMsg);
+        }
+        
+        // Button click handlers
+        actionDiv.querySelectorAll('.btn-action').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ticketId = ticket.id;
+                let newStatus;
+                
+                if (btn.textContent === 'Iniciar trabajo') {
+                    newStatus = 'in_progress';
+                } else if (btn.textContent === 'Marcar como resuelto') {
+                    newStatus = 'resolved';
+                } else if (btn.textContent === 'Cerrar') {
+                    newStatus = 'closed';
+                } else if (btn.textContent === 'Reabrir') {
+                    newStatus = 'in_progress';
+                }
+                
+                if (!actingAsId) {
+                    showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
+                    return;
+                }
+                
+                try {
+                    await fetchAPI(`/tickets/${ticketId}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            status: newStatus,
+                            actor_id: actingAsId
+                        })
+                    });
+                    
+                    // Re-fetch ticket and redetail
+                    const updatedTicket = await fetchAPI(`/tickets/${ticketId}`);
+                    showTicketDetail(updatedTicket);
+                    
+                    // Reload tickets with current filters
+                    await loadTickets(getFilters());
+                } catch (err) {
+                    showError(err.message || 'Error al aplicar la acción');
+                }
+            });
+        });
+        
+        // Assign button handler
+        assignBtn.addEventListener('click', async () => {
+            const selectedUser = assignSelect.value;
+            
+            if (!selectedUser) {
+                showError('Seleccione un usuario para asignar');
+                return;
+            }
+            
+            if (!actingAsId) {
+                showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
+                return;
+            }
+            
+            try {
+                await fetchAPI(`/tickets/${ticket.id}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        assigned_to: parseInt(selectedUser),
+                        actor_id: actingAsId
+                    })
+                });
+                
+                // Re-fetch ticket and redetail
+                const updatedTicket = await fetchAPI(`/tickets/${ticket.id}`);
+                showTicketDetail(updatedTicket);
+                
+                // Reload tickets with current filters
+                await loadTickets(getFilters());
+            } catch (err) {
+                showError(err.message || 'Error al asignar el ticket');
+            }
+        });
+        
+        // Append actions section before history
+        if (state !== 'closed') {
+            actionsSection.appendChild(assignmentDiv);
+        }
+        actionsSection.appendChild(actionDiv);
+        detailPanel.appendChild(actionsSection);
+        
         // Build history list - Historial title always visible
         const historySection = document.createElement('div');
         const historyH3 = document.createElement('h3');
