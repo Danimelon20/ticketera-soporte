@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Literal
 
 
@@ -69,3 +69,19 @@ class TicketRead(BaseModel):
         from_attributes = True
 
     
+
+class HistoryRead(BaseModel):
+    id: int
+    field: str
+    old_value: Optional[str]
+    new_value: Optional[str]
+    changed_by: int
+    changed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TicketDetail(TicketRead):
+    history: list[HistoryRead] = []
+
+    model_config = ConfigDict(from_attributes=True)

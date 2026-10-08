@@ -56,3 +56,4 @@ def test_newest_first(client):
     segundo = create_ticket(client, "Orden segundo ORD1")
     result = ids(client.get("/api/tickets?search=ORD1"))
     assert result.index(segundo["id"]) < result.index(primero["id"])
+

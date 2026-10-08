@@ -3,8 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import TicketCreate, TicketRead, TicketUpdate
-
+from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead
 router = APIRouter(prefix="/api", tags=["tickets"])
 
 
@@ -62,12 +61,21 @@ def list_tickets(
     return query.all()
 
 
-@router.get("/tickets/{ticket_id}", response_model=TicketRead)
+@router.get("/tickets/{ticket_id}", response_model=TicketDetail)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return db_ticket
+    history = (
+        db.query(models.History)
+        .filter(models.History.ticket_id == ticket_id)
+        .order_by(models.History.id.asc())
+        .all()
+    )
+    return TicketDetail(
+        **TicketRead.model_validate(db_ticket).model_dump(),
+        history=[HistoryRead.model_validate(h) for h in history],
+    )
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)
