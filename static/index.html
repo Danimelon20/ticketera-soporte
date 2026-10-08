@@ -9,6 +9,24 @@
 <body>
     <h1>Ticketera de Soporte</h1>
 
+    <section id="users-section">
+        <h2>Usuarios</h2>
+        <div class="form-group">
+            <label for="userName">Nombre</label>
+            <input type="text" id="userName" name="name" required>
+        </div>
+        <div class="form-group">
+            <label for="userEmail">Email</label>
+            <input type="email" id="userEmail" name="email" required>
+        </div>
+        <button id="createUserBtn" class="btn-submit">Crear usuario</button>
+    </div>
+    <div class="form-group">
+        <label for="actingAs">Actuando como</label>
+        <select id="actingAs" name="actingAs"></select>
+    </div>
+</section>
+
     <section id="ticket-form">
         <h2>Nuevo ticket</h2>
         <form id="ticketForm">
@@ -26,10 +44,12 @@
                 <div class="form-group">
                     <label for="category">Categoría</label>
                     <select id="category" name="category"></select>
+</section>
                 </div>
                 <div class="form-group">
                     <label for="priority">Prioridad</label>
                     <select id="priority" name="priority"></select>
+</section>
                 </div>
             </div>
             <button type="submit" class="btn-submit">Crear ticket</button>
@@ -48,14 +68,17 @@
                     <option value="resolved">Resuelto</option>
                     <option value="closed">Cerrado</option>
                 </select>
+</section>
             </div>
             <div class="form-group">
                 <label for="categoryFilter">Categoría</label>
                 <select id="categoryFilter" name="category"></select>
+</section>
             </div>
             <div class="form-group">
                 <label for="priorityFilter">Prioridad</label>
                 <select id="priorityFilter" name="priority"></select>
+</section>
             </div>
             <div class="form-group">
                 <label for="search">Búsqueda</label>
@@ -69,6 +92,7 @@
                     <th>Título</th>
                     <th>Categoría</th>
                     <th>Prioridad</th>
+                    <th>Asignado a</th>
                     <th>Estado</th>
                     <th>Creado</th>
                 </tr>

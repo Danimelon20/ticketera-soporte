@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('search');
     const ticketsBody = document.getElementById('ticketsBody');
     const errorMessage = document.getElementById('errorMessage');
+    const actingAsSelect = document.getElementById('actingAs');
+    const createUserBtn = document.getElementById('createUserBtn');
+    const userNameInput = document.getElementById('userName');
+    const userEmailInput = document.getElementById('userEmail');
 
     const STATE_MAP = {
         new: 'Nuevo',
@@ -19,6 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let categoryMap = {};
     let priorityMap = {};
+    let userMap = {};
+    let actingAsId = null;
 
     function getFilters() {
         return {
@@ -103,11 +109,19 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTickets(tickets);
     }
 
+    function getAssignedTo(ticket) {
+        if (ticket.assigned_to === null || ticket.assigned_to === undefined) {
+            return 'Sin asignar';
+        }
+        return userMap[ticket.assigned_to] || ticket.assigned_to;
+    }
+
     function renderTickets(tickets) {
         ticketsBody.innerHTML = '';
         
         tickets.forEach(ticket => {
             const tr = document.createElement('tr');
+            tr.dataset.ticketId = ticket.id;
             
             const tdId = document.createElement('td');
             tdId.textContent = ticket.id;
@@ -124,6 +138,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const tdStatus = document.createElement('td');
             tdStatus.textContent = STATE_MAP[ticket.status] || ticket.status;
             
+            const tdAssigned = document.createElement('td');
+            tdAssigned.textContent = getAssignedTo(ticket);
+            
             const tdDate = document.createElement('td');
             tdDate.textContent = formatDate(ticket.created_at);
             
@@ -131,6 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.appendChild(tdTitle);
             tr.appendChild(tdCategory);
             tr.appendChild(tdPriority);
+            tr.appendChild(tdAssigned);
             tr.appendChild(tdStatus);
             tr.appendChild(tdDate);
             
@@ -142,6 +160,130 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!dateString) return '';
         const date = new Date(dateString);
         return date.toLocaleDateString('es-ES');
+    }
+
+    function showTicketDetail(ticket) {
+        const detailPanel = document.createElement('div');
+        detailPanel.className = 'detail-panel';
+        
+        // Build header info
+        const assignedTo = ticket.assigned_to !== null ? userMap[ticket.assigned_to] || ticket.assigned_to : 'Sin asignar';
+        
+        const categoryName = categoryMap[ticket.category_id] || '';
+        const priorityName = priorityMap[ticket.priority_id] || '';
+        
+        // Title
+        const h2 = document.createElement('h2');
+        h2.textContent = `Detalle del ticket #${ticket.id}`;
+        detailPanel.appendChild(h2);
+        
+        // Ticket details
+        const tdTitle = document.createElement('p');
+        tdTitle.textContent = `Título: ${ticket.title}`;
+        detailPanel.appendChild(tdTitle);
+        
+        const tdDescription = document.createElement('p');
+        tdDescription.textContent = `Descripción: ${ticket.description}`;
+        detailPanel.appendChild(tdDescription);
+        
+        const tdCategory = document.createElement('p');
+        tdCategory.textContent = `Categoría: ${categoryName || ''}`;
+        detailPanel.appendChild(tdCategory);
+        
+        const tdPriority = document.createElement('p');
+        tdPriority.textContent = `Prioridad: ${priorityName || ''}`;
+        detailPanel.appendChild(tdPriority);
+        
+        const tdStatus = document.createElement('p');
+        tdStatus.textContent = `Estado: ${STATE_MAP[ticket.status] || ticket.status}`;
+        detailPanel.appendChild(tdStatus);
+        
+        const tdAssigned = document.createElement('p');
+        tdAssigned.textContent = `Asignado a: ${assignedTo}`;
+        detailPanel.appendChild(tdAssigned);
+        
+        const tdCreated = document.createElement('p');
+        tdCreated.textContent = `Creado: ${formatDate(ticket.created_at)}`;
+        detailPanel.appendChild(tdCreated);
+        
+        const tdUpdated = document.createElement('p');
+        tdUpdated.textContent = `Última actualización: ${formatDate(ticket.updated_at)}`;
+        detailPanel.appendChild(tdUpdated);
+        
+        // Build history list - Historial title always visible
+        const historySection = document.createElement('div');
+        const historyH3 = document.createElement('h3');
+        historyH3.textContent = 'Historial';
+        historySection.appendChild(historyH3);
+        
+        const pNoChanges = document.createElement('p');
+        pNoChanges.textContent = 'Sin cambios todavía';
+        
+        if (!ticket.history || ticket.history.length === 0) {
+            historySection.appendChild(pNoChanges);
+        } else {
+            const ul = document.createElement('ul');
+            
+            const fieldTranslations = {
+                status: 'Estado',
+                assigned_to: 'Asignado a',
+                priority_id: 'Prioridad',
+                category_id: 'Categoría'
+            };
+            
+            ticket.history.forEach(entry => {
+                const li = document.createElement('li');
+                
+                // Translate field
+                const fieldLabel = fieldTranslations[entry.field] || entry.field;
+                
+                // Translate old value
+                let oldValue = entry.old_value;
+                if (oldValue === null || oldValue === undefined) {
+                    oldValue = 'Sin asignar';
+                } else if (entry.field === 'status') {
+                    oldValue = STATE_MAP[oldValue] || oldValue;
+                } else if (entry.field === 'assigned_to') {
+                    oldValue = userMap[oldValue] || oldValue;
+                } else if (entry.field === 'priority_id') {
+                    oldValue = priorityMap[oldValue] || oldValue;
+                } else if (entry.field === 'category_id') {
+                    oldValue = categoryMap[oldValue] || oldValue;
+                }
+                
+                // Translate new value
+                let newValue = entry.new_value;
+                if (newValue === null || newValue === undefined) {
+                    newValue = 'Sin asignar';
+                } else if (entry.field === 'status') {
+                    newValue = STATE_MAP[newValue] || newValue;
+                } else if (entry.field === 'assigned_to') {
+                    newValue = userMap[newValue] || newValue;
+                } else if (entry.field === 'priority_id') {
+                    newValue = priorityMap[newValue] || newValue;
+                } else if (entry.field === 'category_id') {
+                    newValue = categoryMap[newValue] || newValue;
+                }
+                
+                // Translate changed_by (user ID to name)
+                const changedByName = userMap[entry.changed_by] || entry.changed_by;
+                
+                li.textContent = `${entry.changed_at.substring(0, 10)} - ${changedByName}: ${fieldLabel} → ${oldValue} → ${newValue}`;
+                ul.appendChild(li);
+            });
+            
+            historySection.appendChild(ul);
+        }
+        
+        detailPanel.appendChild(historySection);
+        
+        // Remove existing panel if any
+        const existingPanel = document.querySelector('.detail-panel');
+        if (existingPanel) {
+            existingPanel.remove();
+        }
+        
+        document.body.appendChild(detailPanel);
     }
 
     function showError(message) {
@@ -209,8 +351,75 @@ document.addEventListener('DOMContentLoaded', () => {
         loadTickets(getFilters());
     });
 
-    // Initial load
-    loadCategories();
-    loadPriorities();
-    loadTickets();
+    // Create user button
+    createUserBtn.addEventListener('click', async () => {
+        await createUser();
+    });
+
+    // Actuando como selector change
+    actingAsSelect.addEventListener('change', (e) => {
+        actingAsId = parseInt(e.target.value) || null;
+    });
+
+    async function loadUsers() {
+        const users = await fetchAPI('/users');
+        actingAsSelect.innerHTML = '<option value="">Seleccionar</option>';
+        
+        userMap = {};
+        
+        users.forEach(user => {
+            const opt = document.createElement('option');
+            opt.value = user.id;
+            opt.textContent = user.name;
+            actingAsSelect.appendChild(opt);
+            
+            userMap[user.id] = user.name;
+        });
+    }
+
+    async function createUser() {
+        const name = userNameInput.value.trim();
+        const email = userEmailInput.value.trim();
+
+        if (!name || !email) {
+            showError('Nombre y email son requeridos');
+            return;
+        }
+
+        await fetchAPI('/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name, email })
+        });
+
+        // Reset form
+        userNameInput.value = '';
+        userEmailInput.value = '';
+
+        // Reload users and selector
+        await loadUsers();
+        // Reload tickets to show newly created user in assignments
+        await loadTickets(getFilters());
+    }
+
+    // Add click handler for row selection - registered once
+    ticketsBody.addEventListener('click', async (e) => {
+        const tr = e.target.closest('tr');
+        if (tr) {
+            const ticketId = parseInt(tr.dataset.ticketId);
+            try {
+                const ticket = await fetchAPI(`/tickets/${ticketId}`);
+                showTicketDetail(ticket);
+            } catch (err) {
+                showError('Error al cargar el detalle del ticket');
+            }
+        }
+    });
+    
+    // Initial load - wait for categories, priorities, and users first
+    Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
+        loadTickets();
+    });
 });
