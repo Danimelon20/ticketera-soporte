@@ -156,10 +156,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function parseServerDate(dateString) {
+        // El servidor envía la hora en UTC sin la "Z" final; se la agregamos
+        const hasZone = dateString.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateString);
+        return new Date(hasZone ? dateString : dateString + 'Z');
+    }
+
     function formatDate(dateString) {
         if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('es-ES');
+        return parseServerDate(dateString).toLocaleDateString('es-CR');
+    }
+
+    function formatDateTime(dateString) {
+        if (!dateString) return '';
+        return parseServerDate(dateString).toLocaleString('es-CR', {
+            dateStyle: 'short',
+            timeStyle: 'short',
+        });
     }
 
     function showTicketDetail(ticket) {
@@ -203,11 +216,11 @@ document.addEventListener('DOMContentLoaded', () => {
         detailPanel.appendChild(tdAssigned);
         
         const tdCreated = document.createElement('p');
-        tdCreated.textContent = `Creado: ${formatDate(ticket.created_at)}`;
+        tdCreated.textContent = `Creado: ${formatDateTime(ticket.created_at)}`;
         detailPanel.appendChild(tdCreated);
         
         const tdUpdated = document.createElement('p');
-        tdUpdated.textContent = `Última actualización: ${formatDate(ticket.updated_at)}`;
+        tdUpdated.textContent = `Última actualización: ${formatDateTime(ticket.updated_at)}`;
         detailPanel.appendChild(tdUpdated);
         
         // Acciones section
@@ -425,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Translate changed_by (user ID to name)
                 const changedByName = userMap[entry.changed_by] || entry.changed_by;
                 
-                li.textContent = `${entry.changed_at.substring(0, 10)} - ${changedByName}: ${fieldLabel} → ${oldValue} → ${newValue}`;
+                li.textContent = `${formatDateTime(entry.changed_at)} - ${changedByName}: ${fieldLabel}: ${oldValue} → ${newValue}`;
                 ul.appendChild(li);
             });
             
@@ -434,30 +447,37 @@ document.addEventListener('DOMContentLoaded', () => {
         
         detailPanel.appendChild(historySection);
         
-        // Comments section
-        const commentsSection = document.createElement('div');
-        commentsSection.className = 'comments-section';
+                // Comments section
+                const commentsSection = document.createElement('div');
+                commentsSection.className = 'comments-section';
         
-        if (ticket.status === 'closed') {
-            const closedMsg = document.createElement('p');
-            closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
-            commentsSection.appendChild(closedMsg);
-        } else {
-            if (!ticket.comments || ticket.comments.length === 0) {
-                const noComments = document.createElement('p');
-                noComments.textContent = 'Sin comentarios todavía';
-                commentsSection.appendChild(noComments);
-            } else {
-                const ul = document.createElement('ul');
-                ticket.comments.forEach(comment => {
-                    const li = document.createElement('li');
-                    const authorName = userMap[comment.user_id] || comment.user_id;
-                    const commentDate = formatDate(comment.created_at);
-                    li.textContent = `${commentDate} - ${authorName}: ${comment.content}`;
-                    ul.appendChild(li);
-                });
-                commentsSection.appendChild(ul);
-            }
+                const commentsH3 = document.createElement('h3');
+                commentsH3.textContent = 'Comentarios';
+                commentsSection.appendChild(commentsH3);
+        
+                // La lista se muestra siempre, también en tickets cerrados
+                if (!ticket.comments || ticket.comments.length === 0) {
+                    const noComments = document.createElement('p');
+                    noComments.textContent = 'Sin comentarios todavía';
+                    commentsSection.appendChild(noComments);
+                } else {
+                    const ul = document.createElement('ul');
+                    ticket.comments.forEach(comment => {
+                        const li = document.createElement('li');
+                        const authorName = userMap[comment.user_id] || comment.user_id;
+                        const commentDate = formatDateTime(comment.created_at);
+                        li.textContent = `${commentDate} - ${authorName}: ${comment.content}`;
+                        ul.appendChild(li);
+                    });
+                    commentsSection.appendChild(ul);
+                }
+        
+                // El formulario solo se muestra si el ticket no está cerrado
+                if (ticket.status === 'closed') {
+                    const closedMsg = document.createElement('p');
+                    closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
+                    commentsSection.appendChild(closedMsg);
+                } else {
             
             const commentForm = document.createElement('div');
             const commentTextarea = document.createElement('textarea');
