@@ -434,6 +434,79 @@ document.addEventListener('DOMContentLoaded', () => {
         
         detailPanel.appendChild(historySection);
         
+        // Comments section
+        const commentsSection = document.createElement('div');
+        commentsSection.className = 'comments-section';
+        
+        if (ticket.status === 'closed') {
+            const closedMsg = document.createElement('p');
+            closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
+            commentsSection.appendChild(closedMsg);
+        } else {
+            if (!ticket.comments || ticket.comments.length === 0) {
+                const noComments = document.createElement('p');
+                noComments.textContent = 'Sin comentarios todavía';
+                commentsSection.appendChild(noComments);
+            } else {
+                const ul = document.createElement('ul');
+                ticket.comments.forEach(comment => {
+                    const li = document.createElement('li');
+                    const authorName = userMap[comment.user_id] || comment.user_id;
+                    const commentDate = formatDate(comment.created_at);
+                    li.textContent = `${commentDate} - ${authorName}: ${comment.content}`;
+                    ul.appendChild(li);
+                });
+                commentsSection.appendChild(ul);
+            }
+            
+            const commentForm = document.createElement('div');
+            const commentTextarea = document.createElement('textarea');
+            commentTextarea.placeholder = 'Escribe un comentario';
+            commentTextarea.rows = 3;
+            
+            const addCommentBtn = document.createElement('button');
+            addCommentBtn.textContent = 'Agregar comentario';
+            addCommentBtn.className = 'btn-action';
+            
+            commentForm.appendChild(commentTextarea);
+            commentForm.appendChild(addCommentBtn);
+            commentsSection.appendChild(commentForm);
+            
+            addCommentBtn.addEventListener('click', async () => {
+                const content = commentTextarea.value.trim();
+                
+                if (!actingAsId) {
+                    showError('Selecciona un usuario en \'Actuando como\' antes de comentar');
+                    return;
+                }
+                
+                if (!content) {
+                    showError('El comentario no puede estar vacío');
+                    return;
+                }
+                
+                try {
+                    await fetchAPI(`/tickets/${ticket.id}/comments`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            actor_id: actingAsId,
+                            content: content
+                        })
+                    });
+                    
+                    const updatedTicket = await fetchAPI(`/tickets/${ticket.id}`);
+                    showTicketDetail(updatedTicket);
+                } catch (err) {
+                    showError(err.message || 'Error al agregar el comentario');
+                }
+            });
+        }
+        
+        detailPanel.appendChild(commentsSection);
+        
         // Remove existing panel if any
         const existingPanel = document.querySelector('.detail-panel');
         if (existingPanel) {
