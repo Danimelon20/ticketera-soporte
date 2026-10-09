@@ -1,4 +1,6 @@
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -8,23 +10,11 @@ from .routers.users import router as users_router
 from .routers.catalogs import router as catalogs_router
 from .routers.tickets import router as tickets_router
 
-app = FastAPI()
 
-
-@app.get("/api/health")
-async def health():
-    return {"status": "ok"}
-
-
-app.include_router(users_router)
-app.include_router(catalogs_router)
-app.include_router(tickets_router)
-
-
-@app.on_event("startup")
-def on_startup():
-    models.Base.metadata.create_all(bind=engine)
+def init_db():
+    # Primero la carpeta donde vive la base de datos, después las tablas
     os.makedirs("data", exist_ok=True)
+    models.Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
     try:
@@ -50,4 +40,24 @@ def on_startup():
         db.close()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
+
+
+app.include_router(users_router)
+app.include_router(catalogs_router)
+app.include_router(tickets_router)
+
+
+# Debe ir al final: si va antes, captura las rutas de la API
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
