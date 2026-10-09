@@ -245,84 +245,245 @@ document.addEventListener('DOMContentLoaded', () => {
         const actionsSection = document.createElement('div');
         actionsSection.className = 'actions-section';
         
-        // Create assignment selector
-        const assignmentDiv = document.createElement('div');
-        assignmentDiv.className = 'assignment-section';
-        
-        const assignLabel = document.createElement('label');
-        assignLabel.textContent = 'Asignar a:';
-        assignmentDiv.appendChild(assignLabel);
-        
-        const assignSelect = document.createElement('select');
-        assignSelect.className = 'assign-select';
-        
-        // Add default option
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = '-- Seleccionar --';
-        assignSelect.appendChild(defaultOpt);
-        
-        // Add users from userMap
-        Object.keys(userMap).forEach(userId => {
-            const opt = document.createElement('option');
-            opt.value = userId;
-            opt.textContent = userMap[userId];
-            assignSelect.appendChild(opt);
-        });
-        
-        const assignBtn = document.createElement('button');
-        assignBtn.className = 'btn-assign';
-        assignBtn.textContent = 'Asignar';
-        assignmentDiv.appendChild(assignSelect);
-        assignmentDiv.appendChild(assignBtn);
-        
-        // State-based buttons
         const state = ticket.status;
+        const isClosed = state === 'closed';
         
-        const actionDiv = document.createElement('div');
-        actionDiv.className = 'action-buttons';
-        
-        if (state === 'new') {
-            const startBtn = document.createElement('button');
-            startBtn.className = 'btn-action';
-            startBtn.textContent = 'Iniciar trabajo';
-            actionDiv.appendChild(startBtn);
-        } else if (state === 'in_progress') {
-            const resolveBtn = document.createElement('button');
-            resolveBtn.className = 'btn-action';
-            resolveBtn.textContent = 'Marcar como resuelto';
-            actionDiv.appendChild(resolveBtn);
-        } else if (state === 'resolved') {
-            const closeBtn = document.createElement('button');
-            closeBtn.className = 'btn-action';
-            closeBtn.textContent = 'Cerrar';
-            actionDiv.appendChild(closeBtn);
+        if (actingAsRole === 'requester') {
+            // Requester: no status buttons, no assignment
+            if (!isClosed) {
+                const msg = document.createElement('p');
+                msg.textContent = 'Solo el equipo de soporte puede cambiar el estado o la asignación';
+                msg.className = 'requester-msg';
+                actionsSection.appendChild(msg);
+            } else {
+                const closedMsg = document.createElement('p');
+                closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
+                closedMsg.className = 'closed-msg';
+                actionsSection.appendChild(closedMsg);
+            }
+        } else if (actingAsRole === 'technician') {
+            // Technician: status buttons + assign-to-me button if unassigned
+            const actionDiv = document.createElement('div');
+            actionDiv.className = 'action-buttons';
             
-            const reopenBtn = document.createElement('button');
-            reopenBtn.className = 'btn-action';
-            reopenBtn.textContent = 'Reabrir';
-            actionDiv.appendChild(reopenBtn);
-        } else if (state === 'closed') {
-            const closedMsg = document.createElement('p');
-            closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
-            closedMsg.className = 'closed-msg';
-            actionDiv.appendChild(closedMsg);
-        }
-        
-        // Button click handlers
-        actionDiv.querySelectorAll('.btn-action').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const ticketId = ticket.id;
-                let newStatus;
+            if (!isClosed) {
+                if (state === 'new') {
+                    const startBtn = document.createElement('button');
+                    startBtn.className = 'btn-action';
+                    startBtn.textContent = 'Iniciar trabajo';
+                    actionDiv.appendChild(startBtn);
+                } else if (state === 'in_progress') {
+                    const resolveBtn = document.createElement('button');
+                    resolveBtn.className = 'btn-action';
+                    resolveBtn.textContent = 'Marcar como resuelto';
+                    actionDiv.appendChild(resolveBtn);
+                } else if (state === 'resolved') {
+                    const closeBtn = document.createElement('button');
+                    closeBtn.className = 'btn-action';
+                    closeBtn.textContent = 'Cerrar';
+                    actionDiv.appendChild(closeBtn);
+                    
+                    const reopenBtn = document.createElement('button');
+                    reopenBtn.className = 'btn-action';
+                    reopenBtn.textContent = 'Reabrir';
+                    actionDiv.appendChild(reopenBtn);
+                }
                 
-                if (btn.textContent === 'Iniciar trabajo') {
-                    newStatus = 'in_progress';
-                } else if (btn.textContent === 'Marcar como resuelto') {
-                    newStatus = 'resolved';
-                } else if (btn.textContent === 'Cerrar') {
-                    newStatus = 'closed';
-                } else if (btn.textContent === 'Reabrir') {
-                    newStatus = 'in_progress';
+                // Assign-to-me button if unassigned
+                if (ticket.assigned_to === null || ticket.assigned_to === undefined) {
+                    const assignMeBtn = document.createElement('button');
+                    assignMeBtn.className = 'btn-action';
+                    assignMeBtn.textContent = 'Asignarme a mí';
+                    actionDiv.appendChild(assignMeBtn);
+                    
+                    assignMeBtn.addEventListener('click', async () => {
+                        if (!actingAsId) {
+                            showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
+                            return;
+                        }
+                        
+                        try {
+                            await fetchAPI(`/tickets/${ticket.id}`, {
+                                method: 'PATCH',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    assigned_to: actingAsId,
+                                    actor_id: actingAsId
+                                })
+                            });
+                            
+                            const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
+                            showTicketDetail(updatedTicket);
+                            await loadTickets(getFilters());
+                        } catch (err) {
+                            showError(err.message || 'Error al asignar el ticket');
+                        }
+                    });
+                }
+            } else {
+                const closedMsg = document.createElement('p');
+                closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
+                closedMsg.className = 'closed-msg';
+                actionDiv.appendChild(closedMsg);
+            }
+            
+            actionDiv.querySelectorAll('.btn-action').forEach(btn => {
+                if (btn.textContent === 'Asignarme a mí') return;
+                btn.addEventListener('click', async () => {
+                    const ticketId = ticket.id;
+                    let newStatus;
+                    
+                    if (btn.textContent === 'Iniciar trabajo') {
+                        newStatus = 'in_progress';
+                    } else if (btn.textContent === 'Marcar como resuelto') {
+                        newStatus = 'resolved';
+                    } else if (btn.textContent === 'Cerrar') {
+                        newStatus = 'closed';
+                    } else if (btn.textContent === 'Reabrir') {
+                        newStatus = 'in_progress';
+                    }
+                    
+                    if (!actingAsId) {
+                        showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
+                        return;
+                    }
+                    
+                    try {
+                        await fetchAPI(`/tickets/${ticketId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                status: newStatus,
+                                actor_id: actingAsId
+                            })
+                        });
+                        
+                        const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
+                        showTicketDetail(updatedTicket);
+                        await loadTickets(getFilters());
+                    } catch (err) {
+                        showError(err.message || 'Error al aplicar la acción');
+                    }
+                });
+            });
+            
+            actionsSection.appendChild(actionDiv);
+        } else if (actingAsRole === 'coordinator') {
+            // Coordinator: status buttons + assignment selector (filtered to technician/coordinator)
+            const assignmentDiv = document.createElement('div');
+            assignmentDiv.className = 'assignment-section';
+            
+            const assignLabel = document.createElement('label');
+            assignLabel.textContent = 'Asignar a:';
+            assignmentDiv.appendChild(assignLabel);
+            
+            const assignSelect = document.createElement('select');
+            assignSelect.className = 'assign-select';
+            
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = '-- Seleccionar --';
+            assignSelect.appendChild(defaultOpt);
+            
+            Object.keys(userMap).forEach(userId => {
+                const role = userRoleMap[userId];
+                if (role === 'technician' || role === 'coordinator') {
+                    const opt = document.createElement('option');
+                    opt.value = userId;
+                    opt.textContent = userMap[userId];
+                    assignSelect.appendChild(opt);
+                }
+            });
+            
+            const assignBtn = document.createElement('button');
+            assignBtn.className = 'btn-assign';
+            assignBtn.textContent = 'Asignar';
+            assignmentDiv.appendChild(assignSelect);
+            assignmentDiv.appendChild(assignBtn);
+            
+            const actionDiv = document.createElement('div');
+            actionDiv.className = 'action-buttons';
+            
+            if (!isClosed) {
+                if (state === 'new') {
+                    const startBtn = document.createElement('button');
+                    startBtn.className = 'btn-action';
+                    startBtn.textContent = 'Iniciar trabajo';
+                    actionDiv.appendChild(startBtn);
+                } else if (state === 'in_progress') {
+                    const resolveBtn = document.createElement('button');
+                    resolveBtn.className = 'btn-action';
+                    resolveBtn.textContent = 'Marcar como resuelto';
+                    actionDiv.appendChild(resolveBtn);
+                } else if (state === 'resolved') {
+                    const closeBtn = document.createElement('button');
+                    closeBtn.className = 'btn-action';
+                    closeBtn.textContent = 'Cerrar';
+                    actionDiv.appendChild(closeBtn);
+                    
+                    const reopenBtn = document.createElement('button');
+                    reopenBtn.className = 'btn-action';
+                    reopenBtn.textContent = 'Reabrir';
+                    actionDiv.appendChild(reopenBtn);
+                }
+            } else {
+                const closedMsg = document.createElement('p');
+                closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
+                closedMsg.className = 'closed-msg';
+                actionDiv.appendChild(closedMsg);
+            }
+            
+            actionDiv.querySelectorAll('.btn-action').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const ticketId = ticket.id;
+                    let newStatus;
+                    
+                    if (btn.textContent === 'Iniciar trabajo') {
+                        newStatus = 'in_progress';
+                    } else if (btn.textContent === 'Marcar como resuelto') {
+                        newStatus = 'resolved';
+                    } else if (btn.textContent === 'Cerrar') {
+                        newStatus = 'closed';
+                    } else if (btn.textContent === 'Reabrir') {
+                        newStatus = 'in_progress';
+                    }
+                    
+                    if (!actingAsId) {
+                        showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
+                        return;
+                    }
+                    
+                    try {
+                        await fetchAPI(`/tickets/${ticketId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                status: newStatus,
+                                actor_id: actingAsId
+                            })
+                        });
+                        
+                        const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
+                        showTicketDetail(updatedTicket);
+                        await loadTickets(getFilters());
+                    } catch (err) {
+                        showError(err.message || 'Error al aplicar la acción');
+                    }
+                });
+            });
+            
+            assignBtn.addEventListener('click', async () => {
+                const selectedUser = assignSelect.value;
+                
+                if (!selectedUser) {
+                    showError('Seleccione un usuario para asignar');
+                    return;
                 }
                 
                 if (!actingAsId) {
@@ -331,71 +492,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 try {
-                    await fetchAPI(`/tickets/${ticketId}`, {
+                    await fetchAPI(`/tickets/${ticket.id}`, {
                         method: 'PATCH',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            status: newStatus,
+                            assigned_to: parseInt(selectedUser),
                             actor_id: actingAsId
                         })
                     });
                     
-                    // Re-fetch ticket and redetail
-                    const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
+                    const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
                     showTicketDetail(updatedTicket);
-                    
-                    // Reload tickets with current filters
                     await loadTickets(getFilters());
                 } catch (err) {
-                    showError(err.message || 'Error al aplicar la acción');
+                    showError(err.message || 'Error al asignar el ticket');
                 }
             });
-        });
-        
-        // Assign button handler
-        assignBtn.addEventListener('click', async () => {
-            const selectedUser = assignSelect.value;
             
-            if (!selectedUser) {
-                showError('Seleccione un usuario para asignar');
-                return;
+            if (!isClosed) {
+                actionsSection.appendChild(assignmentDiv);
             }
-            
-            if (!actingAsId) {
-                showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
-                return;
+            actionsSection.appendChild(actionDiv);
+        } else {
+            // Fallback: show closed message if closed, nothing otherwise
+            if (isClosed) {
+                const actionDiv = document.createElement('div');
+                actionDiv.className = 'action-buttons';
+                const closedMsg = document.createElement('p');
+                closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
+                closedMsg.className = 'closed-msg';
+                actionDiv.appendChild(closedMsg);
+                actionsSection.appendChild(actionDiv);
             }
-            
-            try {
-                await fetchAPI(`/tickets/${ticket.id}`, {
-                    method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        assigned_to: parseInt(selectedUser),
-                        actor_id: actingAsId
-                    })
-                });
-                
-                // Re-fetch ticket and redetail
-                const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
-                showTicketDetail(updatedTicket);
-                
-                // Reload tickets with current filters
-                await loadTickets(getFilters());
-            } catch (err) {
-                showError(err.message || 'Error al asignar el ticket');
-            }
-        });
-        
-        // Append actions section before history
-        if (state !== 'closed') {
-            actionsSection.appendChild(assignmentDiv);
         }
-        actionsSection.appendChild(actionDiv);
+        
         detailPanel.appendChild(actionsSection);
         
         // Build history list - Historial title always visible
