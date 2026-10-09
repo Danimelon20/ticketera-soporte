@@ -37,8 +37,7 @@ class UserRead(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CategoryRead(BaseModel):
@@ -47,8 +46,7 @@ class CategoryRead(BaseModel):
     description: Optional[str]
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PriorityRead(BaseModel):
@@ -57,8 +55,7 @@ class PriorityRead(BaseModel):
     level: int
     color: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TicketCreate(BaseModel):
@@ -87,8 +84,7 @@ class TicketRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     
 
