@@ -283,3 +283,13 @@ tr:hover td {
         margin-bottom: 10px;
     }
 }
+/* Aviso de error flotante: siempre visible, arriba y al centro */
+#errorMessage {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100;
+    max-width: 90%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}

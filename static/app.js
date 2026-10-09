@@ -21,10 +21,18 @@ document.addEventListener('DOMContentLoaded', () => {
         closed: 'Cerrado'
     };
 
+    const ROLE_MAP = {
+        requester: 'Solicitante',
+        technician: 'Técnico',
+        coordinator: 'Coordinador'
+    };
+
     let categoryMap = {};
     let priorityMap = {};
     let userMap = {};
+    let userRoleMap = {};
     let actingAsId = null;
+    let actingAsRole = null;
 
     function getFilters() {
         return {
@@ -99,11 +107,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadTickets(filters = {}) {
+        if (actingAsId === null) {
+            ticketsBody.innerHTML = '<tr><td colspan="7">Selecciona un usuario en "Actuando como" para ver los tickets</td></tr>';
+            return;
+        }
+        
         const params = new URLSearchParams();
         if (filters.status) params.append('status', filters.status);
         if (filters.category_id) params.append('category_id', filters.category_id);
         if (filters.priority_id) params.append('priority_id', filters.priority_id);
         if (filters.search) params.append('search', filters.search);
+        params.append('actor_id', actingAsId);
 
         const tickets = await fetchAPI(`/tickets?${params.toString()}`);
         renderTickets(tickets);
@@ -219,6 +233,10 @@ document.addEventListener('DOMContentLoaded', () => {
         tdCreated.textContent = `Creado: ${formatDateTime(ticket.created_at)}`;
         detailPanel.appendChild(tdCreated);
         
+        const tdCreatedBy = document.createElement('p');
+        tdCreatedBy.textContent = `Creado por: ${userMap[ticket.created_by] || ''}`;
+        detailPanel.appendChild(tdCreatedBy);
+        
         const tdUpdated = document.createElement('p');
         tdUpdated.textContent = `Última actualización: ${formatDateTime(ticket.updated_at)}`;
         detailPanel.appendChild(tdUpdated);
@@ -325,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     
                     // Re-fetch ticket and redetail
-                    const updatedTicket = await fetchAPI(`/tickets/${ticketId}`);
+                    const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
                     showTicketDetail(updatedTicket);
                     
                     // Reload tickets with current filters
@@ -363,7 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 
                 // Re-fetch ticket and redetail
-                const updatedTicket = await fetchAPI(`/tickets/${ticket.id}`);
+                const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
                 showTicketDetail(updatedTicket);
                 
                 // Reload tickets with current filters
@@ -517,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         })
                     });
                     
-                    const updatedTicket = await fetchAPI(`/tickets/${ticket.id}`);
+const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
                     showTicketDetail(updatedTicket);
                 } catch (err) {
                     showError(err.message || 'Error al agregar el comentario');
@@ -562,6 +580,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const target = isModalOpen() ? getModalError() : errorMessage;
                 target.textContent = text;
                 target.style.display = 'block';
+                // El aviso flotante se oculta solo después de 5 segundos
+                if (target === errorMessage) {
+                    clearTimeout(showError.timer);
+                    showError.timer = setTimeout(() => {
+                        errorMessage.style.display = 'none';
+                    }, 3000);
+                }
             }
         
             function hideError() {
@@ -583,6 +608,11 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         hideError();
 
+        if (!actingAsId) {
+            showError('Selecciona un usuario en "Actuando como" antes de crear un ticket');
+            return;
+        }
+
         const title = document.getElementById('title').value;
         const description = document.getElementById('description').value;
         const categoryId = categorySelect.value;
@@ -602,7 +632,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 title,
                 description,
                 category_id: parseInt(categoryId),
-                priority_id: parseInt(priorityId)
+                priority_id: parseInt(priorityId),
+                actor_id: actingAsId
             })
         });
 
@@ -638,6 +669,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Actuando como selector change
     actingAsSelect.addEventListener('change', (e) => {
         actingAsId = parseInt(e.target.value) || null;
+        if (userMap[actingAsId]) {
+            actingAsRole = userRoleMap[actingAsId];
+        } else {
+            actingAsRole = null;
+        }
+        
+        if (isModalOpen()) closeModal();
+        loadTickets(getFilters());
     });
 
     async function loadUsers() {
@@ -645,23 +684,32 @@ document.addEventListener('DOMContentLoaded', () => {
         actingAsSelect.innerHTML = '<option value="">Seleccionar</option>';
         
         userMap = {};
+        userRoleMap = {};
         
         users.forEach(user => {
             const opt = document.createElement('option');
             opt.value = user.id;
-            opt.textContent = user.name;
+            opt.textContent = `${user.name} — ${ROLE_MAP[user.role] || ''}`;
             actingAsSelect.appendChild(opt);
             
             userMap[user.id] = user.name;
+            userRoleMap[user.id] = user.role || '';
         });
     }
 
     async function createUser() {
         const name = userNameInput.value.trim();
         const email = userEmailInput.value.trim();
+        const userRoleSelect = document.getElementById('userRole');
+        const selectedRole = userRoleSelect.value;
 
         if (!name || !email) {
             showError('Nombre y email son requeridos');
+            return;
+        }
+
+        if (!selectedRole || selectedRole === '') {
+            showError('Selecciona un rol');
             return;
         }
 
@@ -670,12 +718,13 @@ document.addEventListener('DOMContentLoaded', () => {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ name, email })
+            body: JSON.stringify({ name, email, role: selectedRole })
         });
 
         // Reset form
         userNameInput.value = '';
         userEmailInput.value = '';
+        userRoleSelect.value = '';
 
         // Reload users and selector
         await loadUsers();
@@ -689,7 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tr) {
             const ticketId = parseInt(tr.dataset.ticketId);
             try {
-                const ticket = await fetchAPI(`/tickets/${ticketId}`);
+                const ticket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
                 showTicketDetail(ticket);
             } catch (err) {
                 showError('Error al cargar el detalle del ticket');
