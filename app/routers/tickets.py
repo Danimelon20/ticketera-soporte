@@ -7,8 +7,17 @@ from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, Hist
 router = APIRouter(prefix="/api", tags=["tickets"])
 
 
+def get_actor(db: Session, actor_id: int) -> models.User:
+    """Busca al usuario que hace la petición; 400 si no existe."""
+    actor = db.query(models.User).filter(models.User.id == actor_id).first()
+    if not actor:
+        raise HTTPException(status_code=400, detail="El usuario que realiza la acción no existe")
+    return actor
+
+
 @router.post("/tickets", response_model=TicketRead)
 def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
+    actor = get_actor(db, ticket.actor_id)
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")
@@ -21,6 +30,7 @@ def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
         category_id=ticket.category_id,
         priority_id=ticket.priority_id,
         status="new",
+        created_by=actor.id,
     )
     db.add(db_ticket)
     db.commit()
@@ -30,6 +40,7 @@ def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
 
 @router.get("/tickets", response_model=list[TicketRead])
 def list_tickets(
+    actor_id: int,
     status: Optional[Literal["new", "in_progress", "resolved", "closed"]] = None,
     priority_id: Optional[int] = None,
     category_id: Optional[int] = None,
@@ -37,7 +48,12 @@ def list_tickets(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    actor = get_actor(db, actor_id)
     query = db.query(models.Ticket)
+
+    # Regla: el solicitante solo ve los tickets que él creó
+    if actor.role == "requester":
+        query = query.filter(models.Ticket.created_by == actor.id)
 
     if status:
         query = query.filter(models.Ticket.status == status)
@@ -62,10 +78,14 @@ def list_tickets(
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)
-def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
+def get_ticket(ticket_id: int, actor_id: int, db: Session = Depends(get_db)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
         raise HTTPException(status_code=404, detail="El ticket no existe")
+    actor = get_actor(db, actor_id)
+    # Regla: el solicitante no puede abrir tickets ajenos
+    if actor.role == "requester" and db_ticket.created_by != actor.id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
     history = (
         db.query(models.History)
         .filter(models.History.ticket_id == ticket_id)
@@ -94,6 +114,9 @@ def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(ge
     actor = db.query(models.User).filter(models.User.id == comment.actor_id).first()
     if not actor:
         raise HTTPException(status_code=400, detail="El usuario que realiza la acción no existe")
+        # Regla: el solicitante solo comenta en los tickets que él creó
+    if actor.role == "requester" and db_ticket.created_by != actor.id:
+        raise HTTPException(status_code=403, detail="Solo puedes comentar en tus propios tickets")
     db_comment = models.Comment(
         ticket_id=ticket_id,
         user_id=comment.actor_id,
@@ -119,6 +142,10 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
     if db_ticket.status == "closed":
         raise HTTPException(status_code=400, detail="No se puede modificar un ticket cerrado")
 
+            # Regla: el solicitante no puede cambiar estado, prioridad, categoría ni asignación
+    if actor.role == "requester":
+        raise HTTPException(status_code=403, detail="Los solicitantes no pueden modificar tickets")
+
     # Transiciones de status permitidas
     if data.status is not None:
         allowed_transitions = {
@@ -135,6 +162,15 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
         user = db.query(models.User).filter(models.User.id == data.assigned_to).first()
         if not user:
             raise HTTPException(status_code=400, detail="El usuario asignado no existe")
+                # Regla: solo técnicos y coordinadores pueden ser asignados
+        if user.role not in ("technician", "coordinator"):
+            raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos o coordinadores")
+        # Reglas: el técnico solo puede asignarse a sí mismo un ticket sin asignar
+        if actor.role == "technician":
+            if data.assigned_to != actor.id:
+                raise HTTPException(status_code=403, detail="Un técnico solo puede asignarse tickets a sí mismo")
+            if db_ticket.assigned_to is not None and db_ticket.assigned_to != actor.id:
+                raise HTTPException(status_code=403, detail="Este ticket ya está asignado a otra persona")
 
     if data.priority_id is not None:
         priority = db.query(models.Priority).filter(models.Priority.id == data.priority_id).first()

@@ -12,9 +12,14 @@ class User(Base):
     name = Column(String(100), nullable=False)
     email = Column(String(150), unique=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    role = Column(String(20), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
-    tickets = relationship("Ticket", back_populates="assigned_user")
+    __table_args__ = (
+        CheckConstraint("role IN ('requester', 'technician', 'coordinator')", name="chk_users_role"),
+    )
+
+    tickets = relationship("Ticket", back_populates="assigned_user", foreign_keys="Ticket.assigned_to")
     history = relationship("History", back_populates="user")
 
 
@@ -50,6 +55,7 @@ class Ticket(Base):
     priority_id = Column(Integer, ForeignKey("priorities.id"), nullable=False)
     status = Column(String(20), nullable=False, default="new")
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -59,7 +65,7 @@ class Ticket(Base):
 
     category = relationship("Category", back_populates="tickets")
     priority = relationship("Priority", back_populates="tickets")
-    assigned_user = relationship("User", back_populates="tickets")
+    assigned_user = relationship("User", back_populates="tickets", foreign_keys=[assigned_to])
     comments = relationship("Comment", back_populates="ticket")
     history = relationship("History", back_populates="ticket")
 

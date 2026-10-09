@@ -28,12 +28,14 @@ class CommentRead(BaseModel):
 class UserCreate(BaseModel):
     name: str
     email: str
+    role: Literal["requester", "technician", "coordinator"]
 
 
 class UserRead(BaseModel):
     id: int
     name: str
     email: str
+    role: str
     is_active: bool
     created_at: datetime
 
@@ -63,6 +65,7 @@ class TicketCreate(BaseModel):
     description: str
     category_id: int
     priority_id: int
+    actor_id: int
 
 
 class TicketUpdate(BaseModel):
@@ -81,6 +84,7 @@ class TicketRead(BaseModel):
     priority_id: int
     status: str
     assigned_to: Optional[int]
+    created_by: int
     created_at: datetime
     updated_at: datetime
 
