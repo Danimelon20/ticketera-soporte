@@ -66,3 +66,44 @@ y prioridades (Baja=1, Media=2, Alta=3, Urgente=4) si no existen.
 | Agregar comentarios al ticket. | comments, tickets | POST /api/tickets/{id}/comments |
 | Ver listado, buscar y filtrar tickets. | tickets | GET /api/tickets |
 | Consultar el historial de cambios de cada ticket. | history, tickets | GET /api/tickets/{id} |
+
+## Decisiones tomadas durante el desarrollo
+
+### Comentarios
+- No se puede comentar un ticket cerrado (400).
+- Los comentarios no se registran en la tabla history.
+
+### Roles y permisos
+
+Roles: requester (Solicitante), technician (Técnico),
+coordinator (Coordinador).
+
+Cambios en datos:
+- users.role: obligatorio al crear un usuario.
+- tickets.created_by: FK a users, guarda quién creó el ticket.
+- La base de datos se recrea desde cero para incluir las columnas.
+
+Cambios en la API:
+- POST /api/tickets exige actor_id (se guarda como created_by).
+- GET /api/tickets y GET /api/tickets/{id} exigen actor_id.
+- Una acción no permitida para el rol responde 403 con mensaje
+  en español.
+
+Reglas:
+1. Cualquier rol puede crear tickets y comentar.
+2. El solicitante solo ve, abre y comenta los tickets que creó.
+   Si intenta abrir uno ajeno: 403.
+3. El solicitante no puede cambiar estado, prioridad, categoría
+   ni asignación.
+4. Técnico y coordinador pueden cambiar estado (con las
+   transiciones existentes), prioridad y categoría.
+5. Solo técnicos y coordinadores pueden ser asignados.
+6. El coordinador puede asignar a cualquier técnico o
+   coordinador.
+7. El técnico solo puede asignarse a sí mismo un ticket sin
+   asignar.
+8. Todas las reglas se validan en el backend; la pantalla además
+   oculta los botones que el rol no puede usar.
+9. "Actuando como" muestra el rol junto al nombre. Sin usuario
+   elegido, la tabla no muestra tickets.
+10. El historial sigue registrando quién hizo cada cambio.
