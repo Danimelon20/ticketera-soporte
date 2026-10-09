@@ -527,27 +527,56 @@ document.addEventListener('DOMContentLoaded', () => {
         
         detailPanel.appendChild(commentsSection);
         
-        // Remove existing panel if any
-        const existingPanel = document.querySelector('.detail-panel');
-        if (existingPanel) {
-            existingPanel.remove();
-        }
+                // Mostrar el detalle dentro de la ventana emergente
+                getModal().querySelector('.modal-body').replaceChildren(detailPanel);
+                getModal().style.display = 'flex';
+            }
         
-        document.body.appendChild(detailPanel);
-    }
-
-    function showError(message) {
-        if (Array.isArray(message)) {
-            errorMessage.textContent = message.join('. ');
-        } else {
-            errorMessage.textContent = message;
-        }
-        errorMessage.style.display = 'block';
-    }
-
-    function hideError() {
-        errorMessage.style.display = 'none';
-    }
+            function getModal() {
+                return document.getElementById('ticketModal');
+            }
+        
+            function getModalError() {
+                return document.getElementById('modalError');
+            }
+        
+            function isModalOpen() {
+                return getModal().style.display === 'flex';
+            }
+        
+            function closeModal() {
+                getModal().style.display = 'none';
+                getModalError().style.display = 'none';
+            }
+        
+            function showError(message) {
+                let text;
+                if (Array.isArray(message)) {
+                    // Errores 422: lista de objetos con el texto en "msg"
+                    text = message.map(m => (m && m.msg) ? m.msg : String(m)).join('. ');
+                } else {
+                    text = String(message);
+                }
+                text = text.replace(/Value error, /g, '');
+                // Si la ventana está abierta, el error se muestra dentro de ella
+                const target = isModalOpen() ? getModalError() : errorMessage;
+                target.textContent = text;
+                target.style.display = 'block';
+            }
+        
+            function hideError() {
+                errorMessage.style.display = 'none';
+                getModalError().style.display = 'none';
+            }
+        
+            // Cierre de la ventana: se registra una sola vez al cargar la página
+            getModal().querySelector('.modal-close-btn').addEventListener('click', closeModal);
+            getModal().addEventListener('click', (e) => {
+                if (e.target === getModal()) closeModal();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && isModalOpen()) closeModal();
+            });
 
     // Form submit handler
     document.getElementById('ticketForm').addEventListener('submit', async (e) => {
