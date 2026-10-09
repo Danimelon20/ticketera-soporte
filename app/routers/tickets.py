@@ -11,10 +11,10 @@ router = APIRouter(prefix="/api", tags=["tickets"])
 def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
-        raise HTTPException(status_code=400, detail="Invalid category_id")
+        raise HTTPException(status_code=400, detail="La categoría no existe")
     prioridad = db.query(models.Priority).filter(models.Priority.id == ticket.priority_id).first()
     if not prioridad:
-        raise HTTPException(status_code=400, detail="Invalid priority_id")
+        raise HTTPException(status_code=400, detail="La prioridad no existe")
     db_ticket = models.Ticket(
         title=ticket.title,
         description=ticket.description,
@@ -65,7 +65,7 @@ def list_tickets(
 def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise HTTPException(status_code=404, detail="El ticket no existe")
     history = (
         db.query(models.History)
         .filter(models.History.ticket_id == ticket_id)
@@ -88,12 +88,12 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
 def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(get_db)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise HTTPException(status_code=404, detail="El ticket no existe")
     if db_ticket.status == "closed":
         raise HTTPException(status_code=400, detail="No se puede comentar un ticket cerrado")
     actor = db.query(models.User).filter(models.User.id == comment.actor_id).first()
     if not actor:
-        raise HTTPException(status_code=400, detail="Invalid actor_id")
+        raise HTTPException(status_code=400, detail="El usuario que realiza la acción no existe")
     db_comment = models.Comment(
         ticket_id=ticket_id,
         user_id=comment.actor_id,
@@ -108,16 +108,16 @@ def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(ge
 def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_db)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise HTTPException(status_code=404, detail="El ticket no existe")
 
     # Verificar que actor_id sea un usuario existente
     actor = db.query(models.User).filter(models.User.id == data.actor_id).first()
     if not actor:
-        raise HTTPException(status_code=400, detail="Invalid actor_id")
+        raise HTTPException(status_code=400, detail="El usuario que realiza la acción no existe")
 
     # Si ticket está cerrado, no se puede modificar
     if db_ticket.status == "closed":
-        raise HTTPException(status_code=400, detail="Cannot modify closed ticket")
+        raise HTTPException(status_code=400, detail="No se puede modificar un ticket cerrado")
 
     # Transiciones de status permitidas
     if data.status is not None:
@@ -128,23 +128,23 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
         }
         current_status = db_ticket.status
         if data.status not in allowed_transitions.get(current_status, []):
-            raise HTTPException(status_code=400, detail="Invalid status transition")
+            raise HTTPException(status_code=400, detail="Cambio de estado no permitido")
 
     # Validar que assigned_to, priority_id, category_id existan si se proporcionan
     if data.assigned_to is not None:
         user = db.query(models.User).filter(models.User.id == data.assigned_to).first()
         if not user:
-            raise HTTPException(status_code=400, detail="Invalid assigned_to")
+            raise HTTPException(status_code=400, detail="El usuario asignado no existe")
 
     if data.priority_id is not None:
         priority = db.query(models.Priority).filter(models.Priority.id == data.priority_id).first()
         if not priority:
-            raise HTTPException(status_code=400, detail="Invalid priority_id")
+            raise HTTPException(status_code=400, detail="La prioridad no existe")
 
     if data.category_id is not None:
         category = db.query(models.Category).filter(models.Category.id == data.category_id).first()
         if not category:
-            raise HTTPException(status_code=400, detail="Invalid category_id")
+            raise HTTPException(status_code=400, detail="La categoría no existe")
 
     # Registrar cambios en history y aplicar actualizaciones en una sola transacción
     from datetime import datetime, timezone
