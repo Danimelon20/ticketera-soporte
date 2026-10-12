@@ -128,6 +128,15 @@ tr:hover td {
     background-color: #f0f0f0;
 }
 
+tbody tr[data-ticket-id] {
+    cursor: pointer;
+}
+
+tbody tr.selected td {
+    background-color: #eef2ff;
+    border-left: 4px solid #3b82f6;
+}
+
 .error {
     background-color: #feb2b2;
     color: #c53030;

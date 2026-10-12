@@ -714,6 +714,7 @@ const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsI
             function closeModal() {
                 getModal().style.display = 'none';
                 getModalError().style.display = 'none';
+                ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
             }
         
             function showError(message) {
@@ -883,8 +884,10 @@ const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsI
 
     // Add click handler for row selection - registered once
     ticketsBody.addEventListener('click', async (e) => {
-        const tr = e.target.closest('tr');
+        const tr = e.target.closest('tr[data-ticket-id]');
         if (tr) {
+            ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
+            tr.classList.add('selected');
             const ticketId = parseInt(tr.dataset.ticketId);
             try {
                 const ticket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
