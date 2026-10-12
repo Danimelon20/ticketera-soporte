@@ -25,34 +25,70 @@ body {
     font-size: 15px;
 }
 
-.top-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    background: #2d3748;
-    color: white;
-    padding: 12px 20px;
+.topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 28px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    z-index: 100;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    gap: 16px;
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 50;
 }
 
-.top-bar h1 {
-    margin: 0;
-    font-size: 20px;
-    text-align: left;
+.topbar > span {
+    font-weight: 600;
+    font-size: 17px;
 }
 
-.top-bar .acting-as {
+.topbar nav {
+    display: flex;
+    gap: 8px;
+}
+
+.topbar nav button,
+.topbar button#openNewTicket {
+    min-height: 38px;
+    padding: 6px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
     font-size: 14px;
-    opacity: 0.9;
+    cursor: pointer;
+}
+
+.topbar button#openNewTicket {
+    background-color: var(--accent);
+    color: white;
+    border: none;
+}
+
+.topbar button#openNewTicket:hover {
+    background-color: var(--accent-dark);
+}
+
+.topbar label {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.topbar select {
+    min-height: 38px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
 }
 
 main {
-    padding-top: 70px;
+    padding-top: 20px;
 }
 
 .table-wrapper {

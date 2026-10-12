@@ -10,9 +10,17 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <header class="top-bar">
-        <h1>Ticketera de Soporte</h1>
-        <div class="acting-as" id="actingAsDisplay">Sin usuario elegido</div>
+    <header class="topbar">
+        <span>Ticketera</span>
+        <nav aria-label="Secciones">
+            <button type="button" id="navTickets" style="background: var(--accent-soft); color: var(--accent-dark);">Tickets</button>
+            <button type="button" id="navUsers">Usuarios</button>
+        </nav>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+            <label for="actingAs">Actuando como</label>
+            <select id="actingAs" name="actingAs"></select>
+            <button type="button" id="openNewTicket">+ Nuevo ticket</button>
+        </div>
     </header>
 
     <main>
@@ -36,10 +44,6 @@
             </select>
         </div>
         <button id="createUserBtn" class="btn-submit">Crear usuario</button>
-        <div class="form-group">
-            <label for="actingAs">Actuando como</label>
-            <select id="actingAs" name="actingAs"></select>
-        </div>
     </section>
 
     <section id="ticket-form">

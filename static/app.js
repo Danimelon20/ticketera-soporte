@@ -737,14 +737,16 @@ try {
                 ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
             }
 
-            function updateActingAsDisplay() {
-                const display = document.getElementById('actingAsDisplay');
-                if (actingAsId && userMap[actingAsId] && actingAsRole) {
-                    display.textContent = `Actuando como: ${userMap[actingAsId]} (${ROLE_MAP[actingAsRole]})`;
-                } else {
-                    display.textContent = 'Sin usuario elegido';
-                }
+    function updateActingAsDisplay() {
+        const display = document.getElementById('actingAsDisplay');
+        if (display) {
+            if (actingAsId && userMap[actingAsId] && actingAsRole) {
+                display.textContent = `Actuando como: ${userMap[actingAsId]} (${ROLE_MAP[actingAsRole]})`;
+            } else {
+                display.textContent = 'Sin usuario elegido';
             }
+        }
+    }
         
             function showError(message) {
                 let text;
@@ -872,6 +874,41 @@ try {
         if (isModalOpen()) closeModal();
         loadTickets(getFilters());
     });
+
+    // Top bar navigation and buttons
+    const navTickets = document.getElementById('navTickets');
+    const navUsers = document.getElementById('navUsers');
+    const openNewTicket = document.getElementById('openNewTicket');
+
+    if (navTickets) {
+        navTickets.addEventListener('click', () => {
+            document.getElementById('tickets-list').scrollIntoView({ behavior: 'smooth' });
+            navTickets.style.background = 'var(--accent-soft)';
+            navTickets.style.color = 'var(--accent-dark)';
+            if (navUsers) {
+                navUsers.style.background = '';
+                navUsers.style.color = '';
+            }
+        });
+    }
+
+    if (navUsers) {
+        navUsers.addEventListener('click', () => {
+            document.getElementById('users-section').scrollIntoView({ behavior: 'smooth' });
+            navUsers.style.background = 'var(--accent-soft)';
+            navUsers.style.color = 'var(--accent-dark)';
+            if (navTickets) {
+                navTickets.style.background = '';
+                navTickets.style.color = '';
+            }
+        });
+    }
+
+    if (openNewTicket) {
+        openNewTicket.addEventListener('click', () => {
+            document.getElementById('ticket-form').scrollIntoView({ behavior: 'smooth' });
+        });
+    }
 
     async function loadUsers() {
         const users = await fetchAPI('/users');
