@@ -316,6 +316,25 @@ tbody tr.selected td {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+.success {
+    background-color: #c6f6d5;
+    color: var(--exito);
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    display: none;
+}
+
+#successMessage {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100;
+    max-width: 90%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
 .badge {
     display: inline-block;
     padding: 2px 8px;

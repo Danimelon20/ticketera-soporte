@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('search');
     const ticketsBody = document.getElementById('ticketsBody');
     const errorMessage = document.getElementById('errorMessage');
+    const successMessage = document.getElementById('successMessage');
     const actingAsSelect = document.getElementById('actingAs');
     const createUserBtn = document.getElementById('createUserBtn');
     const userNameInput = document.getElementById('userName');
@@ -319,22 +320,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             return;
                         }
                         
-                        try {
-                            await fetchAPI(`/tickets/${ticket.id}`, {
-                                method: 'PATCH',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    assigned_to: actingAsId,
-                                    actor_id: actingAsId
-                                })
-                            });
-                            
-                            const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
-                            showTicketDetail(updatedTicket);
-                            await loadTickets(getFilters());
-                        } catch (err) {
+try {
+                        await fetchAPI(`/tickets/${ticketId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                status: newStatus,
+                                actor_id: actingAsId
+                            })
+                        });
+
+                        const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
+                        showTicketDetail(updatedTicket);
+                        await loadTickets(getFilters());
+
+                        showSuccess('Estado actualizado');
+                    } catch (err) {
                             showError(err.message || 'Error al asignar el ticket');
                         }
                     });
@@ -508,7 +511,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 
-                try {
+try {
                     await fetchAPI(`/tickets/${ticket.id}`, {
                         method: 'PATCH',
                         headers: {
@@ -519,10 +522,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             actor_id: actingAsId
                         })
                     });
-                    
+
                     const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
                     showTicketDetail(updatedTicket);
                     await loadTickets(getFilters());
+
+                    showSuccess('Ticket asignado');
                 } catch (err) {
                     showError(err.message || 'Error al asignar el ticket');
                 }
@@ -672,7 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 
-                try {
+try {
                     await fetchAPI(`/tickets/${ticket.id}/comments`, {
                         method: 'POST',
                         headers: {
@@ -683,9 +688,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             content: content
                         })
                     });
-                    
-const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
+
+                    const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
                     showTicketDetail(updatedTicket);
+
+                    showSuccess('Comentario agregado');
                 } catch (err) {
                     showError(err.message || 'Error al agregar el comentario');
                 }
@@ -730,6 +737,7 @@ const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsI
                 const target = isModalOpen() ? getModalError() : errorMessage;
                 target.textContent = text;
                 target.style.display = 'block';
+                successMessage.style.display = 'none';
                 // El aviso flotante se oculta solo después de 5 segundos
                 if (target === errorMessage) {
                     clearTimeout(showError.timer);
@@ -741,7 +749,17 @@ const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsI
         
             function hideError() {
                 errorMessage.style.display = 'none';
+                successMessage.style.display = 'none';
                 getModalError().style.display = 'none';
+            }
+
+            function showSuccess(message) {
+                successMessage.textContent = message;
+                successMessage.style.display = 'block';
+                clearTimeout(showSuccess.timer);
+                showSuccess.timer = setTimeout(() => {
+                    successMessage.style.display = 'none';
+                }, 3000);
             }
         
             // Cierre de la ventana: se registra una sola vez al cargar la página
@@ -792,6 +810,8 @@ const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsI
 
         // Reload tickets respecting current filters
         await loadTickets(getFilters());
+
+        showSuccess('Ticket creado');
     });
 
     // Filter change handlers
@@ -880,6 +900,8 @@ const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsI
         await loadUsers();
         // Reload tickets to show newly created user in assignments
         await loadTickets(getFilters());
+
+        showSuccess('Usuario creado');
     }
 
     // Add click handler for row selection - registered once
