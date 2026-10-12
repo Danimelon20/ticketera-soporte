@@ -716,7 +716,7 @@ try {
         
                 // Mostrar el detalle dentro de la ventana emergente
                 getModal().querySelector('.modal-body').replaceChildren(detailPanel);
-                getModal().style.display = 'flex';
+                openModal('ticketModal');
             }
         
             function getModal() {
@@ -727,14 +727,24 @@ try {
                 return document.getElementById('modalError');
             }
         
-            function isModalOpen() {
-                return getModal().style.display === 'flex';
+            function isModalOpen(id = 'ticketModal') {
+                const modal = document.getElementById(id);
+                return modal && modal.style.display === 'flex';
             }
         
-            function closeModal() {
-                getModal().style.display = 'none';
-                getModalError().style.display = 'none';
-                ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
+            function openModal(id) {
+                const modal = document.getElementById(id);
+                if (modal) modal.style.display = 'flex';
+            }
+
+            function closeModal(id) {
+                const modal = document.getElementById(id);
+                if (modal) modal.style.display = 'none';
+                if (id === 'ticketModal') {
+                    const modalError = document.getElementById('modalError');
+                    if (modalError) modalError.style.display = 'none';
+                    ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
+                }
             }
 
     function updateActingAsDisplay() {
@@ -757,8 +767,8 @@ try {
                     text = String(message);
                 }
                 text = text.replace(/Value error, /g, '');
-                // Si la ventana está abierta, el error se muestra dentro de ella
-                const target = isModalOpen() ? getModalError() : errorMessage;
+                // Si la ventana de detalle está abierta, el error se muestra dentro de ella; si no, en el toast
+                const target = isModalOpen('ticketModal') ? getModalError() : errorMessage;
                 target.textContent = text;
                 target.style.display = 'block';
                 successMessage.style.display = 'none';
@@ -786,13 +796,27 @@ try {
                 }, 3000);
             }
         
-            // Cierre de la ventana: se registra una sola vez al cargar la página
-            getModal().querySelector('.modal-close-btn').addEventListener('click', closeModal);
-            getModal().addEventListener('click', (e) => {
-                if (e.target === getModal()) closeModal();
+            // Cierre de ventanas modales: se registra una sola vez al cargar la página
+            document.querySelectorAll('.modal').forEach(modal => {
+                const closeBtn = modal.querySelector('.modal-close-btn');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', () => closeModal(modal.id));
+                }
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        closeModal(modal.id);
+                    }
+                });
             });
+
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && isModalOpen()) closeModal();
+                if (e.key === 'Escape') {
+                    document.querySelectorAll('.modal').forEach(modal => {
+                        if (modal.style.display === 'flex') {
+                            closeModal(modal.id);
+                        }
+                    });
+                }
             });
 
     // Form submit handler
@@ -829,10 +853,9 @@ try {
             })
         });
 
-        // Reset form - only clear fields, don't empty selectors
+        // Close modal, reset form, reload tickets
+        closeModal('newTicketModal');
         document.getElementById('ticketForm').reset();
-
-        // Reload tickets respecting current filters
         await loadTickets(getFilters());
 
         showSuccess('Ticket creado');
@@ -871,7 +894,7 @@ try {
         
         updateActingAsDisplay();
         
-        if (isModalOpen()) closeModal();
+        document.querySelectorAll('.modal').forEach(modal => closeModal(modal.id));
         loadTickets(getFilters());
     });
 
@@ -882,7 +905,6 @@ try {
 
     if (navTickets) {
         navTickets.addEventListener('click', () => {
-            document.getElementById('tickets-list').scrollIntoView({ behavior: 'smooth' });
             navTickets.style.background = 'var(--accent-soft)';
             navTickets.style.color = 'var(--accent-dark)';
             if (navUsers) {
@@ -894,7 +916,7 @@ try {
 
     if (navUsers) {
         navUsers.addEventListener('click', () => {
-            document.getElementById('users-section').scrollIntoView({ behavior: 'smooth' });
+            openModal('usersModal');
             navUsers.style.background = 'var(--accent-soft)';
             navUsers.style.color = 'var(--accent-dark)';
             if (navTickets) {
@@ -906,13 +928,18 @@ try {
 
     if (openNewTicket) {
         openNewTicket.addEventListener('click', () => {
-            document.getElementById('ticket-form').scrollIntoView({ behavior: 'smooth' });
+            openModal('newTicketModal');
         });
     }
+
+    const usersList = document.getElementById('usersList');
 
     async function loadUsers() {
         const users = await fetchAPI('/users');
         actingAsSelect.innerHTML = '<option value="">Seleccionar</option>';
+        if (usersList) {
+            usersList.replaceChildren();
+        }
         
         userMap = {};
         userRoleMap = {};
@@ -922,6 +949,16 @@ try {
             opt.value = user.id;
             opt.textContent = `${user.name} — ${ROLE_MAP[user.role] || ''}`;
             actingAsSelect.appendChild(opt);
+
+            if (usersList) {
+                const li = document.createElement('li');
+                li.style.padding = '8px 12px';
+                li.style.background = '#f8f9fa';
+                li.style.borderRadius = '6px';
+                li.style.border = '1px solid var(--line)';
+                li.textContent = `${user.name} (${user.email}) — ${ROLE_MAP[user.role] || user.role}`;
+                usersList.appendChild(li);
+            }
             
             userMap[user.id] = user.name;
             userRoleMap[user.id] = user.role || '';
@@ -952,15 +989,14 @@ try {
             body: JSON.stringify({ name, email, role: selectedRole })
         });
 
-        // Reset form
+        // Reset form, keep usersModal open
         userNameInput.value = '';
         userEmailInput.value = '';
         userRoleSelect.value = '';
 
-        // Reload users and selector
+        // Reload users, selector, and tickets list
         await loadUsers();
         updateActingAsDisplay();
-        // Reload tickets to show newly created user in assignments
         await loadTickets(getFilters());
 
         showSuccess('Usuario creado');

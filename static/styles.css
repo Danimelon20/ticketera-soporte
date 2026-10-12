@@ -428,7 +428,7 @@ table td:first-child {
     top: 70px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 1100;
+    z-index: 2000;
     max-width: 90%;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
@@ -447,7 +447,7 @@ table td:first-child {
     top: 70px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 1100;
+    z-index: 2000;
     max-width: 90%;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
