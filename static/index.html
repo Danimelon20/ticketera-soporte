@@ -1,128 +1,186 @@
 <!DOCTYPE html>
 <html lang="es">
+<!-- Ticketera de Soporte - Frontend -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ticketera de Soporte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <header class="top-bar">
-        <h1>Ticketera de Soporte</h1>
-        <div class="acting-as" id="actingAsDisplay">Sin usuario elegido</div>
-    </header>
-
-    <main>
-        <section id="users-section">
-        <h2>Usuarios</h2>
-        <div class="form-group">
-            <label for="userName">Nombre</label>
-            <input type="text" id="userName" name="name" required>
-        </div>
-        <div class="form-group">
-            <label for="userEmail">Email</label>
-            <input type="email" id="userEmail" name="email" required>
-        </div>
-        <div class="form-group">
-            <label for="userRole">Rol</label>
-            <select id="userRole" name="userRole">
-                <option value="">Seleccionar</option>
-                <option value="requester">Solicitante</option>
-                <option value="technician">Técnico</option>
-                <option value="coordinator">Coordinador</option>
-            </select>
-        </div>
-        <button id="createUserBtn" class="btn-submit">Crear usuario</button>
-        <div class="form-group">
-            <label for="actingAs">Actuando como</label>
-            <select id="actingAs" name="actingAs"></select>
+    <section id="authScreen" class="auth-screen">
+        <section class="auth-panel">
+          <div class="logo-plate">
+            <img src="img/logo-adn.svg" alt="American Data Networks" class="auth-logo">
+          </div>
+          <p class="auth-kicker">TICKETERA DE SOPORTE</p>
+          <p class="auth-tagline">Soporte técnico, en orden.</p>
+        </section>
+        <div class="auth-card-container">
+            <div class="auth-card">
+                <div class="auth-tabs" role="tablist">
+                    <button type="button" id="tabLogin" class="tab-btn active" aria-pressed="true">Iniciar sesión</button>
+                    <button type="button" id="tabRegister" class="tab-btn" aria-pressed="false">Registrarse</button>
+                </div>
+                <div id="loginFormContainer" class="auth-form-panel">
+                    <form id="loginForm">
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="loginEmail">Correo</label>
+                            <input type="email" id="loginEmail" name="email" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="loginPassword">Contraseña</label>
+                            <input type="password" id="loginPassword" name="password" required>
+                        </div>
+                        <button type="submit" class="btn-submit">Entrar</button>
+                    </form>
+                </div>
+                <div id="registerFormContainer" class="auth-form-panel" style="display: none;">
+                    <form id="registerForm">
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="regName">Nombre</label>
+                            <input type="text" id="regName" name="name" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="regEmail">Correo</label>
+                            <input type="email" id="regEmail" name="email" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="regRole">Rol</label>
+                            <select id="regRole" name="role" required>
+                                <option value="">Seleccionar</option>
+                                <option value="requester">Solicitante</option>
+                                <option value="technician">Técnico</option>
+                                <option value="coordinator">Coordinador</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="regPassword">Contraseña</label>
+                            <input type="password" id="regPassword" name="password" minlength="8" required>
+                            <small class="help-text">Mínimo 8 caracteres</small>
+                        </div>
+                        <button type="submit" class="btn-submit">Crear cuenta</button>
+                    </form>
+                </div>
+            </div>
         </div>
     </section>
 
-    <section id="ticket-form">
-        <h2>Nuevo ticket</h2>
-        <form id="ticketForm">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="title">Título</label>
-                    <input type="text" id="title" name="title" required>
-                </div>
-                <div class="form-group">
-                    <label for="description">Descripción</label>
-                    <textarea id="description" name="description" required></textarea>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="category">Categoría</label>
-                    <select id="category" name="category"></select>
-                </div>
-                <div class="form-group">
-                    <label for="priority">Prioridad</label>
-                    <select id="priority" name="priority"></select>
-                </div>
-            </div>
-            <button type="submit" class="btn-submit">Crear ticket</button>
-        </form>
-    </section>
+<header class="topbar">
+  <div class="topbar-section topbar-logo">
+    <img src="img/logo-adn.svg" alt="American Data Networks">
+  </div>
+  <div class="topbar-section topbar-title">
+    <span class="topbar-app">Ticketera</span>
+    <span class="topbar-sub">Soporte técnico</span>
+  </div>
+  <nav class="topbar-nav" aria-label="Secciones">
+    <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
+    <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
+  </nav>
+  <div class="topbar-section topbar-action">
+    <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
+  </div>
+  <div class="topbar-section topbar-user">
+    <span class="topbar-avatar" aria-hidden="true"></span>
+    <span class="topbar-user-text">
+      <span class="topbar-user-name" id="currentUserDisplay"></span>
+      <span class="topbar-user-role"></span>
+    </span>
+    <button type="button" id="switchAccount" class="btn-secondary">Cambiar cuenta</button>
+  </div>
+</header>
 
-    <section id="tickets-list">
-        <h2>Lista de tickets</h2>
-        <div class="filters">
-            <div class="form-group">
-                <label for="statusFilter">Estado</label>
-                <select id="statusFilter" name="status">
-                    <option value="">Todos</option>
-                    <option value="new">Nuevo</option>
-                    <option value="in_progress">En proceso</option>
-                    <option value="resolved">Resuelto</option>
-                    <option value="closed">Cerrado</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="categoryFilter">Categoría</label>
-                <select id="categoryFilter" name="category"></select>
-            </div>
-            <div class="form-group">
-                <label for="priorityFilter">Prioridad</label>
-                <select id="priorityFilter" name="priority"></select>
-            </div>
-            <div class="form-group">
-                <label for="search">Búsqueda</label>
-                <input type="text" id="search" name="search" placeholder="Buscar título o descripción">
-            </div>
+    <main style="display: none;">
+        <div class="split">
+            <section id="listPanel" aria-label="Lista de tickets">
+                <div class="list-filters">
+                    <div class="search-wrapper">
+                        <label for="search" class="sr-only">Buscar tickets</label>
+                        <input type="text" id="search" name="search" placeholder="Buscar tickets">
+                        <button type="button" id="toggleMoreFilters" class="toggle-filters-btn" aria-expanded="false">Más filtros</button>
+                    </div>
+                    <div class="status-pills" role="group" aria-label="Filtrar por estado">
+                        <button type="button" class="pill-btn active" data-status="" aria-pressed="true">Todos</button>
+                        <button type="button" class="pill-btn" data-status="new" aria-pressed="false">Nuevo</button>
+                        <button type="button" class="pill-btn" data-status="in_progress" aria-pressed="false">En proceso</button>
+                        <button type="button" class="pill-btn" data-status="resolved" aria-pressed="false">Resuelto</button>
+                        <button type="button" class="pill-btn" data-status="closed" aria-pressed="false">Cerrado</button>
+                    </div>
+                    <div id="moreFiltersBlock" class="more-filters" style="display: none;">
+                        <div class="form-group">
+                            <label for="categoryFilter">Categoría</label>
+                            <select id="categoryFilter" name="category"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="priorityFilter">Prioridad</label>
+                            <select id="priorityFilter" name="priority"></select>
+                        </div>
+                    </div>
+                </div>
+                <ul id="ticketList" class="ticket-list"></ul>
+            </section>
+            <section id="detailPanel" aria-label="Detalle del ticket">
+                <button type="button" id="backToList">← Volver a la lista</button>
+                <div id="detailContent">
+                    <div class="detail-placeholder">
+                        <p>Selecciona un ticket para ver el detalle</p>
+                    </div>
+                </div>
+            </section>
         </div>
-        <div class="table-wrapper">
-            <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Título</th>
-                    <th>Categoría</th>
-                    <th>Prioridad</th>
-                    <th>Asignado a</th>
-                    <th>Estado</th>
-                    <th>Creado</th>
-                </tr>
-            </thead>
-            <tbody id="ticketsBody"></tbody>
-            </table>
-        </div>
-    </section>
-</main>
+    </main>
 
     <div id="errorMessage" class="error"></div>
     <div id="successMessage" class="success"></div>
 
-    <!-- Modal -->
-    <div id="ticketModal" class="modal" style="display: none;">
+    <div id="usersModal" class="modal" style="display: none;">
         <div class="modal-content">
-            <span class="modal-close-btn">✕</span>
+            <button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>
             <div class="modal-header">
-                <h2 class="modal-title">Detalle del ticket</h2>
+                <h2 class="modal-title">Usuarios</h2>
             </div>
-            <div id="modalError" class="error"></div>
-            <div class="modal-body"></div>
+            <div class="modal-body">
+                <div>
+                    <h3 style="margin-top: 0;">Usuarios existentes</h3>
+                    <ul id="usersList" style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; margin-top: 10px;"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="newTicketModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>
+            <div class="modal-header">
+                <h2 class="modal-title">Nuevo ticket</h2>
+            </div>
+            <div class="modal-body">
+                <form id="ticketForm">
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label for="title">Título</label>
+                        <input type="text" id="title" name="title" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label for="description">Descripción</label>
+                        <textarea id="description" name="description" required></textarea>
+                    </div>
+                    <div class="form-row" style="margin-bottom: 20px;">
+                        <div class="form-group">
+                            <label for="category">Categoría</label>
+                            <select id="category" name="category"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="priority">Prioridad</label>
+                            <select id="priority" name="priority"></select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-submit">Crear ticket</button>
+                </form>
+            </div>
         </div>
     </div>
 

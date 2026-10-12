@@ -15,8 +15,11 @@ el asistente OpenCode y validado manualmente en cada paso.
 - Consultar el historial de cambios de cada ticket.
 - Roles de usuario: solicitante, técnico y coordinador, con
   permisos distintos.
-- Pantalla con distintivos de color para estado y prioridad, avisos de éxito y error, detalle en ventana
-  emergente y barra superior con el usuario actual.
+- Pantalla con distintivos de color para estado y prioridad, avisos de éxito y error, y nueva interfaz organizada en:
+  - Barra superior con selector "Actuando como" y botón "+ Nuevo ticket".
+  - Lista de tickets a la izquierda con búsqueda y filtros rápidos de estado.
+  - Detalle a la derecha con acciones por rol, comentarios e historial.
+  - Ventanas emergentes para nuevo ticket y usuarios, con diseño adaptable a celular.
 
 ## Tecnologías
 
@@ -66,13 +69,9 @@ La base de datos empieza sin usuarios. Al arrancar se crean solas
 las categorías (Hardware, Software, Red, Accesos) y las prioridades
 (Baja, Media, Alta, Urgente).
 
-1. En la sección **Usuarios**, crear un usuario con rol
-   **Coordinador**.
-2. Elegirlo en **Actuando como**.
-3. Crear técnicos y solicitantes según se necesite.
-
-Sin un usuario elegido en "Actuando como", la tabla de tickets no
-muestra nada.
+1. Abrir la página, registrarse con correo, rol y contraseña (pueden ser
+   correos ficticios como ana@ticketera.test).
+2. Usar "Cambiar cuenta" para entrar como otra persona.
 
 ## Pruebas automáticas
 
@@ -89,7 +88,7 @@ modifican `data/tickets.db`.
 |---|---|---|---|
 | Crear tickets | Sí | Sí | Sí |
 | Ver tickets | Solo los suyos | Todos | Todos |
-| Comentar | Solo en los suyos | Todos | Todos |
+| Comentar | Solo en sus tickets (el autor es siempre quien tiene la sesión abierta) | En cualquiera (el autor es siempre quien tiene la sesión abierta) | En cualquiera (el autor es siempre quien tiene la sesión abierta) |
 | Cambiar estado, prioridad o categoría | No | Sí | Sí |
 | Ser asignado | No | Sí | Sí |
 | Asignar a otra persona | No | No | Sí |
@@ -124,15 +123,20 @@ El diseño completo está en `docs/diseno.md`.
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | /api/health | Estado del servidor |
+| POST | /api/auth/register | Registrar usuario |
+| POST | /api/auth/login | Iniciar sesión |
+| GET | /api/auth/me | Obtener usuario actual |
+| POST | /api/auth/logout | Cerrar sesión |
 | GET | /api/users | Usuarios activos |
-| POST | /api/users | Crear usuario (rol obligatorio) |
 | GET | /api/categories | Categorías |
 | GET | /api/priorities | Prioridades ordenadas por nivel |
-| GET | /api/tickets | Listar con filtros (requiere actor_id) |
-| POST | /api/tickets | Crear ticket (requiere actor_id) |
-| GET | /api/tickets/{id} | Detalle con historial y comentarios (requiere actor_id) |
+| GET | /api/tickets | Listar con filtros |
+| POST | /api/tickets | Crear ticket |
+| GET | /api/tickets/{id} | Detalle con historial y comentarios |
 | PATCH | /api/tickets/{id} | Cambiar estado, asignación, prioridad o categoría |
 | POST | /api/tickets/{id}/comments | Agregar comentario |
+
+Las demás rutas exigen el encabezado `Authorization: Bearer <token>`.
 
 ## Uso de OpenCode
 
@@ -163,7 +167,10 @@ límite, otro modelo disponible en OpenCode.
 
 ## Limitaciones conocidas
 
-- No hay autenticación (ver Decisiones de diseño).
+- Cualquiera puede registrarse con cualquier rol (incluido coordinador).
+- No hay recuperación de contraseña.
+- Sin HTTPS la contraseña viaja sin cifrar.
+- La sesión dura mientras la pestaña esté abierta.
 - La pantalla no tiene pruebas automáticas; se verifica a mano en
   el navegador.
 - Las pruebas muestran advertencias de librerías externas

@@ -14,8 +14,59 @@ from app.main import app  # noqa: E402
 
 @pytest.fixture(scope="session")
 def client():
-    with TestClient(app) as client:
-        yield client
+    with TestClient(app) as test_client:
+        class WrappedClient:
+            def __init__(self, c):
+                self.c = c
+
+            def _inject_auth(self, kwargs):
+                headers = kwargs.get("headers", {})
+                if "Authorization" in headers:
+                    return kwargs
+                
+                actor_id = None
+                params = kwargs.get("params")
+                if isinstance(params, dict) and "actor_id" in params:
+                    actor_id = params.pop("actor_id")
+                
+                json_data = kwargs.get("json")
+                if isinstance(json_data, dict) and "actor_id" in json_data:
+                    actor_id = json_data.pop("actor_id")
+
+                if actor_id is not None:
+                    from app.database import SessionLocal
+                    from app import models
+                    from app.security import new_token
+                    db = SessionLocal()
+                    try:
+                        user = db.query(models.User).filter(models.User.id == actor_id).first()
+                        if user:
+                            db_session = db.query(models.Session).filter(models.Session.user_id == actor_id).first()
+                            if not db_session:
+                                token = new_token()
+                                db_session = models.Session(user_id=actor_id, token=token)
+                                db.add(db_session)
+                                db.commit()
+                            headers["Authorization"] = f"Bearer {db_session.token}"
+                    finally:
+                        db.close()
+                kwargs["headers"] = headers
+                return kwargs
+
+            def get(self, url, **kwargs):
+                return self.c.get(url, **self._inject_auth(kwargs))
+            def post(self, url, **kwargs):
+                return self.c.post(url, **self._inject_auth(kwargs))
+            def patch(self, url, **kwargs):
+                return self.c.patch(url, **self._inject_auth(kwargs))
+            def put(self, url, **kwargs):
+                return self.c.put(url, **self._inject_auth(kwargs))
+            def delete(self, url, **kwargs):
+                return self.c.delete(url, **self._inject_auth(kwargs))
+            def __getattr__(self, name):
+                return getattr(self.c, name)
+
+        yield WrappedClient(test_client)
 
 
 @pytest.fixture
@@ -26,25 +77,31 @@ def make_user(client):
             "name": name,
             "email": f"{role}-{uuid.uuid4().hex}@test.com",
             "role": role,
+            "password": "clave-segura-123",
         }
-        response = client.post("/api/users", json=payload)
-        assert response.status_code == 200, response.text
-        return response.json()
+        response = client.post("/api/auth/register", json=payload)
+        assert response.status_code == 201, response.text
+        data = response.json()
+        user_data = data["user"]
+        token = data["token"]
+        result = dict(user_data)
+        result["token"] = token
+        result["headers"] = {"Authorization": f"Bearer {token}"}
+        return result
     return _make
 
 
 @pytest.fixture
 def make_ticket(client):
-    """Fábrica: crea un ticket a nombre del usuario indicado (actor)."""
+    """Fábrica: crea un ticket a nombre del usuario indicado (headers)."""
     def _make(actor, title="Ticket de prueba", priority_id=1, category_id=1):
         payload = {
             "title": title,
             "description": f"Descripción de {title}",
             "category_id": category_id,
             "priority_id": priority_id,
-            "actor_id": actor["id"],
         }
-        response = client.post("/api/tickets", json=payload)
+        response = client.post("/api/tickets", json=payload, headers=actor["headers"])
         assert response.status_code == 200, response.text
         return response.json()
     return _make

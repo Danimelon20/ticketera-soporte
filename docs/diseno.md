@@ -69,6 +69,12 @@ y prioridades (Baja=1, Media=2, Alta=3, Urgente=4) si no existen.
 
 ## Decisiones tomadas durante el desarrollo
 
+### Autenticación y seguridad
+- Contraseñas guardadas con `hashlib.pbkdf2_hmac` (sal aleatoria, 200 000 iteraciones, sin librerías nuevas).
+- Sesión por token aleatorio guardado en la tabla `sessions`.
+- Se eliminó `actor_id` para que nadie pueda actuar en nombre de otro.
+- Mismo mensaje de error para correo inexistente y contraseña incorrecta, para no revelar qué correos existen.
+
 ### Comentarios
 - No se puede comentar un ticket cerrado (400).
 - Los comentarios no se registran en la tabla history.
