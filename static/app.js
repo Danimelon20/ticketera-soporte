@@ -150,7 +150,10 @@ document.addEventListener('DOMContentLoaded', () => {
             tdPriority.textContent = priorityMap[ticket.priority_id] || '';
             
             const tdStatus = document.createElement('td');
-            tdStatus.textContent = STATE_MAP[ticket.status] || ticket.status;
+            const statusBadge = document.createElement('span');
+            statusBadge.className = `badge status-${ticket.status}`;
+            statusBadge.textContent = STATE_MAP[ticket.status] || ticket.status;
+            tdStatus.appendChild(statusBadge);
             
             const tdAssigned = document.createElement('td');
             tdAssigned.textContent = getAssignedTo(ticket);
@@ -222,7 +225,11 @@ document.addEventListener('DOMContentLoaded', () => {
         detailPanel.appendChild(tdPriority);
         
         const tdStatus = document.createElement('p');
-        tdStatus.textContent = `Estado: ${STATE_MAP[ticket.status] || ticket.status}`;
+        const statusBadge = document.createElement('span');
+        statusBadge.className = `badge status-${ticket.status}`;
+        statusBadge.textContent = STATE_MAP[ticket.status] || ticket.status;
+        tdStatus.textContent = 'Estado: ';
+        tdStatus.appendChild(statusBadge);
         detailPanel.appendChild(tdStatus);
         
         const tdAssigned = document.createElement('p');
