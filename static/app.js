@@ -736,6 +736,15 @@ try {
                 getModalError().style.display = 'none';
                 ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
             }
+
+            function updateActingAsDisplay() {
+                const display = document.getElementById('actingAsDisplay');
+                if (actingAsId && userMap[actingAsId] && actingAsRole) {
+                    display.textContent = `Actuando como: ${userMap[actingAsId]} (${ROLE_MAP[actingAsRole]})`;
+                } else {
+                    display.textContent = 'Sin usuario elegido';
+                }
+            }
         
             function showError(message) {
                 let text;
@@ -858,6 +867,8 @@ try {
             actingAsRole = null;
         }
         
+        updateActingAsDisplay();
+        
         if (isModalOpen()) closeModal();
         loadTickets(getFilters());
     });
@@ -911,6 +922,7 @@ try {
 
         // Reload users and selector
         await loadUsers();
+        updateActingAsDisplay();
         // Reload tickets to show newly created user in assignments
         await loadTickets(getFilters());
 
@@ -935,6 +947,7 @@ try {
     
     // Initial load - wait for categories, priorities, and users first
     Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
+        updateActingAsDisplay();
         loadTickets();
     });
 });
