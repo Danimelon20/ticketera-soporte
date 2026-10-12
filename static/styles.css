@@ -1,3 +1,16 @@
+:root {
+    --estado-nuevo: #1e40af;
+    --estado-proceso: #c2410c;
+    --estado-resuelto: #15803d;
+    --estado-cerrado: #52525b;
+    --prioridad-baja: #52525b;
+    --prioridad-media: #0369a1;
+    --prioridad-alta: #c2410c;
+    --prioridad-urgente: #b91c1c;
+    --exito: #15803d;
+    --error: #b91c1c;
+}
+
 body {
     font-family: system-ui, sans-serif;
     max-width: 800px;
