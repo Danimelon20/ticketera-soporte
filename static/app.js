@@ -137,6 +137,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTickets(tickets) {
         ticketsBody.innerHTML = '';
         
+        if (tickets.length === 0) {
+            const filters = getFilters();
+            const hasActiveFilter = filters.status || filters.category_id || filters.priority_id || filters.search;
+            
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 7;
+            td.textContent = hasActiveFilter ? 'No hay tickets que coincidan con los filtros' : 'Todavía no hay tickets';
+            tr.appendChild(td);
+            ticketsBody.appendChild(tr);
+            return;
+        }
+        
         tickets.forEach(ticket => {
             const tr = document.createElement('tr');
             tr.dataset.ticketId = ticket.id;
