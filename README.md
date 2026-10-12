@@ -15,6 +15,8 @@ el asistente OpenCode y validado manualmente en cada paso.
 - Consultar el historial de cambios de cada ticket.
 - Roles de usuario: solicitante, técnico y coordinador, con
   permisos distintos.
+- Pantalla con distintivos de color para estado y prioridad, avisos de éxito y error, detalle en ventana
+  emergente y barra superior con el usuario actual.
 
 ## Tecnologías
 
