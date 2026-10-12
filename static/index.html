@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+<!-- Ticketera de Soporte - Frontend -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,13 +12,13 @@
 </head>
 <body>
     <section id="authScreen" class="auth-screen">
-        <div class="auth-banner">
-            <img src="img/login-illustration.svg" alt="">
-            <div class="auth-brand">
-                <h1>Ticketera</h1>
-                <p>Soporte técnico, en orden.</p>
-            </div>
-        </div>
+        <section class="auth-panel">
+          <div class="logo-plate">
+            <img src="img/logo-adn.svg" alt="American Data Networks" class="auth-logo">
+          </div>
+          <p class="auth-kicker">TICKETERA DE SOPORTE</p>
+          <p class="auth-tagline">Soporte técnico, en orden.</p>
+        </section>
         <div class="auth-card-container">
             <div class="auth-card">
                 <div class="auth-tabs" role="tablist">
@@ -68,18 +69,30 @@
         </div>
     </section>
 
-    <header class="topbar" style="display: none;">
-        <span>Ticketera</span>
-        <nav aria-label="Secciones">
-            <button type="button" id="navTickets" style="background: var(--accent-soft); color: var(--accent-dark);">Tickets</button>
-            <button type="button" id="navUsers">Usuarios</button>
-        </nav>
-        <div style="margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            <span id="currentUserDisplay" style="font-size: 14px; font-weight: 500;"></span>
-            <button type="button" id="switchAccount" class="btn-secondary">Cambiar cuenta</button>
-            <button type="button" id="openNewTicket">+ Nuevo ticket</button>
-        </div>
-    </header>
+<header class="topbar">
+  <div class="topbar-section topbar-logo">
+    <img src="img/logo-adn.svg" alt="American Data Networks">
+  </div>
+  <div class="topbar-section topbar-title">
+    <span class="topbar-app">Ticketera</span>
+    <span class="topbar-sub">Soporte técnico</span>
+  </div>
+  <nav class="topbar-nav" aria-label="Secciones">
+    <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
+    <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
+  </nav>
+  <div class="topbar-section topbar-action">
+    <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
+  </div>
+  <div class="topbar-section topbar-user">
+    <span class="topbar-avatar" aria-hidden="true"></span>
+    <span class="topbar-user-text">
+      <span class="topbar-user-name" id="currentUserDisplay"></span>
+      <span class="topbar-user-role"></span>
+    </span>
+    <button type="button" id="switchAccount" class="btn-secondary">Cambiar cuenta</button>
+  </div>
+</header>
 
     <main style="display: none;">
         <div class="split">

@@ -46,6 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let userRoleMap = {};
     let currentStatus = '';
     let selectedTicketId = null;
+    let activityFilter = 'all';
+    let currentTicket = null;
 
     let authToken = sessionStorage.getItem('ticketeraToken');
     let currentUser = null;
@@ -107,13 +109,33 @@ document.addEventListener('DOMContentLoaded', () => {
         return response.json();
     }
 
+    function getInitials(name) {
+        if (!name) return 'US';
+        const words = name.trim().split(/\s+/);
+        if (words.length >= 2) {
+            return (words[0][0] + words[1][0]).toUpperCase();
+        } else if (words.length === 1 && words[0].length >= 2) {
+            return words[0].substring(0, 2).toUpperCase();
+        } else if (words.length === 1 && words[0].length === 1) {
+            return words[0][0].toUpperCase();
+        }
+        return 'US';
+    }
+
     function showApp() {
         if (authScreen) authScreen.style.display = 'none';
         if (topbar) topbar.style.display = 'flex';
         if (mainContent) mainContent.style.display = 'block';
 
-        if (currentUserDisplay && currentUser) {
-            currentUserDisplay.textContent = `${currentUser.name} — ${ROLE_MAP[currentUser.role] || currentUser.role}`;
+        if (currentUser) {
+            const userNameEl = document.querySelector('.topbar-user-name');
+            const userRoleEl = document.querySelector('.topbar-user-role');
+            const userAvatarEl = document.querySelector('.topbar-avatar');
+            if (userNameEl) userNameEl.textContent = currentUser.name;
+            if (userRoleEl) userRoleEl.textContent = ROLE_MAP[currentUser.role] || currentUser.role;
+            if (userAvatarEl) {
+                userAvatarEl.textContent = getInitials(currentUser.name);
+            }
         }
 
         Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
@@ -444,6 +466,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showTicketDetail(ticket) {
+        currentTicket = ticket;
         detailContent.replaceChildren();
         const detailPanelEl = document.getElementById('detailPanel');
         if (detailPanelEl) detailPanelEl.scrollTop = 0;
@@ -477,84 +500,55 @@ document.addEventListener('DOMContentLoaded', () => {
         descP.textContent = ticket.description;
         detailContent.appendChild(descP);
 
+        // State, Priority, Assigned to in ONE single card
         const dl = document.createElement('dl');
+        dl.style.background = '#FFFFFF';
+        dl.style.border = '1px solid #E3E6EB';
+        dl.style.borderRadius = '10px';
         dl.style.display = 'grid';
-        dl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
-        dl.style.gap = '16px';
+        dl.style.gridTemplateColumns = 'repeat(3, 1fr)';
         dl.style.margin = '0 0 28px 0';
+        dl.style.overflow = 'hidden';
 
-        // Box 1: Estado
-        const boxStatus = document.createElement('div');
-        boxStatus.style.background = 'var(--surface)';
-        boxStatus.style.border = '1px solid var(--line)';
-        boxStatus.style.borderRadius = 'var(--radius)';
-        boxStatus.style.padding = '12px 16px';
-        
-        const dtStatus = document.createElement('dt');
-        dtStatus.style.fontSize = '12px';
-        dtStatus.style.color = 'var(--muted)';
-        dtStatus.style.marginBottom = '4px';
-        dtStatus.textContent = 'Estado';
-        
-        const ddStatus = document.createElement('dd');
-        ddStatus.style.margin = '0';
-        ddStatus.style.fontWeight = '500';
         const statusBadge = document.createElement('span');
         statusBadge.className = `badge status-${ticket.status}`;
         statusBadge.textContent = STATE_MAP[ticket.status] || ticket.status;
-        ddStatus.appendChild(statusBadge);
 
-        boxStatus.appendChild(dtStatus);
-        boxStatus.appendChild(ddStatus);
-        dl.appendChild(boxStatus);
-
-        // Box 2: Prioridad
-        const boxPriority = document.createElement('div');
-        boxPriority.style.background = 'var(--surface)';
-        boxPriority.style.border = '1px solid var(--line)';
-        boxPriority.style.borderRadius = 'var(--radius)';
-        boxPriority.style.padding = '12px 16px';
-
-        const dtPriority = document.createElement('dt');
-        dtPriority.style.fontSize = '12px';
-        dtPriority.style.color = 'var(--muted)';
-        dtPriority.style.marginBottom = '4px';
-        dtPriority.textContent = 'Prioridad';
-
-        const ddPriority = document.createElement('dd');
-        ddPriority.style.margin = '0';
-        ddPriority.style.fontWeight = '500';
         const priorityBadge = document.createElement('span');
         priorityBadge.className = `priority-${priorityLevelMap[ticket.priority_id] || 1}`;
         priorityBadge.textContent = priorityName;
-        ddPriority.appendChild(priorityBadge);
 
-        boxPriority.appendChild(dtPriority);
-        boxPriority.appendChild(ddPriority);
-        dl.appendChild(boxPriority);
+        const fieldsData = [
+            { title: 'Estado', content: statusBadge },
+            { title: 'Prioridad', content: priorityBadge },
+            { title: 'Asignado a', text: assignedTo }
+        ];
 
-        // Box 3: Asignado a
-        const boxAssigned = document.createElement('div');
-        boxAssigned.style.background = 'var(--surface)';
-        boxAssigned.style.border = '1px solid var(--line)';
-        boxAssigned.style.borderRadius = 'var(--radius)';
-        boxAssigned.style.padding = '12px 16px';
+        fieldsData.forEach((fData, i) => {
+            const box = document.createElement('div');
+            box.style.padding = '16px';
+            if (i < 2) {
+                box.style.borderRight = '1px solid #E3E6EB';
+            }
+            const dt = document.createElement('dt');
+            dt.style.fontSize = '12px';
+            dt.style.color = 'var(--muted)';
+            dt.style.marginBottom = '4px';
+            dt.textContent = fData.title;
 
-        const dtAssigned = document.createElement('dt');
-        dtAssigned.style.fontSize = '12px';
-        dtAssigned.style.color = 'var(--muted)';
-        dtAssigned.style.marginBottom = '4px';
-        dtAssigned.textContent = 'Asignado a';
-
-        const ddAssigned = document.createElement('dd');
-        ddAssigned.style.margin = '0';
-        ddAssigned.style.fontWeight = '500';
-        ddAssigned.style.color = 'var(--ink)';
-        ddAssigned.textContent = assignedTo;
-
-        boxAssigned.appendChild(dtAssigned);
-        boxAssigned.appendChild(ddAssigned);
-        dl.appendChild(boxAssigned);
+            const dd = document.createElement('dd');
+            dd.style.margin = '0';
+            dd.style.fontWeight = '500';
+            if (fData.content) {
+                dd.appendChild(fData.content);
+            } else {
+                dd.textContent = fData.text;
+                dd.style.color = 'var(--ink)';
+            }
+            box.appendChild(dt);
+            box.appendChild(dd);
+            dl.appendChild(box);
+        });
 
         detailContent.appendChild(dl);
 
@@ -711,176 +705,336 @@ document.addEventListener('DOMContentLoaded', () => {
 
         detailContent.appendChild(actionsSection);
 
-        // Two columns: Comentarios e Historial
-        const twoCols = document.createElement('div');
-        twoCols.style.display = 'grid';
-        twoCols.style.gridTemplateColumns = 'repeat(auto-fit, minmax(280px, 1fr))';
-        twoCols.style.gap = '28px';
+        // Actividad Section Card
+        const activityCard = document.createElement('div');
+        activityCard.style.background = '#FFFFFF';
+        activityCard.style.border = '1px solid #E3E6EB';
+        activityCard.style.borderRadius = '12px';
+        activityCard.style.margin = '0 0 28px 0';
+        activityCard.style.overflow = 'hidden';
 
-        // Left col: Comentarios
-        const commentsCol = document.createElement('div');
-        const commentsH3 = document.createElement('h3');
-        commentsH3.textContent = 'Comentarios';
-        commentsH3.style.fontSize = '17px';
-        commentsH3.style.margin = '0 0 4px 0';
-        commentsCol.appendChild(commentsH3);
+        // Header
+        const actHeader = document.createElement('div');
+        actHeader.style.display = 'flex';
+        actHeader.style.justifyContent = 'space-between';
+        actHeader.style.alignItems = 'center';
+        actHeader.style.padding = '12px 16px';
+        actHeader.style.borderBottom = '1px solid #E3E6EB';
 
-        const commentingAsP = document.createElement('p');
-        commentingAsP.style.fontSize = '12px';
-        commentingAsP.style.color = 'var(--muted)';
-        commentingAsP.style.margin = '0 0 12px 0';
-        commentingAsP.textContent = `Comentando como: ${currentUser.name} — ${ROLE_MAP[currentUser.role] || currentUser.role}`;
-        commentsCol.appendChild(commentingAsP);
+        const h2Act = document.createElement('h2');
+        h2Act.style.fontSize = '15px';
+        h2Act.style.margin = '0';
+        h2Act.textContent = 'Actividad';
+        actHeader.appendChild(h2Act);
 
-        if (!ticket.comments || ticket.comments.length === 0) {
-            const noComments = document.createElement('p');
-            noComments.textContent = 'Sin comentarios todavía';
-            noComments.style.color = 'var(--muted)';
-            commentsCol.appendChild(noComments);
-        } else {
-            const ulComments = document.createElement('ul');
-            ulComments.style.listStyle = 'none';
-            ulComments.style.padding = '0';
-            ulComments.style.margin = '0 0 16px 0';
-            ulComments.style.display = 'flex';
-            ulComments.style.flexDirection = 'column';
-            ulComments.style.gap = '12px';
+        const filterGroup = document.createElement('div');
+        filterGroup.style.display = 'flex';
+        filterGroup.style.gap = '4px';
+        filterGroup.style.background = '#EEF0F3';
+        filterGroup.style.borderRadius = '8px';
+        filterGroup.style.padding = '3px';
 
-            ticket.comments.forEach(comment => {
-                const li = document.createElement('li');
-                li.style.background = 'var(--surface)';
-                li.style.border = '1px solid var(--line)';
-                li.style.borderRadius = 'var(--radius)';
-                li.style.padding = '10px 14px';
+        const filtersList = [
+            { key: 'all', label: 'Todo' },
+            { key: 'comments', label: 'Comentarios' },
+            { key: 'history', label: 'Historial' }
+        ];
 
-                const metaP = document.createElement('div');
-                metaP.style.fontSize = '12px';
-                metaP.style.color = 'var(--muted)';
-                metaP.style.marginBottom = '4px';
-                const authorName = userMap[comment.user_id] || comment.user_id;
-                metaP.textContent = `${formatDateTime(comment.created_at)} - ${authorName}`;
+        filtersList.forEach(f => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'activity-filter-btn';
+            btn.dataset.filter = f.key;
+            btn.textContent = f.label;
+            btn.setAttribute('aria-pressed', activityFilter === f.key ? 'true' : 'false');
+            btn.style.border = 'none';
+            btn.style.background = activityFilter === f.key ? '#FFFFFF' : 'transparent';
+            btn.style.fontWeight = activityFilter === f.key ? '600' : '400';
+            btn.style.padding = '4px 10px';
+            btn.style.borderRadius = '6px';
+            btn.style.fontSize = '13px';
+            btn.style.cursor = 'pointer';
+            filterGroup.appendChild(btn);
+        });
+        actHeader.appendChild(filterGroup);
+        activityCard.appendChild(actHeader);
 
-                const contentP = document.createElement('div');
-                contentP.style.color = 'var(--ink)';
-                contentP.textContent = comment.content;
-
-                li.appendChild(metaP);
-                li.appendChild(contentP);
-                ulComments.appendChild(li);
-            });
-            commentsCol.appendChild(ulComments);
-        }
+        // Comment Box (Top)
+        const commentBoxWrap = document.createElement('div');
+        commentBoxWrap.style.padding = '16px';
+        commentBoxWrap.style.borderBottom = '1px solid #EEF0F3';
 
         if (ticket.status === 'closed') {
-            const closedMsg = document.createElement('p');
-            closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
-            closedMsg.style.color = 'var(--muted)';
-            commentsCol.appendChild(closedMsg);
+            const closedP = document.createElement('p');
+            closedP.style.margin = '0';
+            closedP.style.color = 'var(--muted)';
+            closedP.style.fontSize = '13px';
+            closedP.textContent = 'Este ticket está cerrado y ya no admite comentarios.';
+            commentBoxWrap.appendChild(closedP);
         } else {
-            const commentForm = document.createElement('div');
-            commentForm.style.display = 'flex';
-            commentForm.style.flexDirection = 'column';
-            commentForm.style.gap = '10px';
+            const commentFormFlex = document.createElement('div');
+            commentFormFlex.style.display = 'flex';
+            commentFormFlex.style.gap = '12px';
+            commentFormFlex.style.alignItems = 'flex-start';
 
-            const commentTextarea = document.createElement('textarea');
-            commentTextarea.placeholder = 'Escribe un comentario';
-            commentTextarea.rows = 3;
-            commentTextarea.className = 'comment-textarea';
+            const avatarDiv = document.createElement('div');
+            avatarDiv.style.width = '32px';
+            avatarDiv.style.height = '32px';
+            avatarDiv.style.borderRadius = '50%';
+            avatarDiv.style.background = '#EEF2FC';
+            avatarDiv.style.color = '#1F3F99';
+            avatarDiv.style.display = 'flex';
+            avatarDiv.style.alignItems = 'center';
+            avatarDiv.style.justifyContent = 'center';
+            avatarDiv.style.fontWeight = '600';
+            avatarDiv.style.fontSize = '13px';
+            avatarDiv.style.flexShrink = '0';
+            avatarDiv.textContent = getInitials(currentUser.name);
+            commentFormFlex.appendChild(avatarDiv);
 
-            const addCommentBtn = document.createElement('button');
-            addCommentBtn.textContent = 'Agregar comentario';
-            addCommentBtn.className = 'btn-action btn-add-comment';
+            const formRight = document.createElement('div');
+            formRight.style.flex = '1';
+            formRight.style.display = 'flex';
+            formRight.style.flexDirection = 'column';
+            formRight.style.gap = '10px';
 
-            commentForm.appendChild(commentTextarea);
-            commentForm.appendChild(addCommentBtn);
-            commentsCol.appendChild(commentForm);
+            const srLabel = document.createElement('label');
+            srLabel.className = 'sr-only';
+            srLabel.textContent = 'Comentar';
+            formRight.appendChild(srLabel);
+
+            const textarea = document.createElement('textarea');
+            textarea.rows = 2;
+            textarea.className = 'comment-textarea';
+            const userRoleSpanText = ROLE_MAP[currentUser.role] || currentUser.role;
+            textarea.placeholder = `Agregar un comentario como ${currentUser.name} — ${userRoleSpanText}`;
+            textarea.style.width = '100%';
+            textarea.style.padding = '8px 12px';
+            textarea.style.border = '1px solid #D5D9E0';
+            textarea.style.borderRadius = '8px';
+            textarea.style.font = 'inherit';
+            textarea.style.fontSize = '14px';
+            textarea.style.boxSizing = 'border-box';
+            textarea.style.resize = 'vertical';
+            formRight.appendChild(textarea);
+
+            const btnRow = document.createElement('div');
+            btnRow.style.display = 'flex';
+            btnRow.style.justifyContent = 'flex-end';
+
+            const commentBtn = document.createElement('button');
+            commentBtn.type = 'button';
+            commentBtn.className = 'btn-action btn-add-comment';
+            commentBtn.textContent = 'Comentar';
+            commentBtn.style.minHeight = '36px';
+            commentBtn.style.padding = '6px 16px';
+            btnRow.appendChild(commentBtn);
+
+            formRight.appendChild(btnRow);
+            commentFormFlex.appendChild(formRight);
+            commentBoxWrap.appendChild(commentFormFlex);
         }
+        activityCard.appendChild(commentBoxWrap);
 
-        twoCols.appendChild(commentsCol);
+        // Events List Container (ol)
+        const eventsContainer = document.createElement('div');
+        eventsContainer.className = 'activity-events-container';
+        activityCard.appendChild(eventsContainer);
 
-        // Right col: Historial
-        const historyCol = document.createElement('div');
-        const historyH3 = document.createElement('h3');
-        historyH3.textContent = 'Historial';
-        historyH3.style.fontSize = '17px';
-        historyH3.style.margin = '0 0 12px 0';
-        historyCol.appendChild(historyH3);
+        renderEventsList(ticket, eventsContainer);
+        detailContent.appendChild(activityCard);
+    }
 
-        const fieldTranslations = {
-            status: 'Estado',
-            assigned_to: 'Asignado a',
-            priority_id: 'Prioridad',
-            category_id: 'Categoría'
-        };
+    function renderEventsList(ticket, container) {
+        container.replaceChildren();
 
-        if (!ticket.history || ticket.history.length === 0) {
-            const pNoChanges = document.createElement('p');
-            pNoChanges.textContent = 'Sin cambios todavía';
-            pNoChanges.style.color = 'var(--muted)';
-            historyCol.appendChild(pNoChanges);
-        } else {
-            const ulHistory = document.createElement('ul');
-            ulHistory.style.listStyle = 'none';
-            ulHistory.style.padding = '0 0 0 16px';
-            ulHistory.style.margin = '0';
-            ulHistory.style.borderLeft = '2px solid var(--line)';
-            ulHistory.style.display = 'flex';
-            ulHistory.style.flexDirection = 'column';
-            ulHistory.style.gap = '16px';
-
-            ticket.history.forEach(entry => {
-                const li = document.createElement('li');
-
-                const fieldLabel = fieldTranslations[entry.field] || entry.field;
-                
-                let oldValue = entry.old_value;
-                if (oldValue === null || oldValue === undefined) {
-                    oldValue = 'Sin asignar';
-                } else if (entry.field === 'status') {
-                    oldValue = STATE_MAP[oldValue] || oldValue;
-                } else if (entry.field === 'assigned_to') {
-                    oldValue = userMap[oldValue] || oldValue;
-                } else if (entry.field === 'priority_id') {
-                    oldValue = priorityMap[oldValue] || oldValue;
-                } else if (entry.field === 'category_id') {
-                    oldValue = categoryMap[oldValue] || oldValue;
-                }
-                
-                let newValue = entry.new_value;
-                if (newValue === null || newValue === undefined) {
-                    newValue = 'Sin asignar';
-                } else if (entry.field === 'status') {
-                    newValue = STATE_MAP[newValue] || newValue;
-                } else if (entry.field === 'assigned_to') {
-                    newValue = userMap[newValue] || newValue;
-                } else if (entry.field === 'priority_id') {
-                    newValue = priorityMap[newValue] || oldValue;
-                } else if (entry.field === 'category_id') {
-                    newValue = categoryMap[newValue] || newValue;
-                }
-
-                const changedByName = userMap[entry.changed_by] || entry.changed_by;
-
-                const metaDiv = document.createElement('div');
-                metaDiv.style.fontSize = '12px';
-                metaDiv.style.color = 'var(--muted)';
-                metaDiv.style.marginBottom = '2px';
-                metaDiv.textContent = `${formatDateTime(entry.changed_at)} - ${changedByName}`;
-
-                const changeDiv = document.createElement('div');
-                changeDiv.style.color = 'var(--ink)';
-                changeDiv.textContent = `${fieldLabel}: ${oldValue} → ${newValue}`;
-
-                li.appendChild(metaDiv);
-                li.appendChild(changeDiv);
-                ulHistory.appendChild(li);
+        let events = [];
+        if (ticket.comments) {
+            ticket.comments.forEach(c => {
+                events.push({
+                    type: 'comment',
+                    date: c.created_at,
+                    data: c
+                });
             });
+        }
+        if (ticket.history) {
+            ticket.history.forEach(h => {
+                events.push({
+                    type: 'history',
+                    date: h.changed_at,
+                    data: h
+                });
+            });
+        }
+        events.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-            historyCol.appendChild(ulHistory);
+        const filtered = events.filter(e => {
+            if (activityFilter === 'comments') return e.type === 'comment';
+            if (activityFilter === 'history') return e.type === 'history';
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            const emptyP = document.createElement('p');
+            emptyP.style.textAlign = 'center';
+            emptyP.style.color = 'var(--muted)';
+            emptyP.style.padding = '24px 0';
+            emptyP.style.margin = '0';
+            emptyP.style.fontSize = '13px';
+            emptyP.textContent = 'Todavía no hay actividad.';
+            container.appendChild(emptyP);
+            return;
         }
 
-        twoCols.appendChild(historyCol);
-        detailContent.appendChild(twoCols);
+        const ol = document.createElement('ol');
+        ol.style.listStyle = 'none';
+        ol.style.padding = '0 16px';
+        ol.style.margin = '0';
+
+        filtered.forEach((ev, idx) => {
+            const li = document.createElement('li');
+            li.style.display = 'flex';
+            li.style.gap = '12px';
+            li.style.alignItems = 'flex-start';
+            li.style.padding = '12px 0';
+            if (idx < filtered.length - 1) {
+                li.style.borderBottom = '1px solid #EEF0F3';
+            }
+
+            if (ev.type === 'comment') {
+                const comment = ev.data;
+                const authorName = userMap[comment.user_id] || 'Usuario';
+                const authorRole = ROLE_MAP[userRoleMap[comment.user_id]] || userRoleMap[comment.user_id] || '';
+
+                const circle = document.createElement('div');
+                circle.style.width = '32px';
+                circle.style.height = '32px';
+                circle.style.borderRadius = '50%';
+                circle.style.background = '#EEF2FC';
+                circle.style.color = '#1F3F99';
+                circle.style.display = 'flex';
+                circle.style.alignItems = 'center';
+                circle.style.justifyContent = 'center';
+                circle.style.fontWeight = '600';
+                circle.style.fontSize = '13px';
+                circle.style.flexShrink = '0';
+                circle.textContent = getInitials(authorName);
+                li.appendChild(circle);
+
+                const rightDiv = document.createElement('div');
+                rightDiv.style.flex = '1';
+                rightDiv.style.display = 'flex';
+                rightDiv.style.flexDirection = 'column';
+                rightDiv.style.gap = '4px';
+
+                const metaP = document.createElement('p');
+                metaP.style.margin = '0';
+                metaP.style.fontSize = '13px';
+                metaP.style.color = 'var(--muted)';
+
+                const strongName = document.createElement('strong');
+                strongName.textContent = authorName;
+                metaP.appendChild(strongName);
+                metaP.appendChild(document.createTextNode(` · ${authorRole} · ${formatDateTime(comment.created_at)}`));
+                rightDiv.appendChild(metaP);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.style.color = 'var(--ink)';
+                contentDiv.style.fontSize = '14px';
+                contentDiv.textContent = comment.content;
+                rightDiv.appendChild(contentDiv);
+
+                li.appendChild(rightDiv);
+
+            } else {
+                const entry = ev.data;
+                const changedByName = userMap[entry.changed_by] || 'Usuario';
+
+                const dotContainer = document.createElement('div');
+                dotContainer.style.width = '32px';
+                dotContainer.style.height = '32px';
+                dotContainer.style.display = 'flex';
+                dotContainer.style.alignItems = 'center';
+                dotContainer.style.justifyContent = 'center';
+                dotContainer.style.flexShrink = '0';
+
+                const dot = document.createElement('div');
+                dot.style.width = '10px';
+                dot.style.height = '10px';
+                dot.style.borderRadius = '50%';
+                if (entry.field === 'status') {
+                    dot.style.background = '#C77700';
+                } else if (entry.field === 'assigned_to') {
+                    dot.style.background = '#2E55C9';
+                } else {
+                    dot.style.background = '#5A6270';
+                }
+                dotContainer.appendChild(dot);
+                li.appendChild(dotContainer);
+
+                const rightP = document.createElement('p');
+                rightP.style.margin = '0';
+                rightP.style.fontSize = '13px';
+                rightP.style.color = 'var(--muted)';
+                rightP.style.display = 'flex';
+                rightP.style.flexWrap = 'wrap';
+                rightP.style.alignItems = 'center';
+                rightP.style.gap = '4px';
+                rightP.style.lineHeight = '1.4';
+
+                const strongWho = document.createElement('strong');
+                strongWho.textContent = changedByName;
+                rightP.appendChild(strongWho);
+
+                if (entry.field === 'status') {
+                    rightP.appendChild(document.createTextNode(' cambió el estado de '));
+                    const sOld = document.createElement('strong');
+                    sOld.textContent = STATE_MAP[entry.old_value] || entry.old_value || 'Nuevo';
+                    rightP.appendChild(sOld);
+                    rightP.appendChild(document.createTextNode(' a '));
+                    const sNew = document.createElement('strong');
+                    sNew.textContent = STATE_MAP[entry.new_value] || entry.new_value || '';
+                    rightP.appendChild(sNew);
+                } else if (entry.field === 'assigned_to') {
+                    if (entry.new_value && parseInt(entry.new_value) === entry.changed_by) {
+                        rightP.appendChild(document.createTextNode(' se asignó el ticket'));
+                    } else if (!entry.new_value) {
+                        rightP.appendChild(document.createTextNode(' desasignó el ticket'));
+                    } else {
+                        rightP.appendChild(document.createTextNode(' asignó el ticket a '));
+                        const sAssign = document.createElement('strong');
+                        sAssign.textContent = userMap[parseInt(entry.new_value)] || entry.new_value;
+                        rightP.appendChild(sAssign);
+                    }
+                } else if (entry.field === 'priority_id') {
+                    rightP.appendChild(document.createTextNode(' cambió la prioridad de '));
+                    const pOld = document.createElement('strong');
+                    pOld.textContent = priorityMap[entry.old_value] || entry.old_value || '';
+                    rightP.appendChild(pOld);
+                    rightP.appendChild(document.createTextNode(' a '));
+                    const pNew = document.createElement('strong');
+                    pNew.textContent = priorityMap[entry.new_value] || entry.new_value || '';
+                    rightP.appendChild(pNew);
+                } else if (entry.field === 'category_id') {
+                    rightP.appendChild(document.createTextNode(' cambió la categoría de '));
+                    const cOld = document.createElement('strong');
+                    cOld.textContent = categoryMap[entry.old_value] || entry.old_value || '';
+                    rightP.appendChild(cOld);
+                    rightP.appendChild(document.createTextNode(' a '));
+                    const cNew = document.createElement('strong');
+                    cNew.textContent = categoryMap[entry.new_value] || entry.new_value || '';
+                    rightP.appendChild(cNew);
+                }
+
+                rightP.appendChild(document.createTextNode(` · ${formatDateTime(entry.changed_at)}`));
+                li.appendChild(rightP);
+            }
+
+            ol.appendChild(li);
+        });
+
+        container.appendChild(ol);
     }
 
     function showError(message) {
@@ -917,11 +1071,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.modal').forEach(modal => {
         const closeBtn = modal.querySelector('.modal-close-btn');
         if (closeBtn) {
-            closeBtn.addEventListener('click', () => modal.style.display = 'none');
+            closeBtn.addEventListener('click', () => {
+                modal.style.display = 'none';
+                if (modal.id === 'usersModal') {
+                    closeUsersModal();
+                }
+            });
         }
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 modal.style.display = 'none';
+                if (modal.id === 'usersModal') {
+                    closeUsersModal();
+                }
             }
         });
     });
@@ -931,6 +1093,9 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.modal').forEach(modal => {
                 if (modal.style.display === 'flex') {
                     modal.style.display = 'none';
+                    if (modal.id === 'usersModal') {
+                        closeUsersModal();
+                    }
                 }
             });
         }
@@ -1022,23 +1187,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (navTickets) {
         navTickets.addEventListener('click', () => {
-            navTickets.style.background = 'var(--accent-soft)';
-            navTickets.style.color = 'var(--accent-dark)';
+            navTickets.classList.add('active');
             if (navUsers) {
-                navUsers.style.background = '';
-                navUsers.style.color = '';
+                navUsers.classList.remove('active');
             }
         });
     }
 
     if (navUsers) {
         navUsers.addEventListener('click', () => {
-            document.getElementById('usersModal').style.display = 'flex';
-            navUsers.style.background = 'var(--accent-soft)';
-            navUsers.style.color = 'var(--accent-dark)';
+            const usersModal = document.getElementById('usersModal');
+            if (usersModal) usersModal.style.display = 'flex';
+            navUsers.classList.add('active');
             if (navTickets) {
-                navTickets.style.background = '';
-                navTickets.style.color = '';
+                navTickets.classList.remove('active');
             }
         });
     }
@@ -1090,6 +1252,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ticketList.querySelectorAll('.ticket-item').forEach(el => el.classList.remove('selected'));
         item.classList.add('selected');
         selectedTicketId = parseInt(item.dataset.id);
+        activityFilter = 'all';
         document.querySelector('.split').classList.add('show-detail');
         try {
             const ticket = await apiFetch(`/tickets/${selectedTicketId}`);
@@ -1105,6 +1268,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailPanel = document.getElementById('detailPanel');
     detailPanel.addEventListener('click', async (e) => {
         if (!selectedTicketId || !currentUser) return;
+
+        const filterBtn = e.target.closest('.activity-filter-btn');
+        if (filterBtn) {
+            activityFilter = filterBtn.dataset.filter;
+            detailPanel.querySelectorAll('.activity-filter-btn').forEach(b => {
+                const isMatch = b.dataset.filter === activityFilter;
+                b.setAttribute('aria-pressed', isMatch ? 'true' : 'false');
+                b.style.background = isMatch ? '#FFFFFF' : 'transparent';
+                b.style.fontWeight = isMatch ? '600' : '400';
+            });
+            if (currentTicket) {
+                const evContainer = detailPanel.querySelector('.activity-events-container');
+                if (evContainer) {
+                    renderEventsList(currentTicket, evContainer);
+                }
+            }
+            return;
+        }
 
         const actionBtn = e.target.closest('.btn-action');
         if (actionBtn && !actionBtn.classList.contains('btn-add-comment')) {
