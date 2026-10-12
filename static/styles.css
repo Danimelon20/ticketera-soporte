@@ -48,8 +48,9 @@ body {
 }
 
 .topbar nav button,
-.topbar button#openNewTicket {
-    min-height: 38px;
+.topbar button#openNewTicket,
+.btn-secondary {
+    min-height: 44px;
     padding: 6px 14px;
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -70,13 +71,8 @@ body {
     background-color: var(--accent-dark);
 }
 
-.topbar label {
-    font-size: 14px;
-    font-weight: 500;
-}
-
 .topbar select {
-    min-height: 38px;
+    min-height: 44px;
     padding: 6px 10px;
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -111,6 +107,7 @@ body {
 
 #backToList {
     display: none;
+    min-height: 44px;
 }
 
 .detail-placeholder {
@@ -137,7 +134,7 @@ body {
 
 .search-wrapper input {
     flex: 1;
-    min-height: 38px;
+    min-height: 44px;
     padding: 6px 12px;
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -147,7 +144,7 @@ body {
 }
 
 .toggle-filters-btn {
-    min-height: 38px;
+    min-height: 44px;
     padding: 6px 12px;
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -171,7 +168,7 @@ body {
 }
 
 .pill-btn {
-    min-height: 34px;
+    min-height: 44px;
     padding: 4px 12px;
     border: 1px solid var(--line);
     border-radius: 999px;
@@ -215,7 +212,7 @@ body {
 }
 
 .more-filters select {
-    min-height: 38px;
+    min-height: 44px;
     width: 100%;
     padding: 6px 10px;
     border: 1px solid var(--line);
@@ -244,6 +241,7 @@ body {
     cursor: pointer;
     font: inherit;
     box-sizing: border-box;
+    min-height: 44px;
 }
 
 .ticket-item:hover {
@@ -425,7 +423,7 @@ section {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        min-height: 38px;
+        min-height: 44px;
         padding: 6px 12px;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -585,4 +583,104 @@ section {
     color: #A3261B;
     background: transparent;
     font-weight: 500;
+}
+
+/* Auth Screen Styles */
+#authScreen {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+.auth-banner {
+    background: var(--accent);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 48px;
+    color: white;
+    text-align: center;
+}
+
+.auth-banner img {
+    max-width: 80%;
+    max-height: 360px;
+    margin-bottom: 32px;
+}
+
+.auth-brand h1 {
+    font-size: 32px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    color: white;
+}
+
+.auth-brand p {
+    font-size: 16px;
+    margin: 0;
+    opacity: 0.9;
+}
+
+.auth-card-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    background: var(--surface);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 400px;
+    background: white;
+    padding: 32px;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    border: 1px solid var(--line);
+}
+
+.auth-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+}
+
+.auth-tabs button {
+    flex: 1;
+    min-height: 44px;
+    padding: 8px 16px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.auth-tabs button.active,
+.auth-tabs button[aria-pressed="true"] {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.help-text {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
+@media (max-width: 860px) {
+    #authScreen {
+        grid-template-columns: 1fr;
+    }
+    .auth-banner {
+        display: none;
+    }
 }

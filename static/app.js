@@ -10,13 +10,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailContent = document.getElementById('detailContent');
     const errorMessage = document.getElementById('errorMessage');
     const successMessage = document.getElementById('successMessage');
-    const actingAsSelect = document.getElementById('actingAs');
-    const createUserBtn = document.getElementById('createUserBtn');
-    const userNameInput = document.getElementById('userName');
-    const userEmailInput = document.getElementById('userEmail');
     const toggleMoreFiltersBtn = document.getElementById('toggleMoreFilters');
     const moreFiltersBlock = document.getElementById('moreFiltersBlock');
     const backToListBtn = document.getElementById('backToList');
+
+    const authScreen = document.getElementById('authScreen');
+    const topbar = document.querySelector('.topbar');
+    const mainContent = document.querySelector('main');
+    const tabLogin = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const loginFormContainer = document.getElementById('loginFormContainer');
+    const registerFormContainer = document.getElementById('registerFormContainer');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const switchAccountBtn = document.getElementById('switchAccount');
+    const currentUserDisplay = document.getElementById('currentUserDisplay');
 
     const STATE_MAP = {
         new: 'Nuevo',
@@ -36,10 +44,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let priorityLevelMap = {};
     let userMap = {};
     let userRoleMap = {};
-    let actingAsId = null;
-    let actingAsRole = null;
     let currentStatus = '';
     let selectedTicketId = null;
+
+    let authToken = sessionStorage.getItem('ticketeraToken');
+    let currentUser = null;
 
     function getFilters() {
         return {
@@ -50,27 +59,184 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    async function fetchAPI(endpoint, options = {}) {
+    async function apiFetch(endpoint, options = {}) {
         hideError();
-        const url = `${API_BASE}${endpoint}`;
+        const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+        const headers = {
+            'Accept': 'application/json',
+            ...(options.headers || {})
+        };
+        if (authToken) {
+            headers['Authorization'] = `Bearer ${authToken}`;
+        }
+
         const response = await fetch(url, {
-            headers: {
-                'Accept': 'application/json'
-            },
-            ...options
+            ...options,
+            headers
         });
+
+        if (response.status === 401) {
+            sessionStorage.removeItem('ticketeraToken');
+            authToken = null;
+            currentUser = null;
+            showAuthScreen();
+            showError('Tu sesión terminó, inicia sesión de nuevo');
+            throw new Error('Unauthorized');
+        }
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            showError(errorData.detail || `Error ${response.status}: ${response.statusText}`);
-            throw new Error(errorData.detail || `Error ${response.status}`);
+            let message = errorData.detail;
+            if (response.status === 422) {
+                message = 'La contraseña debe tener al menos 8 caracteres';
+            } else if (response.status === 401 && endpoint.includes('/auth/login')) {
+                message = errorData.detail || 'Correo o contraseña incorrectos';
+            } else if (response.status === 409) {
+                message = errorData.detail || 'El correo ya está registrado';
+            } else if (Array.isArray(message)) {
+                message = message.map(m => (m && m.msg) ? m.msg : String(m)).join('. ');
+            }
+            showError(message || `Error ${response.status}: ${response.statusText}`);
+            throw new Error(message || `Error ${response.status}`);
+        }
+
+        if (response.status === 204) {
+            return null;
         }
 
         return response.json();
     }
 
+    function showApp() {
+        if (authScreen) authScreen.style.display = 'none';
+        if (topbar) topbar.style.display = 'flex';
+        if (mainContent) mainContent.style.display = 'block';
+
+        if (currentUserDisplay && currentUser) {
+            currentUserDisplay.textContent = `${currentUser.name} — ${ROLE_MAP[currentUser.role] || currentUser.role}`;
+        }
+
+        Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
+            loadTickets(getFilters());
+        });
+    }
+
+    function showAuthScreen() {
+        if (authScreen) authScreen.style.display = 'grid';
+        if (topbar) topbar.style.display = 'none';
+        if (mainContent) mainContent.style.display = 'none';
+
+        ticketList.replaceChildren();
+        renderDetailPlaceholder();
+        selectedTicketId = null;
+
+        if (tabLogin && tabRegister && loginFormContainer && registerFormContainer) {
+            tabLogin.classList.add('active');
+            tabLogin.setAttribute('aria-pressed', 'true');
+            tabRegister.classList.remove('active');
+            tabRegister.setAttribute('aria-pressed', 'false');
+            loginFormContainer.style.display = 'block';
+            registerFormContainer.style.display = 'none';
+        }
+    }
+
+    // Auth tab switching
+    if (tabLogin && tabRegister && loginFormContainer && registerFormContainer) {
+        tabLogin.addEventListener('click', () => {
+            tabLogin.classList.add('active');
+            tabLogin.setAttribute('aria-pressed', 'true');
+            tabRegister.classList.remove('active');
+            tabRegister.setAttribute('aria-pressed', 'false');
+            loginFormContainer.style.display = 'block';
+            registerFormContainer.style.display = 'none';
+            hideError();
+        });
+
+        tabRegister.addEventListener('click', () => {
+            tabRegister.classList.add('active');
+            tabRegister.setAttribute('aria-pressed', 'true');
+            tabLogin.classList.remove('active');
+            tabLogin.setAttribute('aria-pressed', 'false');
+            registerFormContainer.style.display = 'block';
+            loginFormContainer.style.display = 'none';
+            hideError();
+        });
+    }
+
+    // Login submit
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError();
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                const data = await apiFetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                sessionStorage.setItem('ticketeraToken', data.token);
+                authToken = data.token;
+                currentUser = data.user;
+                loginForm.reset();
+                showApp();
+            } catch (err) {
+                // handled by apiFetch
+            }
+        });
+    }
+
+    // Register submit
+    if (registerForm) {
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError();
+            const name = document.getElementById('regName').value.trim();
+            const email = document.getElementById('regEmail').value.trim();
+            const role = document.getElementById('regRole').value;
+            const password = document.getElementById('regPassword').value;
+
+            if (!role) {
+                showError('Selecciona un rol');
+                return;
+            }
+
+            try {
+                const data = await apiFetch('/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, role, password })
+                });
+                sessionStorage.setItem('ticketeraToken', data.token);
+                authToken = data.token;
+                currentUser = data.user;
+                registerForm.reset();
+                showApp();
+            } catch (err) {
+                // handled by apiFetch
+            }
+        });
+    }
+
+    // Switch account / logout
+    if (switchAccountBtn) {
+        switchAccountBtn.addEventListener('click', async () => {
+            try {
+                await apiFetch('/auth/logout', { method: 'POST' });
+            } catch (e) {
+                // ignore logout errors
+            }
+            sessionStorage.removeItem('ticketeraToken');
+            authToken = null;
+            currentUser = null;
+            showAuthScreen();
+        });
+    }
+
     async function loadCategories() {
-        const categories = await fetchAPI('/categories');
+        const categories = await apiFetch('/categories');
         categorySelect.innerHTML = '<option value="">Seleccionar</option>';
         categoryFilter.innerHTML = '<option value="">Todas</option>';
         
@@ -92,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadPriorities() {
-        const priorities = await fetchAPI('/priorities');
+        const priorities = await apiFetch('/priorities');
         prioritySelect.innerHTML = '<option value="">Seleccionar</option>';
         priorityFilter.innerHTML = '<option value="">Todas</option>';
         
@@ -116,26 +282,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadTickets(filters = {}) {
-        if (actingAsId === null) {
-            ticketList.replaceChildren();
-            const li = document.createElement('li');
-            li.style.padding = '32px 16px';
-            li.style.textAlign = 'center';
-            li.style.color = 'var(--muted)';
-            li.textContent = 'Selecciona un usuario en "Actuando como" para ver los tickets';
-            ticketList.appendChild(li);
-            renderDetailPlaceholder();
-            return;
-        }
+        if (!currentUser) return;
         
         const params = new URLSearchParams();
         if (filters.status) params.append('status', filters.status);
         if (filters.category_id) params.append('category_id', filters.category_id);
         if (filters.priority_id) params.append('priority_id', filters.priority_id);
         if (filters.search) params.append('search', filters.search);
-        params.append('actor_id', actingAsId);
 
-        const tickets = await fetchAPI(`/tickets?${params.toString()}`);
+        const tickets = await apiFetch(`/tickets?${params.toString()}`);
         renderTickets(tickets);
 
         if (selectedTicketId !== null) {
@@ -145,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderDetailPlaceholder();
             } else {
                 try {
-                    const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
+                    const ticket = await apiFetch(`/tickets/${selectedTicketId}`);
                     showTicketDetail(ticket);
                 } catch (err) {
                     selectedTicketId = null;
@@ -276,9 +431,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function reloadSelectedTicketAndList() {
-        if (!selectedTicketId || !actingAsId) return;
+        if (!selectedTicketId || !currentUser) return;
         try {
-            const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
+            const ticket = await apiFetch(`/tickets/${selectedTicketId}`);
             showTicketDetail(ticket);
             await loadTickets(getFilters());
         } catch (err) {
@@ -298,7 +453,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const priorityName = priorityMap[ticket.priority_id] || '';
         const createdByName = userMap[ticket.created_by] || '';
 
-        // a. Línea superior en var(--mono), 13px, gris: "#ID · Categoría · Creado por Nombre · fecha y hora"
         const topMeta = document.createElement('div');
         topMeta.style.fontFamily = 'var(--mono)';
         topMeta.style.fontSize = '13px';
@@ -307,7 +461,6 @@ document.addEventListener('DOMContentLoaded', () => {
         topMeta.textContent = `#${ticket.id} · ${categoryName} · Creado por ${createdByName} · ${formatDateTime(ticket.created_at)}`;
         detailContent.appendChild(topMeta);
 
-        // b. Título <h1> de 26px y debajo la descripción (max-width 64ch, line-height 1.55)
         const h1 = document.createElement('h1');
         h1.style.fontSize = '26px';
         h1.style.fontWeight = '600';
@@ -324,7 +477,6 @@ document.addEventListener('DOMContentLoaded', () => {
         descP.textContent = ticket.description;
         detailContent.appendChild(descP);
 
-        // c. Tres casillas en fila (grid con repeat(auto-fit, minmax(140px, 1fr))): Estado, Prioridad, Asignado a.
         const dl = document.createElement('dl');
         dl.style.display = 'grid';
         dl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
@@ -406,7 +558,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         detailContent.appendChild(dl);
 
-        // d. Acciones
+        // Actions
         const actionsSection = document.createElement('div');
         actionsSection.style.marginBottom = '28px';
         actionsSection.style.paddingTop = '20px';
@@ -415,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const state = ticket.status;
         const isClosed = state === 'closed';
 
-        if (actingAsRole === 'requester') {
+        if (currentUser.role === 'requester') {
             if (!isClosed) {
                 const msg = document.createElement('p');
                 msg.textContent = 'Solo el equipo de soporte puede cambiar el estado o la asignación';
@@ -428,7 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 closedMsg.className = 'closed-msg';
                 actionsSection.appendChild(closedMsg);
             }
-        } else if (actingAsRole === 'technician') {
+        } else if (currentUser.role === 'technician') {
             const actionDiv = document.createElement('div');
             actionDiv.style.display = 'flex';
             actionDiv.style.gap = '10px';
@@ -471,7 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 actionDiv.appendChild(closedMsg);
             }
             actionsSection.appendChild(actionDiv);
-        } else if (actingAsRole === 'coordinator') {
+        } else if (currentUser.role === 'coordinator') {
             const assignmentDiv = document.createElement('div');
             assignmentDiv.style.display = 'flex';
             assignmentDiv.style.gap = '10px';
@@ -559,7 +711,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         detailContent.appendChild(actionsSection);
 
-        // e. Dos columnas (Comentarios e Historial)
+        // Two columns: Comentarios e Historial
         const twoCols = document.createElement('div');
         twoCols.style.display = 'grid';
         twoCols.style.gridTemplateColumns = 'repeat(auto-fit, minmax(280px, 1fr))';
@@ -570,8 +722,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const commentsH3 = document.createElement('h3');
         commentsH3.textContent = 'Comentarios';
         commentsH3.style.fontSize = '17px';
-        commentsH3.style.margin = '0 0 12px 0';
+        commentsH3.style.margin = '0 0 4px 0';
         commentsCol.appendChild(commentsH3);
+
+        const commentingAsP = document.createElement('p');
+        commentingAsP.style.fontSize = '12px';
+        commentingAsP.style.color = 'var(--muted)';
+        commentingAsP.style.margin = '0 0 12px 0';
+        commentingAsP.textContent = `Comentando como: ${currentUser.name} — ${ROLE_MAP[currentUser.role] || currentUser.role}`;
+        commentsCol.appendChild(commentingAsP);
 
         if (!ticket.comments || ticket.comments.length === 0) {
             const noComments = document.createElement('p');
@@ -695,7 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (entry.field === 'assigned_to') {
                     newValue = userMap[newValue] || newValue;
                 } else if (entry.field === 'priority_id') {
-                    newValue = priorityMap[newValue] || newValue;
+                    newValue = priorityMap[newValue] || oldValue;
                 } else if (entry.field === 'category_id') {
                     newValue = categoryMap[newValue] || newValue;
                 }
@@ -722,10 +881,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         twoCols.appendChild(historyCol);
         detailContent.appendChild(twoCols);
-    }
-
-    function updateActingAsDisplay() {
-        // no-op
     }
 
     function showError(message) {
@@ -781,45 +936,48 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.getElementById('ticketForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        hideError();
+    // Create ticket submit
+    const ticketForm = document.getElementById('ticketForm');
+    if (ticketForm) {
+        ticketForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError();
 
-        if (!actingAsId) {
-            showError('Selecciona un usuario en "Actuando como" antes de crear un ticket');
-            return;
-        }
+            if (!currentUser) {
+                showError('Debes iniciar sesión para crear un ticket');
+                return;
+            }
 
-        const title = document.getElementById('title').value;
-        const description = document.getElementById('description').value;
-        const categoryId = categorySelect.value;
-        const priorityId = prioritySelect.value;
+            const title = document.getElementById('title').value;
+            const description = document.getElementById('description').value;
+            const categoryId = categorySelect.value;
+            const priorityId = prioritySelect.value;
 
-        if (!categoryId || !priorityId) {
-            showError('Seleccione categoría y prioridad');
-            return;
-        }
+            if (!categoryId || !priorityId) {
+                showError('Seleccione categoría y prioridad');
+                return;
+            }
 
-        await fetchAPI('/tickets', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                title,
-                description,
-                category_id: parseInt(categoryId),
-                priority_id: parseInt(priorityId),
-                actor_id: actingAsId
-            })
+            await apiFetch('/tickets', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    title,
+                    description,
+                    category_id: parseInt(categoryId),
+                    priority_id: parseInt(priorityId)
+                })
+            });
+
+            document.getElementById('newTicketModal').style.display = 'none';
+            ticketForm.reset();
+            await loadTickets(getFilters());
+
+            showSuccess('Ticket creado');
         });
-
-        document.getElementById('newTicketModal').style.display = 'none';
-        document.getElementById('ticketForm').reset();
-        await loadTickets(getFilters());
-
-        showSuccess('Ticket creado');
-    });
+    }
 
     // Pill buttons filter handlers
     const pillButtons = document.querySelectorAll('.pill-btn');
@@ -858,25 +1016,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadTickets(getFilters());
     });
 
-    createUserBtn.addEventListener('click', async () => {
-        await createUser();
-    });
-
-    actingAsSelect.addEventListener('change', async (e) => {
-        actingAsId = parseInt(e.target.value) || null;
-        if (userMap[actingAsId]) {
-            actingAsRole = userRoleMap[actingAsId];
-        } else {
-            actingAsRole = null;
-        }
-        
-        document.querySelectorAll('.modal').forEach(modal => modal.style.display = 'none');
-        selectedTicketId = null;
-        renderDetailPlaceholder();
-        document.querySelector('.split').classList.remove('show-detail');
-        await loadTickets(getFilters());
-    });
-
     const navTickets = document.getElementById('navTickets');
     const navUsers = document.getElementById('navUsers');
     const openNewTicket = document.getElementById('openNewTicket');
@@ -913,8 +1052,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const usersList = document.getElementById('usersList');
 
     async function loadUsers() {
-        const users = await fetchAPI('/users');
-        actingAsSelect.innerHTML = '<option value="">Seleccionar</option>';
+        const users = await apiFetch('/users');
         if (usersList) {
             usersList.replaceChildren();
         }
@@ -923,11 +1061,6 @@ document.addEventListener('DOMContentLoaded', () => {
         userRoleMap = {};
         
         users.forEach(user => {
-            const opt = document.createElement('option');
-            opt.value = user.id;
-            opt.textContent = `${user.name} — ${ROLE_MAP[user.role] || ''}`;
-            actingAsSelect.appendChild(opt);
-
             if (usersList) {
                 const li = document.createElement('li');
                 li.style.padding = '8px 12px';
@@ -943,49 +1076,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function createUser() {
-        const name = userNameInput.value.trim();
-        const email = userEmailInput.value.trim();
-        const userRoleSelect = document.getElementById('userRole');
-        const selectedRole = userRoleSelect.value;
-
-        if (!name || !email) {
-            showError('Nombre y email son requeridos');
-            return;
-        }
-
-        if (!selectedRole || selectedRole === '') {
-            showError('Selecciona un rol');
-            return;
-        }
-
-        await fetchAPI('/users', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ name, email, role: selectedRole })
-        });
-
-        userNameInput.value = '';
-        userEmailInput.value = '';
-        userRoleSelect.value = '';
-
-        await loadUsers();
-        updateActingAsDisplay();
-        await loadTickets(getFilters());
-
-        showSuccess('Usuario creado');
-    }
-
-    // Registrar listener de #backToList una sola vez
+    // Back to list button
     if (backToListBtn) {
         backToListBtn.addEventListener('click', () => {
             document.querySelector('.split').classList.remove('show-detail');
         });
     }
 
-    // Delegación de eventos en #ticketList (registrado una sola vez)
+    // Ticket list click delegation
     ticketList.addEventListener('click', async (e) => {
         const item = e.target.closest('.ticket-item');
         if (!item) return;
@@ -994,7 +1092,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedTicketId = parseInt(item.dataset.id);
         document.querySelector('.split').classList.add('show-detail');
         try {
-            const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
+            const ticket = await apiFetch(`/tickets/${selectedTicketId}`);
             showTicketDetail(ticket);
         } catch (err) {
             selectedTicketId = null;
@@ -1003,10 +1101,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Delegación de eventos en #detailPanel para acciones y comentarios (registrado una sola vez)
+    // Detail panel click delegation for actions and comments
     const detailPanel = document.getElementById('detailPanel');
     detailPanel.addEventListener('click', async (e) => {
-        if (!selectedTicketId || !actingAsId) return;
+        if (!selectedTicketId || !currentUser) return;
 
         const actionBtn = e.target.closest('.btn-action');
         if (actionBtn && !actionBtn.classList.contains('btn-add-comment')) {
@@ -1019,10 +1117,10 @@ document.addEventListener('DOMContentLoaded', () => {
             else return;
 
             try {
-                await fetchAPI(`/tickets/${selectedTicketId}`, {
+                await apiFetch(`/tickets/${selectedTicketId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: newStatus, actor_id: actingAsId })
+                    body: JSON.stringify({ status: newStatus })
                 });
                 await reloadSelectedTicketAndList();
             } catch (err) {
@@ -1033,10 +1131,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const assignMeBtn = e.target.closest('.btn-assign-me');
         if (assignMeBtn) {
             try {
-                await fetchAPI(`/tickets/${selectedTicketId}`, {
+                await apiFetch(`/tickets/${selectedTicketId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ assigned_to: actingAsId, actor_id: actingAsId })
+                    body: JSON.stringify({ assigned_to: currentUser.id })
                 });
                 await reloadSelectedTicketAndList();
                 showSuccess('Ticket asignado');
@@ -1054,10 +1152,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             try {
-                await fetchAPI(`/tickets/${selectedTicketId}`, {
+                await apiFetch(`/tickets/${selectedTicketId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ assigned_to: parseInt(selectedUser), actor_id: actingAsId })
+                    body: JSON.stringify({ assigned_to: parseInt(selectedUser) })
                 });
                 await reloadSelectedTicketAndList();
                 showSuccess('Ticket asignado');
@@ -1075,10 +1173,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             try {
-                await fetchAPI(`/tickets/${selectedTicketId}/comments`, {
+                await apiFetch(`/tickets/${selectedTicketId}/comments`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ actor_id: actingAsId, content: content })
+                    body: JSON.stringify({ content: content })
                 });
                 await reloadSelectedTicketAndList();
                 showSuccess('Comentario agregado');
@@ -1087,9 +1185,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-    
-    Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
-        updateActingAsDisplay();
-        loadTickets();
-    });
+
+    // Initialize session / app on load
+    async function initApp() {
+        if (!authToken) {
+            showAuthScreen();
+            return;
+        }
+        try {
+            currentUser = await apiFetch('/auth/me');
+            showApp();
+        } catch (err) {
+            sessionStorage.removeItem('ticketeraToken');
+            authToken = null;
+            currentUser = null;
+            showAuthScreen();
+        }
+    }
+
+    initApp();
 });
