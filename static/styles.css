@@ -17,9 +17,7 @@
 
 body {
     font-family: var(--font);
-    max-width: 1100px;
     margin: 0 auto;
-    padding: 20px;
     color: var(--ink);
     background: var(--bg);
     font-size: 15px;
@@ -87,31 +85,180 @@ body {
     font-size: 14px;
 }
 
-main {
-    padding-top: 20px;
+.split {
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) 1fr;
+    min-height: calc(100vh - 73px);
 }
 
-.table-wrapper {
-    overflow-x: auto;
+#listPanel {
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
-@media (max-width: 600px) {
-    .top-bar {
-        flex-direction: column;
-        gap: 8px;
-        text-align: center;
-        padding: 10px 15px;
-    }
-    
-    .top-bar h1 {
-        text-align: center;
-        font-size: 18px;
-    }
-}
-
-h1 {
+#detailPanel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    background: var(--bg);
+    padding: 24px;
     text-align: center;
-    margin-bottom: 20px;
+}
+
+.detail-placeholder {
+    font-size: 15px;
+    color: var(--muted);
+}
+
+.list-filters {
+    padding: 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+
+.search-wrapper {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.search-wrapper input {
+    flex: 1;
+    min-height: 38px;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.toggle-filters-btn {
+    min-height: 38px;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.toggle-filters-btn:hover {
+    background: var(--line-soft);
+}
+
+.status-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 0;
+}
+
+.pill-btn {
+    min-height: 34px;
+    padding: 4px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.pill-btn:hover {
+    background: var(--line-soft);
+}
+
+.pill-btn[aria-pressed="true"],
+.pill-btn.active {
+    background: var(--ink);
+    color: white;
+    border-color: var(--ink);
+}
+
+.more-filters {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line-soft);
+}
+
+.more-filters .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.more-filters label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.more-filters select {
+    min-height: 38px;
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.ticket-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+}
+
+.ticket-item {
+    width: 100%;
+    text-align: left;
+    padding: 16px;
+    border: none;
+    border-bottom: 1px solid var(--line-soft);
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    box-sizing: border-box;
+}
+
+.ticket-item:hover {
+    background: var(--bg);
+}
+
+.ticket-item.selected {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+main {
+    padding-top: 0;
 }
 
 h2 {
@@ -121,7 +268,7 @@ h2 {
 }
 
 section {
-    margin-bottom: 25px;
+    margin-bottom: 0;
 }
 
 .form-row {
@@ -143,7 +290,6 @@ section {
 
 .form-group input,
 .form-group select,
-.filters input,
 .assign-select {
     min-height: 44px;
     width: 100%;
@@ -154,10 +300,6 @@ section {
     font: inherit;
 }
 
-.filters input {
-    width: 200px;
-}
-
 .form-group textarea {
     border: 1px solid #D5D9E0;
     border-radius: 8px;
@@ -166,6 +308,7 @@ section {
     padding: 8px 12px;
     min-height: 80px;
     resize: vertical;
+    width: 100%;
 }
 
 .btn-submit {
@@ -183,62 +326,6 @@ section {
 
 .btn-submit:hover {
     background-color: var(--accent-dark);
-}
-
-.filters {
-    background: #f8f9fa;
-    padding: 15px;
-    border-radius: 4px;
-    margin-bottom: 20px;
-}
-
-.filters .form-group {
-    margin-right: 15px;
-    margin-bottom: 0;
-}
-
-.filters .form-group:last-child {
-    margin-right: 0;
-}
-
-.filters label {
-    display: block;
-    margin-bottom: 6px;
-    font-weight: normal;
-}
-
-.filters input {
-    width: 200px;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-th,
-td {
-    padding: 10px;
-    text-align: left;
-    border-bottom: 1px solid #ddd;
-}
-
-th {
-    background-color: #2d3748;
-    color: white;
-}
-
-tr:hover td {
-    background-color: #f0f0f0;
-}
-
-tbody tr[data-ticket-id] {
-    cursor: pointer;
-}
-
-tbody tr.selected td {
-    background-color: #eef2ff;
-    border-left: 4px solid #3b82f6;
 }
 
 .error {
@@ -327,6 +414,14 @@ tbody tr.selected td {
     .modal-body {
         padding: 15px;
     }
+    
+    .split {
+        grid-template-columns: 1fr;
+    }
+    
+    #detailPanel {
+        display: none;
+    }
 }
 
 .btn-action {
@@ -384,45 +479,12 @@ tbody tr.selected td {
     box-sizing: border-box;
 }
 
-table td:first-child {
-    font-family: var(--mono);
-}
-
 .closed-msg {
     color: #c53030;
     font-style: italic;
     margin: 10px 0;
 }
 
-@media (max-width: 600px) {
-    .form-row {
-        grid-template-columns: 1fr;
-    }
-    
-    .filters .form-group {
-        margin-right: 0;
-        margin-bottom: 10px;
-    }
-    
-    .filters input {
-        width: 100%;
-    }
-    
-    .actions-section .action-buttons {
-        flex-direction: column;
-    }
-    
-    .actions-section .action-buttons button {
-        width: 100%;
-        margin: 5px 0;
-    }
-    
-    .assign-select {
-        width: 100%;
-        margin-bottom: 10px;
-    }
-}
-/* Aviso de error flotante: siempre visible, arriba y al centro */
 #errorMessage {
     position: fixed;
     top: 70px;

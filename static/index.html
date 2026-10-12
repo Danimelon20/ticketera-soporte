@@ -24,102 +24,109 @@
     </header>
 
     <main>
-        <section id="users-section">
-            <h2>Usuarios</h2>
-            <div class="form-group">
-                <label for="userName">Nombre</label>
-                <input type="text" id="userName" name="name" required>
-            </div>
-            <div class="form-group">
-                <label for="userEmail">Email</label>
-                <input type="email" id="userEmail" name="email" required>
-            </div>
-            <div class="form-group">
-                <label for="userRole">Rol</label>
-                <select id="userRole" name="userRole">
-                    <option value="">Seleccionar</option>
-                    <option value="requester">Solicitante</option>
-                    <option value="technician">Técnico</option>
-                    <option value="coordinator">Coordinador</option>
-                </select>
-            </div>
-            <button id="createUserBtn" class="btn-submit">Crear usuario</button>
-        </section>
-
-        <section id="ticket-form">
-            <h2>Nuevo ticket</h2>
-            <form id="ticketForm">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="title">Título</label>
-                        <input type="text" id="title" name="title" required>
+        <div class="split">
+            <section id="listPanel" aria-label="Lista de tickets">
+                <div class="list-filters">
+                    <div class="search-wrapper">
+                        <label for="search" class="sr-only">Buscar tickets</label>
+                        <input type="text" id="search" name="search" placeholder="Buscar tickets">
+                        <button type="button" id="toggleMoreFilters" class="toggle-filters-btn" aria-expanded="false">Más filtros</button>
                     </div>
-                    <div class="form-group">
-                        <label for="description">Descripción</label>
-                        <textarea id="description" name="description" required></textarea>
+                    <div class="status-pills" role="group" aria-label="Filtrar por estado">
+                        <button type="button" class="pill-btn active" data-status="" aria-pressed="true">Todos</button>
+                        <button type="button" class="pill-btn" data-status="new" aria-pressed="false">Nuevo</button>
+                        <button type="button" class="pill-btn" data-status="in_progress" aria-pressed="false">En proceso</button>
+                        <button type="button" class="pill-btn" data-status="resolved" aria-pressed="false">Resuelto</button>
+                        <button type="button" class="pill-btn" data-status="closed" aria-pressed="false">Cerrado</button>
+                    </div>
+                    <div id="moreFiltersBlock" class="more-filters" style="display: none;">
+                        <div class="form-group">
+                            <label for="categoryFilter">Categoría</label>
+                            <select id="categoryFilter" name="category"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="priorityFilter">Prioridad</label>
+                            <select id="priorityFilter" name="priority"></select>
+                        </div>
                     </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="category">Categoría</label>
-                        <select id="category" name="category"></select>
-                    </div>
-                    <div class="form-group">
-                        <label for="priority">Prioridad</label>
-                        <select id="priority" name="priority"></select>
-                    </div>
+                <ul id="ticketList" class="ticket-list"></ul>
+            </section>
+            <section id="detailPanel" aria-label="Detalle del ticket">
+                <div class="detail-placeholder">
+                    <p>Selecciona un ticket para ver el detalle</p>
                 </div>
-                <button type="submit" class="btn-submit">Crear ticket</button>
-            </form>
-        </section>
-
-        <section id="tickets-list">
-            <h2>Lista de tickets</h2>
-            <div class="filters">
-                <div class="form-group">
-                    <label for="statusFilter">Estado</label>
-                    <select id="statusFilter" name="status">
-                        <option value="">Todos</option>
-                        <option value="new">Nuevo</option>
-                        <option value="in_progress">En proceso</option>
-                        <option value="resolved">Resuelto</option>
-                        <option value="closed">Cerrado</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="categoryFilter">Categoría</label>
-                    <select id="categoryFilter" name="category"></select>
-                </div>
-                <div class="form-group">
-                    <label for="priorityFilter">Prioridad</label>
-                    <select id="priorityFilter" name="priority"></select>
-                </div>
-                <div class="form-group">
-                    <label for="search">Búsqueda</label>
-                    <input type="text" id="search" name="search" placeholder="Buscar título o descripción">
-                </div>
-            </div>
-            <div class="table-wrapper">
-                <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Título</th>
-                        <th>Categoría</th>
-                        <th>Prioridad</th>
-                        <th>Asignado a</th>
-                        <th>Estado</th>
-                        <th>Creado</th>
-                    </tr>
-                </thead>
-                <tbody id="ticketsBody"></tbody>
-                </table>
-            </div>
-        </section>
+            </section>
+        </div>
     </main>
 
     <div id="errorMessage" class="error"></div>
     <div id="successMessage" class="success"></div>
+
+    <div id="usersModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>
+            <div class="modal-header">
+                <h2 class="modal-title">Usuarios</h2>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="userName">Nombre</label>
+                    <input type="text" id="userName" name="name" required>
+                </div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label for="userEmail">Email</label>
+                    <input type="email" id="userEmail" name="email" required>
+                </div>
+                <div class="form-group" style="margin-top: 15px; margin-bottom: 20px;">
+                    <label for="userRole">Rol</label>
+                    <select id="userRole" name="userRole">
+                        <option value="">Seleccionar</option>
+                        <option value="requester">Solicitante</option>
+                        <option value="technician">Técnico</option>
+                        <option value="coordinator">Coordinador</option>
+                    </select>
+                </div>
+                <button id="createUserBtn" class="btn-submit">Crear usuario</button>
+                <div style="margin-top: 25px;">
+                    <h3>Usuarios existentes</h3>
+                    <ul id="usersList" style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; margin-top: 10px;"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="newTicketModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>
+            <div class="modal-header">
+                <h2 class="modal-title">Nuevo ticket</h2>
+            </div>
+            <div class="modal-body">
+                <form id="ticketForm">
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label for="title">Título</label>
+                        <input type="text" id="title" name="title" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label for="description">Descripción</label>
+                        <textarea id="description" name="description" required></textarea>
+                    </div>
+                    <div class="form-row" style="margin-bottom: 20px;">
+                        <div class="form-group">
+                            <label for="category">Categoría</label>
+                            <select id="category" name="category"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="priority">Prioridad</label>
+                            <select id="priority" name="priority"></select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-submit">Crear ticket</button>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <!-- Modal -->
     <div id="ticketModal" class="modal" style="display: none;">

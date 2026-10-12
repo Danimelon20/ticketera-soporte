@@ -3,17 +3,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const categorySelect = document.getElementById('category');
     const prioritySelect = document.getElementById('priority');
-    const statusFilter = document.getElementById('statusFilter');
     const categoryFilter = document.getElementById('categoryFilter');
     const priorityFilter = document.getElementById('priorityFilter');
     const searchInput = document.getElementById('search');
-    const ticketsBody = document.getElementById('ticketsBody');
+    const ticketList = document.getElementById('ticketList');
     const errorMessage = document.getElementById('errorMessage');
     const successMessage = document.getElementById('successMessage');
     const actingAsSelect = document.getElementById('actingAs');
     const createUserBtn = document.getElementById('createUserBtn');
     const userNameInput = document.getElementById('userName');
     const userEmailInput = document.getElementById('userEmail');
+    const toggleMoreFiltersBtn = document.getElementById('toggleMoreFilters');
+    const moreFiltersBlock = document.getElementById('moreFiltersBlock');
 
     const STATE_MAP = {
         new: 'Nuevo',
@@ -35,10 +36,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let userRoleMap = {};
     let actingAsId = null;
     let actingAsRole = null;
+    let currentStatus = '';
+    let selectedTicketId = null;
 
     function getFilters() {
         return {
-            status: statusFilter.value || undefined,
+            status: currentStatus || undefined,
             category_id: categoryFilter.value || undefined,
             priority_id: priorityFilter.value || undefined,
             search: searchInput.value || undefined
@@ -112,7 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadTickets(filters = {}) {
         if (actingAsId === null) {
-            ticketsBody.innerHTML = '<tr><td colspan="7">Selecciona un usuario en "Actuando como" para ver los tickets</td></tr>';
+            ticketList.replaceChildren();
+            const li = document.createElement('li');
+            li.style.padding = '32px 16px';
+            li.style.textAlign = 'center';
+            li.style.color = 'var(--muted)';
+            li.textContent = 'Selecciona un usuario en "Actuando como" para ver los tickets';
+            ticketList.appendChild(li);
             return;
         }
         
@@ -127,74 +136,102 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTickets(tickets);
     }
 
-    function getAssignedTo(ticket) {
-        if (ticket.assigned_to === null || ticket.assigned_to === undefined) {
-            return 'Sin asignar';
-        }
-        return userMap[ticket.assigned_to] || ticket.assigned_to;
-    }
-
     function renderTickets(tickets) {
-        ticketsBody.innerHTML = '';
+        ticketList.replaceChildren();
         
         if (tickets.length === 0) {
             const filters = getFilters();
             const hasActiveFilter = filters.status || filters.category_id || filters.priority_id || filters.search;
             
-            const tr = document.createElement('tr');
-            const td = document.createElement('td');
-            td.colSpan = 7;
-            td.textContent = hasActiveFilter ? 'No hay tickets que coincidan con los filtros' : 'Todavía no hay tickets';
-            tr.appendChild(td);
-            ticketsBody.appendChild(tr);
+            const li = document.createElement('li');
+            li.style.padding = '32px 16px';
+            li.style.textAlign = 'center';
+            li.style.color = 'var(--muted)';
+            li.textContent = hasActiveFilter ? 'No hay tickets que coincidan con los filtros' : 'Todavía no hay tickets';
+            ticketList.appendChild(li);
             return;
         }
         
         tickets.forEach(ticket => {
-            const tr = document.createElement('tr');
-            tr.dataset.ticketId = ticket.id;
+            const li = document.createElement('li');
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'ticket-item';
+            if (ticket.id === selectedTicketId) {
+                button.classList.add('selected');
+            }
+            button.dataset.id = ticket.id;
             
-            const tdId = document.createElement('td');
-            tdId.textContent = ticket.id;
-            
-            const tdTitle = document.createElement('td');
-            tdTitle.textContent = ticket.title;
-            
-            const tdCategory = document.createElement('td');
-            tdCategory.textContent = categoryMap[ticket.category_id] || '';
-            
-            const tdPriority = document.createElement('td');
-            const priorityBadge = document.createElement('span');
-            priorityBadge.className = `badge priority-${priorityLevelMap[ticket.priority_id] || 1}`;
-            priorityBadge.textContent = priorityMap[ticket.priority_id] || '';
-            tdPriority.appendChild(priorityBadge);
-            
-            const tdStatus = document.createElement('td');
+            // Línea 1: "#ID · Categoría" (izq) y fecha corta (der)
+            const line1 = document.createElement('div');
+            line1.style.display = 'flex';
+            line1.style.justifyContent = 'space-between';
+            line1.style.fontSize = '13px';
+            line1.style.color = 'var(--muted)';
+            line1.style.marginBottom = '4px';
+
+            const leftSpan = document.createElement('span');
+            const idSpan = document.createElement('span');
+            idSpan.style.fontFamily = 'var(--mono)';
+            idSpan.textContent = `#${ticket.id}`;
+            leftSpan.appendChild(idSpan);
+
+            const catName = categoryMap[ticket.category_id] || '';
+            if (catName) {
+                const catText = document.createTextNode(` · ${catName}`);
+                leftSpan.appendChild(catText);
+            }
+
+            const rightSpan = document.createElement('span');
+            rightSpan.textContent = formatDate(ticket.created_at);
+
+            line1.appendChild(leftSpan);
+            line1.appendChild(rightSpan);
+
+            // Línea 2: Título (font-weight 500)
+            const line2 = document.createElement('div');
+            line2.style.fontWeight = '500';
+            line2.style.fontSize = '15px';
+            line2.style.color = 'var(--ink)';
+            line2.style.marginBottom = '6px';
+            line2.style.textAlign = 'left';
+            line2.textContent = ticket.title;
+
+            // Línea 3: Badge de estado, texto de prioridad y asignado (si tiene)
+            const line3 = document.createElement('div');
+            line3.style.display = 'flex';
+            line3.style.alignItems = 'center';
+            line3.style.gap = '8px';
+            line3.style.flexWrap = 'wrap';
+            line3.style.fontSize = '13px';
+
             const statusBadge = document.createElement('span');
             statusBadge.className = `badge status-${ticket.status}`;
             statusBadge.textContent = STATE_MAP[ticket.status] || ticket.status;
-            tdStatus.appendChild(statusBadge);
-            
-            const tdAssigned = document.createElement('td');
-            tdAssigned.textContent = getAssignedTo(ticket);
-            
-            const tdDate = document.createElement('td');
-            tdDate.textContent = formatDate(ticket.created_at);
-            
-            tr.appendChild(tdId);
-            tr.appendChild(tdTitle);
-            tr.appendChild(tdCategory);
-            tr.appendChild(tdPriority);
-            tr.appendChild(tdAssigned);
-            tr.appendChild(tdStatus);
-            tr.appendChild(tdDate);
-            
-            ticketsBody.appendChild(tr);
+            line3.appendChild(statusBadge);
+
+            const priorityBadge = document.createElement('span');
+            priorityBadge.className = `priority-${priorityLevelMap[ticket.priority_id] || 1}`;
+            priorityBadge.textContent = priorityMap[ticket.priority_id] || '';
+            line3.appendChild(priorityBadge);
+
+            if (ticket.assigned_to !== null && ticket.assigned_to !== undefined) {
+                const assignedSpan = document.createElement('span');
+                assignedSpan.style.marginLeft = 'auto';
+                assignedSpan.style.color = 'var(--muted)';
+                assignedSpan.textContent = userMap[ticket.assigned_to] || ticket.assigned_to;
+                line3.appendChild(assignedSpan);
+            }
+
+            button.appendChild(line1);
+            button.appendChild(line2);
+            button.appendChild(line3);
+            li.appendChild(button);
+            ticketList.appendChild(li);
         });
     }
 
     function parseServerDate(dateString) {
-        // El servidor envía la hora en UTC sin la "Z" final; se la agregamos
         const hasZone = dateString.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateString);
         return new Date(hasZone ? dateString : dateString + 'Z');
     }
@@ -216,18 +253,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const detailPanel = document.createElement('div');
         detailPanel.className = 'detail-panel';
         
-        // Build header info
         const assignedTo = ticket.assigned_to !== null ? userMap[ticket.assigned_to] || ticket.assigned_to : 'Sin asignar';
-        
         const categoryName = categoryMap[ticket.category_id] || '';
         const priorityName = priorityMap[ticket.priority_id] || '';
         
-        // Title
         const h2 = document.createElement('h2');
         h2.textContent = `Detalle del ticket #${ticket.id}`;
         detailPanel.appendChild(h2);
         
-        // Ticket details
         const tdTitle = document.createElement('p');
         tdTitle.textContent = `Título: ${ticket.title}`;
         detailPanel.appendChild(tdTitle);
@@ -272,7 +305,6 @@ document.addEventListener('DOMContentLoaded', () => {
         tdUpdated.textContent = `Última actualización: ${formatDateTime(ticket.updated_at)}`;
         detailPanel.appendChild(tdUpdated);
         
-        // Acciones section
         const actionsSection = document.createElement('div');
         actionsSection.className = 'actions-section';
         
@@ -280,7 +312,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const isClosed = state === 'closed';
         
         if (actingAsRole === 'requester') {
-            // Requester: no status buttons, no assignment
             if (!isClosed) {
                 const msg = document.createElement('p');
                 msg.textContent = 'Solo el equipo de soporte puede cambiar el estado o la asignación';
@@ -293,7 +324,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 actionsSection.appendChild(closedMsg);
             }
         } else if (actingAsRole === 'technician') {
-            // Technician: status buttons + assign-to-me button if unassigned
             const actionDiv = document.createElement('div');
             actionDiv.className = 'action-buttons';
             
@@ -320,7 +350,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     actionDiv.appendChild(reopenBtn);
                 }
                 
-                // Assign-to-me button if unassigned
                 if (ticket.assigned_to === null || ticket.assigned_to === undefined) {
                     const assignMeBtn = document.createElement('button');
                     assignMeBtn.className = 'btn-action';
@@ -333,24 +362,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             return;
                         }
                         
-try {
-                        await fetchAPI(`/tickets/${ticketId}`, {
-                            method: 'PATCH',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                status: newStatus,
-                                actor_id: actingAsId
-                            })
-                        });
+                        try {
+                            await fetchAPI(`/tickets/${ticket.id}`, {
+                                method: 'PATCH',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    assigned_to: actingAsId,
+                                    actor_id: actingAsId
+                                })
+                            });
 
-                        const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
-                        showTicketDetail(updatedTicket);
-                        await loadTickets(getFilters());
+                            const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
+                            showTicketDetail(updatedTicket);
+                            await loadTickets(getFilters());
 
-                        showSuccess('Estado actualizado');
-                    } catch (err) {
+                            showSuccess('Ticket asignado');
+                        } catch (err) {
                             showError(err.message || 'Error al asignar el ticket');
                         }
                     });
@@ -406,7 +435,6 @@ try {
             
             actionsSection.appendChild(actionDiv);
         } else if (actingAsRole === 'coordinator') {
-            // Coordinator: status buttons + assignment selector (filtered to technician/coordinator)
             const assignmentDiv = document.createElement('div');
             assignmentDiv.className = 'assignment-section';
             
@@ -524,7 +552,7 @@ try {
                     return;
                 }
                 
-try {
+                try {
                     await fetchAPI(`/tickets/${ticket.id}`, {
                         method: 'PATCH',
                         headers: {
@@ -551,7 +579,6 @@ try {
             }
             actionsSection.appendChild(actionDiv);
         } else {
-            // Fallback: show closed message if closed, nothing otherwise
             if (isClosed) {
                 const actionDiv = document.createElement('div');
                 actionDiv.className = 'action-buttons';
@@ -565,7 +592,6 @@ try {
         
         detailPanel.appendChild(actionsSection);
         
-        // Build history list - Historial title always visible
         const historySection = document.createElement('div');
         const historyH3 = document.createElement('h3');
         historyH3.textContent = 'Historial';
@@ -588,11 +614,8 @@ try {
             
             ticket.history.forEach(entry => {
                 const li = document.createElement('li');
-                
-                // Translate field
                 const fieldLabel = fieldTranslations[entry.field] || entry.field;
                 
-                // Translate old value
                 let oldValue = entry.old_value;
                 if (oldValue === null || oldValue === undefined) {
                     oldValue = 'Sin asignar';
@@ -606,7 +629,6 @@ try {
                     oldValue = categoryMap[oldValue] || oldValue;
                 }
                 
-                // Translate new value
                 let newValue = entry.new_value;
                 if (newValue === null || newValue === undefined) {
                     newValue = 'Sin asignar';
@@ -620,9 +642,7 @@ try {
                     newValue = categoryMap[newValue] || newValue;
                 }
                 
-                // Translate changed_by (user ID to name)
                 const changedByName = userMap[entry.changed_by] || entry.changed_by;
-                
                 li.textContent = `${formatDateTime(entry.changed_at)} - ${changedByName}: ${fieldLabel}: ${oldValue} → ${newValue}`;
                 ul.appendChild(li);
             });
@@ -632,38 +652,34 @@ try {
         
         detailPanel.appendChild(historySection);
         
-                // Comments section
-                const commentsSection = document.createElement('div');
-                commentsSection.className = 'comments-section';
-        
-                const commentsH3 = document.createElement('h3');
-                commentsH3.textContent = 'Comentarios';
-                commentsSection.appendChild(commentsH3);
-        
-                // La lista se muestra siempre, también en tickets cerrados
-                if (!ticket.comments || ticket.comments.length === 0) {
-                    const noComments = document.createElement('p');
-                    noComments.textContent = 'Sin comentarios todavía';
-                    commentsSection.appendChild(noComments);
-                } else {
-                    const ul = document.createElement('ul');
-                    ticket.comments.forEach(comment => {
-                        const li = document.createElement('li');
-                        const authorName = userMap[comment.user_id] || comment.user_id;
-                        const commentDate = formatDateTime(comment.created_at);
-                        li.textContent = `${commentDate} - ${authorName}: ${comment.content}`;
-                        ul.appendChild(li);
-                    });
-                    commentsSection.appendChild(ul);
-                }
-        
-                // El formulario solo se muestra si el ticket no está cerrado
-                if (ticket.status === 'closed') {
-                    const closedMsg = document.createElement('p');
-                    closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
-                    commentsSection.appendChild(closedMsg);
-                } else {
-            
+        const commentsSection = document.createElement('div');
+        commentsSection.className = 'comments-section';
+
+        const commentsH3 = document.createElement('h3');
+        commentsH3.textContent = 'Comentarios';
+        commentsSection.appendChild(commentsH3);
+
+        if (!ticket.comments || ticket.comments.length === 0) {
+            const noComments = document.createElement('p');
+            noComments.textContent = 'Sin comentarios todavía';
+            commentsSection.appendChild(noComments);
+        } else {
+            const ul = document.createElement('ul');
+            ticket.comments.forEach(comment => {
+                const li = document.createElement('li');
+                const authorName = userMap[comment.user_id] || comment.user_id;
+                const commentDate = formatDateTime(comment.created_at);
+                li.textContent = `${commentDate} - ${authorName}: ${comment.content}`;
+                ul.appendChild(li);
+            });
+            commentsSection.appendChild(ul);
+        }
+
+        if (ticket.status === 'closed') {
+            const closedMsg = document.createElement('p');
+            closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
+            commentsSection.appendChild(closedMsg);
+        } else {
             const commentForm = document.createElement('div');
             const commentTextarea = document.createElement('textarea');
             commentTextarea.placeholder = 'Escribe un comentario';
@@ -690,7 +706,7 @@ try {
                     return;
                 }
                 
-try {
+                try {
                     await fetchAPI(`/tickets/${ticket.id}/comments`, {
                         method: 'POST',
                         headers: {
@@ -714,112 +730,100 @@ try {
         
         detailPanel.appendChild(commentsSection);
         
-                // Mostrar el detalle dentro de la ventana emergente
-                getModal().querySelector('.modal-body').replaceChildren(detailPanel);
-                openModal('ticketModal');
-            }
-        
-            function getModal() {
-                return document.getElementById('ticketModal');
-            }
-        
-            function getModalError() {
-                return document.getElementById('modalError');
-            }
-        
-            function isModalOpen(id = 'ticketModal') {
-                const modal = document.getElementById(id);
-                return modal && modal.style.display === 'flex';
-            }
-        
-            function openModal(id) {
-                const modal = document.getElementById(id);
-                if (modal) modal.style.display = 'flex';
-            }
+        getModal().querySelector('.modal-body').replaceChildren(detailPanel);
+        openModal('ticketModal');
+    }
 
-            function closeModal(id) {
-                const modal = document.getElementById(id);
-                if (modal) modal.style.display = 'none';
-                if (id === 'ticketModal') {
-                    const modalError = document.getElementById('modalError');
-                    if (modalError) modalError.style.display = 'none';
-                    ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
-                }
-            }
+    function getModal() {
+        return document.getElementById('ticketModal');
+    }
 
-    function updateActingAsDisplay() {
-        const display = document.getElementById('actingAsDisplay');
-        if (display) {
-            if (actingAsId && userMap[actingAsId] && actingAsRole) {
-                display.textContent = `Actuando como: ${userMap[actingAsId]} (${ROLE_MAP[actingAsRole]})`;
-            } else {
-                display.textContent = 'Sin usuario elegido';
-            }
+    function getModalError() {
+        return document.getElementById('modalError');
+    }
+
+    function isModalOpen(id = 'ticketModal') {
+        const modal = document.getElementById(id);
+        return modal && modal.style.display === 'flex';
+    }
+
+    function openModal(id) {
+        const modal = document.getElementById(id);
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function closeModal(id) {
+        const modal = document.getElementById(id);
+        if (modal) modal.style.display = 'none';
+        if (id === 'ticketModal') {
+            const modalError = document.getElementById('modalError');
+            if (modalError) modalError.style.display = 'none';
+            ticketList.querySelectorAll('.ticket-item.selected').forEach(r => r.classList.remove('selected'));
+            selectedTicketId = null;
         }
     }
-        
-            function showError(message) {
-                let text;
-                if (Array.isArray(message)) {
-                    // Errores 422: lista de objetos con el texto en "msg"
-                    text = message.map(m => (m && m.msg) ? m.msg : String(m)).join('. ');
-                } else {
-                    text = String(message);
-                }
-                text = text.replace(/Value error, /g, '');
-                // Si la ventana de detalle está abierta, el error se muestra dentro de ella; si no, en el toast
-                const target = isModalOpen('ticketModal') ? getModalError() : errorMessage;
-                target.textContent = text;
-                target.style.display = 'block';
-                successMessage.style.display = 'none';
-                // El aviso flotante se oculta solo después de 5 segundos
-                if (target === errorMessage) {
-                    clearTimeout(showError.timer);
-                    showError.timer = setTimeout(() => {
-                        errorMessage.style.display = 'none';
-                    }, 3000);
-                }
-            }
-        
-            function hideError() {
+
+    function updateActingAsDisplay() {
+        // no-op or placeholder if needed
+    }
+
+    function showError(message) {
+        let text;
+        if (Array.isArray(message)) {
+            text = message.map(m => (m && m.msg) ? m.msg : String(m)).join('. ');
+        } else {
+            text = String(message);
+        }
+        text = text.replace(/Value error, /g, '');
+        const target = isModalOpen('ticketModal') ? getModalError() : errorMessage;
+        target.textContent = text;
+        target.style.display = 'block';
+        successMessage.style.display = 'none';
+        if (target === errorMessage) {
+            clearTimeout(showError.timer);
+            showError.timer = setTimeout(() => {
                 errorMessage.style.display = 'none';
-                successMessage.style.display = 'none';
-                getModalError().style.display = 'none';
-            }
+            }, 3000);
+        }
+    }
 
-            function showSuccess(message) {
-                successMessage.textContent = message;
-                successMessage.style.display = 'block';
-                clearTimeout(showSuccess.timer);
-                showSuccess.timer = setTimeout(() => {
-                    successMessage.style.display = 'none';
-                }, 3000);
+    function hideError() {
+        errorMessage.style.display = 'none';
+        successMessage.style.display = 'none';
+        getModalError().style.display = 'none';
+    }
+
+    function showSuccess(message) {
+        successMessage.textContent = message;
+        successMessage.style.display = 'block';
+        clearTimeout(showSuccess.timer);
+        showSuccess.timer = setTimeout(() => {
+            successMessage.style.display = 'none';
+        }, 3000);
+    }
+
+    document.querySelectorAll('.modal').forEach(modal => {
+        const closeBtn = modal.querySelector('.modal-close-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => closeModal(modal.id));
+        }
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModal(modal.id);
             }
-        
-            // Cierre de ventanas modales: se registra una sola vez al cargar la página
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
             document.querySelectorAll('.modal').forEach(modal => {
-                const closeBtn = modal.querySelector('.modal-close-btn');
-                if (closeBtn) {
-                    closeBtn.addEventListener('click', () => closeModal(modal.id));
-                }
-                modal.addEventListener('click', (e) => {
-                    if (e.target === modal) {
-                        closeModal(modal.id);
-                    }
-                });
-            });
-
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    document.querySelectorAll('.modal').forEach(modal => {
-                        if (modal.style.display === 'flex') {
-                            closeModal(modal.id);
-                        }
-                    });
+                if (modal.style.display === 'flex') {
+                    closeModal(modal.id);
                 }
             });
+        }
+    });
 
-    // Form submit handler
     document.getElementById('ticketForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         hideError();
@@ -853,7 +857,6 @@ try {
             })
         });
 
-        // Close modal, reset form, reload tickets
         closeModal('newTicketModal');
         document.getElementById('ticketForm').reset();
         await loadTickets(getFilters());
@@ -861,10 +864,30 @@ try {
         showSuccess('Ticket creado');
     });
 
-    // Filter change handlers
-    statusFilter.addEventListener('change', () => {
-        loadTickets(getFilters());
+    // Pill buttons filter handlers
+    const pillButtons = document.querySelectorAll('.pill-btn');
+    pillButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            pillButtons.forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-pressed', 'false');
+            });
+            btn.classList.add('active');
+            btn.setAttribute('aria-pressed', 'true');
+            currentStatus = btn.dataset.status;
+            loadTickets(getFilters());
+        });
     });
+
+    // Toggle More Filters handler
+    if (toggleMoreFiltersBtn && moreFiltersBlock) {
+        toggleMoreFiltersBtn.addEventListener('click', () => {
+            const isExpanded = toggleMoreFiltersBtn.getAttribute('aria-expanded') === 'true';
+            toggleMoreFiltersBtn.setAttribute('aria-expanded', !isExpanded);
+            moreFiltersBlock.style.display = isExpanded ? 'none' : 'flex';
+            toggleMoreFiltersBtn.textContent = isExpanded ? 'Más filtros' : 'Menos filtros';
+        });
+    }
 
     categoryFilter.addEventListener('change', () => {
         loadTickets(getFilters());
@@ -874,16 +897,14 @@ try {
         loadTickets(getFilters());
     });
 
-    searchInput.addEventListener('input', (e) => {
+    searchInput.addEventListener('input', () => {
         loadTickets(getFilters());
     });
 
-    // Create user button
     createUserBtn.addEventListener('click', async () => {
         await createUser();
     });
 
-    // Actuando como selector change
     actingAsSelect.addEventListener('change', (e) => {
         actingAsId = parseInt(e.target.value) || null;
         if (userMap[actingAsId]) {
@@ -898,7 +919,6 @@ try {
         loadTickets(getFilters());
     });
 
-    // Top bar navigation and buttons
     const navTickets = document.getElementById('navTickets');
     const navUsers = document.getElementById('navUsers');
     const openNewTicket = document.getElementById('openNewTicket');
@@ -989,12 +1009,10 @@ try {
             body: JSON.stringify({ name, email, role: selectedRole })
         });
 
-        // Reset form, keep usersModal open
         userNameInput.value = '';
         userEmailInput.value = '';
         userRoleSelect.value = '';
 
-        // Reload users, selector, and tickets list
         await loadUsers();
         updateActingAsDisplay();
         await loadTickets(getFilters());
@@ -1002,23 +1020,21 @@ try {
         showSuccess('Usuario creado');
     }
 
-    // Add click handler for row selection - registered once
-    ticketsBody.addEventListener('click', async (e) => {
-        const tr = e.target.closest('tr[data-ticket-id]');
-        if (tr) {
-            ticketsBody.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
-            tr.classList.add('selected');
-            const ticketId = parseInt(tr.dataset.ticketId);
-            try {
-                const ticket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
-                showTicketDetail(ticket);
-            } catch (err) {
-                showError('Error al cargar el detalle del ticket');
-            }
+    // Delegación de eventos en #ticketList (registrado una sola vez)
+    ticketList.addEventListener('click', async (e) => {
+        const item = e.target.closest('.ticket-item');
+        if (!item) return;
+        ticketList.querySelectorAll('.ticket-item').forEach(el => el.classList.remove('selected'));
+        item.classList.add('selected');
+        selectedTicketId = parseInt(item.dataset.id);
+        try {
+            const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
+            showTicketDetail(ticket);
+        } catch (err) {
+            showError('Error al cargar el detalle del ticket');
         }
     });
     
-    // Initial load - wait for categories, priorities, and users first
     Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
         updateActingAsDisplay();
         loadTickets();
