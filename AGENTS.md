@@ -35,8 +35,8 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
   /api/tickets/).
 - Roles: requester, technician, coordinator. Las reglas de permisos
   se validan en el backend y responden 403.
-- Toda petición de tickets usa actor_id: listar, ver detalle,
-  crear, modificar y comentar.
+- Todas las rutas de tickets y usuarios usan get_current_user.
+- Nunca guardar contraseñas en texto plano ni devolver password_hash en una respuesta.
 - Cada cambio de status, assigned_to, priority_id o category_id se
   registra en history. Los comentarios no van a history.
 - Las pruebas usan la base temporal de conftest.py, nunca
