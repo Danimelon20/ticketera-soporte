@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let categoryMap = {};
     let priorityMap = {};
+    let priorityLevelMap = {};
     let userMap = {};
     let userRoleMap = {};
     let actingAsId = null;
@@ -90,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
         priorityFilter.innerHTML = '<option value="">Todas</option>';
         
         priorityMap = {};
+        priorityLevelMap = {};
         
         priorities.forEach(pri => {
             const opt1 = document.createElement('option');
@@ -103,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
             priorityFilter.appendChild(opt2);
             
             priorityMap[pri.id] = pri.name;
+            priorityLevelMap[pri.id] = pri.level;
         });
     }
 
@@ -147,7 +150,10 @@ document.addEventListener('DOMContentLoaded', () => {
             tdCategory.textContent = categoryMap[ticket.category_id] || '';
             
             const tdPriority = document.createElement('td');
-            tdPriority.textContent = priorityMap[ticket.priority_id] || '';
+            const priorityBadge = document.createElement('span');
+            priorityBadge.className = `badge priority-${priorityLevelMap[ticket.priority_id] || 1}`;
+            priorityBadge.textContent = priorityMap[ticket.priority_id] || '';
+            tdPriority.appendChild(priorityBadge);
             
             const tdStatus = document.createElement('td');
             const statusBadge = document.createElement('span');
@@ -221,7 +227,11 @@ document.addEventListener('DOMContentLoaded', () => {
         detailPanel.appendChild(tdCategory);
         
         const tdPriority = document.createElement('p');
-        tdPriority.textContent = `Prioridad: ${priorityName || ''}`;
+        const priorityBadge = document.createElement('span');
+        priorityBadge.className = `badge priority-${priorityLevelMap[ticket.priority_id] || 1}`;
+        priorityBadge.textContent = priorityName || '';
+        tdPriority.textContent = 'Prioridad: ';
+        tdPriority.appendChild(priorityBadge);
         detailPanel.appendChild(tdPriority);
         
         const tdStatus = document.createElement('p');

@@ -332,3 +332,19 @@ tr:hover td {
 .status-closed {
     background-color: var(--estado-cerrado);
 }
+
+.priority-1 {
+    background-color: var(--prioridad-baja);
+}
+
+.priority-2 {
+    background-color: var(--prioridad-media);
+}
+
+.priority-3 {
+    background-color: var(--prioridad-alta);
+}
+
+.priority-4 {
+    background-color: var(--prioridad-urgente);
+}
