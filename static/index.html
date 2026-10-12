@@ -16,7 +16,7 @@
             <button type="button" id="navTickets" style="background: var(--accent-soft); color: var(--accent-dark);">Tickets</button>
             <button type="button" id="navUsers">Usuarios</button>
         </nav>
-        <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <label for="actingAs">Actuando como</label>
             <select id="actingAs" name="actingAs"></select>
             <button type="button" id="openNewTicket">+ Nuevo ticket</button>
@@ -53,8 +53,11 @@
                 <ul id="ticketList" class="ticket-list"></ul>
             </section>
             <section id="detailPanel" aria-label="Detalle del ticket">
-                <div class="detail-placeholder">
-                    <p>Selecciona un ticket para ver el detalle</p>
+                <button type="button" id="backToList">← Volver a la lista</button>
+                <div id="detailContent">
+                    <div class="detail-placeholder">
+                        <p>Selecciona un ticket para ver el detalle</p>
+                    </div>
                 </div>
             </section>
         </div>

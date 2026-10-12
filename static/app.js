@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const priorityFilter = document.getElementById('priorityFilter');
     const searchInput = document.getElementById('search');
     const ticketList = document.getElementById('ticketList');
-    const detailPanel = document.getElementById('detailPanel');
+    const detailContent = document.getElementById('detailContent');
     const errorMessage = document.getElementById('errorMessage');
     const successMessage = document.getElementById('successMessage');
     const actingAsSelect = document.getElementById('actingAs');
@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const userEmailInput = document.getElementById('userEmail');
     const toggleMoreFiltersBtn = document.getElementById('toggleMoreFilters');
     const moreFiltersBlock = document.getElementById('moreFiltersBlock');
+    const backToListBtn = document.getElementById('backToList');
 
     const STATE_MAP = {
         new: 'Nuevo',
@@ -265,17 +266,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderDetailPlaceholder() {
-        detailPanel.replaceChildren();
-        detailPanel.style.display = 'flex';
-        detailPanel.style.alignItems = 'center';
-        detailPanel.style.justifyContent = 'center';
-        detailPanel.style.padding = '24px';
+        detailContent.replaceChildren();
         const div = document.createElement('div');
         div.className = 'detail-placeholder';
         const p = document.createElement('p');
         p.textContent = 'Selecciona un ticket para ver el detalle';
         div.appendChild(p);
-        detailPanel.appendChild(div);
+        detailContent.appendChild(div);
     }
 
     async function reloadSelectedTicketAndList() {
@@ -292,10 +289,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showTicketDetail(ticket) {
-        detailPanel.replaceChildren();
-        detailPanel.style.display = 'block';
-        detailPanel.style.padding = '32px 40px';
-        detailPanel.scrollTop = 0;
+        detailContent.replaceChildren();
+        const detailPanelEl = document.getElementById('detailPanel');
+        if (detailPanelEl) detailPanelEl.scrollTop = 0;
 
         const assignedTo = ticket.assigned_to !== null ? userMap[ticket.assigned_to] || ticket.assigned_to : 'Sin asignar';
         const categoryName = categoryMap[ticket.category_id] || '';
@@ -309,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
         topMeta.style.color = 'var(--muted)';
         topMeta.style.marginBottom = '12px';
         topMeta.textContent = `#${ticket.id} · ${categoryName} · Creado por ${createdByName} · ${formatDateTime(ticket.created_at)}`;
-        detailPanel.appendChild(topMeta);
+        detailContent.appendChild(topMeta);
 
         // b. Título <h1> de 26px y debajo la descripción (max-width 64ch, line-height 1.55)
         const h1 = document.createElement('h1');
@@ -318,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         h1.style.color = 'var(--ink)';
         h1.style.margin = '0 0 12px 0';
         h1.textContent = ticket.title;
-        detailPanel.appendChild(h1);
+        detailContent.appendChild(h1);
 
         const descP = document.createElement('p');
         descP.style.maxWidth = '64ch';
@@ -326,10 +322,9 @@ document.addEventListener('DOMContentLoaded', () => {
         descP.style.color = 'var(--ink)';
         descP.style.margin = '0 0 28px 0';
         descP.textContent = ticket.description;
-        detailPanel.appendChild(descP);
+        detailContent.appendChild(descP);
 
         // c. Tres casillas en fila (grid con repeat(auto-fit, minmax(140px, 1fr))): Estado, Prioridad, Asignado a.
-        // Cada casilla con fondo blanco, borde 1px var(--line), radio var(--radius), etiqueta pequeña gris arriba y el valor debajo. Usa <dl>, <dt> y <dd>.
         const dl = document.createElement('dl');
         dl.style.display = 'grid';
         dl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
@@ -409,9 +404,9 @@ document.addEventListener('DOMContentLoaded', () => {
         boxAssigned.appendChild(ddAssigned);
         dl.appendChild(boxAssigned);
 
-        detailPanel.appendChild(dl);
+        detailContent.appendChild(dl);
 
-        // d. Acciones: las mismas reglas por rol que ya existen. Botones en fila con gap 10px y flex-wrap.
+        // d. Acciones
         const actionsSection = document.createElement('div');
         actionsSection.style.marginBottom = '28px';
         actionsSection.style.paddingTop = '20px';
@@ -562,11 +557,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        detailPanel.appendChild(actionsSection);
+        detailContent.appendChild(actionsSection);
 
-        // e. Dos columnas (grid con repeat(auto-fit, minmax(280px, 1fr)), gap 28px):
-        // a la izquierda "Comentarios" (lista + formulario, el formulario oculto si el ticket está cerrado, como ahora);
-        // a la derecha "Historial" como una lista con línea vertical a la izquierda (border-left 2px var(--line), padding-left 16px), cada entrada con fecha y autor en gris y el cambio debajo.
+        // e. Dos columnas (Comentarios e Historial)
         const twoCols = document.createElement('div');
         twoCols.style.display = 'grid';
         twoCols.style.gridTemplateColumns = 'repeat(auto-fit, minmax(280px, 1fr))';
@@ -728,7 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         twoCols.appendChild(historyCol);
-        detailPanel.appendChild(twoCols);
+        detailContent.appendChild(twoCols);
     }
 
     function updateActingAsDisplay() {
@@ -880,6 +873,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.modal').forEach(modal => modal.style.display = 'none');
         selectedTicketId = null;
         renderDetailPlaceholder();
+        document.querySelector('.split').classList.remove('show-detail');
         await loadTickets(getFilters());
     });
 
@@ -984,6 +978,13 @@ document.addEventListener('DOMContentLoaded', () => {
         showSuccess('Usuario creado');
     }
 
+    // Registrar listener de #backToList una sola vez
+    if (backToListBtn) {
+        backToListBtn.addEventListener('click', () => {
+            document.querySelector('.split').classList.remove('show-detail');
+        });
+    }
+
     // Delegación de eventos en #ticketList (registrado una sola vez)
     ticketList.addEventListener('click', async (e) => {
         const item = e.target.closest('.ticket-item');
@@ -991,6 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ticketList.querySelectorAll('.ticket-item').forEach(el => el.classList.remove('selected'));
         item.classList.add('selected');
         selectedTicketId = parseInt(item.dataset.id);
+        document.querySelector('.split').classList.add('show-detail');
         try {
             const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
             showTicketDetail(ticket);
@@ -1002,6 +1004,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Delegación de eventos en #detailPanel para acciones y comentarios (registrado una sola vez)
+    const detailPanel = document.getElementById('detailPanel');
     detailPanel.addEventListener('click', async (e) => {
         if (!selectedTicketId || !actingAsId) return;
 
