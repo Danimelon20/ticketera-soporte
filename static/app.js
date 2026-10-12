@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const priorityFilter = document.getElementById('priorityFilter');
     const searchInput = document.getElementById('search');
     const ticketList = document.getElementById('ticketList');
+    const detailPanel = document.getElementById('detailPanel');
     const errorMessage = document.getElementById('errorMessage');
     const successMessage = document.getElementById('successMessage');
     const actingAsSelect = document.getElementById('actingAs');
@@ -122,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
             li.style.color = 'var(--muted)';
             li.textContent = 'Selecciona un usuario en "Actuando como" para ver los tickets';
             ticketList.appendChild(li);
+            renderDetailPlaceholder();
             return;
         }
         
@@ -134,6 +136,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const tickets = await fetchAPI(`/tickets?${params.toString()}`);
         renderTickets(tickets);
+
+        if (selectedTicketId !== null) {
+            const exists = tickets.some(t => t.id === selectedTicketId);
+            if (!exists) {
+                selectedTicketId = null;
+                renderDetailPlaceholder();
+            } else {
+                try {
+                    const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
+                    showTicketDetail(ticket);
+                } catch (err) {
+                    selectedTicketId = null;
+                    renderDetailPlaceholder();
+                }
+            }
+        }
     }
 
     function renderTickets(tickets) {
@@ -162,7 +180,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             button.dataset.id = ticket.id;
             
-            // Línea 1: "#ID · Categoría" (izq) y fecha corta (der)
             const line1 = document.createElement('div');
             line1.style.display = 'flex';
             line1.style.justifyContent = 'space-between';
@@ -188,7 +205,6 @@ document.addEventListener('DOMContentLoaded', () => {
             line1.appendChild(leftSpan);
             line1.appendChild(rightSpan);
 
-            // Línea 2: Título (font-weight 500)
             const line2 = document.createElement('div');
             line2.style.fontWeight = '500';
             line2.style.fontSize = '15px';
@@ -197,7 +213,6 @@ document.addEventListener('DOMContentLoaded', () => {
             line2.style.textAlign = 'left';
             line2.textContent = ticket.title;
 
-            // Línea 3: Badge de estado, texto de prioridad y asignado (si tiene)
             const line3 = document.createElement('div');
             line3.style.display = 'flex';
             line3.style.alignItems = 'center';
@@ -249,73 +264,168 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function renderDetailPlaceholder() {
+        detailPanel.replaceChildren();
+        detailPanel.style.display = 'flex';
+        detailPanel.style.alignItems = 'center';
+        detailPanel.style.justifyContent = 'center';
+        detailPanel.style.padding = '24px';
+        const div = document.createElement('div');
+        div.className = 'detail-placeholder';
+        const p = document.createElement('p');
+        p.textContent = 'Selecciona un ticket para ver el detalle';
+        div.appendChild(p);
+        detailPanel.appendChild(div);
+    }
+
+    async function reloadSelectedTicketAndList() {
+        if (!selectedTicketId || !actingAsId) return;
+        try {
+            const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
+            showTicketDetail(ticket);
+            await loadTickets(getFilters());
+        } catch (err) {
+            selectedTicketId = null;
+            renderDetailPlaceholder();
+            await loadTickets(getFilters());
+        }
+    }
+
     function showTicketDetail(ticket) {
-        const detailPanel = document.createElement('div');
-        detailPanel.className = 'detail-panel';
-        
+        detailPanel.replaceChildren();
+        detailPanel.style.display = 'block';
+        detailPanel.style.padding = '32px 40px';
+        detailPanel.scrollTop = 0;
+
         const assignedTo = ticket.assigned_to !== null ? userMap[ticket.assigned_to] || ticket.assigned_to : 'Sin asignar';
         const categoryName = categoryMap[ticket.category_id] || '';
         const priorityName = priorityMap[ticket.priority_id] || '';
+        const createdByName = userMap[ticket.created_by] || '';
+
+        // a. Línea superior en var(--mono), 13px, gris: "#ID · Categoría · Creado por Nombre · fecha y hora"
+        const topMeta = document.createElement('div');
+        topMeta.style.fontFamily = 'var(--mono)';
+        topMeta.style.fontSize = '13px';
+        topMeta.style.color = 'var(--muted)';
+        topMeta.style.marginBottom = '12px';
+        topMeta.textContent = `#${ticket.id} · ${categoryName} · Creado por ${createdByName} · ${formatDateTime(ticket.created_at)}`;
+        detailPanel.appendChild(topMeta);
+
+        // b. Título <h1> de 26px y debajo la descripción (max-width 64ch, line-height 1.55)
+        const h1 = document.createElement('h1');
+        h1.style.fontSize = '26px';
+        h1.style.fontWeight = '600';
+        h1.style.color = 'var(--ink)';
+        h1.style.margin = '0 0 12px 0';
+        h1.textContent = ticket.title;
+        detailPanel.appendChild(h1);
+
+        const descP = document.createElement('p');
+        descP.style.maxWidth = '64ch';
+        descP.style.lineHeight = '1.55';
+        descP.style.color = 'var(--ink)';
+        descP.style.margin = '0 0 28px 0';
+        descP.textContent = ticket.description;
+        detailPanel.appendChild(descP);
+
+        // c. Tres casillas en fila (grid con repeat(auto-fit, minmax(140px, 1fr))): Estado, Prioridad, Asignado a.
+        // Cada casilla con fondo blanco, borde 1px var(--line), radio var(--radius), etiqueta pequeña gris arriba y el valor debajo. Usa <dl>, <dt> y <dd>.
+        const dl = document.createElement('dl');
+        dl.style.display = 'grid';
+        dl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
+        dl.style.gap = '16px';
+        dl.style.margin = '0 0 28px 0';
+
+        // Box 1: Estado
+        const boxStatus = document.createElement('div');
+        boxStatus.style.background = 'var(--surface)';
+        boxStatus.style.border = '1px solid var(--line)';
+        boxStatus.style.borderRadius = 'var(--radius)';
+        boxStatus.style.padding = '12px 16px';
         
-        const h2 = document.createElement('h2');
-        h2.textContent = `Detalle del ticket #${ticket.id}`;
-        detailPanel.appendChild(h2);
+        const dtStatus = document.createElement('dt');
+        dtStatus.style.fontSize = '12px';
+        dtStatus.style.color = 'var(--muted)';
+        dtStatus.style.marginBottom = '4px';
+        dtStatus.textContent = 'Estado';
         
-        const tdTitle = document.createElement('p');
-        tdTitle.textContent = `Título: ${ticket.title}`;
-        detailPanel.appendChild(tdTitle);
-        
-        const tdDescription = document.createElement('p');
-        tdDescription.textContent = `Descripción: ${ticket.description}`;
-        detailPanel.appendChild(tdDescription);
-        
-        const tdCategory = document.createElement('p');
-        tdCategory.textContent = `Categoría: ${categoryName || ''}`;
-        detailPanel.appendChild(tdCategory);
-        
-        const tdPriority = document.createElement('p');
-        const priorityBadge = document.createElement('span');
-        priorityBadge.className = `badge priority-${priorityLevelMap[ticket.priority_id] || 1}`;
-        priorityBadge.textContent = priorityName || '';
-        tdPriority.textContent = 'Prioridad: ';
-        tdPriority.appendChild(priorityBadge);
-        detailPanel.appendChild(tdPriority);
-        
-        const tdStatus = document.createElement('p');
+        const ddStatus = document.createElement('dd');
+        ddStatus.style.margin = '0';
+        ddStatus.style.fontWeight = '500';
         const statusBadge = document.createElement('span');
         statusBadge.className = `badge status-${ticket.status}`;
         statusBadge.textContent = STATE_MAP[ticket.status] || ticket.status;
-        tdStatus.textContent = 'Estado: ';
-        tdStatus.appendChild(statusBadge);
-        detailPanel.appendChild(tdStatus);
-        
-        const tdAssigned = document.createElement('p');
-        tdAssigned.textContent = `Asignado a: ${assignedTo}`;
-        detailPanel.appendChild(tdAssigned);
-        
-        const tdCreated = document.createElement('p');
-        tdCreated.textContent = `Creado: ${formatDateTime(ticket.created_at)}`;
-        detailPanel.appendChild(tdCreated);
-        
-        const tdCreatedBy = document.createElement('p');
-        tdCreatedBy.textContent = `Creado por: ${userMap[ticket.created_by] || ''}`;
-        detailPanel.appendChild(tdCreatedBy);
-        
-        const tdUpdated = document.createElement('p');
-        tdUpdated.textContent = `Última actualización: ${formatDateTime(ticket.updated_at)}`;
-        detailPanel.appendChild(tdUpdated);
-        
+        ddStatus.appendChild(statusBadge);
+
+        boxStatus.appendChild(dtStatus);
+        boxStatus.appendChild(ddStatus);
+        dl.appendChild(boxStatus);
+
+        // Box 2: Prioridad
+        const boxPriority = document.createElement('div');
+        boxPriority.style.background = 'var(--surface)';
+        boxPriority.style.border = '1px solid var(--line)';
+        boxPriority.style.borderRadius = 'var(--radius)';
+        boxPriority.style.padding = '12px 16px';
+
+        const dtPriority = document.createElement('dt');
+        dtPriority.style.fontSize = '12px';
+        dtPriority.style.color = 'var(--muted)';
+        dtPriority.style.marginBottom = '4px';
+        dtPriority.textContent = 'Prioridad';
+
+        const ddPriority = document.createElement('dd');
+        ddPriority.style.margin = '0';
+        ddPriority.style.fontWeight = '500';
+        const priorityBadge = document.createElement('span');
+        priorityBadge.className = `priority-${priorityLevelMap[ticket.priority_id] || 1}`;
+        priorityBadge.textContent = priorityName;
+        ddPriority.appendChild(priorityBadge);
+
+        boxPriority.appendChild(dtPriority);
+        boxPriority.appendChild(ddPriority);
+        dl.appendChild(boxPriority);
+
+        // Box 3: Asignado a
+        const boxAssigned = document.createElement('div');
+        boxAssigned.style.background = 'var(--surface)';
+        boxAssigned.style.border = '1px solid var(--line)';
+        boxAssigned.style.borderRadius = 'var(--radius)';
+        boxAssigned.style.padding = '12px 16px';
+
+        const dtAssigned = document.createElement('dt');
+        dtAssigned.style.fontSize = '12px';
+        dtAssigned.style.color = 'var(--muted)';
+        dtAssigned.style.marginBottom = '4px';
+        dtAssigned.textContent = 'Asignado a';
+
+        const ddAssigned = document.createElement('dd');
+        ddAssigned.style.margin = '0';
+        ddAssigned.style.fontWeight = '500';
+        ddAssigned.style.color = 'var(--ink)';
+        ddAssigned.textContent = assignedTo;
+
+        boxAssigned.appendChild(dtAssigned);
+        boxAssigned.appendChild(ddAssigned);
+        dl.appendChild(boxAssigned);
+
+        detailPanel.appendChild(dl);
+
+        // d. Acciones: las mismas reglas por rol que ya existen. Botones en fila con gap 10px y flex-wrap.
         const actionsSection = document.createElement('div');
-        actionsSection.className = 'actions-section';
-        
+        actionsSection.style.marginBottom = '28px';
+        actionsSection.style.paddingTop = '20px';
+        actionsSection.style.borderTop = '1px solid var(--line)';
+
         const state = ticket.status;
         const isClosed = state === 'closed';
-        
+
         if (actingAsRole === 'requester') {
             if (!isClosed) {
                 const msg = document.createElement('p');
                 msg.textContent = 'Solo el equipo de soporte puede cambiar el estado o la asignación';
                 msg.className = 'requester-msg';
+                msg.style.color = 'var(--muted)';
                 actionsSection.appendChild(msg);
             } else {
                 const closedMsg = document.createElement('p');
@@ -325,8 +435,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else if (actingAsRole === 'technician') {
             const actionDiv = document.createElement('div');
-            actionDiv.className = 'action-buttons';
-            
+            actionDiv.style.display = 'flex';
+            actionDiv.style.gap = '10px';
+            actionDiv.style.flexWrap = 'wrap';
+            actionDiv.style.alignItems = 'center';
+
             if (!isClosed) {
                 if (state === 'new') {
                     const startBtn = document.createElement('button');
@@ -352,37 +465,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 if (ticket.assigned_to === null || ticket.assigned_to === undefined) {
                     const assignMeBtn = document.createElement('button');
-                    assignMeBtn.className = 'btn-action';
+                    assignMeBtn.className = 'btn-action btn-assign-me';
                     assignMeBtn.textContent = 'Asignarme a mí';
                     actionDiv.appendChild(assignMeBtn);
-                    
-                    assignMeBtn.addEventListener('click', async () => {
-                        if (!actingAsId) {
-                            showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
-                            return;
-                        }
-                        
-                        try {
-                            await fetchAPI(`/tickets/${ticket.id}`, {
-                                method: 'PATCH',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    assigned_to: actingAsId,
-                                    actor_id: actingAsId
-                                })
-                            });
-
-                            const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
-                            showTicketDetail(updatedTicket);
-                            await loadTickets(getFilters());
-
-                            showSuccess('Ticket asignado');
-                        } catch (err) {
-                            showError(err.message || 'Error al asignar el ticket');
-                        }
-                    });
                 }
             } else {
                 const closedMsg = document.createElement('p');
@@ -390,54 +475,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 closedMsg.className = 'closed-msg';
                 actionDiv.appendChild(closedMsg);
             }
-            
-            actionDiv.querySelectorAll('.btn-action').forEach(btn => {
-                if (btn.textContent === 'Asignarme a mí') return;
-                btn.addEventListener('click', async () => {
-                    const ticketId = ticket.id;
-                    let newStatus;
-                    
-                    if (btn.textContent === 'Iniciar trabajo') {
-                        newStatus = 'in_progress';
-                    } else if (btn.textContent === 'Marcar como resuelto') {
-                        newStatus = 'resolved';
-                    } else if (btn.textContent === 'Cerrar') {
-                        newStatus = 'closed';
-                    } else if (btn.textContent === 'Reabrir') {
-                        newStatus = 'in_progress';
-                    }
-                    
-                    if (!actingAsId) {
-                        showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
-                        return;
-                    }
-                    
-                    try {
-                        await fetchAPI(`/tickets/${ticketId}`, {
-                            method: 'PATCH',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                status: newStatus,
-                                actor_id: actingAsId
-                            })
-                        });
-                        
-                        const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
-                        showTicketDetail(updatedTicket);
-                        await loadTickets(getFilters());
-                    } catch (err) {
-                        showError(err.message || 'Error al aplicar la acción');
-                    }
-                });
-            });
-            
             actionsSection.appendChild(actionDiv);
         } else if (actingAsRole === 'coordinator') {
             const assignmentDiv = document.createElement('div');
-            assignmentDiv.className = 'assignment-section';
-            
+            assignmentDiv.style.display = 'flex';
+            assignmentDiv.style.gap = '10px';
+            assignmentDiv.style.flexWrap = 'wrap';
+            assignmentDiv.style.alignItems = 'center';
+            assignmentDiv.style.marginBottom = '12px';
+
             const assignLabel = document.createElement('label');
             assignLabel.textContent = 'Asignar a:';
             assignmentDiv.appendChild(assignLabel);
@@ -465,10 +511,17 @@ document.addEventListener('DOMContentLoaded', () => {
             assignBtn.textContent = 'Asignar';
             assignmentDiv.appendChild(assignSelect);
             assignmentDiv.appendChild(assignBtn);
-            
+
+            if (!isClosed) {
+                actionsSection.appendChild(assignmentDiv);
+            }
+
             const actionDiv = document.createElement('div');
-            actionDiv.className = 'action-buttons';
-            
+            actionDiv.style.display = 'flex';
+            actionDiv.style.gap = '10px';
+            actionDiv.style.flexWrap = 'wrap';
+            actionDiv.style.alignItems = 'center';
+
             if (!isClosed) {
                 if (state === 'new') {
                     const startBtn = document.createElement('button');
@@ -497,91 +550,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 closedMsg.className = 'closed-msg';
                 actionDiv.appendChild(closedMsg);
             }
-            
-            actionDiv.querySelectorAll('.btn-action').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const ticketId = ticket.id;
-                    let newStatus;
-                    
-                    if (btn.textContent === 'Iniciar trabajo') {
-                        newStatus = 'in_progress';
-                    } else if (btn.textContent === 'Marcar como resuelto') {
-                        newStatus = 'resolved';
-                    } else if (btn.textContent === 'Cerrar') {
-                        newStatus = 'closed';
-                    } else if (btn.textContent === 'Reabrir') {
-                        newStatus = 'in_progress';
-                    }
-                    
-                    if (!actingAsId) {
-                        showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
-                        return;
-                    }
-                    
-                    try {
-                        await fetchAPI(`/tickets/${ticketId}`, {
-                            method: 'PATCH',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                status: newStatus,
-                                actor_id: actingAsId
-                            })
-                        });
-                        
-                        const updatedTicket = await fetchAPI(`/tickets/${ticketId}?actor_id=${actingAsId}`);
-                        showTicketDetail(updatedTicket);
-                        await loadTickets(getFilters());
-                    } catch (err) {
-                        showError(err.message || 'Error al aplicar la acción');
-                    }
-                });
-            });
-            
-            assignBtn.addEventListener('click', async () => {
-                const selectedUser = assignSelect.value;
-                
-                if (!selectedUser) {
-                    showError('Seleccione un usuario para asignar');
-                    return;
-                }
-                
-                if (!actingAsId) {
-                    showError('Selecciona un usuario en \'Actuando como\' antes de modificar');
-                    return;
-                }
-                
-                try {
-                    await fetchAPI(`/tickets/${ticket.id}`, {
-                        method: 'PATCH',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            assigned_to: parseInt(selectedUser),
-                            actor_id: actingAsId
-                        })
-                    });
-
-                    const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
-                    showTicketDetail(updatedTicket);
-                    await loadTickets(getFilters());
-
-                    showSuccess('Ticket asignado');
-                } catch (err) {
-                    showError(err.message || 'Error al asignar el ticket');
-                }
-            });
-            
-            if (!isClosed) {
-                actionsSection.appendChild(assignmentDiv);
-            }
             actionsSection.appendChild(actionDiv);
         } else {
             if (isClosed) {
                 const actionDiv = document.createElement('div');
-                actionDiv.className = 'action-buttons';
                 const closedMsg = document.createElement('p');
                 closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
                 closedMsg.className = 'closed-msg';
@@ -589,31 +561,124 @@ document.addEventListener('DOMContentLoaded', () => {
                 actionsSection.appendChild(actionDiv);
             }
         }
-        
+
         detailPanel.appendChild(actionsSection);
-        
-        const historySection = document.createElement('div');
+
+        // e. Dos columnas (grid con repeat(auto-fit, minmax(280px, 1fr)), gap 28px):
+        // a la izquierda "Comentarios" (lista + formulario, el formulario oculto si el ticket está cerrado, como ahora);
+        // a la derecha "Historial" como una lista con línea vertical a la izquierda (border-left 2px var(--line), padding-left 16px), cada entrada con fecha y autor en gris y el cambio debajo.
+        const twoCols = document.createElement('div');
+        twoCols.style.display = 'grid';
+        twoCols.style.gridTemplateColumns = 'repeat(auto-fit, minmax(280px, 1fr))';
+        twoCols.style.gap = '28px';
+
+        // Left col: Comentarios
+        const commentsCol = document.createElement('div');
+        const commentsH3 = document.createElement('h3');
+        commentsH3.textContent = 'Comentarios';
+        commentsH3.style.fontSize = '17px';
+        commentsH3.style.margin = '0 0 12px 0';
+        commentsCol.appendChild(commentsH3);
+
+        if (!ticket.comments || ticket.comments.length === 0) {
+            const noComments = document.createElement('p');
+            noComments.textContent = 'Sin comentarios todavía';
+            noComments.style.color = 'var(--muted)';
+            commentsCol.appendChild(noComments);
+        } else {
+            const ulComments = document.createElement('ul');
+            ulComments.style.listStyle = 'none';
+            ulComments.style.padding = '0';
+            ulComments.style.margin = '0 0 16px 0';
+            ulComments.style.display = 'flex';
+            ulComments.style.flexDirection = 'column';
+            ulComments.style.gap = '12px';
+
+            ticket.comments.forEach(comment => {
+                const li = document.createElement('li');
+                li.style.background = 'var(--surface)';
+                li.style.border = '1px solid var(--line)';
+                li.style.borderRadius = 'var(--radius)';
+                li.style.padding = '10px 14px';
+
+                const metaP = document.createElement('div');
+                metaP.style.fontSize = '12px';
+                metaP.style.color = 'var(--muted)';
+                metaP.style.marginBottom = '4px';
+                const authorName = userMap[comment.user_id] || comment.user_id;
+                metaP.textContent = `${formatDateTime(comment.created_at)} - ${authorName}`;
+
+                const contentP = document.createElement('div');
+                contentP.style.color = 'var(--ink)';
+                contentP.textContent = comment.content;
+
+                li.appendChild(metaP);
+                li.appendChild(contentP);
+                ulComments.appendChild(li);
+            });
+            commentsCol.appendChild(ulComments);
+        }
+
+        if (ticket.status === 'closed') {
+            const closedMsg = document.createElement('p');
+            closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
+            closedMsg.style.color = 'var(--muted)';
+            commentsCol.appendChild(closedMsg);
+        } else {
+            const commentForm = document.createElement('div');
+            commentForm.style.display = 'flex';
+            commentForm.style.flexDirection = 'column';
+            commentForm.style.gap = '10px';
+
+            const commentTextarea = document.createElement('textarea');
+            commentTextarea.placeholder = 'Escribe un comentario';
+            commentTextarea.rows = 3;
+            commentTextarea.className = 'comment-textarea';
+
+            const addCommentBtn = document.createElement('button');
+            addCommentBtn.textContent = 'Agregar comentario';
+            addCommentBtn.className = 'btn-action btn-add-comment';
+
+            commentForm.appendChild(commentTextarea);
+            commentForm.appendChild(addCommentBtn);
+            commentsCol.appendChild(commentForm);
+        }
+
+        twoCols.appendChild(commentsCol);
+
+        // Right col: Historial
+        const historyCol = document.createElement('div');
         const historyH3 = document.createElement('h3');
         historyH3.textContent = 'Historial';
-        historySection.appendChild(historyH3);
-        
-        const pNoChanges = document.createElement('p');
-        pNoChanges.textContent = 'Sin cambios todavía';
-        
+        historyH3.style.fontSize = '17px';
+        historyH3.style.margin = '0 0 12px 0';
+        historyCol.appendChild(historyH3);
+
+        const fieldTranslations = {
+            status: 'Estado',
+            assigned_to: 'Asignado a',
+            priority_id: 'Prioridad',
+            category_id: 'Categoría'
+        };
+
         if (!ticket.history || ticket.history.length === 0) {
-            historySection.appendChild(pNoChanges);
+            const pNoChanges = document.createElement('p');
+            pNoChanges.textContent = 'Sin cambios todavía';
+            pNoChanges.style.color = 'var(--muted)';
+            historyCol.appendChild(pNoChanges);
         } else {
-            const ul = document.createElement('ul');
-            
-            const fieldTranslations = {
-                status: 'Estado',
-                assigned_to: 'Asignado a',
-                priority_id: 'Prioridad',
-                category_id: 'Categoría'
-            };
-            
+            const ulHistory = document.createElement('ul');
+            ulHistory.style.listStyle = 'none';
+            ulHistory.style.padding = '0 0 0 16px';
+            ulHistory.style.margin = '0';
+            ulHistory.style.borderLeft = '2px solid var(--line)';
+            ulHistory.style.display = 'flex';
+            ulHistory.style.flexDirection = 'column';
+            ulHistory.style.gap = '16px';
+
             ticket.history.forEach(entry => {
                 const li = document.createElement('li');
+
                 const fieldLabel = fieldTranslations[entry.field] || entry.field;
                 
                 let oldValue = entry.old_value;
@@ -641,130 +706,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (entry.field === 'category_id') {
                     newValue = categoryMap[newValue] || newValue;
                 }
-                
+
                 const changedByName = userMap[entry.changed_by] || entry.changed_by;
-                li.textContent = `${formatDateTime(entry.changed_at)} - ${changedByName}: ${fieldLabel}: ${oldValue} → ${newValue}`;
-                ul.appendChild(li);
+
+                const metaDiv = document.createElement('div');
+                metaDiv.style.fontSize = '12px';
+                metaDiv.style.color = 'var(--muted)';
+                metaDiv.style.marginBottom = '2px';
+                metaDiv.textContent = `${formatDateTime(entry.changed_at)} - ${changedByName}`;
+
+                const changeDiv = document.createElement('div');
+                changeDiv.style.color = 'var(--ink)';
+                changeDiv.textContent = `${fieldLabel}: ${oldValue} → ${newValue}`;
+
+                li.appendChild(metaDiv);
+                li.appendChild(changeDiv);
+                ulHistory.appendChild(li);
             });
-            
-            historySection.appendChild(ul);
-        }
-        
-        detailPanel.appendChild(historySection);
-        
-        const commentsSection = document.createElement('div');
-        commentsSection.className = 'comments-section';
 
-        const commentsH3 = document.createElement('h3');
-        commentsH3.textContent = 'Comentarios';
-        commentsSection.appendChild(commentsH3);
-
-        if (!ticket.comments || ticket.comments.length === 0) {
-            const noComments = document.createElement('p');
-            noComments.textContent = 'Sin comentarios todavía';
-            commentsSection.appendChild(noComments);
-        } else {
-            const ul = document.createElement('ul');
-            ticket.comments.forEach(comment => {
-                const li = document.createElement('li');
-                const authorName = userMap[comment.user_id] || comment.user_id;
-                const commentDate = formatDateTime(comment.created_at);
-                li.textContent = `${commentDate} - ${authorName}: ${comment.content}`;
-                ul.appendChild(li);
-            });
-            commentsSection.appendChild(ul);
+            historyCol.appendChild(ulHistory);
         }
 
-        if (ticket.status === 'closed') {
-            const closedMsg = document.createElement('p');
-            closedMsg.textContent = 'No se pueden agregar comentarios a un ticket cerrado';
-            commentsSection.appendChild(closedMsg);
-        } else {
-            const commentForm = document.createElement('div');
-            const commentTextarea = document.createElement('textarea');
-            commentTextarea.placeholder = 'Escribe un comentario';
-            commentTextarea.rows = 3;
-            
-            const addCommentBtn = document.createElement('button');
-            addCommentBtn.textContent = 'Agregar comentario';
-            addCommentBtn.className = 'btn-action';
-            
-            commentForm.appendChild(commentTextarea);
-            commentForm.appendChild(addCommentBtn);
-            commentsSection.appendChild(commentForm);
-            
-            addCommentBtn.addEventListener('click', async () => {
-                const content = commentTextarea.value.trim();
-                
-                if (!actingAsId) {
-                    showError('Selecciona un usuario en \'Actuando como\' antes de comentar');
-                    return;
-                }
-                
-                if (!content) {
-                    showError('El comentario no puede estar vacío');
-                    return;
-                }
-                
-                try {
-                    await fetchAPI(`/tickets/${ticket.id}/comments`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            actor_id: actingAsId,
-                            content: content
-                        })
-                    });
-
-                    const updatedTicket = await fetchAPI(`/tickets/${ticket.id}?actor_id=${actingAsId}`);
-                    showTicketDetail(updatedTicket);
-
-                    showSuccess('Comentario agregado');
-                } catch (err) {
-                    showError(err.message || 'Error al agregar el comentario');
-                }
-            });
-        }
-        
-        detailPanel.appendChild(commentsSection);
-        
-        getModal().querySelector('.modal-body').replaceChildren(detailPanel);
-        openModal('ticketModal');
-    }
-
-    function getModal() {
-        return document.getElementById('ticketModal');
-    }
-
-    function getModalError() {
-        return document.getElementById('modalError');
-    }
-
-    function isModalOpen(id = 'ticketModal') {
-        const modal = document.getElementById(id);
-        return modal && modal.style.display === 'flex';
-    }
-
-    function openModal(id) {
-        const modal = document.getElementById(id);
-        if (modal) modal.style.display = 'flex';
-    }
-
-    function closeModal(id) {
-        const modal = document.getElementById(id);
-        if (modal) modal.style.display = 'none';
-        if (id === 'ticketModal') {
-            const modalError = document.getElementById('modalError');
-            if (modalError) modalError.style.display = 'none';
-            ticketList.querySelectorAll('.ticket-item.selected').forEach(r => r.classList.remove('selected'));
-            selectedTicketId = null;
-        }
+        twoCols.appendChild(historyCol);
+        detailPanel.appendChild(twoCols);
     }
 
     function updateActingAsDisplay() {
-        // no-op or placeholder if needed
+        // no-op
     }
 
     function showError(message) {
@@ -775,22 +743,18 @@ document.addEventListener('DOMContentLoaded', () => {
             text = String(message);
         }
         text = text.replace(/Value error, /g, '');
-        const target = isModalOpen('ticketModal') ? getModalError() : errorMessage;
-        target.textContent = text;
-        target.style.display = 'block';
+        errorMessage.textContent = text;
+        errorMessage.style.display = 'block';
         successMessage.style.display = 'none';
-        if (target === errorMessage) {
-            clearTimeout(showError.timer);
-            showError.timer = setTimeout(() => {
-                errorMessage.style.display = 'none';
-            }, 3000);
-        }
+        clearTimeout(showError.timer);
+        showError.timer = setTimeout(() => {
+            errorMessage.style.display = 'none';
+        }, 3000);
     }
 
     function hideError() {
         errorMessage.style.display = 'none';
         successMessage.style.display = 'none';
-        getModalError().style.display = 'none';
     }
 
     function showSuccess(message) {
@@ -805,11 +769,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.modal').forEach(modal => {
         const closeBtn = modal.querySelector('.modal-close-btn');
         if (closeBtn) {
-            closeBtn.addEventListener('click', () => closeModal(modal.id));
+            closeBtn.addEventListener('click', () => modal.style.display = 'none');
         }
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
-                closeModal(modal.id);
+                modal.style.display = 'none';
             }
         });
     });
@@ -818,7 +782,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') {
             document.querySelectorAll('.modal').forEach(modal => {
                 if (modal.style.display === 'flex') {
-                    closeModal(modal.id);
+                    modal.style.display = 'none';
                 }
             });
         }
@@ -857,7 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
             })
         });
 
-        closeModal('newTicketModal');
+        document.getElementById('newTicketModal').style.display = 'none';
         document.getElementById('ticketForm').reset();
         await loadTickets(getFilters());
 
@@ -905,7 +869,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await createUser();
     });
 
-    actingAsSelect.addEventListener('change', (e) => {
+    actingAsSelect.addEventListener('change', async (e) => {
         actingAsId = parseInt(e.target.value) || null;
         if (userMap[actingAsId]) {
             actingAsRole = userRoleMap[actingAsId];
@@ -913,10 +877,10 @@ document.addEventListener('DOMContentLoaded', () => {
             actingAsRole = null;
         }
         
-        updateActingAsDisplay();
-        
-        document.querySelectorAll('.modal').forEach(modal => closeModal(modal.id));
-        loadTickets(getFilters());
+        document.querySelectorAll('.modal').forEach(modal => modal.style.display = 'none');
+        selectedTicketId = null;
+        renderDetailPlaceholder();
+        await loadTickets(getFilters());
     });
 
     const navTickets = document.getElementById('navTickets');
@@ -936,7 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (navUsers) {
         navUsers.addEventListener('click', () => {
-            openModal('usersModal');
+            document.getElementById('usersModal').style.display = 'flex';
             navUsers.style.background = 'var(--accent-soft)';
             navUsers.style.color = 'var(--accent-dark)';
             if (navTickets) {
@@ -948,7 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (openNewTicket) {
         openNewTicket.addEventListener('click', () => {
-            openModal('newTicketModal');
+            document.getElementById('newTicketModal').style.display = 'flex';
         });
     }
 
@@ -1031,7 +995,93 @@ document.addEventListener('DOMContentLoaded', () => {
             const ticket = await fetchAPI(`/tickets/${selectedTicketId}?actor_id=${actingAsId}`);
             showTicketDetail(ticket);
         } catch (err) {
+            selectedTicketId = null;
+            renderDetailPlaceholder();
             showError('Error al cargar el detalle del ticket');
+        }
+    });
+
+    // Delegación de eventos en #detailPanel para acciones y comentarios (registrado una sola vez)
+    detailPanel.addEventListener('click', async (e) => {
+        if (!selectedTicketId || !actingAsId) return;
+
+        const actionBtn = e.target.closest('.btn-action');
+        if (actionBtn && !actionBtn.classList.contains('btn-add-comment')) {
+            let newStatus;
+            const text = actionBtn.textContent;
+            if (text === 'Iniciar trabajo') newStatus = 'in_progress';
+            else if (text === 'Marcar como resuelto') newStatus = 'resolved';
+            else if (text === 'Cerrar') newStatus = 'closed';
+            else if (text === 'Reabrir') newStatus = 'in_progress';
+            else return;
+
+            try {
+                await fetchAPI(`/tickets/${selectedTicketId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus, actor_id: actingAsId })
+                });
+                await reloadSelectedTicketAndList();
+            } catch (err) {
+                showError(err.message || 'Error al aplicar la acción');
+            }
+        }
+
+        const assignMeBtn = e.target.closest('.btn-assign-me');
+        if (assignMeBtn) {
+            try {
+                await fetchAPI(`/tickets/${selectedTicketId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assigned_to: actingAsId, actor_id: actingAsId })
+                });
+                await reloadSelectedTicketAndList();
+                showSuccess('Ticket asignado');
+            } catch (err) {
+                showError(err.message || 'Error al asignar el ticket');
+            }
+        }
+
+        const assignBtn = e.target.closest('.btn-assign');
+        if (assignBtn) {
+            const assignSelect = detailPanel.querySelector('.assign-select');
+            const selectedUser = assignSelect ? assignSelect.value : '';
+            if (!selectedUser) {
+                showError('Seleccione un usuario para asignar');
+                return;
+            }
+            try {
+                await fetchAPI(`/tickets/${selectedTicketId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assigned_to: parseInt(selectedUser), actor_id: actingAsId })
+                });
+                await reloadSelectedTicketAndList();
+                showSuccess('Ticket asignado');
+            } catch (err) {
+                showError(err.message || 'Error al asignar el ticket');
+            }
+        }
+
+        const addCommentBtn = e.target.closest('.btn-add-comment');
+        if (addCommentBtn) {
+            const textarea = detailPanel.querySelector('.comment-textarea');
+            const content = textarea ? textarea.value.trim() : '';
+            if (!content) {
+                showError('El comentario no puede estar vacío');
+                return;
+            }
+            try {
+                await fetchAPI(`/tickets/${selectedTicketId}/comments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ actor_id: actingAsId, content: content })
+                });
+                await reloadSelectedTicketAndList();
+                showSuccess('Comentario agregado');
+            } catch (err) {
+                showError(err.message || 'Error al agregar el comentario');
+            }
         }
     });
     

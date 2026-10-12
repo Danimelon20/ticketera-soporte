@@ -100,18 +100,22 @@ body {
 }
 
 #detailPanel {
+    background: var(--surface);
+    overflow-y: auto;
+    text-align: left;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--muted);
-    background: var(--bg);
-    padding: 24px;
-    text-align: center;
+    flex-direction: column;
+    padding: 32px 40px;
 }
 
 .detail-placeholder {
-    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
     color: var(--muted);
+    font-size: 15px;
+    margin: auto;
 }
 
 .list-filters {
@@ -432,18 +436,14 @@ section {
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    margin-right: 8px;
-    margin-bottom: 8px;
+    margin-right: 0;
+    margin-bottom: 0;
     font-size: 14px;
     font: inherit;
 }
 
 .btn-action:hover {
     background-color: var(--accent-dark);
-}
-
-.btn-action:last-child {
-    margin-right: 0;
 }
 
 .btn-assign {
@@ -454,7 +454,6 @@ section {
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    margin-left: 8px;
     font-size: 14px;
     font: inherit;
 }
@@ -463,18 +462,11 @@ section {
     background-color: var(--accent-dark);
 }
 
-.actions-section {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px solid #e2e8f0;
-}
-
 .assign-select {
     min-height: 44px;
     padding: 8px 12px;
     border: 1px solid #D5D9E0;
     border-radius: 8px;
-    margin-right: 10px;
     font: inherit;
     box-sizing: border-box;
 }
