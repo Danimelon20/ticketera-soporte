@@ -9,6 +9,7 @@ from . import models
 from .routers.users import router as users_router
 from .routers.catalogs import router as catalogs_router
 from .routers.tickets import router as tickets_router
+from .routers.auth import router as auth_router
 
 
 def init_db():
@@ -57,6 +58,7 @@ async def health():
 app.include_router(users_router)
 app.include_router(catalogs_router)
 app.include_router(tickets_router)
+app.include_router(auth_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

@@ -13,6 +13,7 @@ class User(Base):
     email = Column(String(150), unique=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     role = Column(String(20), nullable=False)
+    password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
@@ -96,3 +97,14 @@ class History(Base):
 
     ticket = relationship("Ticket", back_populates="history")
     user = relationship("User", back_populates="history")
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True)
+    token = Column(String(64), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    user = relationship("User")

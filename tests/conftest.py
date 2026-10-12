@@ -26,10 +26,17 @@ def make_user(client):
             "name": name,
             "email": f"{role}-{uuid.uuid4().hex}@test.com",
             "role": role,
+            "password": "clave-segura-123",
         }
-        response = client.post("/api/users", json=payload)
-        assert response.status_code == 200, response.text
-        return response.json()
+        response = client.post("/api/auth/register", json=payload)
+        assert response.status_code == 201, response.text
+        data = response.json()
+        user_data = data["user"]
+        token = data["token"]
+        result = dict(user_data)
+        result["token"] = token
+        result["headers"] = {"Authorization": f"Bearer {token}"}
+        return result
     return _make
 
 

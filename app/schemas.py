@@ -31,6 +31,25 @@ class UserCreate(BaseModel):
     role: Literal["requester", "technician", "coordinator"]
 
 
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    role: Literal["requester", "technician", "coordinator"]
+    password: str = Field(min_length=8)
+
+    @field_validator("name")
+    @classmethod
+    def not_empty_or_whitespace(cls, v):
+        if not v.strip():
+            raise ValueError("El nombre no puede estar vacío")
+        return v.strip()
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
 class UserRead(BaseModel):
     id: int
     name: str
@@ -38,6 +57,13 @@ class UserRead(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserRead
 
     model_config = ConfigDict(from_attributes=True)
 
