@@ -3,7 +3,7 @@ def ids(response):
 
 
 def list_as(client, actor, **filters):
-    return client.get("/api/tickets", params={"actor_id": actor["id"], **filters})
+    return client.get("/api/tickets", headers=actor["headers"], params=filters)
 
 
 def test_list_includes_created_ticket(client, make_user, make_ticket):
@@ -57,7 +57,9 @@ def test_newest_first(client, make_user, make_ticket):
 
 
 def test_list_without_actor(client):
-    assert client.get("/api/tickets").status_code == 422
+    response = client.get("/api/tickets")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Inicia sesión para continuar"
 
 
 def test_requester_sees_only_own_tickets(client, make_user, make_ticket):

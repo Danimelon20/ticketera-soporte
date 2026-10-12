@@ -4,7 +4,6 @@ from typing import Optional, Literal
 
 
 class CommentCreate(BaseModel):
-    actor_id: int
     content: str
 
     @field_validator("content")
@@ -91,11 +90,9 @@ class TicketCreate(BaseModel):
     description: str
     category_id: int
     priority_id: int
-    actor_id: int
 
 
 class TicketUpdate(BaseModel):
-    actor_id: int
     status: Optional[Literal["new", "in_progress", "resolved", "closed"]] = None
     assigned_to: Optional[int] = None
     priority_id: Optional[int] = None
