@@ -131,10 +131,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const userNameEl = document.querySelector('.topbar-user-name');
             const userRoleEl = document.querySelector('.topbar-user-role');
             const userAvatarEl = document.querySelector('.topbar-avatar');
+            const openNewTicketBtn = document.getElementById('openNewTicket');
             if (userNameEl) userNameEl.textContent = currentUser.name;
             if (userRoleEl) userRoleEl.textContent = ROLE_MAP[currentUser.role] || currentUser.role;
             if (userAvatarEl) {
                 userAvatarEl.textContent = getInitials(currentUser.name);
+            }
+            if (openNewTicketBtn) {
+                openNewTicketBtn.style.display = currentUser.role === 'technician' ? 'none' : 'block';
             }
         }
 
@@ -653,7 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
             assignmentDiv.appendChild(assignSelect);
             assignmentDiv.appendChild(assignBtn);
 
-            if (!isClosed) {
+            if (state === 'new' || state === 'in_progress' || state === 'resolved') {
                 actionsSection.appendChild(assignmentDiv);
             }
 

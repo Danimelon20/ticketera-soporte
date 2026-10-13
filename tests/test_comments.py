@@ -66,7 +66,8 @@ def test_comment_is_trimmed(client, make_user, make_ticket):
 
 def test_comment_closed_ticket_rejected(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
     close_ticket(client, ticket["id"], coord)
     assert comment(client, ticket["id"], coord, "Después de cerrar").status_code == 400
 

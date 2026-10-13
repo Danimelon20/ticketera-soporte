@@ -11,6 +11,8 @@ router = APIRouter(prefix="/api", tags=["tickets"])
 
 @router.post("/tickets", response_model=TicketRead)
 def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if current_user.role == "technician":
+        raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")
@@ -140,6 +142,14 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
         if data.status not in allowed_transitions.get(current_status, []):
             raise HTTPException(status_code=400, detail="Cambio de estado no permitido")
 
+    # Regla 2 - No se inicia sin asignar:
+    # En el PATCH, calcula assigned_final = data.assigned_to si viene en la petición, si no db_ticket.assigned_to. 
+    # Si data.status es "in_progress" y assigned_final is None, responde 400 con detail exactamente "Ticket sin asignar. Asigne para iniciar". 
+    # Esta validación va después de comprobar que la transición de estado es válida y antes de guardar cambios.
+    assigned_final = data.assigned_to if data.assigned_to is not None else db_ticket.assigned_to
+    if data.status == "in_progress" and assigned_final is None:
+        raise HTTPException(status_code=400, detail="Ticket sin asignar. Asigne para iniciar")
+
     # Validar que assigned_to, priority_id, category_id existan si se proporcionan
     if data.assigned_to is not None:
         user = db.query(models.User).filter(models.User.id == data.assigned_to).first()
@@ -154,6 +164,11 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
                 raise HTTPException(status_code=403, detail="Un técnico solo puede asignarse tickets a sí mismo")
             if db_ticket.assigned_to is not None and db_ticket.assigned_to != current_user.id:
                 raise HTTPException(status_code=403, detail="Este ticket ya está asignado a otra persona")
+        # Regla 3: Asignar en cualquier estado abierto (new, in_progress, resolved).
+        # (El coordinador debe poder asignar o reasignar el ticket a un técnico o coordinador en los estados "new", "in_progress" y "resolved" - no en "closed", que ya da error).
+        # Anteriormente ¿había alguna restricción para el coordinador que impedía asignar cuando el estado no es "new"?
+        # Revisemos el código anterior: no había restricción de estado para asignar para el coordinador, solo que si el ticket estaba cerrado daba error arriba (si db_ticket.status == "closed"). Pero por las dudas, verifiquemos si hay algo más o si ya cumple.
+
 
     if data.priority_id is not None:
         priority = db.query(models.Priority).filter(models.Priority.id == data.priority_id).first()

@@ -13,7 +13,8 @@ def history(client, ticket_id, actor):
 
 def test_valid_transition_and_assign(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
     response = patch(client, ticket["id"], coord,
                      status="in_progress", assigned_to=coord["id"])
     assert response.status_code == 200
@@ -25,21 +26,25 @@ def test_valid_transition_and_assign(client, make_user, make_ticket):
 
 def test_new_to_closed_rejected(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
     assert patch(client, ticket["id"], coord, status="closed").status_code == 400
     assert history(client, ticket["id"], coord) == []
 
 
 def test_cannot_go_back_to_new(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
-    patch(client, ticket["id"], coord, status="in_progress")
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    patch(client, ticket["id"], coord, assigned_to=coord["id"], status="in_progress")
     assert patch(client, ticket["id"], coord, status="new").status_code == 400
 
 
 def test_full_lifecycle_with_reopen(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    patch(client, ticket["id"], coord, assigned_to=coord["id"])
     steps = ["in_progress", "resolved", "in_progress", "resolved", "closed"]
     for status in steps:
         assert patch(client, ticket["id"], coord, status=status).status_code == 200
@@ -49,7 +54,9 @@ def test_full_lifecycle_with_reopen(client, make_user, make_ticket):
 
 def test_closed_ticket_cannot_change(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    patch(client, ticket["id"], coord, assigned_to=coord["id"])
     for status in ["in_progress", "resolved", "closed"]:
         patch(client, ticket["id"], coord, status=status)
     assert patch(client, ticket["id"], coord, priority_id=4).status_code == 400
@@ -57,7 +64,8 @@ def test_closed_ticket_cannot_change(client, make_user, make_ticket):
 
 def test_invalid_actor(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
     response = client.patch(f"/api/tickets/{ticket['id']}", json={"status": "in_progress"})
     assert response.status_code == 401
     assert response.json()["detail"] == "Inicia sesión para continuar"
@@ -66,13 +74,15 @@ def test_invalid_actor(client, make_user, make_ticket):
 
 def test_invalid_assigned_user(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
     assert patch(client, ticket["id"], coord, assigned_to=999999).status_code == 400
 
 
 def test_same_value_no_history(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord, priority_id=1)
+    req = make_user("requester")
+    ticket = make_ticket(req, priority_id=1)
     assert patch(client, ticket["id"], coord, priority_id=1).status_code == 200
     assert history(client, ticket["id"], coord) == []
 
@@ -113,7 +123,8 @@ def test_coordinator_assigns_technician(client, make_user, make_ticket):
     # Regla 10: el coordinador asigna a otra persona
     coord = make_user("coordinator")
     tecnico = make_user("technician")
-    ticket = make_ticket(coord)
+    req = make_user("requester")
+    ticket = make_ticket(req)
     response = patch(client, ticket["id"], coord, assigned_to=tecnico["id"])
     assert response.status_code == 200
     assert response.json()["assigned_to"] == tecnico["id"]
@@ -138,8 +149,68 @@ def test_technician_cannot_assign_other(client, make_user, make_ticket):
 def test_technician_cannot_take_assigned_ticket(client, make_user, make_ticket):
     # Regla 11: solo tickets SIN asignar
     coord = make_user("coordinator")
+    req = make_user("requester")
     tecnico_a = make_user("technician")
     tecnico_b = make_user("technician")
-    ticket = make_ticket(coord)
+    ticket = make_ticket(req)
     patch(client, ticket["id"], coord, assigned_to=tecnico_a["id"])
     assert patch(client, ticket["id"], tecnico_b, assigned_to=tecnico_b["id"]).status_code == 403
+
+
+# Pruebas adicionales requeridas por las nuevas reglas:
+# - un técnico que intenta crear un ticket recibe 403 "Los técnicos no pueden crear tickets";
+def test_technician_cannot_create_ticket(client, make_user):
+    tecnico = make_user("technician")
+    response = client.post(
+        "/api/tickets",
+        json={"title": "Ticket de técnico", "description": "Prueba", "category_id": 1, "priority_id": 1},
+        headers=tecnico["headers"]
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Los técnicos no pueden crear tickets"
+
+
+# - pasar a "in_progress" un ticket sin asignar da 400 "Ticket sin asignar. Asigne para iniciar";
+def test_in_progress_unassigned_rejected(client, make_user, make_ticket):
+    coord = make_user("coordinator")
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    response = patch(client, ticket["id"], coord, status="in_progress")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Ticket sin asignar. Asigne para iniciar"
+
+
+# - un PATCH con assigned_to y status "in_progress" juntos funciona (200);
+def test_patch_assigned_and_in_progress_together(client, make_user, make_ticket):
+    coord = make_user("coordinator")
+    tecnico = make_user("technician")
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    response = patch(client, ticket["id"], coord, status="in_progress", assigned_to=tecnico["id"])
+    assert response.status_code == 200
+    assert response.json()["status"] == "in_progress"
+    assert response.json()["assigned_to"] == tecnico["id"]
+
+
+# - un coordinador reasigna un ticket que ya está "in_progress" a otro técnico (200) y queda en el historial.
+def test_coordinator_reassigns_in_progress_ticket(client, make_user, make_ticket):
+    coord = make_user("coordinator")
+    tecnico1 = make_user("technician")
+    tecnico2 = make_user("technician")
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    # Asignar e iniciar con técnico 1
+    patch(client, ticket["id"], coord, status="in_progress", assigned_to=tecnico1["id"])
+    
+    # Reasignar a técnico 2 estando en in_progress
+    response = patch(client, ticket["id"], coord, assigned_to=tecnico2["id"])
+    assert response.status_code == 200
+    assert response.json()["assigned_to"] == tecnico2["id"]
+    assert response.json()["status"] == "in_progress"
+    
+    hist = history(client, ticket["id"], coord)
+    assigned_histories = [h for h in hist if h["field"] == "assigned_to"]
+    assert len(assigned_histories) == 2
+    assert assigned_histories[-1]["old_value"] == str(tecnico1["id"])
+    assert assigned_histories[-1]["new_value"] == str(tecnico2["id"])
+

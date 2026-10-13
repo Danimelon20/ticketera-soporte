@@ -471,6 +471,12 @@ section {
     z-index: 2000;
     max-width: 90%;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    background-color: #FDECEC;
+    border: 1px solid #E5484D;
+    color: #A3261B;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 6px;
 }
 
 .success {
