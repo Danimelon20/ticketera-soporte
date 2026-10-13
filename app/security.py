@@ -28,6 +28,18 @@ def new_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def generate_invite_code(role: str) -> str:
+    prefix = "TEC-" if role == "technician" else "COO-"
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    part1 = "".join(secrets.choice(alphabet) for _ in range(4))
+    part2 = "".join(secrets.choice(alphabet) for _ in range(4))
+    return f"{prefix}{part1}-{part2}"
+
+
+def hash_code(code: str) -> str:
+    return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+
+
 def get_current_user(
     authorization: str | None = Header(default=None),
     db: DBSession = Depends(get_db)

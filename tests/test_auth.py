@@ -1,12 +1,12 @@
 def test_create_user(client):
-    payload = {"name": "Test User", "email": "test@example.com", "role": "technician", "password": "clave-segura-123"}
+    payload = {"name": "Test User", "email": "test@example.com", "password": "clave-segura-123"}
     response = client.post("/api/auth/register", json=payload)
     assert response.status_code == 201
-    assert response.json()["user"]["role"] == "technician"
+    assert response.json()["user"]["role"] == "requester"
 
 
 def test_create_user_duplicate_email(client):
-    payload = {"name": "Dup User", "email": "dup@example.com", "role": "requester", "password": "clave-segura-123"}
+    payload = {"name": "Dup User", "email": "dup@example.com", "password": "clave-segura-123"}
     first = client.post("/api/auth/register", json=payload)
     assert first.status_code == 201
     second = client.post("/api/auth/register", json=payload)
@@ -15,7 +15,7 @@ def test_create_user_duplicate_email(client):
 
 
 def test_register_correct_returns_token_and_no_password(client):
-    payload = {"name": "Token User", "email": "token@example.com", "role": "requester", "password": "clave-segura-123"}
+    payload = {"name": "Token User", "email": "token@example.com", "password": "clave-segura-123"}
     response = client.post("/api/auth/register", json=payload)
     assert response.status_code == 201
     data = response.json()
@@ -28,26 +28,14 @@ def test_register_correct_returns_token_and_no_password(client):
 
 
 def test_register_short_password(client):
-    payload = {"name": "Short Pwd", "email": "short@example.com", "role": "requester", "password": "123"}
-    response = client.post("/api/auth/register", json=payload)
-    assert response.status_code == 422
-
-
-def test_register_without_role(client):
-    payload = {"name": "Sin Rol", "email": "sinrol@example.com", "password": "clave-segura-123"}
-    response = client.post("/api/auth/register", json=payload)
-    assert response.status_code == 422
-
-
-def test_register_invalid_role(client):
-    payload = {"name": "Rol Raro", "email": "rolraro@example.com", "role": "jefe", "password": "clave-segura-123"}
+    payload = {"name": "Short Pwd", "email": "short@example.com", "password": "123"}
     response = client.post("/api/auth/register", json=payload)
     assert response.status_code == 422
 
 
 def test_login_correct(client):
     email = "loginok@example.com"
-    payload = {"name": "Login Ok", "email": email, "role": "technician", "password": "clave-segura-123"}
+    payload = {"name": "Login Ok", "email": email, "password": "clave-segura-123"}
     client.post("/api/auth/register", json=payload)
 
     login_payload = {"email": email, "password": "clave-segura-123"}

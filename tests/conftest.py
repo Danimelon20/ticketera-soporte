@@ -71,23 +71,40 @@ def client():
 
 @pytest.fixture
 def make_user(client):
-    """Fábrica: crea un usuario con el rol indicado y un correo único."""
+    """Fábrica: crea un usuario directamente en la base de datos de prueba."""
     def _make(role="coordinator", name="Usuario de prueba"):
-        payload = {
-            "name": name,
-            "email": f"{role}-{uuid.uuid4().hex}@test.com",
-            "role": role,
-            "password": "clave-segura-123",
-        }
-        response = client.post("/api/auth/register", json=payload)
-        assert response.status_code == 201, response.text
-        data = response.json()
-        user_data = data["user"]
-        token = data["token"]
-        result = dict(user_data)
-        result["token"] = token
-        result["headers"] = {"Authorization": f"Bearer {token}"}
-        return result
+        from app.database import SessionLocal
+        from app import models
+        from app.security import hash_password, new_token
+        
+        db = SessionLocal()
+        try:
+            user = models.User(
+                name=name,
+                email=f"{role}-{uuid.uuid4().hex}@test.com",
+                role=role,
+                password_hash=hash_password("clave-segura-123")
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+            token = new_token()
+            db_session = models.Session(token=token, user_id=user.id)
+            db.add(db_session)
+            db.commit()
+
+            result = {
+                "id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "role": user.role,
+                "token": token,
+                "headers": {"Authorization": f"Bearer {token}"}
+            }
+            return result
+        finally:
+            db.close()
     return _make
 
 

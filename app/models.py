@@ -126,9 +126,20 @@ class InviteCode(Base):
     used_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     used_at = Column(DateTime, nullable=True)
 
+    creator = relationship("User", foreign_keys=[created_by])
+    used_user = relationship("User", foreign_keys=[used_by])
+
     __table_args__ = (
         CheckConstraint("role IN ('technician', 'coordinator')", name="chk_invite_role"),
     )
+
+    @property
+    def used(self) -> bool:
+        return self.used_by is not None
+
+    @property
+    def used_by_name(self) -> str | None:
+        return self.used_user.name if self.used_user else None
 
 
 class LoginChallenge(Base):

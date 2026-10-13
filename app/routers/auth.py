@@ -1,9 +1,10 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models
 from ..schemas import RegisterRequest, LoginRequest, AuthResponse, UserRead
-from ..security import hash_password, verify_password, new_token, get_current_user
+from ..security import hash_password, verify_password, new_token, get_current_user, hash_code
 
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -16,14 +17,35 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
     if existente:
         raise HTTPException(status_code=409, detail="El correo ya está registrado")
 
+    role = "requester"
+    invite = None
+
+    if user_data.invite_code and user_data.invite_code.strip():
+        c_hash = hash_code(user_data.invite_code)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        invite = db.query(models.InviteCode).filter(
+            models.InviteCode.code_hash == c_hash,
+            models.InviteCode.used_by == None,
+            models.InviteCode.expires_at > now
+        ).first()
+        if not invite:
+            raise HTTPException(status_code=400, detail="Código de invitación inválido o vencido")
+        role = invite.role
+
     pwd_hash = hash_password(user_data.password)
     db_user = models.User(
-        name=user_data.name,
+        name=user_data.name.strip(),
         email=email,
-        role=user_data.role,
+        role=role,
         password_hash=pwd_hash
     )
     db.add(db_user)
+    db.flush()
+
+    if invite:
+        invite.used_by = db_user.id
+        invite.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
     db.commit()
     db.refresh(db_user)
 

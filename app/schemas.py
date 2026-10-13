@@ -33,7 +33,7 @@ class UserCreate(BaseModel):
 class RegisterRequest(BaseModel):
     name: str
     email: str
-    role: Literal["requester", "technician", "coordinator"]
+    invite_code: Optional[str] = None
     password: str = Field(min_length=8)
 
     @field_validator("name")
@@ -42,6 +42,29 @@ class RegisterRequest(BaseModel):
         if not v.strip():
             raise ValueError("El nombre no puede estar vacío")
         return v.strip()
+
+
+class InviteCreate(BaseModel):
+    role: Literal["technician", "coordinator"]
+
+
+class InviteCreated(BaseModel):
+    code: str
+    role: str
+    expires_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InviteRead(BaseModel):
+    id: int
+    role: str
+    created_at: datetime
+    expires_at: datetime
+    used: bool
+    used_by_name: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoginRequest(BaseModel):
