@@ -37,6 +37,18 @@ def init_db():
             if not existente:
                 db.add(models.Priority(name=nombre, level=nivel, color=color))
         db.commit()
+
+        # Asegurar usuario agente virtual
+        agente = db.query(models.User).filter(models.User.role == "agent").first()
+        if not agente:
+            agente = models.User(
+                name="Agente virtual",
+                email="agente@ticketera.local",
+                role="agent",
+                password_hash="!"
+            )
+            db.add(agente)
+            db.commit()
     finally:
         db.close()
 

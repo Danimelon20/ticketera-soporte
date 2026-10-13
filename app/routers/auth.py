@@ -39,7 +39,7 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     email = credentials.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
-    if not user or not verify_password(credentials.password, user.password_hash):
+    if not user or not verify_password(credentials.password, user.password_hash) or user.role == "agent" or not user.is_active:
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
     token = new_token()

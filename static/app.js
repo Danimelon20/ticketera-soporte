@@ -36,7 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const ROLE_MAP = {
         requester: 'Solicitante',
         technician: 'Técnico',
-        coordinator: 'Coordinador'
+        coordinator: 'Coordinador',
+        agent: 'Agente virtual',
+        admin: 'Administrador'
     };
 
     let categoryMap = {};

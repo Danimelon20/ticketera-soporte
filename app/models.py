@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -11,13 +11,15 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     email = Column(String(150), unique=True, nullable=False)
+    phone = Column(String(20), nullable=True)
+    id_number = Column(String(20), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     role = Column(String(20), nullable=False)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
-        CheckConstraint("role IN ('requester', 'technician', 'coordinator')", name="chk_users_role"),
+        CheckConstraint("role IN ('requester', 'technician', 'coordinator', 'agent', 'admin')", name="chk_users_role"),
     )
 
     tickets = relationship("Ticket", back_populates="assigned_user", foreign_keys="Ticket.assigned_to")
@@ -57,11 +59,15 @@ class Ticket(Base):
     status = Column(String(20), nullable=False, default="new")
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    contact_phone = Column(String(20), nullable=True)
+    contact_id_number = Column(String(20), nullable=True)
+    source = Column(String(10), nullable=False, default="web")
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         CheckConstraint("status IN ('new', 'in_progress', 'resolved', 'closed')", name="chk_tickets_status"),
+        CheckConstraint("source IN ('web', 'email')", name="chk_tickets_source"),
     )
 
     category = relationship("Category", back_populates="tickets")
@@ -108,3 +114,52 @@ class Session(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     user = relationship("User")
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), unique=True, nullable=False)
+    role = Column(String(20), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    used_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('technician', 'coordinator')", name="chk_invite_role"),
+    )
+
+
+class LoginChallenge(Base):
+    __tablename__ = "login_challenges"
+
+    id = Column(String(36), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    used = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class ProcessedEmail(Base):
+    __tablename__ = "processed_emails"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String(512), unique=True, index=True, nullable=False)
+    result = Column(String(40), nullable=False)
+    processed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class TicketFollower(Base):
+    __tablename__ = "ticket_followers"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "user_id", name="uq_follower"),
+    )
