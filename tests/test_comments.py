@@ -11,6 +11,11 @@ def detail(client, ticket_id, actor):
 
 
 def close_ticket(client, ticket_id, actor):
+    client.patch(
+        f"/api/tickets/{ticket_id}",
+        json={"assigned_to": actor["id"]},
+        headers=actor["headers"],
+    )
     for status in ["in_progress", "resolved", "closed"]:
         client.patch(
             f"/api/tickets/{ticket_id}",

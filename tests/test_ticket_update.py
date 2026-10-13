@@ -48,7 +48,7 @@ def test_full_lifecycle_with_reopen(client, make_user, make_ticket):
     steps = ["in_progress", "resolved", "in_progress", "resolved", "closed"]
     for status in steps:
         assert patch(client, ticket["id"], coord, status=status).status_code == 200
-    statuses = [h["new_value"] for h in history(client, ticket["id"], coord)]
+    statuses = [h["new_value"] for h in history(client, ticket["id"], coord) if h["field"] == "status"]
     assert statuses == steps
 
 
@@ -107,6 +107,7 @@ def test_technician_can_change_status_and_priority(client, make_user, make_ticke
     tecnico = make_user("technician")
     solicitante = make_user("requester")
     ticket = make_ticket(solicitante)
+    assert patch(client, ticket["id"], tecnico, assigned_to=tecnico["id"]).status_code == 200
     assert patch(client, ticket["id"], tecnico, status="in_progress").status_code == 200
     assert patch(client, ticket["id"], tecnico, priority_id=4).status_code == 200
 
