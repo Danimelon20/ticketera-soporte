@@ -1,12 +1,18 @@
 import json
+import logging
 import urllib.error
 import urllib.request
+
+from . import config
 
 HACIENDA_URL = "https://api.hacienda.go.cr/fe/ae?identificacion={}"
 TIMEOUT_SECONDS = 5
 
 # Caché en memoria: cédula -> {"tipo": ...} o None. Nunca se guarda el nombre.
 _cache: dict[str, dict | None] = {}
+
+
+logger = logging.getLogger(__name__)
 
 
 class HaciendaUnavailable(Exception):
@@ -39,3 +45,28 @@ def lookup_id(id_number: str) -> dict | None:
     result = {"tipo": data.get("tipoIdentificacion")}
     _cache[id_number] = result
     return result
+
+
+def check_id_number(id_number: str) -> str | None:
+    """Verifica en Hacienda que la cédula (ya normalizada) sea física o DIMEX.
+
+    Devuelve el mensaje de error, o None si se acepta.
+    """
+    if not config.hacienda_check_enabled():
+        return None
+
+    try:
+        result = lookup_id(id_number)
+    except HaciendaUnavailable:
+        logger.warning("Hacienda no disponible; se acepta la cédula sin verificar")
+        return None
+
+    if result is None:
+        if config.hacienda_strict():
+            return "La cédula no está registrada en Hacienda"
+        return None
+
+    expected = "01" if len(id_number) == 9 else "03"
+    if result.get("tipo") != expected:
+        return "La cédula no corresponde a una persona física o DIMEX"
+    return None

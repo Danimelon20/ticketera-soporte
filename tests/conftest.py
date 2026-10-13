@@ -5,6 +5,8 @@ import uuid
 # Debe ir ANTES de importar la app: database.py lee esta variable al cargarse
 _tmp_dir = tempfile.mkdtemp()
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp_dir}/test.db"
+os.environ["EMAIL_ENABLED"] = "false"
+os.environ["MS_TOKEN_CACHE"] = f"{_tmp_dir}/ms_token_cache.json"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -135,3 +137,6 @@ def fake_hacienda(monkeypatch):
         return {"tipo": "01"} if len(id_number) == 9 else {"tipo": "03"}
 
     monkeypatch.setattr(hacienda, "lookup_id", _fake_lookup)
+    # Que un .env real (cargado por docker compose) no cambie el resultado de las pruebas
+    monkeypatch.setenv("HACIENDA_CHECK", "true")
+    monkeypatch.delenv("HACIENDA_STRICT", raising=False)
