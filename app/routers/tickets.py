@@ -1,3 +1,6 @@
+import logging
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Literal, Optional
@@ -6,8 +9,32 @@ from .. import models
 from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead
 from ..security import get_current_user
 from ..validators import mask_id_number
+from .. import hacienda
 
 router = APIRouter(prefix="/api", tags=["tickets"])
+logger = logging.getLogger(__name__)
+
+
+def verify_id_number(id_number: str) -> None:
+    """Verifica en Hacienda que la cédula (ya normalizada) sea física o DIMEX."""
+    if os.getenv("HACIENDA_CHECK", "true").lower() == "false":
+        return
+    strict = os.getenv("HACIENDA_STRICT", "false").lower() == "true"
+
+    try:
+        result = hacienda.lookup_id(id_number)
+    except hacienda.HaciendaUnavailable:
+        logger.warning("Hacienda no disponible; se acepta la cédula sin verificar")
+        return
+
+    if result is None:
+        if strict:
+            raise HTTPException(status_code=400, detail="La cédula no está registrada en Hacienda")
+        return
+
+    expected = "01" if len(id_number) == 9 else "03"
+    if result.get("tipo") != expected:
+        raise HTTPException(status_code=400, detail="La cédula no corresponde a una persona física o DIMEX")
 
 
 @router.post("/tickets", response_model=TicketRead)
@@ -31,6 +58,8 @@ def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db), current_u
     prioridad = db.query(models.Priority).filter(models.Priority.id == ticket.priority_id).first()
     if not prioridad:
         raise HTTPException(status_code=400, detail="La prioridad no existe")
+
+    verify_id_number(ticket.contact_id_number)
     
     db_ticket = models.Ticket(
         title=ticket.title,

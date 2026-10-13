@@ -1,5 +1,5 @@
 def normalize_phone(value: str) -> str:
-    digits = "".join(c for c in value if c.isdigit())
+    digits = "".join(c for c in value if c in "0123456789")
     if digits.startswith("506") and len(digits) == 11:
         digits = digits[3:]
     if len(digits) != 8:
@@ -8,7 +8,7 @@ def normalize_phone(value: str) -> str:
 
 
 def normalize_id_number(value: str) -> str:
-    digits = "".join(c for c in value if c.isdigit())
+    digits = "".join(c for c in value if c in "0123456789")
     if len(digits) not in (9, 11, 12):
         raise ValueError("La cédula debe tener 9 dígitos, o 11 o 12 si es DIMEX")
     return digits

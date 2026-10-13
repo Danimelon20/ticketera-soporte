@@ -124,3 +124,14 @@ def make_ticket(client):
         assert response.status_code == 200, response.text
         return response.json()
     return _make
+
+
+@pytest.fixture(autouse=True)
+def fake_hacienda(monkeypatch):
+    """Reemplaza la consulta a Hacienda: las pruebas nunca llaman a internet."""
+    from app import hacienda
+
+    def _fake_lookup(id_number):
+        return {"tipo": "01"} if len(id_number) == 9 else {"tipo": "03"}
+
+    monkeypatch.setattr(hacienda, "lookup_id", _fake_lookup)

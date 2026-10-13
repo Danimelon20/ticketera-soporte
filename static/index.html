@@ -157,8 +157,31 @@
             <div class="modal-body">
                 <form id="ticketForm">
                     <div class="form-group" style="margin-bottom: 15px;">
-                        <label for="title">Título</label>
-                        <input type="text" id="title" name="title" required>
+                        <h3 style="margin-top: 0; margin-bottom: 8px; font-size: 14px; color: var(--muted);">Datos de contacto</h3>
+                        <div class="form-row" style="margin-bottom: 15px;">
+                            <div class="form-group">
+                                <label for="contactName">Nombre</label>
+                                <input type="text" id="contactName" name="contactName" autocomplete="name" readonly style="background: #F6F7F9;">
+                            </div>
+                            <div class="form-group">
+                                <label for="contactEmail">Correo</label>
+                                <input type="email" id="contactEmail" name="contactEmail" autocomplete="email" readonly style="background: #F6F7F9;">
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-bottom: 15px;">
+                            <div class="form-group">
+                                <label for="contactPhone">Teléfono</label>
+                                <input type="tel" id="contactPhone" name="contactPhone" autocomplete="tel" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="contactIdNumber">Cédula</label>
+                                <input type="text" id="contactIdNumber" name="contactIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label for="title">Título</label>
+                            <input type="text" id="title" name="title" required>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-bottom: 15px;">
                         <label for="description">Descripción</label>

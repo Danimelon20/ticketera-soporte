@@ -63,6 +63,33 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function getErrorMessage(data) {
+        const detail = data && data.detail;
+        if (typeof detail === 'string' && detail) {
+            return detail;
+        }
+        if (Array.isArray(detail) && detail.length > 0 && detail[0] && typeof detail[0].msg === 'string') {
+            return detail[0].msg.replace(/^Value error, /, '');
+        }
+        return 'No se pudo completar la acción';
+    }
+
+    // Mismas reglas que app/validators.py (solo comodidad: el servidor también valida)
+    function validatePhone(value) {
+        let digits = value.replace(/[^0-9]/g, '');
+        if (digits.length === 11 && digits.startsWith('506')) {
+            digits = digits.slice(3);
+        }
+        return digits.length === 8 ? null : 'El teléfono debe tener 8 dígitos';
+    }
+
+    function validateIdNumber(value) {
+        const digits = value.replace(/[^0-9]/g, '');
+        return [9, 11, 12].includes(digits.length)
+            ? null
+            : 'La cédula debe tener 9 dígitos, o 11 o 12 si es DIMEX';
+    }
+
     async function apiFetch(endpoint, options = {}) {
         hideError();
         const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
@@ -91,8 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             let message = errorData.detail;
-            if (response.status === 422) {
+            if (response.status === 422 && endpoint.startsWith('/auth/')) {
                 message = 'La contraseña debe tener al menos 8 caracteres';
+            } else if (endpoint === '/tickets' && options.method === 'POST') {
+                message = getErrorMessage(errorData);
             } else if (response.status === 401 && endpoint.includes('/auth/login')) {
                 message = errorData.detail || 'Correo o contraseña incorrectos';
             } else if (response.status === 409) {
@@ -529,7 +558,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const fieldsData = [
             { title: 'Estado', content: statusBadge },
             { title: 'Prioridad', content: priorityBadge },
-            { title: 'Asignado a', text: assignedTo }
+            { title: 'Asignado a', text: assignedTo },
+            { title: 'Teléfono', text: ticket.contact_phone || '' },
+            { title: 'Cédula', text: ticket.contact_id_number || '' }
         ];
 
         fieldsData.forEach((fData, i) => {
@@ -1131,6 +1162,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            const contactPhone = document.getElementById('contactPhone').value.trim();
+            const contactIdNumber = document.getElementById('contactIdNumber').value.trim();
+
+            const contactError = validatePhone(contactPhone) || validateIdNumber(contactIdNumber);
+            if (contactError) {
+                showError(contactError);
+                return;
+            }
+
             await apiFetch('/tickets', {
                 method: 'POST',
                 headers: {
@@ -1140,7 +1180,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     title,
                     description,
                     category_id: parseInt(categoryId),
-                    priority_id: parseInt(priorityId)
+                    priority_id: parseInt(priorityId),
+                    contact_phone: contactPhone,
+                    contact_id_number: contactIdNumber
                 })
             });
 
@@ -1215,8 +1257,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (openNewTicket) {
-        openNewTicket.addEventListener('click', () => {
+        openNewTicket.addEventListener('click', async () => {
             document.getElementById('newTicketModal').style.display = 'flex';
+            if (currentUser) {
+                document.getElementById('contactName').value = currentUser.name;
+                document.getElementById('contactEmail').value = currentUser.email;
+                if (currentUser.phone) {
+                    document.getElementById('contactPhone').value = currentUser.phone;
+                }
+                if (currentUser.id_number) {
+                    document.getElementById('contactIdNumber').value = currentUser.id_number;
+                }
+            }
         });
     }
 

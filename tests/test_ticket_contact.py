@@ -216,3 +216,103 @@ def test_get_requesters_technician_forbidden(client, make_user):
     response = client.get("/api/requesters?q=dan", headers=technician["headers"])
     assert response.status_code == 403
     assert response.json()["detail"] == "No tienes permiso para ver esta información"
+
+def _contact_payload(phone="8888-1234", id_number="1-0234-0567"):
+    return {
+        "title": "Ticket de contacto",
+        "description": "Validación de contacto",
+        "category_id": 1,
+        "priority_id": 1,
+        "contact_phone": phone,
+        "contact_id_number": id_number,
+    }
+
+
+def test_phone_nine_digits_invalid(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(phone="888812345"), headers=user["headers"])
+    assert response.status_code == 422
+
+
+def test_phone_with_prefix_and_extra_digit_invalid(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(phone="+506 8888 12345"), headers=user["headers"])
+    assert response.status_code == 422
+
+
+def test_phone_error_message_is_about_phone(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(phone="888812345"), headers=user["headers"])
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert isinstance(detail, list)
+    assert "El teléfono debe tener 8 dígitos" in detail[0]["msg"]
+    assert "contraseña" not in response.text
+
+
+def test_id_number_ten_digits_invalid(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(id_number="1023405670"), headers=user["headers"])
+    assert response.status_code == 422
+
+
+def test_id_number_thirteen_digits_invalid(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(id_number="1234567890123"), headers=user["headers"])
+    assert response.status_code == 422
+
+
+def test_id_number_dimex_twelve_digits_valid(client, make_user, monkeypatch):
+    from app import hacienda
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "03"})
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(id_number="123456789012"), headers=user["headers"])
+    assert response.status_code == 200, response.text
+
+
+def test_id_number_legal_entity_rejected(client, make_user, monkeypatch):
+    from app import hacienda
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "02"})
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(id_number="310123456"), headers=user["headers"])
+    assert response.status_code == 400
+    assert response.json()["detail"] == "La cédula no corresponde a una persona física o DIMEX"
+
+
+def test_id_number_not_found_accepted_when_not_strict(client, make_user, monkeypatch):
+    from app import hacienda
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: None)
+    monkeypatch.setenv("HACIENDA_STRICT", "false")
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(), headers=user["headers"])
+    assert response.status_code == 200, response.text
+
+
+def test_id_number_not_found_rejected_when_strict(client, make_user, monkeypatch):
+    from app import hacienda
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: None)
+    monkeypatch.setenv("HACIENDA_STRICT", "true")
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(), headers=user["headers"])
+    assert response.status_code == 400
+    assert response.json()["detail"] == "La cédula no está registrada en Hacienda"
+
+
+def test_id_number_accepted_when_hacienda_unavailable(client, make_user, monkeypatch):
+    from app import hacienda
+
+    def _unavailable(id_number):
+        raise hacienda.HaciendaUnavailable("caído")
+
+    monkeypatch.setattr(hacienda, "lookup_id", _unavailable)
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(), headers=user["headers"])
+    assert response.status_code == 200, response.text
+
+
+def test_non_ascii_digits_not_counted(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_contact_payload(phone="8888123²"), headers=user["headers"])
+    assert response.status_code == 422
+    response = client.post("/api/tickets", json=_contact_payload(id_number="10234056٣"), headers=user["headers"])
+    assert response.status_code == 422
