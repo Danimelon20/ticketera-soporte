@@ -147,6 +147,8 @@ document.addEventListener('DOMContentLoaded', () => {
         Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
             loadTickets(getFilters());
         });
+
+        renderInvitesSection();
     }
 
     function showAuthScreen() {
@@ -223,19 +225,19 @@ document.addEventListener('DOMContentLoaded', () => {
             hideError();
             const name = document.getElementById('regName').value.trim();
             const email = document.getElementById('regEmail').value.trim();
-            const role = document.getElementById('regRole').value;
             const password = document.getElementById('regPassword').value;
-
-            if (!role) {
-                showError('Selecciona un rol');
-                return;
-            }
+            const inviteCodeInput = document.getElementById('regInviteCode');
+            const inviteCode = inviteCodeInput.value.trim().toUpperCase().replace(/\s+/g, '');
 
             try {
+                const body = { name, email, password };
+                if (inviteCode) {
+                    body.invite_code = inviteCode;
+                }
                 const data = await apiFetch('/auth/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, email, role, password })
+                    body: JSON.stringify(body)
                 });
                 sessionStorage.setItem('ticketeraToken', data.token);
                 authToken = data.token;
@@ -1208,6 +1210,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (navTickets) {
                 navTickets.classList.remove('active');
             }
+            renderInvitesSection();
         });
     }
 
@@ -1387,6 +1390,202 @@ document.addEventListener('DOMContentLoaded', () => {
             authToken = null;
             currentUser = null;
             showAuthScreen();
+        }
+    }
+
+    function renderInvitesSection() {
+        if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) {
+            const section = document.getElementById('invitesSection');
+            if (section) section.style.display = 'none';
+            return;
+        }
+
+        let section = document.getElementById('invitesSection');
+        const modalBody = document.querySelector('#usersModal .modal-body');
+        if (!modalBody) return;
+
+        if (section) {
+            section.remove();
+        }
+        section = document.createElement('div');
+        section.id = 'invitesSection';
+        section.style.marginTop = '12px';
+        section.style.padding = '12px';
+        section.style.background = '#FFF8F0';
+        section.style.borderRadius = '8px';
+        section.style.border = '1px solid #8A4B00';
+        section.style.display = 'block';
+
+        const isAdmin = currentUser.role === 'admin';
+        let buttonsHtml = `<button id="generateTechnicianCodeBtn" class="btn-action">Generar código de técnico</button>`;
+            if (isAdmin) {
+                buttonsHtml += `<button id="generateCoordinatorCodeBtn" class="btn-action" style="margin-left: 8px;">Generar código de coordinador</button>`;
+            }
+            section.innerHTML += `<div style="margin-bottom: 12px;">${buttonsHtml}</div>`;
+
+            section.innerHTML += `<div id="codeDisplay" style="margin: 12px 0; padding: 12px; background: var(--bg); font-family: var(--mono); font-size: 20px; min-height: 44px; border: 1px solid var(--line); border-radius: 4px; display: none;">
+                <span id="codeText">---</span>
+            </div>`;
+
+            section.innerHTML += `<button id="copyCodeBtn" class="btn-action" style="display: none;">Copiar</button>`;
+
+            section.innerHTML += `<div id="codeWarning" style="margin-top: 8px; color: #8A4B00; font-size: 12px; display: none;">
+                Guárdalo ahora: no se volverá a mostrar. Vence en 7 días y sirve una sola vez.
+            </div>`;
+
+            const isAdmin2 = currentUser.role === 'admin';
+            section.innerHTML += `<div style="margin-top: 12px; font-size: 14px;">
+                <strong>Códigos de invitación</strong>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
+                    <thead>
+                        <tr style="background: #F0F2F5;">
+                            <th style="padding: 8px; text-align: left;">Rol</th>
+                            <th style="padding: 8px; text-align: left;">Creado</th>
+                            <th style="padding: 8px; text-align: left;">Vence</th>
+                            <th style="padding: 8px; text-align: left;">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invitesTableBody"></tbody>
+                </table>
+            </div>`;
+
+            modalBody.prepend(section);
+
+            // Add event listeners
+            document.getElementById('generateTechnicianCodeBtn').addEventListener('click', async () => {
+                try {
+                    const data = await apiFetch('/invites', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ role: 'technician' })
+                    });
+                    const codeText = document.getElementById('codeText');
+                    const codeDisplay = document.getElementById('codeDisplay');
+                    const copyBtn = document.getElementById('copyCodeBtn');
+                    const codeWarning = document.getElementById('codeWarning');
+
+                    codeText.textContent = data.code;
+                    codeDisplay.style.display = 'block';
+                    copyBtn.style.display = 'inline-block';
+                    codeWarning.style.display = 'block';
+
+                    loadInvitesTable();
+
+                    // Set up copy button
+                    copyBtn.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(data.code);
+                            copyBtn.textContent = 'Copiado';
+                            copyBtn.style.color = 'var(--exito)';
+                            setTimeout(() => {
+                                copyBtn.textContent = 'Copiar';
+                                copyBtn.style.color = '';
+                            }, 2000);
+                        } catch (err) {
+                            showError('No se pudo copiar al portapapeles');
+                        }
+                    };
+                } catch (err) {
+                    showError(err.message || 'Error al generar código');
+                }
+            });
+
+            if (isAdmin2) {
+                document.getElementById('generateCoordinatorCodeBtn').addEventListener('click', async () => {
+                    try {
+                        const data = await apiFetch('/invites', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ role: 'coordinator' })
+                        });
+                        const codeText = document.getElementById('codeText');
+                        const codeDisplay = document.getElementById('codeDisplay');
+                        const copyBtn = document.getElementById('copyCodeBtn');
+                        const codeWarning = document.getElementById('codeWarning');
+
+codeText.textContent = data.code;
+                    codeDisplay.style.display = 'block';
+                    copyBtn.style.display = 'inline-block';
+                    codeWarning.style.display = 'block';
+
+                    loadInvitesTable();
+
+                    // Set up copy button
+                        copyBtn.onclick = async () => {
+                            try {
+                                await navigator.clipboard.writeText(data.code);
+                                copyBtn.textContent = 'Copiado';
+                                copyBtn.style.color = 'var(--exito)';
+                                setTimeout(() => {
+                                    copyBtn.textContent = 'Copiar';
+                                    copyBtn.style.color = '';
+                                }, 2000);
+                            } catch (err) {
+                                showError('No se pudo copiar al portapapeles');
+                            }
+                        };
+                    } catch (err) {
+                        showError(err.message || 'Error al generar código');
+                    }
+                });
+            }
+
+        // Load invites table
+        loadInvitesTable();
+    }
+
+async function loadInvitesTable() {
+        if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) return;
+
+        try {
+            const invites = await apiFetch('/invites');
+            const tableBody = document.getElementById('invitesTableBody');
+            if (!tableBody) return;
+
+            tableBody.innerHTML = '';
+
+            invites.forEach(invite => {
+                const roleLabel = { technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador' }[invite.role] || invite.role;
+
+                let statusText;
+                if (invite.used) {
+                    statusText = `Usado por ${invite.used_by_name}`;
+                } else if (new Date(invite.expires_at + 'Z') < new Date()) {
+                    statusText = 'Vencido';
+                } else {
+                    statusText = 'Disponible';
+                }
+
+                const row = document.createElement('tr');
+
+                const td1 = document.createElement('td');
+                td1.style.padding = '8px';
+                td1.style.textAlign = 'left';
+                td1.textContent = roleLabel;
+                row.appendChild(td1);
+
+                const td2 = document.createElement('td');
+                td2.style.padding = '8px';
+                td2.style.textAlign = 'left';
+                td2.textContent = formatDate(invite.created_at);
+                row.appendChild(td2);
+
+                const td3 = document.createElement('td');
+                td3.style.padding = '8px';
+                td3.style.textAlign = 'left';
+                td3.textContent = invite.expires_at ? formatDate(invite.expires_at) : '—';
+                row.appendChild(td3);
+
+                const td4 = document.createElement('td');
+                td4.style.padding = '8px';
+                td4.style.textAlign = 'left';
+                td4.textContent = statusText;
+                row.appendChild(td4);
+
+                tableBody.appendChild(row);
+            });
+        } catch (err) {
+            showError(err.message || 'Error al cargar códigos');
         }
     }
 
