@@ -246,6 +246,28 @@ section {
     margin-bottom: 0;
 }
 
+.requester-group {
+    margin-bottom: 15px;
+}
+
+.requester-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.requester-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.btn-small {
+    min-height: 36px;
+    padding: 4px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 6px;

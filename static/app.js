@@ -51,6 +51,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let activityFilter = 'all';
     let currentTicket = null;
 
+    let selectedRequesterId = null;
+    let requesterResults = [];
+    let requesterSearchTimer = null;
+    let requesterSearchSeq = 0;
+
     let authToken = sessionStorage.getItem('ticketeraToken');
     let currentUser = null;
 
@@ -1115,6 +1120,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (modal.id === 'usersModal') {
                     closeUsersModal();
                 }
+                if (modal.id === 'newTicketModal') {
+                    resetRequesterField();
+                }
             });
         }
         modal.addEventListener('click', (e) => {
@@ -1122,6 +1130,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 modal.style.display = 'none';
                 if (modal.id === 'usersModal') {
                     closeUsersModal();
+                }
+                if (modal.id === 'newTicketModal') {
+                    resetRequesterField();
                 }
             }
         });
@@ -1134,6 +1145,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     modal.style.display = 'none';
                     if (modal.id === 'usersModal') {
                         closeUsersModal();
+                    }
+                    if (modal.id === 'newTicketModal') {
+                        resetRequesterField();
                     }
                 }
             });
@@ -1182,12 +1196,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     category_id: parseInt(categoryId),
                     priority_id: parseInt(priorityId),
                     contact_phone: contactPhone,
-                    contact_id_number: contactIdNumber
+                    contact_id_number: contactIdNumber,
+                    ...(selectedRequesterId !== null ? { requester_id: selectedRequesterId } : {})
                 })
             });
 
             document.getElementById('newTicketModal').style.display = 'none';
             ticketForm.reset();
+            resetRequesterField();
             await loadTickets(getFilters());
 
             showSuccess('Ticket creado');
@@ -1256,9 +1272,97 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Solicitante (solo coordinator y admin): crear tickets a nombre de otra persona
+    const requesterGroup = document.getElementById('requesterGroup');
+    const requesterSearch = document.getElementById('requesterSearch');
+    const requesterOptions = document.getElementById('requesterOptions');
+    const forMeBtn = document.getElementById('forMeBtn');
+
+    function requesterLabel(r) {
+        return `${r.name} — ${r.email}`;
+    }
+
+    function fillContactFields(person) {
+        document.getElementById('contactName').value = person.name || '';
+        document.getElementById('contactEmail').value = person.email || '';
+        document.getElementById('contactPhone').value = person.phone || '';
+        document.getElementById('contactIdNumber').value = person.id_number || '';
+    }
+
+    function clearRequesterSelection() {
+        const hadRequester = selectedRequesterId !== null;
+        selectedRequesterId = null;
+        if (hadRequester && currentUser) {
+            fillContactFields(currentUser);
+        }
+    }
+
+    function resetRequesterField() {
+        clearTimeout(requesterSearchTimer);
+        requesterSearchSeq++;
+        requesterResults = [];
+        if (requesterSearch) requesterSearch.value = '';
+        if (requesterOptions) requesterOptions.replaceChildren();
+        clearRequesterSelection();
+    }
+
+    async function searchRequesters(q) {
+        const seq = ++requesterSearchSeq;
+        let results;
+        try {
+            results = await apiFetch(`/requesters?q=${encodeURIComponent(q)}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        if (seq !== requesterSearchSeq) return; // llegó una búsqueda más nueva
+        requesterResults = results;
+        requesterOptions.replaceChildren();
+        results.forEach(r => {
+            const option = document.createElement('option');
+            option.value = requesterLabel(r);
+            requesterOptions.appendChild(option);
+        });
+    }
+
+    if (requesterSearch) {
+        requesterSearch.addEventListener('input', () => {
+            const text = requesterSearch.value;
+            const match = requesterResults.find(r => requesterLabel(r) === text);
+            if (match) {
+                clearTimeout(requesterSearchTimer);
+                selectedRequesterId = match.id;
+                fillContactFields(match);
+                return;
+            }
+            // El texto no coincide con ninguna opción: no se manda requester_id
+            clearRequesterSelection();
+            clearTimeout(requesterSearchTimer);
+            const q = text.trim();
+            if (q.length < 2) {
+                requesterSearchSeq++;
+                requesterResults = [];
+                requesterOptions.replaceChildren();
+                return;
+            }
+            requesterSearchTimer = setTimeout(() => searchRequesters(q), 300);
+        });
+    }
+
+    if (forMeBtn) {
+        forMeBtn.addEventListener('click', () => {
+            resetRequesterField();
+            if (currentUser) {
+                fillContactFields(currentUser);
+            }
+        });
+    }
+
     if (openNewTicket) {
         openNewTicket.addEventListener('click', async () => {
             document.getElementById('newTicketModal').style.display = 'flex';
+            resetRequesterField();
+            const canChooseRequester = currentUser && ['coordinator', 'admin'].includes(currentUser.role);
+            requesterGroup.style.display = canChooseRequester ? 'block' : 'none';
             if (currentUser) {
                 document.getElementById('contactName').value = currentUser.name;
                 document.getElementById('contactEmail').value = currentUser.email;

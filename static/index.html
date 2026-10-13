@@ -156,6 +156,14 @@
             </div>
             <div class="modal-body">
                 <form id="ticketForm">
+                    <div id="requesterGroup" class="form-group requester-group" style="display: none;">
+                        <label for="requesterSearch">Solicitante</label>
+                        <div class="requester-row">
+                            <input type="text" id="requesterSearch" list="requesterOptions" autocomplete="off" placeholder="Buscar por nombre o correo">
+                            <button type="button" id="forMeBtn" class="btn-secondary btn-small">Para mí</button>
+                        </div>
+                        <datalist id="requesterOptions"></datalist>
+                    </div>
                     <div class="form-group" style="margin-bottom: 15px;">
                         <h3 style="margin-top: 0; margin-bottom: 8px; font-size: 14px; color: var(--muted);">Datos de contacto</h3>
                         <div class="form-row" style="margin-bottom: 15px;">
