@@ -21,6 +21,8 @@ def test_create_ticket_invalid_category(client, make_user):
         "description": "No debería crearse",
         "category_id": 99,
         "priority_id": 2,
+        "contact_phone": "8888-1234",
+        "contact_id_number": "1-0234-0567",
     }
     response = client.post("/api/tickets", json=payload, headers=user["headers"])
     assert response.status_code == 400

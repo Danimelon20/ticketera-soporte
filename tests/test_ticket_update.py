@@ -164,7 +164,7 @@ def test_technician_cannot_create_ticket(client, make_user):
     tecnico = make_user("technician")
     response = client.post(
         "/api/tickets",
-        json={"title": "Ticket de técnico", "description": "Prueba", "category_id": 1, "priority_id": 1},
+        json={"title": "Ticket de técnico", "description": "Prueba", "category_id": 1, "priority_id": 1, "contact_phone": "8888-1234", "contact_id_number": "1-0234-0567"},
         headers=tecnico["headers"]
     )
     assert response.status_code == 403

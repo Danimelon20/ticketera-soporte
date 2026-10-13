@@ -117,6 +117,8 @@ def make_ticket(client):
             "description": f"Descripción de {title}",
             "category_id": category_id,
             "priority_id": priority_id,
+            "contact_phone": "8888-1234",
+            "contact_id_number": "1-0234-0567",
         }
         response = client.post("/api/tickets", json=payload, headers=actor["headers"])
         assert response.status_code == 200, response.text

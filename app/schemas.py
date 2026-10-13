@@ -1,6 +1,7 @@
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Literal
+from .validators import normalize_phone, normalize_id_number, mask_id_number
 
 
 class CommentCreate(BaseModel):
@@ -83,27 +84,13 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AuthResponse(BaseModel):
-    token: str
-    user: UserRead
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CategoryRead(BaseModel):
+class MeRead(BaseModel):
     id: int
     name: str
-    description: Optional[str]
-    is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PriorityRead(BaseModel):
-    id: int
-    name: str
-    level: int
-    color: Optional[str]
+    email: str
+    role: str
+    phone: Optional[str] = None
+    id_number: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -113,6 +100,19 @@ class TicketCreate(BaseModel):
     description: str
     category_id: int
     priority_id: int
+    contact_phone: str
+    contact_id_number: str
+    requester_id: Optional[int] = None
+
+    @field_validator("contact_phone")
+    @classmethod
+    def validate_contact_phone(cls, v):
+        return normalize_phone(v)
+
+    @field_validator("contact_id_number")
+    @classmethod
+    def validate_contact_id_number(cls, v):
+        return normalize_id_number(v)
 
 
 class TicketUpdate(BaseModel):
@@ -136,7 +136,6 @@ class TicketRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    
 
 class HistoryRead(BaseModel):
     id: int
@@ -149,8 +148,43 @@ class HistoryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RequesterRead(BaseModel):
+    id: int
+    name: str
+    email: str
+    phone: Optional[str] = None
+    id_number: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PriorityRead(BaseModel):
+    id: int
+    name: str
+    level: int
+    color: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
+    contact_phone: Optional[str] = None
+    contact_id_number: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CategoryRead(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserRead
 
     model_config = ConfigDict(from_attributes=True)

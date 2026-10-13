@@ -5,6 +5,7 @@ from ..database import get_db
 from .. import models
 from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead
 from ..security import get_current_user
+from ..validators import mask_id_number
 
 router = APIRouter(prefix="/api", tags=["tickets"])
 
@@ -13,23 +14,49 @@ router = APIRouter(prefix="/api", tags=["tickets"])
 def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if current_user.role == "technician":
         raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
+    
+    if ticket.requester_id is not None:
+        if current_user.role not in ("coordinator", "admin"):
+            raise HTTPException(status_code=403, detail="No puedes crear tickets a nombre de otra persona")
+        requester = db.query(models.User).filter(models.User.id == ticket.requester_id).first()
+        if not requester or requester.role != "requester":
+            raise HTTPException(status_code=400, detail="El solicitante no existe")
+        created_by = ticket.requester_id
+    else:
+        created_by = current_user.id
+    
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")
     prioridad = db.query(models.Priority).filter(models.Priority.id == ticket.priority_id).first()
     if not prioridad:
         raise HTTPException(status_code=400, detail="La prioridad no existe")
+    
     db_ticket = models.Ticket(
         title=ticket.title,
         description=ticket.description,
         category_id=ticket.category_id,
         priority_id=ticket.priority_id,
         status="new",
-        created_by=current_user.id,
+        created_by=created_by,
+        contact_phone=ticket.contact_phone,
+        contact_id_number=ticket.contact_id_number,
+        source="web",
     )
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
+    
+    # Si el dueño del ticket tiene phone o id_number vacíos, guárdalos en su perfil
+    owner = db.query(models.User).filter(models.User.id == db_ticket.created_by).first()
+    if owner:
+        if not owner.phone:
+            owner.phone = ticket.contact_phone
+        if not owner.id_number:
+            owner.id_number = ticket.contact_id_number
+        db.add(owner)
+        db.commit()
+    
     return db_ticket
 
 
@@ -79,6 +106,34 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
     # Regla: el solicitante no puede abrir tickets ajenos
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
+    
+    # Determinar qué campos de contacto mostrar según el rol del usuario que ve
+    # El creador del ticket, coordinator y admin ven los campos completos
+    # Un technician que es el assigned_to ve teléfono completo y cédula enmascarada
+    # Un technician que no está asignado ve None para ambos
+    # Un technician sin assigned_to ve None para ambos
+    
+    is_creator = current_user.role != "requester" or db_ticket.created_by == current_user.id
+    is_coordinator_or_admin = current_user.role in ("coordinator", "admin")
+    is_assigned_technician = (
+        current_user.role == "technician"
+        and db_ticket.assigned_to is not None
+        and db_ticket.assigned_to == current_user.id
+    )
+    
+    if is_coordinator_or_admin or (is_creator and current_user.role != "technician"):
+        # Coordinator, admin, or creator: ver campos completos
+        contact_phone = db_ticket.contact_phone
+        contact_id_number = db_ticket.contact_id_number
+    elif is_assigned_technician:
+        # Técnico asignado: teléfono completo, cédula enmascarada
+        contact_phone = db_ticket.contact_phone
+        contact_id_number = mask_id_number(db_ticket.contact_id_number)
+    else:
+        # Técnico no asignado o rol desconocido: None para ambos
+        contact_phone = None
+        contact_id_number = None
+    
     history = (
         db.query(models.History)
         .filter(models.History.ticket_id == ticket_id)
@@ -95,7 +150,10 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         **TicketRead.model_validate(db_ticket).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
         comments=[CommentRead.model_validate(c) for c in comments],
+        contact_phone=contact_phone,
+        contact_id_number=contact_id_number,
     )
+
 
 @router.post("/tickets/{ticket_id}/comments", response_model=CommentRead)
 def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
@@ -116,6 +174,7 @@ def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(ge
     db.commit()
     db.refresh(db_comment)
     return db_comment
+
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)
 def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):

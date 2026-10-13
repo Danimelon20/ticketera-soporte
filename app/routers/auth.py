@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models
-from ..schemas import RegisterRequest, LoginRequest, AuthResponse, UserRead
+from ..schemas import RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead
 from ..security import hash_password, verify_password, new_token, get_current_user, hash_code
 
 
@@ -72,9 +72,16 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     return AuthResponse(token=token, user=user)
 
 
-@router.get("/auth/me", response_model=UserRead)
+@router.get("/auth/me", response_model=MeRead)
 def get_me(current_user: models.User = Depends(get_current_user)):
-    return current_user
+    return MeRead(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        role=current_user.role,
+        phone=current_user.phone,
+        id_number=current_user.id_number,
+    )
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
