@@ -241,11 +241,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
-                sessionStorage.setItem('ticketeraToken', data.token);
-                authToken = data.token;
-                currentUser = data.user;
                 loginForm.reset();
-                showApp();
+                if (data.requires_code) {
+                    showVerifyScreen(data);
+                    return;
+                }
+                completeLogin(data);
             } catch (err) {
                 // handled by apiFetch
             }
@@ -273,16 +274,289 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
-                sessionStorage.setItem('ticketeraToken', data.token);
-                authToken = data.token;
-                currentUser = data.user;
                 registerForm.reset();
-                showApp();
+                if (data.requires_code) {
+                    showVerifyScreen(data);
+                    return;
+                }
+                completeLogin(data);
             } catch (err) {
                 // handled by apiFetch
             }
         });
     }
+
+    function completeLogin(data) {
+        sessionStorage.setItem('ticketeraToken', data.token);
+        authToken = data.token;
+        currentUser = data.user;
+        showApp();
+    }
+
+    // ===== Verificación en dos pasos =====
+    const verifyScreen = document.getElementById('verifyScreen');
+    const verifyHint = document.getElementById('verifyHint');
+    const verifyForm = document.getElementById('verifyForm');
+    const verifyDigits = document.getElementById('verifyDigits');
+    const digitInputs = Array.from(document.querySelectorAll('#verifyDigits .code-digit'));
+    const verifyError = document.getElementById('verifyError');
+    const verifySubmit = document.getElementById('verifySubmit');
+    const verifySuccess = document.getElementById('verifySuccess');
+    const verifyTimer = document.getElementById('verifyTimer');
+    const resendCodeBtn = document.getElementById('resendCode');
+    const resendNotice = document.getElementById('resendNotice');
+    const backToLoginBtn = document.getElementById('backToLogin');
+
+    const CODE_SECONDS = 10 * 60;
+    const RESEND_WAIT_SECONDS = 60;
+
+    let challengeId = null;
+    let expiryTimer = null;
+    let resendTimer = null;
+    let verifyBusy = false;
+    let verifyRedirectTimer = null;
+
+    function formatCountdown(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    function startExpiryCountdown() {
+        clearInterval(expiryTimer);
+        const deadline = Date.now() + CODE_SECONDS * 1000;
+        const tick = () => {
+            const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+            if (left === 0) {
+                clearInterval(expiryTimer);
+                verifyTimer.textContent = 'El código venció. Inicia sesión de nuevo.';
+                verifySubmit.disabled = true;
+                return;
+            }
+            verifyTimer.textContent = `El código vence en ${formatCountdown(left)}`;
+        };
+        tick();
+        expiryTimer = setInterval(tick, 1000);
+    }
+
+    function startResendCountdown() {
+        clearInterval(resendTimer);
+        const deadline = Date.now() + RESEND_WAIT_SECONDS * 1000;
+        resendCodeBtn.disabled = true;
+        const tick = () => {
+            const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+            if (left === 0) {
+                clearInterval(resendTimer);
+                resendCodeBtn.disabled = false;
+                resendCodeBtn.textContent = 'Reenviar código';
+                return;
+            }
+            resendCodeBtn.textContent = `Reenviar código en ${left} s`;
+        };
+        tick();
+        resendTimer = setInterval(tick, 1000);
+    }
+
+    function clearDigits() {
+        digitInputs.forEach(input => { input.value = ''; });
+    }
+
+    function hideVerifyError() {
+        verifyError.hidden = true;
+        verifyError.textContent = '';
+    }
+
+    function showVerifyError(message) {
+        verifyError.textContent = message;
+        verifyError.hidden = false;
+    }
+
+    function showVerifyScreen(data) {
+        challengeId = data.challenge_id;
+        verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + data.email_hint;
+        clearTimeout(verifyRedirectTimer);
+        verifyBusy = false;
+        clearDigits();
+        hideVerifyError();
+        resendNotice.textContent = '';
+        verifyForm.hidden = false;
+        verifySuccess.hidden = true;
+        verifySubmit.disabled = false;
+        if (authScreen) authScreen.style.display = 'none';
+        verifyScreen.hidden = false;
+        startExpiryCountdown();
+        startResendCountdown();
+        digitInputs[0].focus();
+    }
+
+    function backToLogin() {
+        clearInterval(expiryTimer);
+        clearInterval(resendTimer);
+        clearTimeout(verifyRedirectTimer);
+        challengeId = null;
+        verifyBusy = false;
+        clearDigits();
+        hideVerifyError();
+        verifyScreen.hidden = true;
+        showAuthScreen();
+    }
+
+    // Sin apiFetch: aquí se necesita el código HTTP y no se debe cerrar la sesión ni usar el error global
+    async function postAuth(endpoint, body) {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json().catch(() => ({}));
+        return { ok: response.ok, status: response.status, data };
+    }
+
+    function shakeDigits() {
+        verifyDigits.classList.remove('shake');
+        void verifyDigits.offsetWidth;
+        verifyDigits.classList.add('shake');
+    }
+
+    async function submitCode() {
+        const code = digitInputs.map(input => input.value).join('');
+        if (verifyBusy || !challengeId) return;
+        if (!/^\d{6}$/.test(code)) {
+            showVerifyError('Escribe los 6 dígitos del código');
+            return;
+        }
+        verifyBusy = true;
+        verifySubmit.disabled = true;
+        hideVerifyError();
+
+        let result;
+        try {
+            result = await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
+        } catch (err) {
+            verifyBusy = false;
+            verifySubmit.disabled = false;
+            showVerifyError('No se pudo conectar con el servidor');
+            return;
+        }
+
+        if (result.ok) {
+            clearInterval(expiryTimer);
+            clearInterval(resendTimer);
+            verifyForm.hidden = true;
+            verifySuccess.hidden = false;
+            verifyRedirectTimer = setTimeout(() => {
+                verifyScreen.hidden = true;
+                challengeId = null;
+                verifyBusy = false;
+                completeLogin(result.data);
+            }, 1500);
+            return;
+        }
+
+        const message = getErrorMessage(result.data);
+        showVerifyError(message);
+        if (result.status === 429 || message.includes('Inicia sesión de nuevo')) {
+            clearInterval(expiryTimer);
+            clearInterval(resendTimer);
+            resendCodeBtn.disabled = true;
+            verifyRedirectTimer = setTimeout(backToLogin, 3000);
+            return;
+        }
+        shakeDigits();
+        clearDigits();
+        verifyBusy = false;
+        verifySubmit.disabled = false;
+        digitInputs[0].focus();
+    }
+
+    function fillDigitsFrom(index, text) {
+        const digits = text.replace(/\D/g, '').slice(0, digitInputs.length - index).split('');
+        digits.forEach((digit, offset) => { digitInputs[index + offset].value = digit; });
+        return index + digits.length;
+    }
+
+    digitInputs.forEach((input, index) => {
+        input.addEventListener('input', () => {
+            const value = input.value.replace(/\D/g, '');
+            if (value.length > 1) {
+                // Autocompletado del sistema o varios dígitos a la vez
+                const next = fillDigitsFrom(index, value);
+                digitInputs[Math.min(next, digitInputs.length - 1)].focus();
+            } else {
+                input.value = value;
+                if (value && index < digitInputs.length - 1) {
+                    digitInputs[index + 1].focus();
+                }
+            }
+            if (digitInputs.every(d => /^\d$/.test(d.value))) {
+                submitCode();
+            }
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && !input.value && index > 0) {
+                e.preventDefault();
+                digitInputs[index - 1].value = '';
+                digitInputs[index - 1].focus();
+            }
+        });
+
+        input.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text') || '';
+            const digits = text.replace(/\D/g, '');
+            if (!digits) return;
+            const start = digits.length >= digitInputs.length ? 0 : index;
+            const next = fillDigitsFrom(start, digits);
+            digitInputs[Math.min(next, digitInputs.length - 1)].focus();
+            if (digitInputs.every(d => /^\d$/.test(d.value))) {
+                submitCode();
+            }
+        });
+    });
+
+    verifyForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        submitCode();
+    });
+
+    resendCodeBtn.addEventListener('click', async () => {
+        if (!challengeId) return;
+        resendCodeBtn.disabled = true;
+        resendNotice.textContent = '';
+        hideVerifyError();
+
+        let result;
+        try {
+            result = await postAuth('/auth/resend-code', { challenge_id: challengeId });
+        } catch (err) {
+            resendCodeBtn.disabled = false;
+            showVerifyError('No se pudo conectar con el servidor');
+            return;
+        }
+
+        if (result.ok) {
+            challengeId = result.data.challenge_id;
+            verifySubmit.disabled = false;
+            clearDigits();
+            startExpiryCountdown();
+            startResendCountdown();
+            resendNotice.textContent = 'Te enviamos un código nuevo';
+            digitInputs[0].focus();
+            return;
+        }
+
+        showVerifyError(getErrorMessage(result.data));
+        if (result.status === 429) {
+            resendCodeBtn.disabled = false;
+        } else {
+            clearInterval(expiryTimer);
+            clearInterval(resendTimer);
+            verifyRedirectTimer = setTimeout(backToLogin, 3000);
+        }
+    });
+
+    backToLoginBtn.addEventListener('click', backToLogin);
 
     // Switch account / logout
     if (switchAccountBtn) {

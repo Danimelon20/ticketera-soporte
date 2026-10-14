@@ -40,6 +40,15 @@ def hash_code(code: str) -> str:
     return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
 
 
+def generate_login_code() -> str:
+    return f"{secrets.randbelow(10**6):06d}"
+
+
+def mask_email(email: str) -> str:
+    local, _, domain = email.partition("@")
+    return f"{local[:2]}***@{domain}"
+
+
 def get_current_user(
     authorization: str | None = Header(default=None),
     db: DBSession = Depends(get_db)

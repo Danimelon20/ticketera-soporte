@@ -188,3 +188,18 @@ class AuthResponse(BaseModel):
     user: UserRead
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LoginChallengeResponse(BaseModel):
+    requires_code: bool = True
+    challenge_id: str
+    email_hint: str
+
+
+class VerifyCodeRequest(BaseModel):
+    challenge_id: str
+    code: str
+
+
+class ResendCodeRequest(BaseModel):
+    challenge_id: str

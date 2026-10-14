@@ -11,6 +11,41 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <section id="verifyScreen" hidden>
+        <div class="verify-column">
+            <svg class="verify-shield" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/>
+                <rect x="9" y="11" width="6" height="5" rx="1"/>
+                <path d="M10 11V9.5a2 2 0 0 1 4 0V11"/>
+            </svg>
+            <h1 class="verify-title">Verificación de seguridad</h1>
+            <p id="verifyHint" class="verify-hint"></p>
+            <form id="verifyForm" class="verify-form" novalidate>
+                <div class="verify-digits" id="verifyDigits">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 1 de 6" autocomplete="one-time-code">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 2 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 3 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 4 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 5 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 6 de 6" autocomplete="off">
+                </div>
+                <div id="verifyError" class="verify-error" role="alert" hidden></div>
+                <button type="submit" id="verifySubmit" class="verify-submit">Verificar</button>
+            </form>
+            <div id="verifySuccess" class="verify-success" hidden>
+                <div class="verify-check">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M5 12.5l4.5 4.5L19 7.5"/>
+                    </svg>
+                </div>
+                <p class="verify-success-text">Verificación completada</p>
+            </div>
+            <p id="verifyTimer" class="verify-timer">El código vence en 10:00</p>
+            <button type="button" id="resendCode" class="verify-link" disabled>Reenviar código en 60 s</button>
+            <p id="resendNotice" class="verify-notice" aria-live="polite"></p>
+            <button type="button" id="backToLogin" class="verify-link">Volver al inicio de sesión</button>
+        </div>
+    </section>
     <section id="authScreen" class="auth-screen">
         <section class="auth-panel">
           <div class="logo-plate">
