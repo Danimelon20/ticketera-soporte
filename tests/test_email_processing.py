@@ -112,7 +112,7 @@ def test_missing_category_is_incomplete(db, sent, make_user):
     assert process_message(db, _email(requester["email"], body=body)) == "incomplete"
     assert _tickets_of(db, requester["id"]) == []
     _to, subject, reply = sent[0]
-    assert subject == "Faltan datos para crear tu ticket"
+    assert subject == "Faltan datos para crear su ticket"
     assert "Falta la línea Categoría" in reply
     assert "[Soporte]" in reply
 
@@ -121,7 +121,7 @@ def test_unregistered_sender(db, sent):
     sender = f"nadie-{uuid.uuid4().hex}@test.com"
     assert process_message(db, _email(sender)) == "unregistered"
     assert sent[0][0] == sender
-    assert sent[0][1] == "No pudimos crear tu ticket"
+    assert sent[0][1] == "No pudimos crear su ticket"
 
 
 def test_technician_is_unregistered(db, sent, make_user):

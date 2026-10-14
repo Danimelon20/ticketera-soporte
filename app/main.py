@@ -17,6 +17,7 @@ from .routers.auth import router as auth_router
 from .routers.invites import router as invites_router
 from .routers.admin import router as admin_router
 from .routers.chat import router as chat_router
+from .routers.drafts import router as drafts_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -114,6 +115,7 @@ app.include_router(auth_router)
 app.include_router(invites_router)
 app.include_router(admin_router)
 app.include_router(chat_router)
+app.include_router(drafts_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

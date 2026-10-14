@@ -203,3 +203,42 @@ class TicketAIAnalysis(Base):
 
     ticket = relationship("Ticket", back_populates="ai_analysis")
     ai_category = relationship("Category")
+
+
+class EmailDraft(Base):
+    __tablename__ = "email_drafts"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String(512), nullable=False)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subject = Column(String(300), nullable=False, default="")
+    body = Column(Text, nullable=False, default="")
+    status = Column(String(20), nullable=False, default="analyzing")
+    attempts = Column(Integer, nullable=False, default=0)
+    title = Column(String(200), nullable=True)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    priority_id = Column(Integer, ForeignKey("priorities.id"), nullable=True)
+    description = Column(Text, nullable=True)
+    contact_phone = Column(String(20), nullable=True)
+    contact_id_number = Column(String(20), nullable=True)
+    ai_level = Column(Integer, nullable=True)
+    summary = Column(String(300), nullable=True)
+    needs_review = Column(Boolean, nullable=False, default=False)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('analyzing', 'pending_review', 'waiting_contact', 'unclear', 'not_support', "
+            "'status_reply', 'confirmed', 'discarded', 'error')",
+            name="chk_draft_status",
+        ),
+        CheckConstraint("ai_level IS NULL OR ai_level BETWEEN 0 AND 4", name="chk_draft_ai_level"),
+    )
+
+    requester = relationship("User", foreign_keys=[requester_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+    category = relationship("Category")
+    priority = relationship("Priority")

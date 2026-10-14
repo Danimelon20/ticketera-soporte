@@ -111,6 +111,7 @@
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
+    <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
     <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
   </nav>
@@ -199,6 +200,59 @@
                 </table>
             </div>
             <p id="directoryEmpty" class="view-note" hidden>No hay usuarios con esos filtros.</p>
+        </section>
+
+        <section id="draftsView" class="page-view" hidden aria-labelledby="draftsTitle">
+            <h1 id="draftsTitle" class="view-title">Borradores de correos</h1>
+            <p class="view-note drafts-intro">Correos escritos sin la plantilla que la IA preparó como ticket. Revíselos y confírmelos o descártelos.</p>
+            <div class="drafts-layout">
+                <ul id="draftsList" class="drafts-list" aria-label="Borradores"></ul>
+                <div id="draftDetail" class="draft-detail">
+                    <p id="draftPlaceholder" class="view-note">Seleccione un borrador.</p>
+                    <div id="draftContent" hidden>
+                        <h2 id="draftSubject" class="draft-subject"></h2>
+                        <p id="draftMeta" class="draft-meta"></p>
+                        <h3 class="draft-section">Correo original</h3>
+                        <pre id="draftBody" class="draft-body" tabindex="0"></pre>
+                        <h3 class="draft-section">Análisis de la IA</h3>
+                        <div id="draftAi" class="draft-ai"></div>
+                        <form id="draftForm" class="draft-form">
+                            <div class="form-group">
+                                <label for="draftTitle">Título</label>
+                                <input type="text" id="draftTitle" maxlength="200" required>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="draftCategory">Categoría</label>
+                                    <select id="draftCategory" required></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="draftPriority">Prioridad</label>
+                                    <select id="draftPriority" required></select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="draftDescription">Descripción</label>
+                                <textarea id="draftDescription" rows="6" required></textarea>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="draftPhone">Teléfono</label>
+                                    <input type="tel" id="draftPhone" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="draftIdNumber">Cédula</label>
+                                    <input type="text" id="draftIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
+                                </div>
+                            </div>
+                            <div class="draft-actions">
+                                <button type="submit" id="draftConfirmBtn" class="btn-submit">Confirmar y crear ticket</button>
+                                <button type="button" id="draftDiscardBtn" class="btn-secondary">Descartar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <section id="adminView" class="page-view" hidden aria-labelledby="adminTitle">

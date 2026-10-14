@@ -126,6 +126,11 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
         "email_last_error": email_poller.last_error,
         "chatbot_enabled": getattr(config, "CHATBOT_ENABLED", False),
         "ai_analysis": _ai_analysis_stats(db),
+        "drafts_by_status": dict(
+            db.query(models.EmailDraft.status, func.count(models.EmailDraft.id))
+            .group_by(models.EmailDraft.status)
+            .all()
+        ),
     }
 
 

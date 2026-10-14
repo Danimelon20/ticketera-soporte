@@ -113,4 +113,8 @@ async def poll_forever() -> None:
                 await asyncio.to_thread(email_analysis.analyze_pending)
             except Exception:
                 logging.exception("Falló el análisis de correos con IA")
+            try:
+                await asyncio.to_thread(email_analysis.analyze_pending_drafts)
+            except Exception:
+                logging.exception("Falló el análisis de los borradores con IA")
         await asyncio.sleep(config.EMAIL_POLL_SECONDS)

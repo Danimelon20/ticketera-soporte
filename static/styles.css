@@ -984,6 +984,32 @@ section {
 .count-list .count { font-weight: 600; font-variant-numeric: tabular-nums; }
 .admin-ai-accuracy { margin: 12px 0 0; font-weight: 600; }
 
+/* Borradores de correos */
+.tab-badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: #B91C1C; color: #FFFFFF; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.tab-badge[hidden] { display: none; }
+.drafts-intro { margin: -8px 0 20px; }
+.drafts-layout { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 20px; align-items: start; }
+.drafts-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.draft-item { width: 100%; text-align: left; background: #FFFFFF; border: 1px solid var(--line); border-radius: 10px; padding: 12px; font: inherit; cursor: pointer; display: grid; gap: 4px; }
+.draft-item:hover { border-color: #2E55C9; }
+.draft-item[aria-current="true"] { border-color: #2E55C9; box-shadow: inset 3px 0 0 #2E55C9; }
+.draft-item-subject { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.draft-item-meta { font-size: 13px; color: var(--muted); }
+.draft-detail { background: #FFFFFF; border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; min-width: 0; }
+.draft-detail .view-note { margin: 0; }
+.draft-subject { font-size: 20px; margin: 0 0 4px; overflow-wrap: anywhere; }
+.draft-meta { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+.draft-section { font-size: 14px; margin: 16px 0 8px; color: var(--muted); }
+.draft-body { margin: 0; padding: 12px; max-height: 280px; overflow: auto; background: #F6F7F9; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 14px; }
+.draft-ai { display: grid; gap: 8px; margin-bottom: 16px; }
+.draft-ai p { margin: 0; line-height: 1.5; }
+.draft-form { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+.draft-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.draft-actions .btn-submit { width: auto; }
+@media (max-width: 860px) {
+  .drafts-layout { grid-template-columns: 1fr; }
+}
+
 /* Análisis de la IA en el detalle del ticket */
 .ai-card { background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 10px; padding: 16px; margin: 0 0 28px 0; display: grid; gap: 10px; }
 .ai-card h2 { font-size: 15px; margin: 0; }

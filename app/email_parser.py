@@ -13,6 +13,14 @@ _PREFIX_RE = re.compile(r"^\s*(?:(?:re|fw|fwd|rv)\s*:\s*)+", re.IGNORECASE)
 _SUPPORT_TAG_RE = re.compile(r"\[soporte\]", re.IGNORECASE)
 _BREAK_RE = re.compile(r"<br\s*/?>|</p\s*>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
+# Inicio del texto citado de un correo anterior
+_QUOTE_RES = (
+    re.compile(r"^>"),
+    re.compile(r"^El .* escribió:\s*$", re.IGNORECASE),
+    re.compile(r"^On .* wrote:\s*$", re.IGNORECASE),
+    re.compile(r"-----Original Message-----", re.IGNORECASE),
+    re.compile(r"^De:", re.IGNORECASE),
+)
 
 
 def normalize(text: str) -> str:
@@ -48,6 +56,17 @@ def get_plain_body(msg) -> str:
         return ""
     text = _BREAK_RE.sub("\n", _decode_part(html_part))
     return html.unescape(_TAG_RE.sub("", text))
+
+
+def strip_quoted(body: str) -> str:
+    """Quita el texto citado: corta en la primera línea que lo inicia."""
+    lines = []
+    for line in (body or "").splitlines():
+        stripped = line.strip()
+        if any(pattern.search(stripped) for pattern in _QUOTE_RES):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
 
 
 def _clean_title(subject: str) -> str:

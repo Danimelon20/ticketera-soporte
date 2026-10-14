@@ -1,5 +1,6 @@
 import base64
 import logging
+from email import policy
 from email.message import EmailMessage
 
 from . import config, graph
@@ -20,12 +21,13 @@ def send_email(to: str, subject: str, body: str) -> bool:
         msg["Subject"] = subject
         # Evita que otros sistemas respondan automáticamente y se forme un bucle
         msg["Auto-Submitted"] = "auto-generated"
-        msg.set_content(body, charset="utf-8")
+        # base64 y saltos \r\n: con quoted-printable y \n, Graph cambiaba letras por "="
+        msg.set_content(body, charset="utf-8", cte="base64")
 
         response = graph.graph_request(
             "POST",
             "/me/sendMail",
-            content=base64.b64encode(msg.as_bytes()),
+            content=base64.b64encode(msg.as_bytes(policy=policy.SMTP)),
             headers={"Content-Type": "text/plain"},
         )
         return response.status_code == 202

@@ -79,3 +79,19 @@ def test_get_plain_body_prefers_text_plain():
     msg.set_content("Texto plano")
     msg.add_alternative("<p>Texto <b>HTML</b></p>", subtype="html")
     assert get_plain_body(msg).strip() == "Texto plano"
+
+
+def test_strip_quoted_cuts_at_each_marker():
+    from app.email_parser import strip_quoted
+
+    markers = [
+        "> Mensaje anterior",
+        "El lun, 12 oct 2026 a las 10:00, Soporte <soporte@ejemplo.com> escribió:",
+        "On Mon, Oct 12, 2026 at 10:00 AM Soporte wrote:",
+        "-----Original Message-----",
+        "De: Soporte <soporte@ejemplo.com>",
+    ]
+    for marker in markers:
+        body = f"Ya funciona, gracias.\nSaludos.\n\n{marker}\nTexto viejo del correo"
+        assert strip_quoted(body) == "Ya funciona, gracias.\nSaludos."
+    assert strip_quoted("Solo texto nuevo") == "Solo texto nuevo"

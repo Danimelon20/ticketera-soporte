@@ -189,6 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderInvitesSection();
         updateRoleTabs();
         showView('tickets');
+        refreshDraftsBadge();
         setupChat();
     }
 
@@ -1862,6 +1863,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const splitView = document.querySelector('main .split');
     const directoryView = document.getElementById('directoryView');
     const adminView = document.getElementById('adminView');
+    const navDrafts = document.getElementById('navDrafts');
+    const draftsView = document.getElementById('draftsView');
 
     function setActiveTab(activeTab) {
         document.querySelectorAll('.topbar-tab').forEach(tab => {
@@ -1876,20 +1879,250 @@ document.addEventListener('DOMContentLoaded', () => {
         const role = currentUser ? currentUser.role : '';
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
         navAdmin.hidden = role !== 'admin';
+        navDrafts.hidden = !DRAFT_ROLES.includes(role);
     }
 
     function showView(name) {
         if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
         directoryView.hidden = name !== 'directory';
         adminView.hidden = name !== 'admin';
-        const tabs = { tickets: navTickets, directory: navDirectory, admin: navAdmin };
+        draftsView.hidden = name !== 'drafts';
+        const tabs = { tickets: navTickets, directory: navDirectory, admin: navAdmin, drafts: navDrafts };
         setActiveTab(tabs[name]);
         if (name === 'directory') loadDirectory();
         if (name === 'admin') loadAdminPanel();
+        if (name === 'drafts') loadDrafts();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
     navAdmin.addEventListener('click', () => showView('admin'));
+    navDrafts.addEventListener('click', () => showView('drafts'));
+
+    // ----- Borradores de correos -----
+    const DRAFT_ROLES = ['technician', 'coordinator', 'admin'];
+    const DRAFT_STATUS_LABELS = {
+        analyzing: 'Analizando',
+        pending_review: 'Por revisar',
+        waiting_contact: 'Esperando datos de contacto',
+        unclear: 'No se entendió (se pidió aclarar)',
+        not_support: 'No es soporte',
+        status_reply: 'Consulta de estado respondida',
+        confirmed: 'Confirmado',
+        discarded: 'Descartado',
+        error: 'No se pudo analizar'
+    };
+    const draftsBadge = document.getElementById('draftsBadge');
+    const draftsList = document.getElementById('draftsList');
+    const draftPlaceholder = document.getElementById('draftPlaceholder');
+    const draftContent = document.getElementById('draftContent');
+    const draftForm = document.getElementById('draftForm');
+    const draftTitleInput = document.getElementById('draftTitle');
+    const draftCategorySelect = document.getElementById('draftCategory');
+    const draftPrioritySelect = document.getElementById('draftPriority');
+    const draftDescriptionInput = document.getElementById('draftDescription');
+    const draftPhoneInput = document.getElementById('draftPhone');
+    const draftIdNumberInput = document.getElementById('draftIdNumber');
+    const draftConfirmBtn = document.getElementById('draftConfirmBtn');
+    const draftDiscardBtn = document.getElementById('draftDiscardBtn');
+    let drafts = [];
+    let selectedDraftId = null;
+
+    function updateDraftsBadge(count) {
+        draftsBadge.textContent = String(count);
+        draftsBadge.hidden = count === 0;
+        navDrafts.setAttribute('aria-label', count ? `Borradores, ${count} pendientes` : 'Borradores');
+    }
+
+    async function refreshDraftsBadge() {
+        if (!currentUser || !DRAFT_ROLES.includes(currentUser.role)) return;
+        try {
+            const list = await apiFetch('/drafts');
+            updateDraftsBadge(list.length);
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+    }
+
+    async function loadDrafts() {
+        try {
+            drafts = await apiFetch('/drafts');
+        } catch (err) {
+            return;
+        }
+        updateDraftsBadge(drafts.length);
+        renderDraftList();
+        const current = drafts.find(d => d.id === selectedDraftId);
+        if (current) {
+            showDraft(current);
+        } else {
+            selectedDraftId = null;
+            draftContent.hidden = true;
+            draftPlaceholder.hidden = false;
+            draftPlaceholder.textContent = drafts.length ? 'Seleccione un borrador.' : 'No hay borradores pendientes.';
+        }
+    }
+
+    function renderDraftList() {
+        draftsList.replaceChildren();
+        drafts.forEach(draft => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'draft-item';
+            btn.dataset.draftId = String(draft.id);
+            if (draft.id === selectedDraftId) btn.setAttribute('aria-current', 'true');
+
+            const subject = document.createElement('span');
+            subject.className = 'draft-item-subject';
+            subject.textContent = draft.subject || '(Sin asunto)';
+            const meta = document.createElement('span');
+            meta.className = 'draft-item-meta';
+            meta.textContent = `${draft.requester_name} · ${formatDateTime(draft.created_at)}`;
+            const state = document.createElement('span');
+            state.className = 'draft-item-meta';
+            state.textContent = DRAFT_STATUS_LABELS[draft.status] || draft.status;
+            btn.append(subject, meta, state);
+            if (draft.needs_review) {
+                const review = document.createElement('span');
+                review.className = 'ai-review';
+                review.textContent = 'Revisar';
+                btn.appendChild(review);
+            }
+            li.appendChild(btn);
+            draftsList.appendChild(li);
+        });
+    }
+
+    function fillDraftSelect(select, map, selectedId) {
+        select.replaceChildren();
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '-- Seleccionar --';
+        select.appendChild(empty);
+        Object.keys(map).forEach(id => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = map[id];
+            if (Number(id) === selectedId) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    function showDraft(draft) {
+        selectedDraftId = draft.id;
+        draftPlaceholder.hidden = true;
+        draftContent.hidden = false;
+        draftsList.querySelectorAll('.draft-item').forEach(btn => {
+            if (btn.dataset.draftId === String(draft.id)) btn.setAttribute('aria-current', 'true');
+            else btn.removeAttribute('aria-current');
+        });
+
+        document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
+        document.getElementById('draftMeta').textContent =
+            `${draft.requester_name} · ${formatDateTime(draft.created_at)} · ${DRAFT_STATUS_LABELS[draft.status] || draft.status}`;
+        document.getElementById('draftBody').textContent = draft.body;
+
+        const ai = document.getElementById('draftAi');
+        ai.replaceChildren();
+        const head = document.createElement('div');
+        head.className = 'ai-head';
+        const badge = document.createElement('span');
+        const level = draft.ai_level;
+        badge.className = `ai-level ai-level-${level === null ? 'none' : level}`;
+        badge.textContent = level === null ? 'Sin nivel' : `Nivel ${level} · ${AI_LEVEL_NAMES[level]}`;
+        head.appendChild(badge);
+        if (draft.needs_review) {
+            const review = document.createElement('span');
+            review.className = 'ai-review';
+            review.textContent = 'Revisar';
+            head.appendChild(review);
+        }
+        ai.appendChild(head);
+        const summary = document.createElement('p');
+        summary.textContent = draft.summary || 'La IA no dejó un resumen.';
+        if (!draft.summary) summary.className = 'ai-muted';
+        ai.appendChild(summary);
+        if (draft.status === 'waiting_contact') {
+            const waiting = document.createElement('p');
+            waiting.className = 'ai-muted';
+            waiting.textContent = 'Se pidió al cliente su teléfono y su cédula. Si los consiguió por otro medio, escríbalos abajo.';
+            ai.appendChild(waiting);
+        }
+
+        draftTitleInput.value = draft.title || '';
+        draftDescriptionInput.value = draft.description || '';
+        draftPhoneInput.value = draft.contact_phone || '';
+        draftIdNumberInput.value = draft.contact_id_number || '';
+        // Si el borrador ya los tiene, vacíos o enmascarados se usan los guardados
+        draftPhoneInput.required = !draft.contact_phone;
+        draftIdNumberInput.required = !draft.contact_id_number;
+        fillDraftSelect(draftCategorySelect, categoryMap, draft.category_id);
+        fillDraftSelect(draftPrioritySelect, priorityMap, draft.priority_id);
+        draftConfirmBtn.disabled = false;
+        draftDiscardBtn.disabled = false;
+    }
+
+    function setDraftBusy(busy) {
+        draftConfirmBtn.disabled = busy;
+        draftDiscardBtn.disabled = busy;
+    }
+
+    draftsList.addEventListener('click', (e) => {
+        const btn = e.target.closest('.draft-item');
+        if (!btn) return;
+        const draft = drafts.find(d => String(d.id) === btn.dataset.draftId);
+        if (draft) showDraft(draft);
+    });
+
+    draftForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (selectedDraftId === null) return;
+        // Solo se valida lo que se escribió nuevo (sin asteriscos)
+        const isNew = value => value.trim() !== '' && !value.includes('*');
+        const phoneError = isNew(draftPhoneInput.value) ? validatePhone(draftPhoneInput.value) : null;
+        const idError = isNew(draftIdNumberInput.value) ? validateIdNumber(draftIdNumberInput.value) : null;
+        if (phoneError || idError) {
+            showError(phoneError || idError);
+            return;
+        }
+        setDraftBusy(true);
+        try {
+            const result = await apiFetch(`/drafts/${selectedDraftId}/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: draftTitleInput.value.trim(),
+                    category_id: parseInt(draftCategorySelect.value, 10),
+                    priority_id: parseInt(draftPrioritySelect.value, 10),
+                    description: draftDescriptionInput.value.trim(),
+                    contact_phone: draftPhoneInput.value,
+                    contact_id_number: draftIdNumberInput.value
+                })
+            });
+            showSuccess(`Ticket #${result.ticket_id} creado`);
+            selectedDraftId = null;
+            await loadDrafts();
+            loadTickets(getFilters());
+        } catch (err) {
+            setDraftBusy(false);
+            showError(err.message || 'No se pudo confirmar el borrador');
+        }
+    });
+
+    draftDiscardBtn.addEventListener('click', async () => {
+        if (selectedDraftId === null) return;
+        if (!window.confirm('¿Descartar este borrador? No se creará ningún ticket ni se avisará al cliente.')) return;
+        setDraftBusy(true);
+        try {
+            await apiFetch(`/drafts/${selectedDraftId}/discard`, { method: 'POST' });
+            showSuccess('Borrador descartado');
+            selectedDraftId = null;
+            await loadDrafts();
+        } catch (err) {
+            setDraftBusy(false);
+            showError(err.message || 'No se pudo descartar el borrador');
+        }
+    });
 
     // ----- Directorio -----
     const directorySearch = document.getElementById('directorySearch');

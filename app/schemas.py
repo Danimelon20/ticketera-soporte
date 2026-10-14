@@ -253,3 +253,40 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+
+
+class DraftRead(BaseModel):
+    id: int
+    status: str
+    created_at: datetime
+    requester_id: int
+    requester_name: str
+    subject: str
+    body: str
+    title: Optional[str] = None
+    category_id: Optional[int] = None
+    priority_id: Optional[int] = None
+    description: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_id_number: Optional[str] = None
+    ai_level: Optional[int] = None
+    summary: Optional[str] = None
+    needs_review: bool = False
+    ticket_id: Optional[int] = None
+
+
+class DraftConfirm(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1)
+    category_id: int
+    priority_id: int
+    # Vacíos o enmascarados (con *): se usan los guardados. Se validan en la ruta.
+    contact_phone: Optional[str] = None
+    contact_id_number: Optional[str] = None
+
+    @field_validator("title", "description")
+    @classmethod
+    def not_blank(cls, v):
+        if not v.strip():
+            raise ValueError("Este campo no puede estar vacío")
+        return v.strip()

@@ -156,3 +156,23 @@ def test_ms_login_saves_cache_for_support_mailbox(cache_path, monkeypatch, capsy
     assert os.path.exists(cache_path)
     assert oct(os.stat(cache_path).st_mode & 0o777) == "0o600"
     assert f"Sesión de Microsoft guardada para {MAILBOX}" in capsys.readouterr().out
+
+
+def test_send_email_body_survives_encoding(fake_app, graph_calls, monkeypatch):
+    import email
+    from email import policy
+
+    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    calls, _statuses = graph_calls
+    long_line = "Esta dirección no está registrada; regístrese en http://localhost:8000/registro " + "ñ" * 40
+    assert len(long_line) > 100
+    body = f"Buen día, José.\n\n{long_line}\nCédula, teléfono y descripción."
+    assert mailer.send_email("ana@test.com", "Recibimos su solicitud", body) is True
+
+    raw = base64.b64decode(calls[0]["content"])
+    # Saltos de línea \r\n en todo el MIME y cuerpo en base64, no quoted-printable
+    assert b"\r\n" in raw and b"\n" not in raw.replace(b"\r\n", b"")
+    msg = email.message_from_bytes(raw, policy=policy.default)
+    assert msg["Content-Transfer-Encoding"] == "base64"
+    sent_text = msg.get_content().replace("\r\n", "\n")
+    assert sent_text == f"{body}\n\n{mailer.SIGNATURE}\n"
