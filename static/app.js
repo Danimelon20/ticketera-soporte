@@ -189,9 +189,11 @@ document.addEventListener('DOMContentLoaded', () => {
         renderInvitesSection();
         updateRoleTabs();
         showView('tickets');
+        setupChat();
     }
 
     function showAuthScreen() {
+        resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
         if (mainContent) mainContent.style.display = 'none';
@@ -378,6 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showVerifyScreen(data) {
+        resetChat();
         challengeId = data.challenge_id;
         verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + data.email_hint;
         clearTimeout(verifyRedirectTimer);
@@ -563,6 +566,181 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     backToLoginBtn.addEventListener('click', backToLogin);
+
+    // ===== Asistente =====
+    const chatToggle = document.getElementById('chatToggle');
+    const chatPanel = document.getElementById('chatPanel');
+    const chatClose = document.getElementById('chatClose');
+    const chatRole = document.getElementById('chatRole');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatSuggestions = document.getElementById('chatSuggestions');
+    const chatForm = document.getElementById('chatForm');
+    const chatInput = document.getElementById('chatInput');
+    const chatSend = document.getElementById('chatSend');
+
+    const CHAT_WELCOME = {
+        requester: 'Hola. Puedo contarte cómo van tus tickets o ayudarte a describir un problema.',
+        technician: 'Hola. Puedo resumir tus tickets asignados y sugerir pasos de diagnóstico.',
+        coordinator: 'Hola. Puedo resumir el estado del equipo y señalar tickets atrasados.',
+        admin: 'Hola. Puedo resumir el estado del equipo y señalar tickets atrasados.'
+    };
+    const CHAT_SUGGESTIONS = {
+        requester: ['¿Cómo va mi ticket?', '¿Qué significa En proceso?', 'Ayúdame a describir mi problema'],
+        technician: ['Resume mis tickets abiertos', '¿Qué atiendo primero?', 'Pasos para diagnosticar una red lenta'],
+        coordinator: ['Resume el estado del equipo', '¿Qué tickets llevan más tiempo abiertos?', '¿Quién tiene más carga?'],
+        admin: ['Resume el estado del equipo', '¿Qué tickets llevan más tiempo abiertos?', '¿Quién tiene más carga?']
+    };
+    const CHAT_HISTORY_LIMIT = 10;
+    const CHAT_TURN_CHARS = 2000;
+
+    // Solo en memoria: se pierde al recargar o al cambiar de cuenta
+    let chatHistory = [];
+    let chatBusy = false;
+    // Cambia al cerrar sesión: una respuesta tardía no se pinta en la conversación de otra cuenta
+    let chatSession = 0;
+
+    function addChatMessage(text, kind) {
+        const bubble = document.createElement('div');
+        bubble.className = `chat-msg ${kind}`;
+        bubble.textContent = text;
+        chatMessages.appendChild(bubble);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return bubble;
+    }
+
+    function renderChatStart() {
+        const role = currentUser ? currentUser.role : '';
+        chatMessages.replaceChildren();
+        chatSuggestions.replaceChildren();
+        addChatMessage(CHAT_WELCOME[role] || CHAT_WELCOME.requester, 'model');
+        (CHAT_SUGGESTIONS[role] || []).forEach(text => {
+            const pill = document.createElement('button');
+            pill.type = 'button';
+            pill.className = 'chat-suggestion';
+            pill.textContent = text;
+            chatSuggestions.appendChild(pill);
+        });
+        chatSuggestions.hidden = false;
+    }
+
+    function setupChat() {
+        if (!currentUser) return;
+        chatRole.textContent = `Te ayuda según tu rol: ${ROLE_MAP[currentUser.role] || currentUser.role}`;
+        if (chatHistory.length === 0) renderChatStart();
+        chatToggle.hidden = false;
+    }
+
+    function resetChat() {
+        chatSession += 1;
+        chatHistory = [];
+        chatBusy = false;
+        chatPanel.hidden = true;
+        chatToggle.hidden = true;
+        chatToggle.setAttribute('aria-expanded', 'false');
+        chatMessages.replaceChildren();
+        chatSuggestions.replaceChildren();
+        chatInput.value = '';
+        setChatBusy(false);
+    }
+
+    function setChatBusy(busy) {
+        chatBusy = busy;
+        chatSend.disabled = busy;
+        chatSuggestions.querySelectorAll('button').forEach(b => { b.disabled = busy; });
+    }
+
+    function openChat() {
+        chatPanel.hidden = false;
+        chatToggle.setAttribute('aria-expanded', 'true');
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        chatInput.focus();
+    }
+
+    function closeChat() {
+        chatPanel.hidden = true;
+        chatToggle.setAttribute('aria-expanded', 'false');
+        chatToggle.focus();
+    }
+
+    async function sendChat(text) {
+        const message = text.trim().slice(0, 1000);
+        if (!message || chatBusy) return;
+        setChatBusy(true);
+        chatSuggestions.hidden = true;
+        addChatMessage(message, 'user');
+        const pending = addChatMessage('Pensando... (puede tardar hasta un minuto)', 'pending');
+        const history = chatHistory.slice(-CHAT_HISTORY_LIMIT);
+        const session = chatSession;
+
+        try {
+            // fetch propio: los 429/503 se muestran dentro del chat, no en el aviso rojo
+            const response = await fetch(`${API_BASE}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ message, history })
+            });
+            if (response.status === 401) {
+                sessionStorage.removeItem('ticketeraToken');
+                authToken = null;
+                currentUser = null;
+                showAuthScreen();
+                showError('Tu sesión terminó, inicia sesión de nuevo');
+                return;
+            }
+            const data = await response.json().catch(() => ({}));
+            if (session !== chatSession) return;
+            pending.remove();
+            if (!response.ok) {
+                addChatMessage(getErrorMessage(data), 'notice');
+                return;
+            }
+            addChatMessage(data.reply, 'model');
+            chatHistory.push({ role: 'user', text: message.slice(0, CHAT_TURN_CHARS) });
+            chatHistory.push({ role: 'model', text: String(data.reply).slice(0, CHAT_TURN_CHARS) });
+            chatHistory = chatHistory.slice(-CHAT_HISTORY_LIMIT);
+        } catch (err) {
+            if (session !== chatSession) return;
+            pending.remove();
+            addChatMessage('No se pudo conectar con el servidor', 'notice');
+        } finally {
+            if (session === chatSession) setChatBusy(false);
+        }
+    }
+
+    chatToggle.addEventListener('click', () => {
+        if (chatPanel.hidden) openChat();
+        else closeChat();
+    });
+
+    chatClose.addEventListener('click', closeChat);
+
+    chatPanel.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeChat();
+    });
+
+    chatSuggestions.addEventListener('click', (e) => {
+        const pill = e.target.closest('.chat-suggestion');
+        if (pill) sendChat(pill.textContent);
+    });
+
+    chatForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = chatInput.value;
+        if (!text.trim() || chatBusy) return;
+        chatInput.value = '';
+        sendChat(text);
+    });
+
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            chatForm.requestSubmit();
+        }
+    });
 
     // Switch account / logout
     if (switchAccountBtn) {

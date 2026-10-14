@@ -221,3 +221,17 @@ class DirectoryUser(BaseModel):
 class AdminUserUpdate(BaseModel):
     role: Literal["requester", "technician", "coordinator", "admin"] | None = None
     is_active: bool | None = None
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "model"]
+    text: str = Field(max_length=2000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=10)
+
+
+class ChatResponse(BaseModel):
+    reply: str

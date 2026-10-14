@@ -8,3 +8,12 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+  # Modelo local para el asistente. Sin puertos publicados: solo lo usa app por la red interna (http://ollama:11434)
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
