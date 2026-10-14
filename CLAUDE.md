@@ -16,14 +16,17 @@ Roles: requester (solicitante), technician (técnico), coordinator (coordinador)
 - En app/schemas.py una clase debe estar definida antes de que otra la use.
 - Desde app/routers/ los módulos de app/ se importan con dos puntos: `from ..validators import ...`.
 - create_all no altera tablas existentes. Si agregas o cambias columnas, avisa en el resumen que hay que borrar la base de datos. Nunca la borres tú.
-- Las pruebas usan una base temporal en archivo (nunca sqlite:///:memory:) y nunca llaman a internet: Hacienda, Microsoft Graph y Gemini se simulan con monkeypatch.
+- Las pruebas usan una base temporal en archivo (nunca sqlite:///:memory:) y nunca se conectan a Hacienda, Microsoft Graph ni Ollama: se simulan con monkeypatch.
 - En el navegador: textContent en vez de innerHTML con datos, cada listener se registra una sola vez y los errores del servidor se muestran con getErrorMessage.
 
 ## Seguridad y privacidad
 - Nunca leas, muestres ni modifiques .env ni data/ms_token_cache.json. Las variables nuevas se documentan en .env.example.
 - Nunca agregues a Git .env, data/ ni archivos .db.
 - Contraseñas, códigos de invitación y códigos de verificación se guardan con hash.
-- Teléfono y cédula son datos personales (Ley 8968): no van en logs, no se envían al chatbot y solo los ve quien tiene permiso.
+- Teléfono y cédula son datos personales (Ley 8968): no van en logs y solo los ve quien tiene permiso.
+- Nunca se envían al chatbot cédulas, teléfonos, correos ni contraseñas.
+- mailer.send_email nunca lanza excepciones: si falla, lo registra y devuelve False.
+- El rol admin nunca se obtiene registrándose ni con un código de invitación: el primer administrador se crea con `docker compose exec -it app python -m app.create_admin`.
 
 ## Git
 - No hagas commit ni push salvo que te lo pida. Nunca push --force.
