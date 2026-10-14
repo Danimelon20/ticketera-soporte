@@ -236,6 +236,17 @@ def call_llm(system_prompt: str, history: list, message: str) -> str:
         "messages": messages,
         "options": {"temperature": 0.3, "num_predict": 500, "num_ctx": 4096},
     }
+    content = post_chat(payload)
+
+    reply = _THINK_RE.sub("", content).strip()
+    if not reply:
+        logging.error("Ollama devolvió una respuesta vacía")
+        raise ChatbotUnavailable()
+    return reply
+
+
+def post_chat(payload: dict) -> str:
+    """Envía el payload a /api/chat de Ollama y devuelve el texto del mensaje."""
     try:
         response = httpx.post(f"{config.LLM_BASE_URL}/api/chat", json=payload, timeout=TIMEOUT_SECONDS)
     except httpx.HTTPError as exc:
@@ -250,13 +261,7 @@ def call_llm(system_prompt: str, history: list, message: str) -> str:
         raise ChatbotUnavailable()
 
     try:
-        content = response.json()["message"]["content"] or ""
+        return response.json()["message"]["content"] or ""
     except (ValueError, KeyError, TypeError) as exc:
         logging.error("Ollama devolvió una respuesta inesperada")
         raise ChatbotUnavailable() from exc
-
-    reply = _THINK_RE.sub("", content).strip()
-    if not reply:
-        logging.error("Ollama devolvió una respuesta vacía")
-        raise ChatbotUnavailable()
-    return reply

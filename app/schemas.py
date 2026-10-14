@@ -167,12 +167,30 @@ class PriorityRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AIAnalysisRead(BaseModel):
+    status: str
+    ai_level: Optional[int] = None
+    ai_category_id: Optional[int] = None
+    ai_category_name: Optional[str] = None
+    summary: Optional[str] = None
+    needs_review: bool = False
+    human_level: Optional[int] = None
+    effective_level: Optional[int] = None
+    due_at: Optional[datetime] = None
+    overdue: bool = False
+
+
+class AILevelUpdate(BaseModel):
+    level: int = Field(ge=0, le=4)
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
     contact_phone: Optional[str] = None
     contact_id_number: Optional[str] = None
     following: bool = False
+    ai_analysis: Optional[AIAnalysisRead] = None
 
     model_config = ConfigDict(from_attributes=True)
 

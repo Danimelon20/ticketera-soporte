@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from email import policy
 from urllib.parse import quote, urlencode
 
-from . import config, graph
+from . import config, email_analysis, graph
 from .database import SessionLocal
 from .email_processing import process_message
 from .graph import GraphAuthRequired
@@ -107,4 +107,10 @@ async def poll_forever() -> None:
         except Exception as exc:
             last_error = str(exc)
             logging.exception("Falló la revisión del buzón")
+        if config.AI_ANALYSIS_ENABLED:
+            # Un error del análisis nunca detiene la revisión del correo
+            try:
+                await asyncio.to_thread(email_analysis.analyze_pending)
+            except Exception:
+                logging.exception("Falló el análisis de correos con IA")
         await asyncio.sleep(config.EMAIL_POLL_SECONDS)

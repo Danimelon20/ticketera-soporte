@@ -75,6 +75,7 @@ class Ticket(Base):
     assigned_user = relationship("User", back_populates="tickets", foreign_keys=[assigned_to])
     comments = relationship("Comment", back_populates="ticket")
     history = relationship("History", back_populates="ticket")
+    ai_analysis = relationship("TicketAIAnalysis", back_populates="ticket", uselist=False)
 
 
 class Comment(Base):
@@ -174,3 +175,31 @@ class TicketFollower(Base):
     __table_args__ = (
         UniqueConstraint("ticket_id", "user_id", name="uq_follower"),
     )
+
+
+class TicketAIAnalysis(Base):
+    __tablename__ = "ticket_ai_analysis"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), unique=True, nullable=False)
+    status = Column(String(10), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    ai_level = Column(Integer, nullable=True)
+    ai_category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    summary = Column(String(300), nullable=True)
+    needs_review = Column(Boolean, nullable=False, default=False)
+    human_level = Column(Integer, nullable=True)
+    human_level_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    due_at = Column(DateTime, nullable=True)
+    model = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    analyzed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'done', 'error')", name="chk_ai_status"),
+        CheckConstraint("ai_level IS NULL OR ai_level BETWEEN 0 AND 4", name="chk_ai_level"),
+        CheckConstraint("human_level IS NULL OR human_level BETWEEN 0 AND 4", name="chk_ai_human_level"),
+    )
+
+    ticket = relationship("Ticket", back_populates="ai_analysis")
+    ai_category = relationship("Category")

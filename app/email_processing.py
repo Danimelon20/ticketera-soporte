@@ -143,6 +143,8 @@ def process_message(db: Session, msg) -> str:
     if not user.id_number:
         user.id_number = id_number
     db.add(models.TicketFollower(ticket_id=ticket.id, user_id=user.id))
+    # La IA lo analiza después, en la revisión del buzón (solo se muestra)
+    db.add(models.TicketAIAnalysis(ticket_id=ticket.id, status="pending"))
     if agent is not None:
         db.add(models.Comment(ticket_id=ticket.id, user_id=agent.id, content=AGENT_COMMENT))
     # h. Todo en el mismo commit

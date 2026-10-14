@@ -125,6 +125,26 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
         "email_last_processed": email_poller.last_processed,
         "email_last_error": email_poller.last_error,
         "chatbot_enabled": getattr(config, "CHATBOT_ENABLED", False),
+        "ai_analysis": _ai_analysis_stats(db),
+    }
+
+
+def _ai_analysis_stats(db: Session) -> dict:
+    ai = models.TicketAIAnalysis
+    by_status = dict(db.query(ai.status, func.count(ai.id)).group_by(ai.status).all())
+    corrected = db.query(ai).filter(ai.human_level.isnot(None), ai.human_level != ai.ai_level).count()
+    done_with_level = db.query(ai).filter(ai.status == "done", ai.ai_level.isnot(None))
+    total = done_with_level.count()
+    # Acierto: el nivel de la IA no fue corregido por una persona
+    right = done_with_level.filter((ai.human_level.is_(None)) | (ai.human_level == ai.ai_level)).count()
+    return {
+        "enabled": config.AI_ANALYSIS_ENABLED,
+        "pending": by_status.get("pending", 0),
+        "done": by_status.get("done", 0),
+        "error": by_status.get("error", 0),
+        "needs_review": db.query(ai).filter(ai.needs_review.is_(True)).count(),
+        "corrected": corrected,
+        "accuracy": round(right * 100 / total, 1) if total else None,
     }
 
 

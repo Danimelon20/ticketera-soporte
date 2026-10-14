@@ -1080,6 +1080,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         detailContent.appendChild(dl);
 
+        if (currentUser.role !== 'requester' && ticket.ai_analysis) {
+            detailContent.appendChild(renderAiCard(ticket));
+        }
+
         // Actions
         const actionsSection = document.createElement('div');
         actionsSection.style.marginBottom = '28px';
@@ -1371,6 +1375,108 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderEventsList(ticket, eventsContainer);
         detailContent.appendChild(activityCard);
+    }
+
+    const AI_LEVEL_NAMES = {
+        0: 'No es soporte',
+        1: 'Consulta',
+        2: 'Solicitud estándar',
+        3: 'Incidente',
+        4: 'Crítico'
+    };
+
+    function aiParagraph(text, className) {
+        const p = document.createElement('p');
+        if (className) p.className = className;
+        p.textContent = text;
+        return p;
+    }
+
+    function renderAiCard(ticket) {
+        const ai = ticket.ai_analysis;
+        const card = document.createElement('section');
+        card.className = 'ai-card';
+        card.setAttribute('aria-label', 'Análisis de la IA');
+
+        const h2 = document.createElement('h2');
+        h2.textContent = 'Análisis de la IA';
+        card.appendChild(h2);
+
+        if (ai.status === 'pending') {
+            card.appendChild(aiParagraph('Analizando...', 'ai-muted'));
+            return card;
+        }
+        if (ai.status === 'error') {
+            card.appendChild(aiParagraph('No se pudo analizar', 'ai-muted'));
+            return card;
+        }
+
+        const head = document.createElement('div');
+        head.className = 'ai-head';
+        const level = ai.effective_level;
+        const badge = document.createElement('span');
+        badge.className = `ai-level ai-level-${level === null ? 'none' : level}`;
+        badge.textContent = level === null ? 'Sin nivel' : `Nivel ${level} · ${AI_LEVEL_NAMES[level]}`;
+        head.appendChild(badge);
+        if (ai.needs_review) {
+            const review = document.createElement('span');
+            review.className = 'ai-review';
+            review.textContent = 'Revisar';
+            head.appendChild(review);
+        }
+        card.appendChild(head);
+
+        if (ai.summary) card.appendChild(aiParagraph(ai.summary));
+
+        if (ai.ai_category_name) {
+            const cat = aiParagraph(`Categoría sugerida: ${ai.ai_category_name}`);
+            if (ai.ai_category_id !== ticket.category_id) {
+                const diff = document.createElement('span');
+                diff.className = 'ai-muted';
+                diff.textContent = ' (distinta a la del ticket)';
+                cat.appendChild(diff);
+            }
+            card.appendChild(cat);
+        }
+
+        if (ai.due_at) {
+            const due = aiParagraph(`Tiempo meta: vence el ${formatDateTime(ai.due_at)}`);
+            if (ai.overdue) {
+                const late = document.createElement('span');
+                late.className = 'ai-overdue';
+                late.textContent = ' · Vencido';
+                due.appendChild(late);
+            }
+            card.appendChild(due);
+        } else {
+            card.appendChild(aiParagraph('Tiempo meta: sin tiempo meta', 'ai-muted'));
+        }
+
+        const correct = document.createElement('div');
+        correct.className = 'ai-correct';
+        const label = document.createElement('label');
+        label.htmlFor = 'aiLevelSelect';
+        label.textContent = 'Corregir nivel:';
+        const select = document.createElement('select');
+        select.id = 'aiLevelSelect';
+        select.className = 'ai-level-select';
+        if (level === null) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '-- Seleccionar --';
+            select.appendChild(empty);
+        }
+        Object.keys(AI_LEVEL_NAMES).forEach(key => {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = `${key} · ${AI_LEVEL_NAMES[key]}`;
+            if (Number(key) === level) opt.selected = true;
+            select.appendChild(opt);
+        });
+        correct.appendChild(label);
+        correct.appendChild(select);
+        card.appendChild(correct);
+        return card;
     }
 
     function renderEventsList(ticket, container) {
@@ -1971,6 +2077,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const adminStatus = document.getElementById('adminStatus');
     const adminUsersByRole = document.getElementById('adminUsersByRole');
     const adminTicketsByStatus = document.getElementById('adminTicketsByStatus');
+    const adminAiAnalysis = document.getElementById('adminAiAnalysis');
+    const adminAiAccuracy = document.getElementById('adminAiAccuracy');
     const downloadBackupBtn = document.getElementById('downloadBackup');
     const refreshLogsBtn = document.getElementById('refreshLogs');
     const adminLogs = document.getElementById('adminLogs');
@@ -2045,6 +2153,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['requester', 'technician', 'coordinator', 'admin', 'agent']);
             renderCountList(adminTicketsByStatus, health.tickets_by_status, STATE_MAP,
                 ['new', 'in_progress', 'resolved', 'closed']);
+
+            const ai = health.ai_analysis || {};
+            const aiLabels = {
+                pending: 'Pendientes',
+                done: 'Analizados',
+                error: 'Con error',
+                needs_review: 'Para revisar',
+                corrected: 'Corregidos por una persona'
+            };
+            const aiOrder = Object.keys(aiLabels);
+            const aiCounts = {};
+            aiOrder.forEach(key => { aiCounts[key] = ai[key] || 0; });
+            renderCountList(adminAiAnalysis, aiCounts, aiLabels, aiOrder);
+            adminAiAccuracy.textContent = ai.accuracy === null || ai.accuracy === undefined
+                ? 'Acierto: sin datos'
+                : `Acierto: ${ai.accuracy} %`;
         } catch (err) {
             // apiFetch ya mostró el error
         }
@@ -2367,6 +2491,24 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 showError(err.message || 'Error al agregar el comentario');
             }
+        }
+    });
+
+    detailPanel.addEventListener('change', async (e) => {
+        const select = e.target.closest('.ai-level-select');
+        if (!select || !selectedTicketId || select.value === '') return;
+        select.disabled = true;
+        try {
+            await apiFetch(`/tickets/${selectedTicketId}/ai-level`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ level: parseInt(select.value, 10) })
+            });
+            await reloadSelectedTicketAndList();
+            showSuccess('Nivel actualizado');
+        } catch (err) {
+            select.disabled = false;
+            showError(err.message || 'No se pudo actualizar el nivel');
         }
     });
 

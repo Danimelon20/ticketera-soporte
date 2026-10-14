@@ -3,11 +3,14 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead
+from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate
 from ..security import get_current_user
 from ..validators import mask_id_number
 from .. import hacienda
 from ..notifications import STATUS_LABELS, notify_followers
+from .. import email_analysis
+
+AI_ROLES = ("technician", "coordinator", "admin")
 
 router = APIRouter(prefix="/api", tags=["tickets"])
 
@@ -28,6 +31,26 @@ def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Tick
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
     return db_ticket
+
+
+def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIAnalysisRead:
+    overdue = (
+        row.due_at is not None
+        and row.due_at < email_analysis._now()
+        and ticket.status not in ("resolved", "closed")
+    )
+    return AIAnalysisRead(
+        status=row.status,
+        ai_level=row.ai_level,
+        ai_category_id=row.ai_category_id,
+        ai_category_name=row.ai_category.name if row.ai_category else None,
+        summary=row.summary,
+        needs_review=row.needs_review,
+        human_level=row.human_level,
+        effective_level=email_analysis.effective_level(row),
+        due_at=row.due_at,
+        overdue=overdue,
+    )
 
 
 @router.post("/tickets", response_model=TicketRead)
@@ -120,7 +143,8 @@ def list_tickets(
     return query.all()
 
 
-@router.get("/tickets/{ticket_id}", response_model=TicketDetail)
+# exclude_unset: el solicitante no recibe la clave ai_analysis
+@router.get("/tickets/{ticket_id}", response_model=TicketDetail, response_model_exclude_unset=True)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     
@@ -169,6 +193,10 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         .first()
         is not None
     )
+    extra = {}
+    if current_user.role in AI_ROLES:
+        row = db_ticket.ai_analysis
+        extra["ai_analysis"] = ai_analysis_read(row, db_ticket) if row else None
     return TicketDetail(
         **TicketRead.model_validate(db_ticket).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
@@ -176,7 +204,25 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
         following=following,
+        **extra,
     )
+
+
+@router.patch("/tickets/{ticket_id}/ai-level", response_model=AIAnalysisRead)
+def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if current_user.role not in AI_ROLES:
+        raise HTTPException(status_code=403, detail="No tienes permiso para corregir el análisis")
+    db_ticket = get_visible_ticket(db, ticket_id, current_user)
+    row = db_ticket.ai_analysis
+    if row is None:
+        raise HTTPException(status_code=404, detail="Este ticket no tiene análisis de la IA")
+    # Solo el análisis cambia: prioridad, estado y asignación quedan igual
+    row.human_level = data.level
+    row.human_level_by = current_user.id
+    row.due_at = email_analysis.compute_due_at(db_ticket.created_at, data.level)
+    db.commit()
+    db.refresh(row)
+    return ai_analysis_read(row, db_ticket)
 
 
 @router.post("/tickets/{ticket_id}/follow", status_code=204)

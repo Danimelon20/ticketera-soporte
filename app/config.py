@@ -15,6 +15,16 @@ CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "false").lower() == "true"
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://ollama:11434").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:1.7b")
 
+# Análisis de los correos con el mismo modelo local (solo se muestra, no actúa)
+AI_ANALYSIS_ENABLED = os.getenv("AI_ANALYSIS_ENABLED", "false").lower() == "true"
+
+# Horario de oficina para los tiempos meta
+OFFICE_DAYS = os.getenv("OFFICE_DAYS", "1-5")
+OFFICE_START = os.getenv("OFFICE_START", "08:00")
+OFFICE_END = os.getenv("OFFICE_END", "17:00")
+OFFICE_TZ = os.getenv("OFFICE_TZ", "America/Costa_Rica")
+OFFICE_HOLIDAYS = os.getenv("OFFICE_HOLIDAYS", "")
+
 
 # Hacienda: se leen en cada llamada para poder cambiarlas sin reiniciar (y en pruebas)
 def hacienda_check_enabled() -> bool:
