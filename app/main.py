@@ -1,16 +1,21 @@
+import asyncio
+import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import models
+from . import config, models
+from .email_poller import poll_forever
 from .routers.users import router as users_router
 from .routers.catalogs import router as catalogs_router
 from .routers.tickets import router as tickets_router
 from .routers.auth import router as auth_router
 from .routers.invites import router as invites_router
+
+logging.basicConfig(level=logging.INFO)
 
 
 def init_db():
@@ -57,7 +62,21 @@ def init_db():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+
+    poller = None
+    if config.EMAIL_ENABLED:
+        if config.MS_TENANT_ID and config.MS_CLIENT_ID and config.SUPPORT_MAILBOX:
+            poller = asyncio.create_task(poll_forever())
+            logging.info("Revisando la carpeta %s cada %s segundos", config.MAIL_FOLDER, config.EMAIL_POLL_SECONDS)
+        else:
+            logging.warning("EMAIL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
+
     yield
+
+    if poller is not None:
+        poller.cancel()
+        with suppress(asyncio.CancelledError):
+            await poller
 
 
 app = FastAPI(lifespan=lifespan)
