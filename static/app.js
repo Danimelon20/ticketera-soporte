@@ -781,6 +781,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function renderFollowButton(btn, hint, following) {
+        btn.textContent = following ? 'Siguiendo' : 'Dar seguimiento';
+        btn.setAttribute('aria-pressed', following ? 'true' : 'false');
+        btn.classList.toggle('following', following);
+        hint.textContent = following
+            ? 'Te avisaremos por correo de cambios de estado, asignación y comentarios nuevos.'
+            : '';
+        hint.hidden = !following;
+    }
+
     function showTicketDetail(ticket) {
         currentTicket = ticket;
         detailContent.replaceChildren();
@@ -804,9 +814,25 @@ document.addEventListener('DOMContentLoaded', () => {
         h1.style.fontSize = '26px';
         h1.style.fontWeight = '600';
         h1.style.color = 'var(--ink)';
-        h1.style.margin = '0 0 12px 0';
+        h1.style.margin = '0';
         h1.textContent = ticket.title;
-        detailContent.appendChild(h1);
+
+        const titleRow = document.createElement('div');
+        titleRow.className = 'detail-title-row';
+        titleRow.appendChild(h1);
+
+        const followBox = document.createElement('div');
+        followBox.className = 'follow-box';
+        const followBtn = document.createElement('button');
+        followBtn.type = 'button';
+        followBtn.className = 'follow-btn';
+        const followHint = document.createElement('p');
+        followHint.className = 'follow-hint';
+        followBox.appendChild(followBtn);
+        followBox.appendChild(followHint);
+        titleRow.appendChild(followBox);
+        renderFollowButton(followBtn, followHint, Boolean(ticket.following));
+        detailContent.appendChild(titleRow);
 
         const descP = document.createElement('p');
         descP.style.maxWidth = '64ch';
@@ -1726,8 +1752,30 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const followBtn = e.target.closest('.follow-btn');
+        if (followBtn) {
+            const ticketId = selectedTicketId;
+            const following = followBtn.getAttribute('aria-pressed') === 'true';
+            followBtn.disabled = true;
+            try {
+                await apiFetch(`/tickets/${ticketId}/follow`, { method: following ? 'DELETE' : 'POST' });
+                // Si mientras tanto se abrió otro ticket, no tocar su botón
+                if (ticketId === selectedTicketId) {
+                    const hint = followBtn.parentElement.querySelector('.follow-hint');
+                    renderFollowButton(followBtn, hint, !following);
+                    if (currentTicket) currentTicket.following = !following;
+                }
+                showSuccess(following ? 'Ya no das seguimiento a este ticket' : 'Ahora das seguimiento a este ticket');
+            } catch (err) {
+                showError(err.message || 'No se pudo actualizar el seguimiento');
+            } finally {
+                followBtn.disabled = false;
+            }
+            return;
+        }
+
         const actionBtn = e.target.closest('.btn-action');
-        if (actionBtn && !actionBtn.classList.contains('btn-add-comment')) {
+        if (actionBtn && !actionBtn.classList.contains('btn-add-comment') && !actionBtn.classList.contains('btn-assign-me')) {
             let newStatus;
             const text = actionBtn.textContent;
             if (text === 'Iniciar trabajo') newStatus = 'in_progress';

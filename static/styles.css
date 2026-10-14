@@ -891,3 +891,42 @@ section {
 @media (prefers-reduced-motion: reduce) {
   .verify-digits.shake, .verify-check { animation: none; }
 }
+
+/* ===== Dar seguimiento ===== */
+.detail-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin: 0 0 12px 0;
+}
+.detail-title-row h1 { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.follow-box { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 240px; }
+.follow-btn {
+  min-height: 44px;
+  padding: 6px 16px;
+  border: 1px solid #D5D9E0;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.follow-btn:hover { background: var(--bg); }
+.follow-btn.following {
+  background: #EEF2FC;
+  border-color: #2E55C9;
+  color: #1F3F99;
+  font-weight: 600;
+}
+.follow-btn:disabled { opacity: 0.6; cursor: default; }
+.follow-btn:focus-visible { outline: 2px solid #2E55C9; outline-offset: 2px; }
+.follow-hint { margin: 0; font-size: 12px; color: var(--muted); text-align: right; }
+.follow-hint[hidden] { display: none; }
+@media (max-width: 860px) {
+  .follow-box { align-items: flex-start; max-width: none; }
+  .follow-hint { text-align: left; }
+}

@@ -172,6 +172,7 @@ class TicketDetail(TicketRead):
     comments: list[CommentRead] = []
     contact_phone: Optional[str] = None
     contact_id_number: Optional[str] = None
+    following: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

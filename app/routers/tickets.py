@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
@@ -7,6 +7,7 @@ from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, Hist
 from ..security import get_current_user
 from ..validators import mask_id_number
 from .. import hacienda
+from ..notifications import STATUS_LABELS, notify_followers
 
 router = APIRouter(prefix="/api", tags=["tickets"])
 
@@ -16,6 +17,17 @@ def verify_id_number(id_number: str) -> None:
     error = hacienda.check_id_number(id_number)
     if error:
         raise HTTPException(status_code=400, detail=error)
+
+
+def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Ticket:
+    """Mismas reglas que el detalle: 404 si no existe, 403 si no puede verlo."""
+    db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not db_ticket:
+        raise HTTPException(status_code=404, detail="El ticket no existe")
+    # Regla: el solicitante no puede abrir tickets ajenos
+    if current_user.role == "requester" and db_ticket.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
+    return db_ticket
 
 
 @router.post("/tickets", response_model=TicketRead)
@@ -110,12 +122,7 @@ def list_tickets(
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
-    if not db_ticket:
-        raise HTTPException(status_code=404, detail="El ticket no existe")
-    # Regla: el solicitante no puede abrir tickets ajenos
-    if current_user.role == "requester" and db_ticket.created_by != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
+    db_ticket = get_visible_ticket(db, ticket_id, current_user)
     
     # Determinar qué campos de contacto mostrar según el rol del usuario que ve
     # El creador del ticket, coordinator y admin ven los campos completos
@@ -156,17 +163,52 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         .order_by(models.Comment.id.asc())
         .all()
     )
+    following = (
+        db.query(models.TicketFollower)
+        .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
+        .first()
+        is not None
+    )
     return TicketDetail(
         **TicketRead.model_validate(db_ticket).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
         comments=[CommentRead.model_validate(c) for c in comments],
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
+        following=following,
     )
 
 
+@router.post("/tickets/{ticket_id}/follow", status_code=204)
+def follow_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    get_visible_ticket(db, ticket_id, current_user)
+    exists = (
+        db.query(models.TicketFollower)
+        .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
+        .first()
+    )
+    if not exists:
+        db.add(models.TicketFollower(ticket_id=ticket_id, user_id=current_user.id))
+        db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/tickets/{ticket_id}/follow", status_code=204)
+def unfollow_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    get_visible_ticket(db, ticket_id, current_user)
+    follower = (
+        db.query(models.TicketFollower)
+        .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
+        .first()
+    )
+    if follower:
+        db.delete(follower)
+        db.commit()
+    return Response(status_code=204)
+
+
 @router.post("/tickets/{ticket_id}/comments", response_model=CommentRead)
-def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def add_comment(ticket_id: int, comment: CommentCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
         raise HTTPException(status_code=404, detail="El ticket no existe")
@@ -183,11 +225,16 @@ def add_comment(ticket_id: int, comment: CommentCreate, db: Session = Depends(ge
     db.add(db_comment)
     db.commit()
     db.refresh(db_comment)
+    notify_followers(
+        db, background_tasks, db_ticket, current_user,
+        f"[Ticket #{db_ticket.id}] Nuevo comentario de {current_user.name}",
+        [db_comment.content],
+    )
     return db_comment
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)
-def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
         raise HTTPException(status_code=404, detail="El ticket no existe")
@@ -220,8 +267,10 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="Ticket sin asignar. Asigne para iniciar")
 
     # Validar que assigned_to, priority_id, category_id existan si se proporcionan
+    assignee = None
     if data.assigned_to is not None:
         user = db.query(models.User).filter(models.User.id == data.assigned_to).first()
+        assignee = user
         if not user:
             raise HTTPException(status_code=400, detail="El usuario asignado no existe")
         # Regla: solo técnicos y coordinadores pueden ser asignados
@@ -302,4 +351,18 @@ def update_ticket(ticket_id: int, data: TicketUpdate, db: Session = Depends(get_
 
     db.commit()
     db.refresh(db_ticket)
+
+    # Aviso a los seguidores: un solo correo aunque cambien estado y asignación
+    lines = []
+    subject = None
+    if db_ticket.status != old_status:
+        new_label = STATUS_LABELS.get(db_ticket.status, db_ticket.status)
+        old_label = STATUS_LABELS.get(old_status, old_status)
+        lines.append(f"{current_user.name} cambió el estado de {old_label} a {new_label}.")
+        subject = f"[Ticket #{db_ticket.id}] Cambió de estado: {new_label}"
+    if db_ticket.assigned_to != old_assigned_to and assignee is not None:
+        lines.append(f"{current_user.name} asignó el ticket a {assignee.name}.")
+        subject = subject or f"[Ticket #{db_ticket.id}] Nueva asignación"
+    if lines:
+        notify_followers(db, background_tasks, db_ticket, current_user, subject, lines)
     return db_ticket
