@@ -204,3 +204,20 @@ class VerifyCodeRequest(BaseModel):
 
 class ResendCodeRequest(BaseModel):
     challenge_id: str
+
+
+class DirectoryUser(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+    phone: Optional[str] = None
+    id_number: Optional[str] = None
+    is_active: bool
+    tickets_created: int = 0
+    tickets_assigned_open: int = 0
+
+
+class AdminUserUpdate(BaseModel):
+    role: Literal["requester", "technician", "coordinator", "admin"] | None = None
+    is_active: bool | None = None

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager, suppress
+from logging.handlers import RotatingFileHandler
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -14,8 +15,26 @@ from .routers.catalogs import router as catalogs_router
 from .routers.tickets import router as tickets_router
 from .routers.auth import router as auth_router
 from .routers.invites import router as invites_router
+from .routers.admin import router as admin_router
 
 logging.basicConfig(level=logging.INFO)
+
+LOG_FILE = "data/app.log"
+
+
+def setup_file_logging() -> None:
+    # Además de la consola; el panel del Administrador lee este archivo
+    os.makedirs("data", exist_ok=True)
+    root = logging.getLogger()
+    target = os.path.abspath(LOG_FILE)
+    if any(isinstance(h, RotatingFileHandler) and h.baseFilename == target for h in root.handlers):
+        return
+    handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(handler)
+
+
+setup_file_logging()
 
 
 def init_db():
@@ -92,6 +111,7 @@ app.include_router(catalogs_router)
 app.include_router(tickets_router)
 app.include_router(auth_router)
 app.include_router(invites_router)
+app.include_router(admin_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

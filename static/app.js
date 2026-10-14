@@ -142,6 +142,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
 
+        if (options.responseType === 'blob') {
+            return response;
+        }
+
         return response.json();
     }
 
@@ -183,6 +187,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         renderInvitesSection();
+        updateRoleTabs();
+        showView('tickets');
     }
 
     function showAuthScreen() {
@@ -1553,10 +1559,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (navTickets) {
         navTickets.addEventListener('click', () => {
-            navTickets.classList.add('active');
-            if (navUsers) {
-                navUsers.classList.remove('active');
-            }
+            showView('tickets');
         });
     }
 
@@ -1564,13 +1567,348 @@ document.addEventListener('DOMContentLoaded', () => {
         navUsers.addEventListener('click', () => {
             const usersModal = document.getElementById('usersModal');
             if (usersModal) usersModal.style.display = 'flex';
-            navUsers.classList.add('active');
-            if (navTickets) {
-                navTickets.classList.remove('active');
-            }
+            setActiveTab(navUsers);
             renderInvitesSection();
         });
     }
+
+    // ===== Vistas: Tickets, Directorio y Administración =====
+    const navDirectory = document.getElementById('navDirectory');
+    const navAdmin = document.getElementById('navAdmin');
+    const splitView = document.querySelector('main .split');
+    const directoryView = document.getElementById('directoryView');
+    const adminView = document.getElementById('adminView');
+
+    function setActiveTab(activeTab) {
+        document.querySelectorAll('.topbar-tab').forEach(tab => {
+            const isActive = tab === activeTab;
+            tab.classList.toggle('active', isActive);
+            if (isActive) tab.setAttribute('aria-current', 'page');
+            else tab.removeAttribute('aria-current');
+        });
+    }
+
+    function updateRoleTabs() {
+        const role = currentUser ? currentUser.role : '';
+        navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
+        navAdmin.hidden = role !== 'admin';
+    }
+
+    function showView(name) {
+        if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
+        directoryView.hidden = name !== 'directory';
+        adminView.hidden = name !== 'admin';
+        const tabs = { tickets: navTickets, directory: navDirectory, admin: navAdmin };
+        setActiveTab(tabs[name]);
+        if (name === 'directory') loadDirectory();
+        if (name === 'admin') loadAdminPanel();
+    }
+
+    navDirectory.addEventListener('click', () => showView('directory'));
+    navAdmin.addEventListener('click', () => showView('admin'));
+
+    // ----- Directorio -----
+    const directorySearch = document.getElementById('directorySearch');
+    const directoryRole = document.getElementById('directoryRole');
+    const directoryBody = document.getElementById('directoryBody');
+    const directoryEmpty = document.getElementById('directoryEmpty');
+    const directoryActionsHead = document.querySelector('#directoryHead .admin-only-col');
+    let directorySearchTimer = null;
+    let directorySeq = 0;
+
+    const ROLE_OPTIONS = [
+        ['requester', 'Solicitante'],
+        ['technician', 'Técnico'],
+        ['coordinator', 'Coordinador'],
+        ['admin', 'Administrador']
+    ];
+
+    function maskIdNumber(value) {
+        if (!value) return '';
+        if (value.length <= 3) return value;
+        return '*'.repeat(value.length - 3) + value.slice(-3);
+    }
+
+    async function loadDirectory() {
+        const params = new URLSearchParams();
+        const q = directorySearch.value.trim();
+        if (q) params.set('q', q);
+        if (directoryRole.value) params.set('role', directoryRole.value);
+        const seq = ++directorySeq;
+        try {
+            const query = params.toString();
+            const users = await apiFetch(`/directory${query ? `?${query}` : ''}`);
+            // Solo la última búsqueda pinta la tabla
+            if (seq !== directorySeq) return;
+            renderDirectory(users);
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+    }
+
+    function makeCell(text, className) {
+        const td = document.createElement('td');
+        if (className) td.className = className;
+        td.textContent = text;
+        return td;
+    }
+
+    function renderDirectory(users) {
+        const isAdmin = currentUser && currentUser.role === 'admin';
+        directoryActionsHead.hidden = !isAdmin;
+        directoryBody.replaceChildren();
+        directoryEmpty.hidden = users.length > 0;
+
+        users.forEach(user => {
+            const isSelf = currentUser && user.id === currentUser.id;
+            const row = document.createElement('tr');
+            row.dataset.userId = user.id;
+            row.dataset.userName = user.name;
+
+            row.appendChild(makeCell(user.name));
+            row.appendChild(makeCell(user.email));
+
+            const roleTd = document.createElement('td');
+            if (isAdmin && !isSelf) {
+                const select = document.createElement('select');
+                select.className = 'directory-role-select';
+                select.setAttribute('aria-label', `Rol de ${user.name}`);
+                ROLE_OPTIONS.forEach(([value, label]) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = label;
+                    option.selected = value === user.role;
+                    select.appendChild(option);
+                });
+                roleTd.appendChild(select);
+            } else {
+                roleTd.textContent = ROLE_MAP[user.role] || user.role;
+            }
+            row.appendChild(roleTd);
+
+            row.appendChild(makeCell(user.phone || '—'));
+
+            const idTd = document.createElement('td');
+            if (user.id_number) {
+                const wrap = document.createElement('span');
+                wrap.className = 'id-cell';
+                const value = document.createElement('span');
+                value.className = 'id-value';
+                value.textContent = maskIdNumber(user.id_number);
+                value.dataset.full = user.id_number;
+                const toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.className = 'link-btn id-toggle';
+                toggle.textContent = 'Mostrar';
+                toggle.setAttribute('aria-pressed', 'false');
+                toggle.setAttribute('aria-label', `Mostrar cédula de ${user.name}`);
+                wrap.appendChild(value);
+                wrap.appendChild(toggle);
+                idTd.appendChild(wrap);
+            } else {
+                idTd.textContent = '—';
+            }
+            row.appendChild(idTd);
+
+            row.appendChild(makeCell(String(user.tickets_created), 'num'));
+            row.appendChild(makeCell(String(user.tickets_assigned_open), 'num'));
+
+            const stateTd = document.createElement('td');
+            const state = document.createElement('span');
+            state.className = user.is_active ? 'state-active' : 'state-inactive';
+            state.textContent = user.is_active ? 'Activa' : 'Desactivada';
+            stateTd.appendChild(state);
+            row.appendChild(stateTd);
+
+            if (isAdmin) {
+                const actionsTd = document.createElement('td');
+                if (!isSelf) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn-secondary directory-toggle-active';
+                    btn.dataset.activate = user.is_active ? 'false' : 'true';
+                    btn.textContent = user.is_active ? 'Desactivar' : 'Activar';
+                    actionsTd.appendChild(btn);
+                }
+                row.appendChild(actionsTd);
+            }
+
+            directoryBody.appendChild(row);
+        });
+    }
+
+    async function updateDirectoryUser(userId, changes) {
+        try {
+            await apiFetch(`/admin/users/${userId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(changes)
+            });
+            showSuccess('Usuario actualizado');
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+        await loadDirectory();
+    }
+
+    directorySearch.addEventListener('input', () => {
+        clearTimeout(directorySearchTimer);
+        directorySearchTimer = setTimeout(loadDirectory, 300);
+    });
+
+    directoryRole.addEventListener('change', loadDirectory);
+
+    directoryBody.addEventListener('click', (e) => {
+        const idToggle = e.target.closest('.id-toggle');
+        if (idToggle) {
+            const value = idToggle.parentElement.querySelector('.id-value');
+            const showing = idToggle.getAttribute('aria-pressed') === 'true';
+            value.textContent = showing ? maskIdNumber(value.dataset.full) : value.dataset.full;
+            idToggle.textContent = showing ? 'Mostrar' : 'Ocultar';
+            idToggle.setAttribute('aria-pressed', showing ? 'false' : 'true');
+            return;
+        }
+
+        const activeBtn = e.target.closest('.directory-toggle-active');
+        if (activeBtn) {
+            const row = activeBtn.closest('tr');
+            const activate = activeBtn.dataset.activate === 'true';
+            if (!activate && !confirm(`¿Desactivar la cuenta de ${row.dataset.userName}? No podrá entrar hasta que la actives de nuevo.`)) {
+                return;
+            }
+            activeBtn.disabled = true;
+            updateDirectoryUser(row.dataset.userId, { is_active: activate });
+        }
+    });
+
+    directoryBody.addEventListener('change', (e) => {
+        const select = e.target.closest('.directory-role-select');
+        if (select) {
+            select.disabled = true;
+            updateDirectoryUser(select.closest('tr').dataset.userId, { role: select.value });
+        }
+    });
+
+    // ----- Administración -----
+    const adminStatus = document.getElementById('adminStatus');
+    const adminUsersByRole = document.getElementById('adminUsersByRole');
+    const adminTicketsByStatus = document.getElementById('adminTicketsByStatus');
+    const downloadBackupBtn = document.getElementById('downloadBackup');
+    const refreshLogsBtn = document.getElementById('refreshLogs');
+    const adminLogs = document.getElementById('adminLogs');
+
+    function addStatusItem(label, ...children) {
+        const dt = document.createElement('dt');
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        children.forEach(child => dd.appendChild(child));
+        adminStatus.appendChild(dt);
+        adminStatus.appendChild(dd);
+    }
+
+    function statusText(ok, text) {
+        const span = document.createElement('span');
+        const dot = document.createElement('span');
+        dot.className = `status-dot ${ok ? 'ok' : 'bad'}`;
+        dot.setAttribute('aria-hidden', 'true');
+        span.appendChild(dot);
+        span.appendChild(document.createTextNode(text));
+        return span;
+    }
+
+    function subText(text, className = 'status-sub') {
+        const span = document.createElement('span');
+        span.className = className;
+        span.textContent = text;
+        return span;
+    }
+
+    function renderCountList(list, counts, labels, order) {
+        list.replaceChildren();
+        const keys = order.filter(k => k in counts).concat(Object.keys(counts).filter(k => !order.includes(k)));
+        if (keys.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = 'Sin datos';
+            list.appendChild(li);
+            return;
+        }
+        keys.forEach(key => {
+            const li = document.createElement('li');
+            const name = document.createElement('span');
+            name.textContent = labels[key] || key;
+            const count = document.createElement('span');
+            count.className = 'count';
+            count.textContent = String(counts[key]);
+            li.appendChild(name);
+            li.appendChild(count);
+            list.appendChild(li);
+        });
+    }
+
+    async function loadAdminHealth() {
+        try {
+            const health = await apiFetch('/admin/health');
+            adminStatus.replaceChildren();
+
+            const dbOk = health.database === 'ok';
+            addStatusItem('Base de datos', statusText(dbOk, dbOk ? 'Funcionando' : health.database));
+
+            const emailParts = [statusText(health.email_enabled, health.email_enabled ? 'Encendido' : 'Apagado')];
+            emailParts.push(subText(`Última revisión: ${health.email_last_run ? formatDateTime(health.email_last_run) : 'Nunca'}`));
+            emailParts.push(subText(`Correos procesados en la última revisión: ${health.email_last_processed}`));
+            if (health.email_last_error) {
+                emailParts.push(subText(`Último error: ${health.email_last_error}`, 'status-sub status-error'));
+            }
+            addStatusItem('Correo', ...emailParts);
+
+            addStatusItem('Chatbot', statusText(health.chatbot_enabled, health.chatbot_enabled ? 'Encendido' : 'Apagado'));
+
+            renderCountList(adminUsersByRole, health.users_by_role, ROLE_MAP,
+                ['requester', 'technician', 'coordinator', 'admin', 'agent']);
+            renderCountList(adminTicketsByStatus, health.tickets_by_status, STATE_MAP,
+                ['new', 'in_progress', 'resolved', 'closed']);
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+    }
+
+    async function loadAdminLogs() {
+        try {
+            const data = await apiFetch('/admin/logs');
+            adminLogs.textContent = data.lines.length ? data.lines.join('\n') : 'Todavía no hay registros.';
+            adminLogs.scrollTop = adminLogs.scrollHeight;
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+    }
+
+    function loadAdminPanel() {
+        loadAdminHealth();
+        loadAdminLogs();
+    }
+
+    refreshLogsBtn.addEventListener('click', loadAdminLogs);
+
+    downloadBackupBtn.addEventListener('click', async () => {
+        downloadBackupBtn.disabled = true;
+        try {
+            const response = await apiFetch('/admin/backup', { responseType: 'blob' });
+            const blob = await response.blob();
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="?([^";]+)"?/);
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = match ? match[1] : 'ticketera-respaldo.db';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        } catch (err) {
+            // apiFetch ya mostró el error
+        } finally {
+            downloadBackupBtn.disabled = false;
+        }
+    });
 
     // Solicitante (solo coordinator y admin): crear tickets a nombre de otra persona
     const requesterGroup = document.getElementById('requesterGroup');

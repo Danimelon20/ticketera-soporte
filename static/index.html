@@ -111,6 +111,8 @@
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
+    <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
+    <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
   </nav>
   <div class="topbar-section topbar-action">
     <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
@@ -163,6 +165,72 @@
                 </div>
             </section>
         </div>
+
+        <section id="directoryView" class="page-view" hidden aria-labelledby="directoryTitle">
+            <h1 id="directoryTitle" class="view-title">Directorio</h1>
+            <div class="directory-filters">
+                <label for="directorySearch" class="sr-only">Buscar por nombre o correo</label>
+                <input type="search" id="directorySearch" placeholder="Buscar por nombre o correo">
+                <label for="directoryRole" class="sr-only">Filtrar por rol</label>
+                <select id="directoryRole">
+                    <option value="">Todos</option>
+                    <option value="requester">Solicitantes</option>
+                    <option value="technician">Técnicos</option>
+                    <option value="coordinator">Coordinadores</option>
+                    <option value="admin">Administradores</option>
+                </select>
+            </div>
+            <div class="table-scroll">
+                <table class="directory-table">
+                    <thead>
+                        <tr id="directoryHead">
+                            <th scope="col">Nombre</th>
+                            <th scope="col">Correo</th>
+                            <th scope="col">Rol</th>
+                            <th scope="col">Teléfono</th>
+                            <th scope="col">Cédula</th>
+                            <th scope="col">Tickets creados</th>
+                            <th scope="col">Abiertos asignados</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col" class="admin-only-col">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="directoryBody"></tbody>
+                </table>
+            </div>
+            <p id="directoryEmpty" class="view-note" hidden>No hay usuarios con esos filtros.</p>
+        </section>
+
+        <section id="adminView" class="page-view" hidden aria-labelledby="adminTitle">
+            <h1 id="adminTitle" class="view-title">Administración</h1>
+            <div class="admin-grid">
+                <article class="admin-card">
+                    <h2>Estado del sistema</h2>
+                    <dl id="adminStatus" class="admin-status"></dl>
+                </article>
+                <article class="admin-card">
+                    <h2>Usuarios por rol</h2>
+                    <ul id="adminUsersByRole" class="count-list"></ul>
+                </article>
+                <article class="admin-card">
+                    <h2>Tickets por estado</h2>
+                    <ul id="adminTicketsByStatus" class="count-list"></ul>
+                </article>
+                <article class="admin-card">
+                    <h2>Copia de seguridad</h2>
+                    <p class="admin-text">Descarga una copia completa de la base de datos. Guárdala en un lugar seguro: contiene datos personales.</p>
+                    <button type="button" id="downloadBackup" class="btn-secondary">Descargar copia</button>
+                </article>
+                <article class="admin-card admin-card-wide">
+                    <div class="admin-card-head">
+                        <h2>Registros del servidor</h2>
+                        <button type="button" id="refreshLogs" class="btn-secondary">Actualizar</button>
+                    </div>
+                    <pre id="adminLogs" class="admin-logs" tabindex="0"></pre>
+                </article>
+            </div>
+            <p class="view-note">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
+        </section>
     </main>
 
     <div id="errorMessage" class="error"></div>

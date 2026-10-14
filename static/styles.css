@@ -930,3 +930,71 @@ section {
   .follow-box { align-items: flex-start; max-width: none; }
   .follow-hint { text-align: left; }
 }
+
+/* ===== Directorio y Administración ===== */
+.page-view { padding: 28px 32px; box-sizing: border-box; width: 100%; }
+.page-view[hidden], .topbar-tab[hidden] { display: none; }
+.view-title { font-size: 24px; font-weight: 600; margin: 0 0 20px; }
+.view-note { color: var(--muted); font-size: 13px; margin: 20px 0 0; }
+.view-note[hidden] { display: none; }
+.directory-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.directory-filters input,
+.directory-filters select {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font: inherit;
+  box-sizing: border-box;
+}
+.directory-filters input { flex: 1 1 260px; max-width: 420px; }
+.table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.directory-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.directory-table th,
+.directory-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+.directory-table th { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--bg); }
+.directory-table tbody tr:last-child td { border-bottom: none; }
+.directory-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.directory-table .admin-only-col[hidden] { display: none; }
+.directory-table select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--surface); }
+.id-cell { display: flex; align-items: center; gap: 8px; }
+.id-cell .id-value { font-family: var(--mono); font-size: 13px; }
+.link-btn { min-height: 32px; padding: 0 6px; border: none; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+.state-active { color: #1D6B43; font-weight: 600; }
+.state-inactive { color: var(--muted); }
+.admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.admin-card { background: #FFFFFF; border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; min-width: 0; }
+.admin-card h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; border-bottom: none; padding-bottom: 0; }
+.admin-card-wide { grid-column: 1 / -1; }
+.admin-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.admin-card-head h2 { margin: 0; }
+.admin-text { margin: 0 0 16px; color: var(--ink); line-height: 1.5; }
+.admin-status { margin: 0; display: grid; gap: 12px; }
+.admin-status dt { font-size: 12px; color: var(--muted); }
+.admin-status dd { margin: 2px 0 0; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.status-dot.ok { background: #16A34A; }
+.status-dot.bad { background: #B91C1C; }
+.status-error { color: #B91C1C; overflow-wrap: anywhere; }
+.status-sub { display: block; font-size: 13px; color: var(--muted); }
+.count-list { list-style: none; margin: 0; padding: 0; }
+.count-list li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.count-list li:last-child { border-bottom: none; }
+.count-list .count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.admin-logs {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0F172A;
+  color: #E2E8F0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+@media (max-width: 860px) {
+  .page-view { padding: 20px 16px; }
+}
