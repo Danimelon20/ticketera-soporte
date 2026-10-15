@@ -34,6 +34,33 @@ def is_business_day(day: date) -> bool:
     return day.isoweekday() in _office_days() and day not in _holidays()
 
 
+def business_hours_between(start: datetime, end: datetime) -> float:
+    """Horas hábiles entre dos fechas. Una fecha sin zona se toma como UTC (así se guardan en la base)."""
+    tz = ZoneInfo(config.OFFICE_TZ)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    start = start.astimezone(tz)
+    end = end.astimezone(tz)
+    if end <= start:
+        return 0.0
+    open_time = _parse_time(config.OFFICE_START)
+    close_time = _parse_time(config.OFFICE_END)
+    days = _office_days()
+    holidays = _holidays()
+    total = timedelta()
+    day = start.date()
+    while day <= end.date():
+        if day.isoweekday() in days and day not in holidays:
+            low = max(start, datetime.combine(day, open_time, tzinfo=tz))
+            high = min(end, datetime.combine(day, close_time, tzinfo=tz))
+            if high > low:
+                total += high - low
+        day += timedelta(days=1)
+    return total.total_seconds() / 3600
+
+
 def day_hours() -> float:
     """Horas de una jornada (un día hábil)."""
     start = _parse_time(config.OFFICE_START)

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
-from .. import config, daily_summary, email_analysis, email_poller, models
+from .. import alerts, config, daily_summary, email_analysis, email_poller, models
 from ..schemas import AdminUserUpdate, DirectoryUser
 from ..security import get_current_user
 
@@ -133,6 +133,8 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
         ),
         "daily_summary_enabled": config.DAILY_SUMMARY_ENABLED,
         "daily_summary_last": _isoformat(daily_summary.last_automatic(db)),
+        "alerts_enabled": config.ALERTS_ENABLED,
+        "alerts_last": _isoformat(alerts.last_sent(db)),
     }
 
 

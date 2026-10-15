@@ -2323,6 +2323,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryStatus = document.getElementById('summaryStatus');
     const sendSummaryNowBtn = document.getElementById('sendSummaryNow');
     const analyzeMissingBtn = document.getElementById('analyzeMissing');
+    const alertsStatus = document.getElementById('alertsStatus');
 
     function addStatusItem(label, ...children) {
         const dt = document.createElement('dt');
@@ -2414,6 +2415,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const summaryState = health.daily_summary_enabled ? 'Automático encendido' : 'Automático apagado';
             const summaryLast = health.daily_summary_last ? formatDateTime(health.daily_summary_last) : 'Nunca';
             summaryStatus.textContent = `${summaryState}. Último resumen automático: ${summaryLast}.`;
+
+            const alertsState = health.alerts_enabled ? 'Encendidas' : 'Apagadas';
+            const alertsLast = health.alerts_last ? formatDateTime(health.alerts_last) : 'Nunca';
+            alertsStatus.textContent = `${alertsState}. Última alerta enviada: ${alertsLast}.`;
         } catch (err) {
             // apiFetch ya mostró el error
         }

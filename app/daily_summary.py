@@ -100,7 +100,7 @@ def build_summary(db: Session, now: datetime | None = None) -> tuple[str, str]:
     new_tickets = (
         db.query(models.Ticket)
         .options(joinedload(models.Ticket.ai_analysis), joinedload(models.Ticket.assigned_user))
-        .filter(models.Ticket.created_at >= now - timedelta(hours=24))
+        .filter(models.Ticket.created_at >= now - timedelta(hours=24), models.Ticket.created_at <= now)
         .all()
     )
     new_tickets.sort(key=lambda t: (LEVEL_ORDER.index(_level(t)) if _level(t) in LEVEL_ORDER else len(LEVEL_ORDER), t.id))

@@ -29,6 +29,11 @@ OFFICE_HOLIDAYS = os.getenv("OFFICE_HOLIDAYS", "")
 DAILY_SUMMARY_ENABLED = os.getenv("DAILY_SUMMARY_ENABLED", "false").lower() == "true"
 DAILY_SUMMARY_HOUR = int(os.getenv("DAILY_SUMMARY_HOUR", "8"))
 
+# Alertas por correo: críticos, por vencer (porcentaje del tiempo meta hábil) y vencidos
+ALERTS_ENABLED = os.getenv("ALERTS_ENABLED", "false").lower() == "true"
+ALERT_WARN_PERCENT = int(os.getenv("ALERT_WARN_PERCENT", "75"))
+ALERTS_CHECK_SECONDS = int(os.getenv("ALERTS_CHECK_SECONDS", "120"))
+
 
 # Hacienda: se leen en cada llamada para poder cambiarlas sin reiniciar (y en pruebas)
 def hacienda_check_enabled() -> bool:

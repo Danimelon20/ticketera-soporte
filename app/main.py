@@ -11,6 +11,7 @@ from .database import engine, SessionLocal, get_db
 from . import config, models
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
+from .alerts import alerts_forever
 from .routers.users import router as users_router
 from .routers.catalogs import router as catalogs_router
 from .routers.tickets import router as tickets_router
@@ -101,9 +102,17 @@ async def lifespan(app: FastAPI):
         else:
             logging.warning("DAILY_SUMMARY_ENABLED=true pero EMAIL_ENABLED=false: no se enviará el resumen")
 
+    alerts_task = None
+    if config.ALERTS_ENABLED:
+        if config.EMAIL_ENABLED:
+            alerts_task = asyncio.create_task(alerts_forever())
+            logging.info("Alertas por correo activas cada %s segundos", config.ALERTS_CHECK_SECONDS)
+        else:
+            logging.warning("ALERTS_ENABLED=true pero EMAIL_ENABLED=false: no se enviarán alertas")
+
     yield
 
-    for task in (poller, summary):
+    for task in (poller, summary, alerts_task):
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):

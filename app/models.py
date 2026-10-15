@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint, Index, text
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -260,3 +260,22 @@ class DailySummary(Base):
     id = Column(Integer, primary_key=True)
     day = Column(Date, unique=True, nullable=False)
     sent_at = Column(DateTime, nullable=False)
+
+
+class AlertSent(Base):
+    """Alerta ya enviada: una sola vez por ticket o borrador y tipo."""
+    __tablename__ = "alerts_sent"
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(20), nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), nullable=True)
+    sent_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('critical', 'due_soon', 'overdue')", name="chk_alert_kind"),
+        UniqueConstraint("kind", "ticket_id", "draft_id", name="uq_alert"),
+        # En SQLite los NULL no se repiten en un UNIQUE: estos índices sí evitan duplicados
+        Index("uq_alert_ticket", "kind", "ticket_id", unique=True, sqlite_where=text("ticket_id IS NOT NULL")),
+        Index("uq_alert_draft", "kind", "draft_id", unique=True, sqlite_where=text("draft_id IS NOT NULL")),
+    )
