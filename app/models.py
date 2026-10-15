@@ -242,3 +242,12 @@ class EmailDraft(Base):
     reviewer = relationship("User", foreign_keys=[reviewed_by])
     category = relationship("Category")
     priority = relationship("Priority")
+
+
+class UnclearNotice(Base):
+    """Cuándo se le pidió más detalles a un solicitante (antibucle)."""
+    __tablename__ = "unclear_notices"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    sent_at = Column(DateTime, nullable=False)

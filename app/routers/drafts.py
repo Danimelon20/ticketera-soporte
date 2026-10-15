@@ -16,7 +16,8 @@ from .tickets import verify_id_number
 router = APIRouter(prefix="/api", tags=["drafts"])
 
 REVIEW_ROLES = ("technician", "coordinator", "admin")
-DEFAULT_STATUSES = ("pending_review", "waiting_contact", "error", "unclear")
+# Los poco claros y los que no son soporte no se revisan: no se listan ni se cuentan
+DEFAULT_STATUSES = ("pending_review", "waiting_contact", "error")
 DraftStatus = Literal[
     "analyzing", "pending_review", "waiting_contact", "unclear", "not_support",
     "status_reply", "confirmed", "discarded", "error",

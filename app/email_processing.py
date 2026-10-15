@@ -266,7 +266,8 @@ def process_message(db: Session, msg) -> str:
             message_id=message_id,
             requester_id=user.id,
             subject=subject[:300],
-            body=body_text[:BODY_MAX_LENGTH],
+            # Sin el texto citado (por ejemplo, la respuesta a "Necesitamos más detalles")
+            body=strip_quoted(body_text)[:BODY_MAX_LENGTH],
             status="analyzing",
             contact_phone=phone,
             contact_id_number=user.id_number if hacienda_error else id_number,

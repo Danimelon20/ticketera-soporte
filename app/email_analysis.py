@@ -1,14 +1,14 @@
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from . import chatbot, config, mailer, models
 from .business_hours import add_business_hours, day_hours
 from .database import SessionLocal
-from .email_parser import _clean_title
+from .email_parser import _PREFIX_RE, _SUPPORT_TAG_RE, _clean_title, normalize, strip_quoted
 from .notifications import STATUS_LABELS
 
 # Fase 1: el análisis solo se muestra y se mide. Nunca cambia el ticket ni responde correos.
@@ -34,6 +34,15 @@ MAX_ATTEMPTS = 3
 SUMMARY_CHARS = 300
 START_MARK = "<<<CORREO>>>"
 END_MARK = "<<<FIN>>>"
+# Palabras que no dicen qué falla: si sin ellas quedan menos de 2, el correo es demasiado vago
+FILLER_WORDS = frozenset({
+    "hola", "buenas", "buenos", "dias", "tardes", "noches", "ayuda", "ayudar", "ayudenme",
+    "necesito", "quiero", "porfa", "por", "favor", "pls", "gracias", "urgente", "soporte",
+    "consulta", "saludos", "me", "puede", "pueden", "podrian", "un", "una", "el", "la",
+    "de", "a", "y", "con",
+})
+MIN_MEANINGFUL_WORDS = 2
+_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def _now() -> datetime:
@@ -186,6 +195,8 @@ DRAFT_TITLE_CHARS = 120
 DRAFT_DESCRIPTION_CHARS = 2000
 OPEN_STATUSES = ("new", "in_progress", "resolved")
 _TICKET_NUMBER_RE = re.compile(r"#\s*(\d+)")
+UNCLEAR_SUBJECT = "[Soporte] Necesitamos más detalles sobre su solicitud"
+UNCLEAR_RESEND_HOURS = 24
 
 
 def build_draft_messages(draft: models.EmailDraft, category_names: list[str]) -> list[dict]:
@@ -207,9 +218,11 @@ def build_draft_messages(draft: models.EmailDraft, category_names: list[str]) ->
         '"description": "<qué pasa, en español>", "level": <0 a 4>, '
         '"summary": "<máximo 2 oraciones en español>"}.',
     ])
+    # La respuesta a nuestro pedido de detalles se juzga por el cuerpo, no por nuestro asunto
+    subject = "" if _clean_title(draft.subject) == _clean_title(UNCLEAR_SUBJECT) else draft.subject
     user = "\n".join([
         START_MARK,
-        f"Asunto: {_clean(draft.subject)}",
+        f"Asunto: {_clean(subject)}",
         "",
         _clean(draft.body),
         END_MARK,
@@ -287,14 +300,60 @@ def _unclear_body(user: models.User) -> str:
     return "\n".join([
         f"Buen día, {user.name}.",
         "",
-        "Recibimos su correo, pero no logramos entender su solicitud.",
-        "Para ayudarle, por favor escríbanos de nuevo indicando:",
-        "- qué problema tiene,",
+        "Recibimos su correo, pero necesitamos más información para poder atender su solicitud.",
+        "Le agradecemos que nos indique:",
+        "- qué es lo que falla,",
         "- desde cuándo ocurre, y",
-        "- a qué equipo o sistema afecta.",
+        "- qué equipo o sistema se ve afectado.",
         "",
-        "Recuerde poner \"[Soporte]\" en el asunto del correo.",
+        "Por favor responda a este mismo correo con esa información.",
     ])
+
+
+def _strip_subject(subject: str) -> str:
+    """Asunto sin "[Soporte]" ni prefijos Re:/RV:/Fwd:, sin título por defecto."""
+    text = subject or ""
+    while True:
+        cleaned = _SUPPORT_TAG_RE.sub("", _PREFIX_RE.sub("", text)).strip()
+        if cleaned == text:
+            return text
+        text = cleaned
+
+
+def is_too_vague(subject: str, body: str) -> bool:
+    """Regla fija, sin IA: True si el correo no dice qué falla."""
+    subject = _strip_subject(subject)
+    # El asunto de nuestro propio aviso no cuenta como descripción
+    if normalize(subject) == normalize(_strip_subject(UNCLEAR_SUBJECT)):
+        subject = ""
+    words = _WORD_RE.findall(normalize(f"{subject} {strip_quoted(body or '')}"))
+    meaningful = [w for w in words if w not in FILLER_WORDS and not w.isdigit()]
+    return len(meaningful) < MIN_MEANINGFUL_WORDS
+
+
+def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User) -> str:
+    """Poco claro: no queda borrador; se piden detalles como mucho una vez cada 24 horas."""
+    draft_id = draft.id
+    processed = (
+        db.query(models.ProcessedEmail).filter(models.ProcessedEmail.message_id == draft.message_id).first()
+    )
+    if processed is not None:
+        processed.result = "unclear"
+    db.delete(draft)
+    db.commit()
+
+    cutoff = _now() - timedelta(hours=UNCLEAR_RESEND_HOURS)
+    already_sent = (
+        db.query(models.UnclearNotice)
+        .filter(models.UnclearNotice.user_id == user.id, models.UnclearNotice.sent_at >= cutoff)
+        .first()
+        is not None
+    )
+    if not already_sent and mailer.send_email(user.email, UNCLEAR_SUBJECT, _unclear_body(user)):
+        db.add(models.UnclearNotice(user_id=user.id, sent_at=_now()))
+        db.commit()
+    logging.info("Borrador %s poco claro: se descartó (aviso %s)", draft_id, "omitido" if already_sent else "enviado")
+    return "unclear"
 
 
 def _received_body(user: models.User, missing_contact: bool) -> str:
@@ -316,6 +375,10 @@ def _received_body(user: models.User, missing_contact: bool) -> str:
 
 
 def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
+    # El modelo pequeño no distingue bien los correos vagos: se deciden sin llamarlo
+    if is_too_vague(draft.subject, draft.body):
+        return _handle_unclear(db, draft, draft.requester)
+
     categories = (
         db.query(models.Category).filter(models.Category.is_active.is_(True)).order_by(models.Category.id).all()
     )
@@ -344,13 +407,14 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
     draft.needs_review = result["needs_review"]
     kind = result["kind"]
 
+    # Lo que trae "[Soporte]" ya pasó la regla de Outlook: el cliente sí quiso pedir soporte
+    has_tag = bool(_SUPPORT_TAG_RE.search(draft.subject or ""))
+    if kind == "unclear" or (has_tag and (kind == "not_support" or (kind == "ticket" and result["level"] == 0))):
+        return _handle_unclear(db, draft, user)
+
     if kind == "not_support":
         draft.status = "not_support"
         db.commit()
-    elif kind == "unclear":
-        draft.status = "unclear"
-        db.commit()
-        mailer.send_email(user.email, "Necesitamos más detalles sobre su solicitud", _unclear_body(user))
     elif kind == "status_question":
         draft.status = "status_reply"
         db.commit()

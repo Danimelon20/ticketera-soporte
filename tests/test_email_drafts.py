@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from email.message import EmailMessage
 from email.utils import make_msgid
 
@@ -29,6 +30,7 @@ def setup(monkeypatch):
     db = SessionLocal()
     try:
         db.query(models.EmailDraft).delete()
+        db.query(models.UnclearNotice).delete()
         db.commit()
     finally:
         db.close()
@@ -220,15 +222,168 @@ def test_partial_contact_keeps_waiting(make_user, sent, llm):
     assert "Todavía falta: Cédula" in sent[-1][2]
 
 
+def _processed_result(msg):
+    db = SessionLocal()
+    try:
+        message_id = "".join(msg["Message-ID"].split())
+        return db.query(models.ProcessedEmail).filter(models.ProcessedEmail.message_id == message_id).first().result
+    finally:
+        db.close()
+
+
+def _unclear_from(requester, llm, answer, body="hola, eso que hablamos", subject="Problema con la impresora"):
+    """Correo confuso: devuelve el mensaje para revisar su ProcessedEmail."""
+    msg = _email(requester["email"], body=body, subject=subject)
+    assert _process(msg) == "draft_created"
+    llm["replies"].append(answer)
+    email_analysis.analyze_pending_drafts()
+    return msg
+
+
 def test_unclear_asks_for_details(make_user, sent, llm):
     requester = make_user("requester", "Mario Cliente")
-    draft = _draft_from(requester, llm, _answer(kind="unclear"), body="hola, eso que hablamos")
-    assert draft.status == "unclear"
+    msg = _unclear_from(requester, llm, _answer(kind="unclear"))
+    assert _drafts(requester["id"]) == []
+    assert _processed_result(msg) == "unclear"
+    assert len(sent) == 1
     to, subject, body = sent[0]
-    assert subject == "Necesitamos más detalles sobre su solicitud"
+    assert to == requester["email"]
+    assert subject == "[Soporte] Necesitamos más detalles sobre su solicitud"
     assert "Buen día, Mario Cliente." in body
-    assert "desde cuándo" in body and "equipo o sistema" in body
-    assert "[Soporte]" in body
+    assert "falla" in body and "desde cuándo" in body and "equipo o sistema" in body
+    assert "responda a este mismo correo" in body
+
+
+def test_soporte_short_email_asks_for_details_without_draft(client, make_user, sent, llm):
+    technician = make_user("technician")
+    requester = make_user("requester")
+    msg = _unclear_from(requester, llm, _answer(kind="unclear", level=0), body="hola ayuda porfa", subject="[Soporte] Ayuda")
+    assert _drafts(requester["id"]) == []
+    assert _processed_result(msg) == "unclear"
+    assert [s[1] for s in sent] == ["[Soporte] Necesitamos más detalles sobre su solicitud"]
+    # No suma al contador de Borradores
+    assert client.get("/api/drafts", headers=technician["headers"]).json() == []
+
+
+def test_soporte_not_support_is_treated_as_unclear(client, make_user, sent, llm):
+    technician = make_user("technician")
+    requester = make_user("requester")
+    # No es vago: lo decide la IA, que se equivoca con not_support
+    msg = _unclear_from(requester, llm, _answer(kind="not_support", level=0), body="la pantalla parpadea", subject="[Soporte] Ayuda")
+    assert len(llm["payloads"]) == 1
+    assert _drafts(requester["id"]) == []
+    assert _processed_result(msg) == "unclear"
+    assert [s[1] for s in sent] == ["[Soporte] Necesitamos más detalles sobre su solicitud"]
+    assert client.get("/api/drafts", headers=technician["headers"]).json() == []
+
+
+def test_two_unclear_emails_send_one_notice(make_user, sent, llm):
+    requester = make_user("requester")
+    first = _unclear_from(requester, llm, _answer(kind="unclear"), subject="[Soporte] Ayuda")
+    second = _unclear_from(requester, llm, _answer(kind="not_support", level=0), subject="[Soporte] Ayuda otra vez")
+    assert len(sent) == 1
+    assert _processed_result(first) == "unclear"
+    assert _processed_result(second) == "unclear"
+    assert _drafts(requester["id"]) == []
+
+
+def test_unclear_notice_is_sent_again_after_24_hours(make_user, sent, llm):
+    requester = make_user("requester")
+    _unclear_from(requester, llm, _answer(kind="unclear"), subject="[Soporte] Ayuda")
+    db = SessionLocal()
+    try:
+        notice = db.query(models.UnclearNotice).filter(models.UnclearNotice.user_id == requester["id"]).one()
+        notice.sent_at = email_analysis._now() - timedelta(hours=25)
+        db.commit()
+    finally:
+        db.close()
+    _unclear_from(requester, llm, _answer(kind="unclear"), subject="[Soporte] Ayuda")
+    assert len(sent) == 2
+
+
+def test_reply_to_unclear_notice_creates_normal_draft(make_user, sent, llm):
+    requester = make_user("requester")
+    _set(models.User, requester["id"], phone="88887777", id_number="109870654")
+    # El primer correo es vago: se decide sin la IA
+    assert _process(_email(requester["email"], body="hola ayuda porfa", subject="[Soporte] Ayuda")) == "draft_created"
+    email_analysis.analyze_pending_drafts()
+    assert llm["payloads"] == []
+    reply = (
+        "La impresora del tercer piso no imprime desde ayer en la mañana.\n\n"
+        "El mié, 14 oct 2026 a las 10:00, Soporte <soporte@ejemplo.com> escribió:\n"
+        "> Buen día. Recibimos su correo, pero necesitamos más información."
+    )
+    draft = _draft_from(requester, llm, _answer(), body=reply,
+                        subject="Re: [Soporte] Necesitamos más detalles sobre su solicitud")
+    assert draft.status == "pending_review"
+    assert "tercer piso" in draft.body
+    assert "escribió" not in draft.body and "necesitamos más información" not in draft.body
+    sent_to_ai = llm["payloads"][-1]["messages"][1]["content"]
+    assert "escribió" not in sent_to_ai and "Necesitamos más detalles" not in sent_to_ai
+    assert sent[-1][1] == "[Soporte] Recibimos su correo"
+
+
+@pytest.mark.parametrize("subject, body", [
+    ("[Soporte] Ayuda 3", "necesito ayuda"),
+    ("[Soporte] Ayuda", "hola ayuda porfa"),
+    ("RE: [Soporte] Consulta", "Buenas, me pueden ayudar? Gracias"),
+    ("Re: [Soporte] Necesitamos más detalles sobre su solicitud",
+     "necesito ayuda\n\nEl mié, 14 oct 2026, Soporte escribió:\n> La impresora no imprime"),
+])
+def test_vague_emails(subject, body):
+    assert email_analysis.is_too_vague(subject, body) is True
+
+
+@pytest.mark.parametrize("subject, body", [
+    ("[Soporte] Ayuda", "Sin internet"),
+    ("[Soporte] Ayuda", "No tengo internet"),
+    ("[Soporte] Ayuda", "La impresora no imprime"),
+    ("[Soporte] Sin internet", "ayuda porfa"),
+])
+def test_clear_emails_are_not_vague(subject, body):
+    assert email_analysis.is_too_vague(subject, body) is False
+
+
+@pytest.mark.parametrize("subject, body", [
+    ("[Soporte] Ayuda 3", "necesito ayuda"),
+    ("[Soporte] Ayuda", "hola ayuda porfa"),
+    ("[Soporte] Consulta", "Buenas, me pueden ayudar? Gracias"),
+])
+def test_vague_email_skips_ai(client, make_user, sent, llm, subject, body):
+    technician = make_user("technician")
+    requester = make_user("requester")
+    msg = _email(requester["email"], body=body, subject=subject)
+    assert _process(msg) == "draft_created"
+    email_analysis.analyze_pending_drafts()
+    assert llm["payloads"] == []
+    assert _drafts(requester["id"]) == []
+    assert _processed_result(msg) == "unclear"
+    assert [s[1] for s in sent] == ["[Soporte] Necesitamos más detalles sobre su solicitud"]
+    assert client.get("/api/drafts", headers=technician["headers"]).json() == []
+
+
+def test_two_vague_emails_send_one_notice(make_user, sent, llm):
+    requester = make_user("requester")
+    for subject in ("[Soporte] Ayuda 3", "[Soporte] Ayuda 4"):
+        assert _process(_email(requester["email"], body="necesito ayuda", subject=subject)) == "draft_created"
+        email_analysis.analyze_pending_drafts()
+    assert llm["payloads"] == []
+    assert len(sent) == 1
+    assert _drafts(requester["id"]) == []
+
+
+def test_list_hides_unclear_and_not_support(client, make_user, sent):
+    technician = make_user("technician")
+    requester = make_user("requester")
+    db = SessionLocal()
+    try:
+        for status in ("unclear", "not_support", "pending_review", "waiting_contact", "error"):
+            db.add(models.EmailDraft(message_id=f"<{status}@test>", requester_id=requester["id"], status=status))
+        db.commit()
+    finally:
+        db.close()
+    items = client.get("/api/drafts", headers=technician["headers"]).json()
+    assert sorted(i["status"] for i in items) == ["error", "pending_review", "waiting_contact"]
 
 
 def test_not_support_has_no_reply(make_user, sent, llm):
