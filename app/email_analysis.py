@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -31,6 +32,8 @@ LEVEL_RULES = "\n".join([
 ])
 
 MAX_ATTEMPTS = 3
+# Un solo análisis a la vez en todo el sistema (correo, borradores y página): la máquina tiene poca RAM
+ANALYSIS_LOCK = threading.Lock()
 SUMMARY_CHARS = 300
 START_MARK = "<<<CORREO>>>"
 END_MARK = "<<<FIN>>>"
@@ -141,7 +144,10 @@ def _parse(content: str, categories: list[models.Category]) -> tuple[int | None,
 
 
 def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
+    ticket_id = ticket.id
     row = ticket.ai_analysis
+    # Sin fila previa (página o analyze-missing): si falla, no queda fila y se puede reintentar
+    created_here = row is None
     if row is None:
         row = models.TicketAIAnalysis(ticket_id=ticket.id, status="pending", attempts=0)
         db.add(row)
@@ -160,6 +166,10 @@ def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
     try:
         content = chatbot.post_chat(payload)
     except Exception as exc:
+        if created_here:
+            db.rollback()
+            logging.warning("No se pudo analizar el ticket %s: %s", ticket_id, type(exc).__name__)
+            return "error"
         row.attempts = (row.attempts or 0) + 1
         if row.attempts >= MAX_ATTEMPTS:
             row.status = "error"
@@ -198,16 +208,39 @@ def analyze_pending(limit: int = 2) -> int:
         db.close()
 
     for row_id in ids:
+        with ANALYSIS_LOCK:
+            db = SessionLocal()
+            try:
+                row = db.get(models.TicketAIAnalysis, row_id)
+                if row is not None and row.status == "pending":
+                    analyze_ticket(db, row.ticket)
+            except Exception:
+                logging.exception("Falló el análisis de un ticket")
+            finally:
+                db.close()
+    return len(ids)
+
+
+def analyze_ticket_by_id(ticket_id: int) -> str:
+    """Análisis en segundo plano de un ticket sin fila (página o analyze-missing). Nunca lanza excepciones."""
+    with ANALYSIS_LOCK:
         db = SessionLocal()
         try:
-            row = db.get(models.TicketAIAnalysis, row_id)
-            if row is not None and row.status == "pending":
-                analyze_ticket(db, row.ticket)
+            ticket = db.get(models.Ticket, ticket_id)
+            # Otro análisis pudo terminarlo mientras esperaba el turno
+            if ticket is None or ticket.ai_analysis is not None:
+                return "skipped"
+            return analyze_ticket(db, ticket)
         except Exception:
-            logging.exception("Falló el análisis de un ticket")
+            logging.exception("Falló el análisis del ticket %s", ticket_id)
+            return "error"
         finally:
             db.close()
-    return len(ids)
+
+
+def analyze_missing_tickets(ticket_ids: list[int]) -> None:
+    for ticket_id in ticket_ids:
+        analyze_ticket_by_id(ticket_id)
 
 
 # ----- Fase 2: correos sin plantilla (borradores que confirma una persona) -----
@@ -478,13 +511,14 @@ def analyze_pending_drafts(limit: int = 2) -> int:
         db.close()
 
     for draft_id in ids:
-        db = SessionLocal()
-        try:
-            draft = db.get(models.EmailDraft, draft_id)
-            if draft is not None and draft.status == "analyzing":
-                analyze_draft(db, draft)
-        except Exception:
-            logging.exception("Falló el análisis de un borrador")
-        finally:
-            db.close()
+        with ANALYSIS_LOCK:
+            db = SessionLocal()
+            try:
+                draft = db.get(models.EmailDraft, draft_id)
+                if draft is not None and draft.status == "analyzing":
+                    analyze_draft(db, draft)
+            except Exception:
+                logging.exception("Falló el análisis de un borrador")
+            finally:
+                db.close()
     return len(ids)

@@ -7,7 +7,7 @@ from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, Hist
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
-from .. import hacienda
+from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
 from .. import email_analysis
 
@@ -75,7 +75,7 @@ def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIA
 
 
 @router.post("/tickets", response_model=TicketRead)
-def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if current_user.role == "technician":
         raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
     
@@ -122,7 +122,10 @@ def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db), current_u
             owner.id_number = ticket.contact_id_number
         db.add(owner)
         db.commit()
-    
+
+    # Mismo análisis que los tickets por correo, después de responder: no espera al modelo
+    if config.AI_ANALYSIS_ENABLED:
+        background_tasks.add_task(email_analysis.analyze_ticket_by_id, db_ticket.id)
     return db_ticket
 
 

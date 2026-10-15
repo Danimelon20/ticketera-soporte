@@ -2322,6 +2322,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const adminLogs = document.getElementById('adminLogs');
     const summaryStatus = document.getElementById('summaryStatus');
     const sendSummaryNowBtn = document.getElementById('sendSummaryNow');
+    const analyzeMissingBtn = document.getElementById('analyzeMissing');
 
     function addStatusItem(label, ...children) {
         const dt = document.createElement('dt');
@@ -2434,6 +2435,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     refreshLogsBtn.addEventListener('click', loadAdminLogs);
+
+    analyzeMissingBtn.addEventListener('click', async () => {
+        analyzeMissingBtn.disabled = true;
+        try {
+            const result = await apiFetch('/admin/ai/analyze-missing', { method: 'POST' });
+            showSuccess(result.found
+                ? `Se encontraron ${result.found} tickets sin nivel. Se analizarán en segundo plano.`
+                : 'No hay tickets abiertos sin nivel.');
+        } catch (err) {
+            // apiFetch ya mostró el error
+        } finally {
+            analyzeMissingBtn.disabled = false;
+        }
+    });
 
     sendSummaryNowBtn.addEventListener('click', async () => {
         sendSummaryNowBtn.disabled = true;

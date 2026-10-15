@@ -6,14 +6,14 @@ from collections import deque
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
-from .. import config, daily_summary, email_poller, models
+from .. import config, daily_summary, email_analysis, email_poller, models
 from ..schemas import AdminUserUpdate, DirectoryUser
 from ..security import get_current_user
 
@@ -148,6 +148,25 @@ def send_daily_summary_now(db: Session = Depends(get_db), admin=Depends(require_
     sent, total = daily_summary.send_summary(db)
     logging.info("Resumen diario enviado a mano por el usuario %s a %s destinatarios", admin.id, sent)
     return {"sent": sent, "recipients": total}
+
+
+@router.post("/admin/ai/analyze-missing")
+def analyze_missing(background_tasks: BackgroundTasks, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    if not config.AI_ANALYSIS_ENABLED:
+        raise HTTPException(status_code=400, detail="El análisis con IA está apagado")
+    ids = [
+        ticket_id
+        for (ticket_id,) in db.query(models.Ticket.id)
+        .outerjoin(models.TicketAIAnalysis, models.TicketAIAnalysis.ticket_id == models.Ticket.id)
+        .filter(models.Ticket.status.in_(("new", "in_progress")), models.TicketAIAnalysis.id.is_(None))
+        .order_by(models.Ticket.id)
+        .all()
+    ]
+    # Uno por uno y después de responder: con poca RAM puede tardar varios minutos
+    if ids:
+        background_tasks.add_task(email_analysis.analyze_missing_tickets, ids)
+    logging.info("Análisis de tickets sin nivel pedido por el usuario %s: %s tickets", admin.id, len(ids))
+    return {"found": len(ids)}
 
 
 def _ai_analysis_stats(db: Session) -> dict:
