@@ -6,6 +6,7 @@ from .. import models
 from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate
 from ..security import get_current_user
 from ..validators import mask_id_number
+from ..chatbot import _redact
 from .. import hacienda
 from ..notifications import STATUS_LABELS, notify_followers
 from .. import email_analysis
@@ -31,6 +32,26 @@ def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Tick
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
     return db_ticket
+
+
+def hides_personal_data(ticket: models.Ticket, current_user) -> bool:
+    """Técnico no asignado: el teléfono o la cédula escritos en el texto se ocultan al responder."""
+    return current_user.role == "technician" and ticket.assigned_to != current_user.id
+
+
+def ticket_read(ticket: models.Ticket, current_user) -> TicketRead:
+    # En la base queda el texto original; solo se enmascara la respuesta
+    data = TicketRead.model_validate(ticket)
+    if hides_personal_data(ticket, current_user):
+        data.description = _redact(data.description)
+    return data
+
+
+def comment_read(comment: models.Comment, ticket: models.Ticket, current_user) -> CommentRead:
+    data = CommentRead.model_validate(comment)
+    if hides_personal_data(ticket, current_user):
+        data.content = _redact(data.content)
+    return data
 
 
 def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIAnalysisRead:
@@ -140,7 +161,7 @@ def list_tickets(
         )
 
     query = query.order_by(models.Ticket.created_at.desc())
-    return query.all()
+    return [ticket_read(t, current_user) for t in query.all()]
 
 
 # exclude_unset: el solicitante no recibe la clave ai_analysis
@@ -198,9 +219,9 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         row = db_ticket.ai_analysis
         extra["ai_analysis"] = ai_analysis_read(row, db_ticket) if row else None
     return TicketDetail(
-        **TicketRead.model_validate(db_ticket).model_dump(),
+        **ticket_read(db_ticket, current_user).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
-        comments=[CommentRead.model_validate(c) for c in comments],
+        comments=[comment_read(c, db_ticket, current_user) for c in comments],
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
         following=following,
@@ -411,4 +432,4 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         subject = subject or f"[Ticket #{db_ticket.id}] Nueva asignación"
     if lines:
         notify_followers(db, background_tasks, db_ticket, current_user, subject, lines)
-    return db_ticket
+    return ticket_read(db_ticket, current_user)
