@@ -372,6 +372,21 @@ def test_two_vague_emails_send_one_notice(make_user, sent, llm):
     assert _drafts(requester["id"]) == []
 
 
+def test_draft_network_outage_is_critical(make_user, sent, llm):
+    requester = make_user("requester")
+    body = "Desde esta mañana nadie del segundo piso tiene internet. El router muestra una luz roja."
+    draft = _draft_from(requester, llm, _answer(category="Red", level=3), body=body, subject="[Soporte] Sin internet")
+    assert draft.ai_level == 4
+    assert _get(models.Priority, draft.priority_id).name == "Urgente"
+
+
+def test_draft_single_person_keeps_ai_level(make_user, sent, llm):
+    requester = make_user("requester")
+    draft = _draft_from(requester, llm, _answer(category="Red", level=3),
+                        body="No tengo internet en mi computadora", subject="[Soporte] Sin internet")
+    assert draft.ai_level == 3
+
+
 def test_list_hides_unclear_and_not_support(client, make_user, sent):
     technician = make_user("technician")
     requester = make_user("requester")

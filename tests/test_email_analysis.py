@@ -314,3 +314,40 @@ def test_health_accuracy(client, make_user, make_ticket):
     assert ai["corrected"] == 1
     assert ai["accuracy"] == 66.7
     assert ai["enabled"] is False
+
+
+# ----- Regla fija: caída de red que afecta a varias personas -----
+
+OUTAGE = "Desde esta mañana nadie del segundo piso tiene internet. El router muestra una luz roja."
+
+
+def test_floor_raises_network_outage_to_critical():
+    assert email_analysis.apply_level_floor("Red", OUTAGE, 3) == 4
+
+
+def test_floor_ignores_single_person():
+    assert email_analysis.apply_level_floor("Red", "No tengo internet en mi computadora", 3) == 3
+
+
+def test_floor_ignores_other_categories():
+    assert email_analysis.apply_level_floor("Hardware", OUTAGE, 3) == 3
+
+
+def test_floor_never_lowers_level():
+    assert email_analysis.apply_level_floor("Red", OUTAGE, 4) == 4
+    assert email_analysis.apply_level_floor("Red", "No tengo internet en mi computadora", 4) == 4
+
+
+def test_floor_handles_accents_and_case():
+    assert email_analysis.apply_level_floor("red", "TODOS estamos SIN CONEXIÓN", 2) == 4
+
+
+def test_template_ticket_outage_is_critical_with_new_due_at(make_user, llm):
+    ticket_id = _email_ticket(make_user("requester"), description=OUTAGE)
+    llm["replies"].append(_answer(level=3))
+
+    assert email_analysis.analyze_pending() == 1
+    row = _row(ticket_id)
+    assert row.ai_level == 4
+    # Nivel 4 = 4 h hábiles desde el lunes 09:00: lunes 13:00 en Costa Rica = 19:00 UTC
+    assert row.due_at == datetime(2026, 10, 12, 19, 0)

@@ -43,6 +43,18 @@ FILLER_WORDS = frozenset({
 })
 MIN_MEANINGFUL_WORDS = 2
 _WORD_RE = re.compile(r"[a-z0-9]+")
+# Regla fija de nivel: una caída de red que afecta a varias personas es Crítico (nivel 4).
+# Las señales se comparan en minúsculas y sin tildes.
+FLOOR_CATEGORY = "Red"
+FLOOR_LEVEL = 4
+OUTAGE_SIGNALS = (
+    "sin internet", "no hay internet", "no hay red", "sin red", "caido", "caida",
+    "no funciona la red", "no conecta", "sin conexion", "router", "servidor caido",
+)
+MANY_PEOPLE_SIGNALS = (
+    "nadie", "todos", "toda la oficina", "todo el piso", "segundo piso", "departamento",
+    "varios", "ninguno",
+)
 
 
 def _now() -> datetime:
@@ -71,6 +83,16 @@ def effective_level(row: models.TicketAIAnalysis) -> int | None:
 def _clean(text: str | None) -> str:
     # Sin datos personales y sin forma de cerrar el marcador desde el correo
     return chatbot._redact(text).replace("<<<", "").replace(">>>", "")
+
+
+def apply_level_floor(category: str | None, text: str | None, level: int | None) -> int | None:
+    """Sube a Crítico una caída de red que afecta a varias personas. Nunca baja el nivel de la IA."""
+    if normalize(category or "") != normalize(FLOOR_CATEGORY):
+        return level
+    clean = normalize(text or "")
+    if any(s in clean for s in OUTAGE_SIGNALS) and any(s in clean for s in MANY_PEOPLE_SIGNALS):
+        return FLOOR_LEVEL if level is None else max(level, FLOOR_LEVEL)
+    return level
 
 
 def build_messages(ticket: models.Ticket, category_names: list[str]) -> list[dict]:
@@ -146,7 +168,9 @@ def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
         return row.status
 
     level, category_id, summary, needs_review = _parse(content, categories)
-    row.ai_level = level
+    # La categoría es la que eligió el cliente en la plantilla
+    category_name = ticket.category.name if ticket.category else None
+    row.ai_level = apply_level_floor(category_name, f"{ticket.title}\n{ticket.description}", level)
     row.ai_category_id = category_id
     row.summary = summary
     row.needs_review = needs_review
@@ -401,6 +425,9 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         return draft.status
 
     result = _parse_draft(content, categories)
+    category_name = next((c.name for c in categories if c.id == result["category_id"]), None)
+    # Nivel final: también decide la prioridad y, al confirmar, el tiempo meta
+    result["level"] = apply_level_floor(category_name, f"{draft.subject}\n{draft.body}", result["level"])
     user = draft.requester
     draft.ai_level = result["level"]
     draft.summary = result["summary"]
