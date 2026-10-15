@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from .database import engine, SessionLocal, get_db
 from . import config, models
 from .email_poller import poll_forever
+from .daily_summary import summary_forever
 from .routers.users import router as users_router
 from .routers.catalogs import router as catalogs_router
 from .routers.tickets import router as tickets_router
@@ -92,12 +93,21 @@ async def lifespan(app: FastAPI):
         else:
             logging.warning("EMAIL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
 
+    summary = None
+    if config.DAILY_SUMMARY_ENABLED:
+        if config.EMAIL_ENABLED:
+            summary = asyncio.create_task(summary_forever())
+            logging.info("Resumen diario activo a partir de las %s:00", config.DAILY_SUMMARY_HOUR)
+        else:
+            logging.warning("DAILY_SUMMARY_ENABLED=true pero EMAIL_ENABLED=false: no se enviará el resumen")
+
     yield
 
-    if poller is not None:
-        poller.cancel()
-        with suppress(asyncio.CancelledError):
-            await poller
+    for task in (poller, summary):
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(lifespan=lifespan)

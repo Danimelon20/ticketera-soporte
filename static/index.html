@@ -210,6 +210,7 @@
                 <div id="draftDetail" class="draft-detail">
                     <p id="draftPlaceholder" class="view-note">Seleccione un borrador.</p>
                     <div id="draftContent" hidden>
+                        <p id="draftNumber" class="draft-meta"></p>
                         <h2 id="draftSubject" class="draft-subject"></h2>
                         <p id="draftMeta" class="draft-meta"></p>
                         <h3 class="draft-section">Correo original</h3>
@@ -279,6 +280,11 @@
                     <h2>Copia de seguridad</h2>
                     <p class="admin-text">Descarga una copia completa de la base de datos. Guárdala en un lugar seguro: contiene datos personales.</p>
                     <button type="button" id="downloadBackup" class="btn-secondary">Descargar copia</button>
+                </article>
+                <article class="admin-card">
+                    <h2>Resumen diario</h2>
+                    <p id="summaryStatus" class="admin-text"></p>
+                    <button type="button" id="sendSummaryNow" class="btn-secondary">Enviar resumen ahora</button>
                 </article>
                 <article class="admin-card admin-card-wide">
                     <div class="admin-card-head">

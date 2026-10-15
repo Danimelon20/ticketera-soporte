@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -250,4 +250,13 @@ class UnclearNotice(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    sent_at = Column(DateTime, nullable=False)
+
+
+class DailySummary(Base):
+    """Resumen diario automático ya enviado (uno por día, aunque la app se reinicie)."""
+    __tablename__ = "daily_summaries"
+
+    id = Column(Integer, primary_key=True)
+    day = Column(Date, unique=True, nullable=False)
     sent_at = Column(DateTime, nullable=False)

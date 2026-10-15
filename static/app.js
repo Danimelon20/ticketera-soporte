@@ -1972,6 +1972,10 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.dataset.draftId = String(draft.id);
             if (draft.id === selectedDraftId) btn.setAttribute('aria-current', 'true');
 
+            // Mismo formato que el resumen diario
+            const number = document.createElement('span');
+            number.className = 'draft-item-meta';
+            number.textContent = `Borrador #${draft.id}`;
             const subject = document.createElement('span');
             subject.className = 'draft-item-subject';
             subject.textContent = draft.subject || '(Sin asunto)';
@@ -1981,7 +1985,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const state = document.createElement('span');
             state.className = 'draft-item-meta';
             state.textContent = DRAFT_STATUS_LABELS[draft.status] || draft.status;
-            btn.append(subject, meta, state);
+            btn.append(number, subject, meta, state);
             if (draft.needs_review) {
                 const review = document.createElement('span');
                 review.className = 'ai-review';
@@ -2017,6 +2021,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else btn.removeAttribute('aria-current');
         });
 
+        document.getElementById('draftNumber').textContent = `Borrador #${draft.id}`;
         document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
         document.getElementById('draftMeta').textContent =
             `${draft.requester_name} · ${formatDateTime(draft.created_at)} · ${DRAFT_STATUS_LABELS[draft.status] || draft.status}`;
@@ -2315,6 +2320,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadBackupBtn = document.getElementById('downloadBackup');
     const refreshLogsBtn = document.getElementById('refreshLogs');
     const adminLogs = document.getElementById('adminLogs');
+    const summaryStatus = document.getElementById('summaryStatus');
+    const sendSummaryNowBtn = document.getElementById('sendSummaryNow');
 
     function addStatusItem(label, ...children) {
         const dt = document.createElement('dt');
@@ -2402,6 +2409,10 @@ document.addEventListener('DOMContentLoaded', () => {
             adminAiAccuracy.textContent = ai.accuracy === null || ai.accuracy === undefined
                 ? 'Acierto: sin datos'
                 : `Acierto: ${ai.accuracy} %`;
+
+            const summaryState = health.daily_summary_enabled ? 'Automático encendido' : 'Automático apagado';
+            const summaryLast = health.daily_summary_last ? formatDateTime(health.daily_summary_last) : 'Nunca';
+            summaryStatus.textContent = `${summaryState}. Último resumen automático: ${summaryLast}.`;
         } catch (err) {
             // apiFetch ya mostró el error
         }
@@ -2423,6 +2434,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     refreshLogsBtn.addEventListener('click', loadAdminLogs);
+
+    sendSummaryNowBtn.addEventListener('click', async () => {
+        sendSummaryNowBtn.disabled = true;
+        try {
+            const result = await apiFetch('/admin/daily-summary/send-now', { method: 'POST' });
+            showSuccess(`Resumen enviado a ${result.sent} de ${result.recipients} destinatarios`);
+        } catch (err) {
+            // apiFetch ya mostró el error
+        } finally {
+            sendSummaryNowBtn.disabled = false;
+        }
+    });
 
     downloadBackupBtn.addEventListener('click', async () => {
         downloadBackupBtn.disabled = true;

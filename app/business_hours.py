@@ -29,6 +29,11 @@ def _holidays() -> set[date]:
     return {date.fromisoformat(d.strip()) for d in config.OFFICE_HOLIDAYS.split(",") if d.strip()}
 
 
+def is_business_day(day: date) -> bool:
+    """Día hábil: está en OFFICE_DAYS y no es feriado."""
+    return day.isoweekday() in _office_days() and day not in _holidays()
+
+
 def day_hours() -> float:
     """Horas de una jornada (un día hábil)."""
     start = _parse_time(config.OFFICE_START)

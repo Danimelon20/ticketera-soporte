@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
-from .. import config, email_poller, models
+from .. import config, daily_summary, email_poller, models
 from ..schemas import AdminUserUpdate, DirectoryUser
 from ..security import get_current_user
 
@@ -131,7 +131,23 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
             .group_by(models.EmailDraft.status)
             .all()
         ),
+        "daily_summary_enabled": config.DAILY_SUMMARY_ENABLED,
+        "daily_summary_last": _isoformat(daily_summary.last_automatic(db)),
     }
+
+
+def _isoformat(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+@router.post("/admin/daily-summary/send-now")
+def send_daily_summary_now(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    # Envío manual: no cuenta para el control de una vez por día
+    if not config.EMAIL_ENABLED:
+        raise HTTPException(status_code=400, detail="El envío de correos está apagado")
+    sent, total = daily_summary.send_summary(db)
+    logging.info("Resumen diario enviado a mano por el usuario %s a %s destinatarios", admin.id, sent)
+    return {"sent": sent, "recipients": total}
 
 
 def _ai_analysis_stats(db: Session) -> dict:

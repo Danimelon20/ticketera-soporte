@@ -25,6 +25,10 @@ OFFICE_END = os.getenv("OFFICE_END", "17:00")
 OFFICE_TZ = os.getenv("OFFICE_TZ", "America/Costa_Rica")
 OFFICE_HOLIDAYS = os.getenv("OFFICE_HOLIDAYS", "")
 
+# Resumen diario por correo a coordinadores y administradores (hora local de la oficina)
+DAILY_SUMMARY_ENABLED = os.getenv("DAILY_SUMMARY_ENABLED", "false").lower() == "true"
+DAILY_SUMMARY_HOUR = int(os.getenv("DAILY_SUMMARY_HOUR", "8"))
+
 
 # Hacienda: se leen en cada llamada para poder cambiarlas sin reiniciar (y en pruebas)
 def hacienda_check_enabled() -> bool:
