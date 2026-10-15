@@ -388,17 +388,10 @@ def is_too_vague(subject: str, body: str) -> bool:
     return len(meaningful) < MIN_MEANINGFUL_WORDS
 
 
-def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User) -> str:
-    """Poco claro: no queda borrador; se piden detalles como mucho una vez cada 24 horas."""
+def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User, force: bool = False) -> str:
+    """Poco claro: no queda borrador; se piden detalles como mucho una vez cada 24 horas.
+    force (lo pidió una persona): se envía aunque ya se haya avisado y, si el envío falla, no se toca nada."""
     draft_id = draft.id
-    processed = (
-        db.query(models.ProcessedEmail).filter(models.ProcessedEmail.message_id == draft.message_id).first()
-    )
-    if processed is not None:
-        processed.result = "unclear"
-    db.delete(draft)
-    db.commit()
-
     cutoff = _now() - timedelta(hours=UNCLEAR_RESEND_HOURS)
     already_sent = (
         db.query(models.UnclearNotice)
@@ -406,10 +399,22 @@ def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User) ->
         .first()
         is not None
     )
-    if not already_sent and mailer.send_email(user.email, UNCLEAR_SUBJECT, _unclear_body(user)):
+    should_send = force or not already_sent
+    delivered = should_send and mailer.send_email(user.email, UNCLEAR_SUBJECT, _unclear_body(user))
+    if force and not delivered:
+        logging.warning("Borrador %s: no se pudo enviar el pedido de más detalles", draft_id)
+        return "send_failed"
+
+    processed = (
+        db.query(models.ProcessedEmail).filter(models.ProcessedEmail.message_id == draft.message_id).first()
+    )
+    if processed is not None:
+        processed.result = "unclear"
+    db.delete(draft)
+    if delivered:
         db.add(models.UnclearNotice(user_id=user.id, sent_at=_now()))
-        db.commit()
-    logging.info("Borrador %s poco claro: se descartó (aviso %s)", draft_id, "omitido" if already_sent else "enviado")
+    db.commit()
+    logging.info("Borrador %s poco claro: se descartó (aviso %s)", draft_id, "enviado" if delivered else "omitido")
     return "unclear"
 
 

@@ -57,6 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let requesterSearchSeq = 0;
 
     let authToken = sessionStorage.getItem('ticketeraToken');
+    // Arriba para que exista antes del primer showAuthScreen
+    let draftsPollTimer = null;
     let currentUser = null;
 
     function getFilters() {
@@ -190,10 +192,12 @@ document.addEventListener('DOMContentLoaded', () => {
         updateRoleTabs();
         showView('tickets');
         refreshDraftsBadge();
+        startDraftsPolling();
         setupChat();
     }
 
     function showAuthScreen() {
+        stopDraftsPolling();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
@@ -1924,6 +1928,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftIdNumberInput = document.getElementById('draftIdNumber');
     const draftConfirmBtn = document.getElementById('draftConfirmBtn');
     const draftDiscardBtn = document.getElementById('draftDiscardBtn');
+    const draftDetailsBtn = document.getElementById('draftDetailsBtn');
     let drafts = [];
     let selectedDraftId = null;
 
@@ -1941,6 +1946,35 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             // apiFetch ya mostró el error
         }
+    }
+
+    // Contador cada minuto, solo con la pestaña visible. No usa apiFetch para no borrar
+    // un mensaje de error en pantalla, y no vuelve a dibujar la lista ni el borrador abierto.
+    async function pollDraftsBadge() {
+        if (document.visibilityState !== 'visible' || !authToken) return;
+        try {
+            const response = await fetch(`${API_BASE}/drafts`, {
+                headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${authToken}` }
+            });
+            if (!response.ok) return;
+            const list = await response.json();
+            updateDraftsBadge(list.length);
+        } catch (err) {
+            // Se reintenta en el siguiente minuto
+        }
+    }
+
+    function stopDraftsPolling() {
+        if (draftsPollTimer !== null) {
+            clearInterval(draftsPollTimer);
+            draftsPollTimer = null;
+        }
+    }
+
+    function startDraftsPolling() {
+        stopDraftsPolling();
+        if (!currentUser || !DRAFT_ROLES.includes(currentUser.role)) return;
+        draftsPollTimer = setInterval(pollDraftsBadge, 60000);
     }
 
     async function loadDrafts() {
@@ -2022,6 +2056,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         document.getElementById('draftNumber').textContent = `Borrador #${draft.id}`;
+        draftDetailsBtn.hidden = !['pending_review', 'waiting_contact'].includes(draft.status);
         document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
         document.getElementById('draftMeta').textContent =
             `${draft.requester_name} · ${formatDateTime(draft.created_at)} · ${DRAFT_STATUS_LABELS[draft.status] || draft.status}`;
@@ -2065,11 +2100,13 @@ document.addEventListener('DOMContentLoaded', () => {
         fillDraftSelect(draftPrioritySelect, priorityMap, draft.priority_id);
         draftConfirmBtn.disabled = false;
         draftDiscardBtn.disabled = false;
+        draftDetailsBtn.disabled = false;
     }
 
     function setDraftBusy(busy) {
         draftConfirmBtn.disabled = busy;
         draftDiscardBtn.disabled = busy;
+        draftDetailsBtn.disabled = busy;
     }
 
     draftsList.addEventListener('click', (e) => {
@@ -2126,6 +2163,21 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             setDraftBusy(false);
             showError(err.message || 'No se pudo descartar el borrador');
+        }
+    });
+
+    draftDetailsBtn.addEventListener('click', async () => {
+        if (selectedDraftId === null) return;
+        if (!window.confirm('¿Pedir más detalles al cliente? Se le enviará un correo y este borrador se eliminará.')) return;
+        setDraftBusy(true);
+        try {
+            await apiFetch(`/drafts/${selectedDraftId}/request-details`, { method: 'POST' });
+            showSuccess('Se pidieron más detalles al cliente');
+            selectedDraftId = null;
+            await loadDrafts();
+        } catch (err) {
+            setDraftBusy(false);
+            showError(err.message || 'No se pudo pedir más detalles');
         }
     });
 

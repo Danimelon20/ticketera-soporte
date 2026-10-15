@@ -731,3 +731,90 @@ def test_technician_new_contact_is_validated(client, make_user, sent, llm):
     ticket = _get(models.Ticket, response.json()["ticket_id"])
     assert ticket.contact_phone == "77776666"
     assert ticket.contact_id_number == "102340567"
+
+
+# ----- Pedir más detalles desde un borrador -----
+
+def _pending_with_message(make_user, llm):
+    requester = make_user("requester", "Mario Cliente")
+    _set(models.User, requester["id"], phone="88887777", id_number="109870654")
+    msg = _email(requester["email"])
+    assert _process(msg) == "draft_created"
+    llm["replies"].append(_answer())
+    email_analysis.analyze_pending_drafts()
+    draft = _drafts(requester["id"])[-1]
+    assert draft.status == "pending_review"
+    return requester, draft, msg
+
+
+def _notices(user_id):
+    db = SessionLocal()
+    try:
+        return db.query(models.UnclearNotice).filter(models.UnclearNotice.user_id == user_id).all()
+    finally:
+        db.close()
+
+
+def test_request_details_sends_and_deletes_draft(client, make_user, sent, llm):
+    technician = make_user("technician")
+    requester, draft, msg = _pending_with_message(make_user, llm)
+
+    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=technician["headers"])
+    assert response.status_code == 200, response.text
+    assert response.json() == {"result": "unclear"}
+    to, subject, body = sent[-1]
+    assert to == requester["email"]
+    assert subject == "[Soporte] Necesitamos más detalles sobre su solicitud"
+    assert "Buen día, Mario Cliente." in body
+    assert _drafts(requester["id"]) == []
+    assert _processed_result(msg) == "unclear"
+    assert len(_notices(requester["id"])) == 1
+
+
+def test_request_details_ignores_recent_notice(client, make_user, sent, llm):
+    coordinator = make_user("coordinator")
+    requester, draft, _msg = _pending_with_message(make_user, llm)
+    db = SessionLocal()
+    try:
+        db.add(models.UnclearNotice(user_id=requester["id"], sent_at=email_analysis._now() - timedelta(hours=1)))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=coordinator["headers"])
+    assert response.status_code == 200, response.text
+    assert sent[-1][1] == "[Soporte] Necesitamos más detalles sobre su solicitud"
+    assert len(_notices(requester["id"])) == 2
+
+
+def test_request_details_send_failure_changes_nothing(client, make_user, sent, llm, monkeypatch):
+    coordinator = make_user("coordinator")
+    requester, draft, msg = _pending_with_message(make_user, llm)
+    monkeypatch.setattr(mailer, "send_email", lambda to, subject, body: False)
+
+    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=coordinator["headers"])
+    assert response.status_code == 502
+    assert "no se modificó" in response.json()["detail"]
+    assert _get(models.EmailDraft, draft.id).status == "pending_review"
+    assert _processed_result(msg) == "draft_created"
+    assert _notices(requester["id"]) == []
+
+
+def test_request_details_requester_gets_403(client, make_user, sent, llm):
+    requester, draft, _msg = _pending_with_message(make_user, llm)
+    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=requester["headers"])
+    assert response.status_code == 403
+    assert _get(models.EmailDraft, draft.id) is not None
+
+
+def test_request_details_missing_or_not_pending(client, make_user, sent, llm):
+    coordinator = make_user("coordinator")
+    response = client.post("/api/drafts/999999/request-details", headers=coordinator["headers"])
+    assert response.status_code == 404
+
+    for status in ("confirmed", "discarded", "error"):
+        _requester, draft, _msg = _pending_with_message(make_user, llm)
+        _set(models.EmailDraft, draft.id, status=status)
+        response = client.post(f"/api/drafts/{draft.id}/request-details", headers=coordinator["headers"])
+        assert response.status_code == 409, status
+        assert _get(models.EmailDraft, draft.id) is not None

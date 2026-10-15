@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -175,6 +176,19 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
 
     background_tasks.add_task(send_ticket_created, ticket, requester, category, priority)
     return _draft_read(draft, reviewer)
+
+
+@router.post("/drafts/{draft_id}/request-details")
+def request_details(draft_id: int, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
+    draft = _open_draft(db, draft_id)
+    if draft.status not in ("pending_review", "waiting_contact"):
+        raise HTTPException(status_code=409, detail="Este borrador ya no está pendiente")
+    # Lo decide una persona: se envía aunque el antibucle de 24 horas ya haya avisado
+    result = email_analysis._handle_unclear(db, draft, draft.requester, force=True)
+    if result == "send_failed":
+        raise HTTPException(status_code=502, detail="No se pudo enviar el correo al cliente. El borrador no se modificó.")
+    logging.info("Borrador %s: más detalles pedidos por el usuario %s", draft_id, reviewer.id)
+    return {"result": result}
 
 
 @router.post("/drafts/{draft_id}/discard", response_model=DraftRead)

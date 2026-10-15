@@ -775,8 +775,19 @@ section {
 #listPanel .ticket-item.selected { background: #FFFFFF; border-color: #2E55C9; box-shadow: none; }
 
 @media (max-width: 860px) {
-  .topbar-title, .topbar-nav { display: none; }
+  .topbar-title { display: none; }
   .topbar-section { padding: 0 12px; }
+  /* Pestañas en su propia fila; si no caben, se desplazan de lado sin desbordar la página */
+  .topbar-nav {
+    order: 10;
+    flex: 1 0 100%;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 0 8px;
+    border-top: 1px solid #E3E6EB;
+    scrollbar-width: thin;
+  }
+  .topbar-tab { flex: 0 0 auto; white-space: nowrap; min-height: 44px; }
 }
 
 
@@ -1006,6 +1017,7 @@ section {
 .draft-form { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
 .draft-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .draft-actions .btn-submit { width: auto; }
+.draft-actions [hidden] { display: none; }
 @media (max-width: 860px) {
   .drafts-layout { grid-template-columns: 1fr; }
 }
