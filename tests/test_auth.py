@@ -21,8 +21,8 @@ def _verify(client, email, code):
     return client.post("/api/auth/register/verify", json={"email": email, "code": code})
 
 
-def _login(client, email, password=PASSWORD):
-    return client.post("/api/auth/login", json={"email": email, "password": password})
+def _login(client, email, password=PASSWORD, portal="requester"):
+    return client.post("/api/auth/login", json={"email": email, "password": password, "portal": portal})
 
 
 def _wrong(code):

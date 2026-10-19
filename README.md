@@ -16,9 +16,10 @@ y validado manualmente en cada paso.
   avisos por correo.
 - Listar, buscar y filtrar por estado, categoría, prioridad y texto.
 - Consultar el historial de cambios de cada ticket.
-- Un solo inicio de sesión para todos los roles; cuentas de cliente
-  confirmadas por correo, personal activado por invitación y código
-  por correo para el administrador.
+- Inicio de sesión con tres opciones (Administrador, Coordinador /
+  Técnico y Solicitante): cada cuenta solo entra por la de su rol.
+  Cuentas de cliente confirmadas por correo, personal activado por
+  invitación y código por correo para el administrador.
 - Perfil del cliente con cédula única que queda fija desde su primer
   ticket.
 - Tickets por correo atendidos por el Agente virtual (Microsoft 365).

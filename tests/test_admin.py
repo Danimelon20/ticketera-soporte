@@ -108,12 +108,12 @@ def test_deactivated_user_loses_session_and_login(client, make_user):
     me = client.get("/api/auth/me", headers=requester["headers"])
     assert me.status_code == 401
     assert me.json()["detail"] == "Inicia sesión para continuar"
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
+    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
     assert login.status_code == 401
 
     # Activada de nuevo puede entrar
     assert _patch_user(client, admin, requester["id"], is_active=True).status_code == 200
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
+    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
     assert login.status_code == 200
 
 

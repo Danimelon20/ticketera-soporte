@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const authScreen = document.getElementById('authScreen');
     const topbar = document.querySelector('.topbar');
     const mainContent = document.querySelector('main');
+    const portalChooser = document.getElementById('portalChooser');
     const loginPanel = document.getElementById('loginPanel');
     const signupPanel = document.getElementById('signupPanel');
     const activatePanel = document.getElementById('activatePanel');
@@ -201,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showAuthScreen() {
         document.body.classList.remove('profile-required');
+        loginPortal = null;
         stopDraftsPolling();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
@@ -217,8 +219,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Pantallas de inicio: iniciar sesión, crear cuenta de cliente, activar cuenta de personal =====
     const AUTH_ROUTES = { '#crear-cuenta': 'signup', '#activar-cuenta': 'activate' };
 
+    // Cada opción de inicio de sesión solo deja entrar a sus roles (lo verifica el servidor)
+    const PORTALS = {
+        admin: { title: 'Administrador', link: null },
+        staff: { title: 'Coordinador / Técnico', link: { href: '#activar-cuenta', text: 'Activar cuenta (invitación)' } },
+        requester: { title: 'Solicitante', link: { href: '#crear-cuenta', text: 'Crear cuenta de cliente' } }
+    };
+    const loginTitle = document.getElementById('loginTitle');
+    const loginExtraLink = document.getElementById('loginExtraLink');
+    let loginPortal = null;
+
     function showAuthPanel() {
-        const panel = AUTH_ROUTES[window.location.hash] || 'login';
+        const route = AUTH_ROUTES[window.location.hash];
+        const panel = route || (loginPortal ? 'login' : 'chooser');
+        portalChooser.hidden = panel !== 'chooser';
         loginPanel.hidden = panel !== 'login';
         signupPanel.hidden = panel !== 'signup';
         activatePanel.hidden = panel !== 'activate';
@@ -227,14 +241,45 @@ document.addEventListener('DOMContentLoaded', () => {
         hideError();
     }
 
-    function goToLogin() {
-        // Sin "#" en la dirección: vuelve al inicio de sesión
+    function clearHash() {
         history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+
+    function openPortal(portal) {
+        const info = PORTALS[portal];
+        if (!info) return;
+        loginPortal = portal;
+        loginForm.reset();
+        loginTitle.textContent = `Iniciar sesión — ${info.title}`;
+        loginExtraLink.hidden = !info.link;
+        if (info.link) {
+            loginExtraLink.href = info.link.href;
+            loginExtraLink.textContent = info.link.text;
+        }
+        clearHash();
+        showAuthPanel();
+        document.getElementById('loginEmail').focus();
+    }
+
+    function showPortalChooser() {
+        loginPortal = null;
+        loginForm.reset();
+        clearHash();
         showAuthPanel();
     }
 
+    portalChooser.addEventListener('click', (e) => {
+        const button = e.target.closest('[data-portal]');
+        if (button) openPortal(button.dataset.portal);
+    });
+
+    document.getElementById('backToPortals').addEventListener('click', showPortalChooser);
+
     window.addEventListener('hashchange', () => {
-        if (!currentUser) showAuthPanel();
+        if (currentUser) return;
+        // Desde registro o activación, "Volver al inicio de sesión" lleva a las opciones
+        loginPortal = null;
+        showAuthPanel();
     });
 
     // Login submit
@@ -249,7 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await apiFetch('/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify({ email, password, portal: loginPortal })
                 });
                 loginForm.reset();
                 if (data.requires_code) {
@@ -371,8 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('activateToLogin').addEventListener('click', () => {
         clearActivationResult();
-        goToLogin();
-        document.getElementById('loginEmail').focus();
+        openPortal('staff');
     });
 
     activateResendBtn.addEventListener('click', async () => {

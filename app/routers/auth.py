@@ -21,6 +21,13 @@ from ..security import (
 router = APIRouter(prefix="/api", tags=["auth"])
 
 TWO_FACTOR_ROLES = ("admin",)
+# Cada opción de la pantalla de inicio solo deja entrar a sus roles (el Agente virtual a ninguna)
+PORTAL_ROLES = {
+    "admin": ("admin",),
+    "staff": ("coordinator", "technician"),
+    "requester": ("requester",),
+}
+LOGIN_ERROR = "Correo o contraseña incorrectos"
 CODE_MINUTES = 10
 MAX_CODE_ATTEMPTS = 5
 RESEND_SECONDS = 60
@@ -270,14 +277,25 @@ def resend_activation(data: EmailRequest, db: Session = Depends(get_db)):
 @router.post("/auth/login", response_model=AuthResponse | LoginChallengeResponse)
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     email = credentials.email.strip().lower()
+    allowed_roles = PORTAL_ROLES.get(credentials.portal or "", ())
     user = db.query(models.User).filter(models.User.email == email).first()
     if user is None:
         pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-        # Solo quien sabe la contraseña se entera de que falta confirmar
-        if pending is not None and verify_password(credentials.password, pending.password_hash):
+        # Solo quien sabe la contraseña y entra como solicitante se entera de que falta confirmar
+        if (
+            pending is not None
+            and verify_password(credentials.password, pending.password_hash)
+            and credentials.portal == "requester"
+        ):
             raise HTTPException(status_code=403, detail=CONFIRM_EMAIL)
-    if not user or not verify_password(credentials.password, user.password_hash) or user.role == "agent" or not user.is_active:
-        raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+    # La contraseña se revisa antes que la opción: rol equivocado y contraseña incorrecta responden igual
+    if (
+        not user
+        or not verify_password(credentials.password, user.password_hash)
+        or not user.is_active
+        or user.role not in allowed_roles
+    ):
+        raise HTTPException(status_code=401, detail=LOGIN_ERROR)
 
     if user.role in TWO_FACTOR_ROLES:
         return start_challenge(db, user)

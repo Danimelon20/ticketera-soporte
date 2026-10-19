@@ -56,8 +56,25 @@
         </section>
         <div class="auth-card-container">
             <div class="auth-card">
-                <div id="loginPanel" class="auth-form-panel">
+                <div id="portalChooser" class="auth-form-panel">
                     <h1 class="auth-title">Iniciar sesión</h1>
+                    <p class="help-text">Elija cómo quiere entrar.</p>
+                    <ul class="portal-options">
+                        <li class="portal-option">
+                            <button type="button" class="portal-btn" data-portal="admin">Administrador</button>
+                        </li>
+                        <li class="portal-option">
+                            <button type="button" class="portal-btn" data-portal="staff">Coordinador / Técnico</button>
+                            <a href="#activar-cuenta" class="auth-link portal-link">Activar cuenta (invitación)</a>
+                        </li>
+                        <li class="portal-option">
+                            <button type="button" class="portal-btn" data-portal="requester">Solicitante</button>
+                            <a href="#crear-cuenta" class="auth-link portal-link">Crear cuenta de cliente</a>
+                        </li>
+                    </ul>
+                </div>
+                <div id="loginPanel" class="auth-form-panel" hidden>
+                    <h1 id="loginTitle" class="auth-title">Iniciar sesión</h1>
                     <form id="loginForm">
                         <div class="form-group" style="margin-bottom: 16px;">
                             <label for="loginEmail">Correo</label>
@@ -74,8 +91,8 @@
                         <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
                     </div>
                     <nav class="auth-links" aria-label="Otras opciones">
-                        <a href="#crear-cuenta" class="auth-link">Crear cuenta de cliente</a>
-                        <a href="#activar-cuenta" class="auth-link">Activar cuenta de personal</a>
+                        <a id="loginExtraLink" href="#crear-cuenta" class="auth-link" hidden></a>
+                        <button type="button" id="backToPortals" class="auth-link auth-link-btn">Volver a las opciones</button>
                     </nav>
                 </div>
                 <div id="signupPanel" class="auth-form-panel" hidden>

@@ -28,7 +28,7 @@ def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplo
     activation = client.post("/api/auth/activate", json={"email": staff_email, "code": code}).json()
     secrets += [code, activation["password"]]
 
-    challenge = client.post("/api/auth/login", json={"email": admin["email"], "password": "clave-segura-123"}).json()
+    challenge = client.post("/api/auth/login", json={"email": admin["email"], "password": "clave-segura-123", "portal": "admin"}).json()
     code = code_from(sent[-1][2])
     secrets.append(code)
     assert client.post("/api/auth/verify-code", json={"challenge_id": challenge["challenge_id"], "code": code}).status_code == 200

@@ -13,8 +13,13 @@ def _code_from(sent):
     return code_from(sent[-1][2])
 
 
+PORTALS = {"admin": "admin", "coordinator": "staff", "technician": "staff", "requester": "requester"}
+
+
 def _login(client, user):
-    return client.post("/api/auth/login", json={"email": user["email"], "password": PASSWORD})
+    return client.post(
+        "/api/auth/login", json={"email": user["email"], "password": PASSWORD, "portal": PORTALS[user["role"]]}
+    )
 
 
 def _start(client, make_user, role="admin"):

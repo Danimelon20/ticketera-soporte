@@ -82,7 +82,7 @@ def test_admin_invites_and_activation_creates_role(client, make_user, sent, role
     # La contraseña nunca va por correo
     assert all(password not in b for (_t, _s, b) in sent)
 
-    login = client.post("/api/auth/login", json={"email": email, "password": password})
+    login = client.post("/api/auth/login", json={"email": email, "password": password, "portal": "staff"})
     assert login.status_code == 200, login.text
     user = login.json()["user"]
     assert user["role"] == role and user["name"] == "Carla Mora"

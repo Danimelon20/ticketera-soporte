@@ -81,6 +81,9 @@ class ActivationResult(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+    # Opción de la pantalla de inicio: "admin", "staff" o "requester". Se valida en la ruta
+    # para que falte o no, la respuesta sea el mismo 401 genérico.
+    portal: Optional[str] = None
 
 
 class UserRead(BaseModel):
