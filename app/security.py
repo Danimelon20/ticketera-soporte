@@ -44,6 +44,19 @@ def generate_login_code() -> str:
     return f"{secrets.randbelow(10**6):06d}"
 
 
+PASSWORD_LENGTH = 20
+_PASSWORD_GROUPS = ("ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789", "!#$%&*+-=?@_")
+
+
+def generate_password() -> str:
+    """Contraseña aleatoria fuerte con al menos una letra mayúscula, minúscula, dígito y símbolo."""
+    alphabet = "".join(_PASSWORD_GROUPS)
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(PASSWORD_LENGTH))
+        if all(any(c in group for c in password) for group in _PASSWORD_GROUPS):
+            return password
+
+
 def mask_email(email: str) -> str:
     local, _, domain = email.partition("@")
     return f"{local[:2]}***@{domain}"

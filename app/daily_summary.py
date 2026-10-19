@@ -10,7 +10,7 @@ from .business_hours import is_business_day
 from .chatbot import _redact
 from .database import SessionLocal
 from .email_analysis import LEVEL_NAMES, _now, effective_level
-from .notifications import STATUS_LABELS
+from .notifications import STATUS_LABELS, display_name
 
 # Resumen diario para coordinadores y administradores.
 # Privacidad: solo número, título (enmascarado), nivel, estado y responsable.
@@ -51,7 +51,7 @@ def _ticket_line(ticket: models.Ticket) -> str:
 def _draft_line(draft: models.EmailDraft) -> str:
     return (
         f"Borrador #{draft.id} | {_redact(draft.title or 'Sin título')} | {_level_text(draft.ai_level)} "
-        f"| Solicitante: {draft.requester.name}"
+        f"| Solicitante: {display_name(draft.requester)}"
     )
 
 

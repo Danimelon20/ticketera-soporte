@@ -594,32 +594,89 @@ section {
     border: 1px solid var(--line);
 }
 
-.auth-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 24px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 12px;
+.auth-title {
+    margin: 0 0 20px;
+    font-size: 22px;
+    font-weight: 600;
 }
 
-.auth-tabs button {
-    flex: 1;
+.auth-form-panel[hidden],
+.auth-notice[hidden],
+.password-reveal[hidden],
+.auth-links[hidden],
+#activateForm[hidden] {
+    display: none;
+}
+
+.auth-links {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+}
+
+.auth-link {
+    display: flex;
+    align-items: center;
     min-height: 44px;
-    padding: 8px 16px;
+    color: var(--accent);
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.auth-link:hover,
+.auth-link:focus-visible {
+    text-decoration: underline;
+}
+
+.auth-notice {
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--accent-soft);
+}
+
+.auth-notice p {
+    margin: 0 0 8px;
+}
+
+.auth-secondary {
+    width: 100%;
+    margin-top: 12px;
+}
+
+.password-reveal {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.password-reveal p {
+    margin: 0;
+}
+
+.password-reveal-title {
+    font-weight: 600;
+    color: var(--exito);
+}
+
+.password-value {
+    display: block;
+    padding: 12px;
     border: 1px solid var(--line);
     border-radius: 8px;
-    background: var(--surface);
-    color: var(--ink);
-    font: inherit;
-    font-weight: 500;
-    cursor: pointer;
+    background: var(--bg);
+    font-family: var(--mono);
+    font-size: 18px;
+    overflow-wrap: anywhere;
+    user-select: all;
 }
 
-.auth-tabs button.active,
-.auth-tabs button[aria-pressed="true"] {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
+.password-warning {
+    color: #8A4B00;
+    font-weight: 600;
 }
 
 .help-text {
@@ -1185,4 +1242,106 @@ section {
     border-radius: 0;
     z-index: 950;
   }
+}
+
+/* ===== Perfil del solicitante ===== */
+.profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 480px;
+    margin-top: 20px;
+}
+
+.profile-form input[readonly] {
+    background: var(--bg);
+    color: var(--muted);
+}
+
+.profile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.profile-actions .btn-submit {
+    width: auto;
+    min-width: 140px;
+}
+
+.help-text[hidden],
+.profile-actions [hidden] {
+    display: none;
+}
+
+/* Mientras el perfil esté incompleto solo se ve esa pantalla */
+.profile-required .topbar-tab,
+.profile-required #openNewTicket,
+.profile-required #chatToggle {
+    display: none !important;
+}
+
+.draft-reason {
+    margin: -8px 0 16px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #FFF4E5;
+    color: #8A4B00;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.draft-reason[hidden] {
+    display: none;
+}
+
+/* ===== Invitaciones del personal ===== */
+.invites-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.invites-section h3 {
+    margin: 0;
+}
+
+.invites-section h4 {
+    margin: 16px 0 8px;
+}
+
+.invite-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    align-items: end;
+    margin-top: 12px;
+}
+
+.invite-form .btn-action {
+    min-height: 44px;
+}
+
+.invites-table-wrap {
+    overflow-x: auto;
+}
+
+.invites-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.invites-table th,
+.invites-table td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--line-soft);
+    overflow-wrap: anywhere;
+}
+
+.invites-table th {
+    background: #F0F2F5;
 }

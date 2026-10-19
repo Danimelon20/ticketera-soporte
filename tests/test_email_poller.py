@@ -75,7 +75,7 @@ def _mime(sender, body=COMPLETE_BODY):
 
 
 def test_poll_once_processes_unread(monkeypatch, make_user):
-    requester = make_user("requester", "Ana")
+    requester = make_user("requester", "Ana", profile=False)
     fake = FakeGraph({
         "msg-1": _mime(requester["email"]),
         "msg-2": _mime(f"nadie-{uuid.uuid4().hex}@test.com"),

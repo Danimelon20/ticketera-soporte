@@ -2,9 +2,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import models
-from ..schemas import RequesterRead, UserRead
+from .. import identity, models
+from ..schemas import MeRead, ProfileUpdate, RequesterRead, UserRead
 from ..security import get_current_user
+from .auth import me_read
 
 router = APIRouter(prefix="/api", tags=["users"])
 
@@ -27,3 +28,31 @@ def get_requesters(q: Optional[str] = None, db: Session = Depends(get_db), curre
         )
     
     return query.order_by(models.User.name).limit(20).all()
+
+
+@router.put("/profile", response_model=MeRead)
+def update_profile(data: ProfileUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if current_user.role != "requester":
+        raise HTTPException(status_code=403, detail="Solo los clientes completan este perfil")
+
+    name_changed = data.name != " ".join((current_user.name or "").split())
+    identity_changed = name_changed or data.id_number != current_user.id_number
+    if identity_changed and identity.is_locked(db, current_user):
+        # Guarda la fecha de bloqueo si recién se calculó (cuentas con tickets anteriores)
+        db.commit()
+        raise HTTPException(status_code=403, detail=identity.LOCKED)
+    if name_changed and len(data.name.split()) < 2:
+        raise HTTPException(status_code=422, detail="Escriba su nombre completo (nombre y apellidos)")
+    if data.id_number != current_user.id_number:
+        error = identity.check_id_number(db, current_user, data.id_number)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+
+    current_user.phone = data.phone
+    if identity_changed:
+        current_user.name = data.name
+        current_user.id_number = data.id_number
+        identity.save_hacienda_result(db, current_user, data.name, data.id_number)
+    db.commit()
+    db.refresh(current_user)
+    return me_read(db, current_user)

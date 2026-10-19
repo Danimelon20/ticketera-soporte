@@ -16,8 +16,11 @@ y validado manualmente en cada paso.
   avisos por correo.
 - Listar, buscar y filtrar por estado, categoría, prioridad y texto.
 - Consultar el historial de cambios de cada ticket.
-- Inicio de sesión con contraseña, códigos de invitación y
-  verificación por correo para coordinadores y administradores.
+- Un solo inicio de sesión para todos los roles; cuentas de cliente
+  confirmadas por correo, personal activado por invitación y código
+  por correo para el administrador.
+- Perfil del cliente con cédula única que queda fija desde su primer
+  ticket.
 - Tickets por correo atendidos por el Agente virtual (Microsoft 365).
 - Directorio de usuarios y panel de Administración.
 - Asistente de la página con un modelo local (Qwen3 con Ollama).
@@ -74,11 +77,11 @@ Microsoft; esa carpeta nunca se sube a Git.
 
 | Rol | Cómo obtiene la cuenta | Cómo entra | Qué puede hacer |
 |---|---|---|---|
-| Solicitante | Se registra en la página sin código de invitación | Correo y contraseña | Crear tickets (en la página o por correo), ver y comentar solo los suyos, dar seguimiento y usar el asistente |
-| Técnico | Se registra con un código de invitación `TEC-` que genera un coordinador o el Administrador | Correo y contraseña | Ver todos los tickets, cambiar estado, prioridad y categoría, asignarse tickets libres y comentar. No crea tickets. Del ticket que tiene asignado ve el teléfono completo y la cédula enmascarada |
-| Coordinador | Se registra con un código de invitación `COO-` que genera el Administrador | Correo, contraseña y código de 6 dígitos por correo | Crear tickets (también a nombre de un solicitante), ver todos los tickets con los datos de contacto completos, cambiar estado, prioridad y categoría, asignar a técnicos o coordinadores, comentar, generar códigos para técnicos y ver el Directorio |
+| Solicitante | "Crear cuenta de cliente": correo, contraseña y código de 6 dígitos que llega al correo (vence en 15 minutos). En su primer ingreso completa nombre, cédula y teléfono | Correo y contraseña | Crear tickets (en la página o por correo), ver y comentar solo los suyos, dar seguimiento y usar el asistente |
+| Técnico | Lo invita un coordinador o el Administrador; activa la cuenta en "Activar cuenta de personal" y recibe una contraseña generada | Correo y contraseña | Ver todos los tickets, cambiar estado, prioridad y categoría, asignarse tickets libres y comentar. No crea tickets. Del ticket que tiene asignado ve el teléfono completo y la cédula enmascarada |
+| Coordinador | Lo invita el Administrador; activa la cuenta como el técnico | Correo y contraseña | Crear tickets (también a nombre de un solicitante), ver todos los tickets con los datos de contacto completos, cambiar estado, prioridad y categoría, asignar a técnicos o coordinadores, comentar, invitar técnicos y ver el Directorio |
 | Agente virtual | Se crea solo al arrancar el sistema | No inicia sesión | Lee el buzón de soporte, crea tickets a partir de correos de solicitantes registrados y responde por correo |
-| Administrador | Se crea con el comando `python -m app.create_admin` | Correo, contraseña y código de 6 dígitos por correo | Todo lo del coordinador, generar códigos para coordinadores, cambiar roles, activar o desactivar cuentas en el Directorio y usar el panel de Administración |
+| Administrador | Se crea con el comando `python -m app.create_admin` | Correo, contraseña y código de 6 dígitos por correo | Todo lo del coordinador, invitar coordinadores, cambiar roles, activar o desactivar cuentas en el Directorio y usar el panel de Administración |
 
 Las reglas se validan en el backend; una acción no permitida
 responde `403`. La pantalla además oculta los botones que el rol
@@ -107,12 +110,14 @@ las categorías (Hardware, Software, Red, Accesos), las prioridades
    docker compose logs app | grep "SOLO DESARROLLO"
    ```
 
-3. En la pestaña "Usuarios", generar códigos de invitación: de
-   coordinador (`COO-`, solo el Administrador) o de técnico (`TEC-`).
-   Cada código sirve una sola vez, vence en 7 días y se muestra
-   solo al generarlo.
-4. Cada persona se registra en "Registrarse" con su código. Los
-   solicitantes se registran sin código.
+3. En la pestaña "Usuarios", invitar al personal con su correo,
+   nombre y rol (coordinador solo el Administrador). El sistema envía
+   un correo con un código de 6 dígitos (vence en 72 horas, máximo 5
+   intentos, se puede reenviar cada minuto) y el enlace a "Activar
+   cuenta de personal". Al activarla, la página muestra una sola vez
+   una contraseña generada; nunca se envía por correo.
+4. Los clientes crean su cuenta en "Crear cuenta de cliente" y la
+   confirman con el código que les llega al correo.
 
 ## Tickets por correo
 

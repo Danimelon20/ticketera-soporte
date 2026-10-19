@@ -73,7 +73,7 @@ def _tickets_of(db, user_id):
 
 
 def test_complete_email_creates_ticket(db, sent, make_user):
-    requester = make_user("requester", "Ana")
+    requester = make_user("requester", "Ana", profile=False)
     assert process_message(db, _email(requester["email"])) == "created"
 
     tickets = _tickets_of(db, requester["id"])
@@ -97,7 +97,7 @@ def test_complete_email_creates_ticket(db, sent, make_user):
 
 
 def test_uses_profile_phone_and_id_number(db, sent, make_user):
-    requester = make_user("requester")
+    requester = make_user("requester", profile=False)
     _set_user(requester["id"], phone="88887777", id_number="109870654")
     body = "Categoría: Red\nDescripción: Sin internet"
     assert process_message(db, _email(requester["email"], body=body)) == "created"
@@ -107,7 +107,7 @@ def test_uses_profile_phone_and_id_number(db, sent, make_user):
 
 
 def test_missing_category_is_incomplete(db, sent, make_user):
-    requester = make_user("requester")
+    requester = make_user("requester", profile=False)
     body = COMPLETE_BODY.replace("Categoría: Software\n", "")
     assert process_message(db, _email(requester["email"], body=body)) == "incomplete"
     assert _tickets_of(db, requester["id"]) == []
@@ -131,7 +131,7 @@ def test_technician_is_unregistered(db, sent, make_user):
 
 
 def test_same_message_id_twice_is_duplicate(db, sent, make_user):
-    requester = make_user("requester")
+    requester = make_user("requester", profile=False)
     message_id = make_msgid()
     assert process_message(db, _email(requester["email"], message_id=message_id)) == "created"
     assert process_message(db, _email(requester["email"], message_id=message_id)) == "duplicate"
@@ -145,7 +145,7 @@ def test_mailbox_sender_is_ignored(db, sent):
 
 
 def test_auto_replied_is_ignored(db, sent, make_user):
-    requester = make_user("requester")
+    requester = make_user("requester", profile=False)
     msg = _email(requester["email"], Auto_Submitted="auto-replied")
     assert process_message(db, msg) == "ignored"
     assert sent == []
@@ -153,7 +153,7 @@ def test_auto_replied_is_ignored(db, sent, make_user):
 
 
 def test_sender_email_is_case_insensitive(db, sent, make_user):
-    requester = make_user("requester")
+    requester = make_user("requester", profile=False)
     email = f"daniel-{uuid.uuid4().hex}@data.cr"
     _set_user(requester["id"], email=email)
     sender = "Daniel <" + email.replace("daniel", "Daniel").replace("data.cr", "Data.cr") + ">"
@@ -163,7 +163,7 @@ def test_sender_email_is_case_insensitive(db, sent, make_user):
 
 def test_id_number_rejected_by_hacienda_is_incomplete(db, sent, make_user, monkeypatch):
     monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "02"})
-    requester = make_user("requester")
+    requester = make_user("requester", profile=False)
     assert process_message(db, _email(requester["email"])) == "incomplete"
     assert _tickets_of(db, requester["id"]) == []
     assert "La cédula no corresponde a una persona física o DIMEX" in sent[0][2]

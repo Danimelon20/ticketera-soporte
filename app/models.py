@@ -279,3 +279,67 @@ class AlertSent(Base):
         Index("uq_alert_ticket", "kind", "ticket_id", unique=True, sqlite_where=text("ticket_id IS NOT NULL")),
         Index("uq_alert_draft", "kind", "draft_id", unique=True, sqlite_where=text("draft_id IS NOT NULL")),
     )
+
+
+class PendingSignup(Base):
+    """Registro de cliente sin confirmar: la cuenta (User) se crea al confirmar el código."""
+    __tablename__ = "pending_signups"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(150), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    sent_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class StaffInvitation(Base):
+    """Invitación del personal enviada por correo con un código de activación."""
+    __tablename__ = "staff_invitations"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(150), index=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    role = Column(String(20), nullable=False)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    sent_at = Column(DateTime, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    used_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('technician', 'coordinator')", name="chk_staff_invitation_role"),
+    )
+
+
+class RequesterIdentity(Base):
+    """Resultado de Hacienda (sin el nombre que devuelve) y fecha en que nombre y cédula quedaron fijos."""
+    __tablename__ = "requester_identities"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    hacienda_result = Column(String(20), nullable=True)
+    checked_at = Column(DateTime, nullable=True)
+    locked_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "hacienda_result IS NULL OR hacienda_result IN ('match', 'mismatch', 'not_found', 'unverified')",
+            name="chk_identity_hacienda",
+        ),
+    )
+
+
+class DraftPendingReason(Base):
+    """Motivo por el que un borrador quedó pendiente para que lo revise una persona."""
+    __tablename__ = "draft_pending_reasons"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), unique=True, nullable=False)
+    reason = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import config, email_analysis, models
+from .. import config, email_analysis, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import DraftConfirm, DraftRead
@@ -37,7 +37,12 @@ def _stored_contact(draft: models.EmailDraft) -> tuple[str | None, str | None]:
     return draft.contact_phone or requester.phone, draft.contact_id_number or requester.id_number
 
 
-def _draft_read(draft: models.EmailDraft, viewer: models.User) -> DraftRead:
+def _pending_reason(db: Session, draft: models.EmailDraft) -> str | None:
+    row = db.query(models.DraftPendingReason).filter(models.DraftPendingReason.draft_id == draft.id).first()
+    return row.reason if row else None
+
+
+def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> DraftRead:
     requester = draft.requester
     phone, id_number = _stored_contact(draft)
     data = DraftRead(
@@ -45,7 +50,8 @@ def _draft_read(draft: models.EmailDraft, viewer: models.User) -> DraftRead:
         status=draft.status,
         created_at=draft.created_at,
         requester_id=draft.requester_id,
-        requester_name=requester.name,
+        # Cuenta nueva sin perfil completo: se muestra el correo
+        requester_name=requester.name or requester.email,
         subject=draft.subject,
         body=draft.body,
         title=draft.title,
@@ -58,6 +64,7 @@ def _draft_read(draft: models.EmailDraft, viewer: models.User) -> DraftRead:
         summary=draft.summary,
         needs_review=draft.needs_review,
         ticket_id=draft.ticket_id,
+        pending_reason=_pending_reason(db, draft),
     )
     if viewer.role == "technician":
         # El técnico no ve datos personales completos (como en el detalle del ticket)
@@ -105,7 +112,7 @@ def list_drafts(status: Optional[DraftStatus] = None, db: Session = Depends(get_
         .order_by(models.EmailDraft.created_at.asc(), models.EmailDraft.id.asc())
         .all()
     )
-    return [_draft_read(d, reviewer) for d in drafts]
+    return [_draft_read(db, d, reviewer) for d in drafts]
 
 
 @router.post("/drafts/{draft_id}/confirm", response_model=DraftRead)
@@ -121,11 +128,15 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     stored_phone, stored_id = _stored_contact(draft)
     contact_phone = _final_contact(data.contact_phone, stored_phone, normalize_phone, "Falta el teléfono")
     contact_id_number = _final_contact(data.contact_id_number, stored_id, normalize_id_number, "Falta la cédula")
+    requester = draft.requester
     # Hacienda solo para una cédula nueva escrita por quien confirma
     if contact_id_number != stored_id:
+        if identity.id_number_taken(db, contact_id_number, requester.id):
+            raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
         verify_id_number(contact_id_number)
+    elif contact_id_number != requester.id_number and identity.id_number_taken(db, contact_id_number, requester.id):
+        raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
 
-    requester = draft.requester
     ticket = models.Ticket(
         title=data.title,
         description=data.description,
@@ -160,10 +171,9 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         analyzed_at=_now().replace(tzinfo=None),
         due_at=email_analysis.compute_due_at(ticket.created_at, draft.ai_level),
     ))
-    if not requester.phone:
-        requester.phone = contact_phone
-    if not requester.id_number:
-        requester.id_number = contact_id_number
+    # Al perfil con las mismas reglas que "Complete su perfil"; desde aquí queda fijo
+    identity.apply_contact_from_email(db, requester, requester.phone or contact_phone, contact_id_number)
+    identity.lock(db, requester)
 
     draft.status = "confirmed"
     draft.reviewed_by = reviewer.id
@@ -175,7 +185,7 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         db.refresh(obj)
 
     background_tasks.add_task(send_ticket_created, ticket, requester, category, priority)
-    return _draft_read(draft, reviewer)
+    return _draft_read(db, draft, reviewer)
 
 
 @router.post("/drafts/{draft_id}/request-details")
@@ -199,4 +209,4 @@ def discard_draft(draft_id: int, db: Session = Depends(get_db), reviewer=Depends
     draft.reviewed_at = _now()
     db.commit()
     db.refresh(draft)
-    return _draft_read(draft, reviewer)
+    return _draft_read(db, draft, reviewer)

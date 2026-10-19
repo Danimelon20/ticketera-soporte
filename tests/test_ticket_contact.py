@@ -1,85 +1,60 @@
-def test_create_ticket_missing_contact_phone(client, make_user):
-    user = make_user("requester")
+def _ticket_payload(**extra):
     payload = {
-        "title": "Ticket sin telefono",
-        "description": "Sin telefono",
+        "title": "Ticket de contacto",
+        "description": "Validación de contacto",
         "category_id": 1,
         "priority_id": 1,
     }
-    response = client.post("/api/tickets", json=payload, headers=user["headers"])
-    assert response.status_code == 422
+    payload.update(extra)
+    return payload
 
 
-def test_create_ticket_missing_contact_id_number(client, make_user):
+def _profile(name="Ana María Rojas", phone="8888-1234", id_number="1-0234-0567"):
+    return {"name": name, "phone": phone, "id_number": id_number}
+
+
+def test_ticket_without_phone_uses_profile_phone(client, make_user):
     user = make_user("requester")
-    payload = {
-        "title": "Ticket sin cedula",
-        "description": "Sin cedula",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_phone": "8888-1234",
-    }
-    response = client.post("/api/tickets", json=payload, headers=user["headers"])
-    assert response.status_code == 422
+    response = client.post("/api/tickets", json=_ticket_payload(), headers=user["headers"])
+    assert response.status_code == 200, response.text
+    detail = client.get(f"/api/tickets/{response.json()['id']}", headers=user["headers"]).json()
+    assert detail["contact_phone"] == user["phone"]
+    assert detail["contact_id_number"] == user["id_number"]
+
+
+def test_ticket_ignores_id_number_sent_in_form(client, make_user):
+    user = make_user("requester")
+    response = client.post("/api/tickets", json=_ticket_payload(contact_id_number="1-0234-0567"), headers=user["headers"])
+    assert response.status_code == 200, response.text
+    detail = client.get(f"/api/tickets/{response.json()['id']}", headers=user["headers"]).json()
+    assert detail["contact_id_number"] == user["id_number"]
 
 
 def test_phone_short_invalid(client, make_user):
     user = make_user("requester")
-    payload = {
-        "title": "Ticket corto",
-        "description": "Corto",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_phone": "1234",
-    }
-    response = client.post("/api/tickets", json=payload, headers=user["headers"])
+    response = client.post("/api/tickets", json=_ticket_payload(contact_phone="1234"), headers=user["headers"])
     assert response.status_code == 422
 
 
 def test_phone_formatted_saved_clean(client, make_user):
     user = make_user("requester")
-    payload = {
-        "title": "Ticket con telefono formateado",
-        "description": "Formateado",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_phone": "+506 8888 1234",
-        "contact_id_number": "1-0234-0567",
-    }
-    response = client.post("/api/tickets", json=payload, headers=user["headers"])
+    response = client.post("/api/tickets", json=_ticket_payload(contact_phone="+506 7777 1234"), headers=user["headers"])
     assert response.status_code == 200
     response = client.get(f"/api/tickets/{response.json()['id']}", headers=user["headers"])
-    ticket = response.json()
-    assert ticket["contact_phone"] == "88881234"
+    assert response.json()["contact_phone"] == "77771234"
 
 
-def test_id_number_formatted_saved_clean(client, make_user):
-    user = make_user("requester")
-    payload = {
-        "title": "Ticket con cedula formateada",
-        "description": "Formateada",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_id_number": "1-0234-0567",
-        "contact_phone": "8888-1234",
-    }
-    response = client.post("/api/tickets", json=payload, headers=user["headers"])
-    assert response.status_code == 200
-    response = client.get(f"/api/tickets/{response.json()['id']}", headers=user["headers"])
-    ticket = response.json()
-    assert ticket["contact_id_number"] == "102340567"
+def test_profile_id_number_formatted_saved_clean(client, make_user):
+    user = make_user("requester", profile=False)
+    response = client.put("/api/profile", json=_profile(), headers=user["headers"])
+    assert response.status_code == 200, response.text
+    assert response.json()["id_number"] == "102340567"
+    assert response.json()["phone"] == "88881234"
 
 
-def test_id_number_short_invalid(client, make_user):
-    user = make_user("requester")
-    payload = {
-        "title": "Ticket cedula corta",
-        "description": "Corta",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_id_number": "12345",
-    }
-    response = client.post("/api/tickets", json=payload, headers=user["headers"])
+def test_profile_id_number_short_invalid(client, make_user):
+    user = make_user("requester", profile=False)
+    response = client.put("/api/profile", json=_profile(id_number="12345"), headers=user["headers"])
     assert response.status_code == 422
 
 
@@ -102,7 +77,6 @@ def test_coordinator_creates_ticket_with_requester_id(client, make_user):
         "category_id": 1,
         "priority_id": 1,
         "contact_phone": "8888-1234",
-        "contact_id_number": "1-0234-0567",
         "requester_id": requester["id"],
     }
     response = client.post("/api/tickets", json=payload, headers=coordinator["headers"])
@@ -120,7 +94,6 @@ def test_requester_cannot_create_ticket_with_requester_id(client, make_user):
         "category_id": 1,
         "priority_id": 1,
         "contact_phone": "8888-1234",
-        "contact_id_number": "1-0234-0567",
         "requester_id": requester["id"],
     }
     response = client.post("/api/tickets", json=payload, headers=requester["headers"])
@@ -135,7 +108,7 @@ def test_ticket_detail_shows_contact_for_creator(client, make_user, make_ticket)
     assert response.status_code == 200
     data = response.json()
     assert data["contact_phone"] == "88881234"
-    assert data["contact_id_number"] == "102340567"
+    assert data["contact_id_number"] == requester["id_number"]
 
 
 def test_ticket_detail_shows_masked_id_for_assigned_technician(client, make_user, make_ticket):
@@ -158,7 +131,7 @@ def test_ticket_detail_shows_masked_id_for_assigned_technician(client, make_user
     assert response.status_code == 200
     data = response.json()
     assert data["contact_phone"] == "88881234"
-    assert data["contact_id_number"] == "******567"
+    assert data["contact_id_number"] == "******" + requester["id_number"][-3:]
 
 
 def test_ticket_detail_shows_none_for_unassigned_technician(client, make_user, make_ticket):
@@ -182,7 +155,7 @@ def test_ticket_detail_shows_full_for_coordinator(client, make_user, make_ticket
     assert response.status_code == 200
     data = response.json()
     assert data["contact_phone"] == "88881234"
-    assert data["contact_id_number"] == "102340567"
+    assert data["contact_id_number"] == requester["id_number"]
 
 
 def test_list_tickets_no_contact_fields(client, make_user, make_ticket):
@@ -218,31 +191,28 @@ def test_get_requesters_technician_forbidden(client, make_user):
     assert response.json()["detail"] == "No tienes permiso para ver esta información"
 
 def _contact_payload(phone="8888-1234", id_number="1-0234-0567"):
-    return {
-        "title": "Ticket de contacto",
-        "description": "Validación de contacto",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_phone": phone,
-        "contact_id_number": id_number,
-    }
+    return _profile(phone=phone, id_number=id_number)
+
+
+def _put_profile(client, user, **kwargs):
+    return client.put("/api/profile", json=_contact_payload(**kwargs), headers=user["headers"])
 
 
 def test_phone_nine_digits_invalid(client, make_user):
     user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(phone="888812345"), headers=user["headers"])
+    response = client.post("/api/tickets", json=_ticket_payload(contact_phone="888812345"), headers=user["headers"])
     assert response.status_code == 422
 
 
 def test_phone_with_prefix_and_extra_digit_invalid(client, make_user):
     user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(phone="+506 8888 12345"), headers=user["headers"])
+    response = client.post("/api/tickets", json=_ticket_payload(contact_phone="+506 8888 12345"), headers=user["headers"])
     assert response.status_code == 422
 
 
 def test_phone_error_message_is_about_phone(client, make_user):
     user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(phone="888812345"), headers=user["headers"])
+    response = client.post("/api/tickets", json=_ticket_payload(contact_phone="888812345"), headers=user["headers"])
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert isinstance(detail, list)
@@ -251,30 +221,28 @@ def test_phone_error_message_is_about_phone(client, make_user):
 
 
 def test_id_number_ten_digits_invalid(client, make_user):
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(id_number="1023405670"), headers=user["headers"])
-    assert response.status_code == 422
+    user = make_user("requester", profile=False)
+    assert _put_profile(client, user, id_number="1023405670").status_code == 422
 
 
 def test_id_number_thirteen_digits_invalid(client, make_user):
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(id_number="1234567890123"), headers=user["headers"])
-    assert response.status_code == 422
+    user = make_user("requester", profile=False)
+    assert _put_profile(client, user, id_number="1234567890123").status_code == 422
 
 
 def test_id_number_dimex_twelve_digits_valid(client, make_user, monkeypatch):
     from app import hacienda
     monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "03"})
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(id_number="123456789012"), headers=user["headers"])
+    user = make_user("requester", profile=False)
+    response = _put_profile(client, user, id_number="123456789012")
     assert response.status_code == 200, response.text
 
 
 def test_id_number_legal_entity_rejected(client, make_user, monkeypatch):
     from app import hacienda
     monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "02"})
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(id_number="310123456"), headers=user["headers"])
+    user = make_user("requester", profile=False)
+    response = _put_profile(client, user, id_number="310123456")
     assert response.status_code == 400
     assert response.json()["detail"] == "La cédula no corresponde a una persona física o DIMEX"
 
@@ -283,8 +251,8 @@ def test_id_number_not_found_accepted_when_not_strict(client, make_user, monkeyp
     from app import hacienda
     monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: None)
     monkeypatch.setenv("HACIENDA_STRICT", "false")
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(), headers=user["headers"])
+    user = make_user("requester", profile=False)
+    response = _put_profile(client, user)
     assert response.status_code == 200, response.text
 
 
@@ -292,8 +260,8 @@ def test_id_number_not_found_rejected_when_strict(client, make_user, monkeypatch
     from app import hacienda
     monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: None)
     monkeypatch.setenv("HACIENDA_STRICT", "true")
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(), headers=user["headers"])
+    user = make_user("requester", profile=False)
+    response = _put_profile(client, user)
     assert response.status_code == 400
     assert response.json()["detail"] == "La cédula no está registrada en Hacienda"
 
@@ -305,14 +273,12 @@ def test_id_number_accepted_when_hacienda_unavailable(client, make_user, monkeyp
         raise hacienda.HaciendaUnavailable("caído")
 
     monkeypatch.setattr(hacienda, "lookup_id", _unavailable)
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(), headers=user["headers"])
+    user = make_user("requester", profile=False)
+    response = _put_profile(client, user)
     assert response.status_code == 200, response.text
 
 
 def test_non_ascii_digits_not_counted(client, make_user):
-    user = make_user("requester")
-    response = client.post("/api/tickets", json=_contact_payload(phone="8888123²"), headers=user["headers"])
-    assert response.status_code == 422
-    response = client.post("/api/tickets", json=_contact_payload(id_number="10234056٣"), headers=user["headers"])
-    assert response.status_code == 422
+    user = make_user("requester", profile=False)
+    assert _put_profile(client, user, phone="8888123²").status_code == 422
+    assert _put_profile(client, user, id_number="10234056٣").status_code == 422

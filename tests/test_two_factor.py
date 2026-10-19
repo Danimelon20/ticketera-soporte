@@ -1,38 +1,23 @@
-import re
-import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import mailer, models
+from app import models
 from app.database import SessionLocal
+from conftest import code_from
 
 PASSWORD = "clave-segura-123"
 
 
-@pytest.fixture
-def sent(monkeypatch):
-    calls = []
-
-    def _fake_send(to, subject, body):
-        calls.append((to, subject, body))
-        return True
-
-    monkeypatch.setattr(mailer, "send_email", _fake_send)
-    return calls
-
-
 def _code_from(sent):
-    match = re.search(r"\b(\d{6})\b", sent[-1][2])
-    assert match, "El correo no trae un código de 6 dígitos"
-    return match.group(1)
+    return code_from(sent[-1][2])
 
 
 def _login(client, user):
     return client.post("/api/auth/login", json={"email": user["email"], "password": PASSWORD})
 
 
-def _start(client, make_user, role="coordinator"):
+def _start(client, make_user, role="admin"):
     user = make_user(role)
     response = _login(client, user)
     assert response.status_code == 200, response.text
@@ -47,7 +32,7 @@ def _wrong(code):
     return f"{(int(code) + 1) % 10**6:06d}"
 
 
-def test_coordinator_login_requires_code(client, make_user, sent):
+def test_admin_login_requires_code(client, make_user, sent):
     user, data = _start(client, make_user)
     assert data["requires_code"] is True
     assert "token" not in data
@@ -113,7 +98,7 @@ def test_unknown_challenge(client, sent):
     assert response.json()["detail"] == "Error: Intente Nuevamente"
 
 
-@pytest.mark.parametrize("role", ["requester", "technician"])
+@pytest.mark.parametrize("role", ["requester", "technician", "coordinator"])
 def test_other_roles_get_token_directly(client, make_user, sent, role):
     response = _login(client, make_user(role))
     assert response.status_code == 200
@@ -155,21 +140,3 @@ def test_resend_after_a_minute_sends_new_code(client, make_user, sent):
     if new_code != old_code:
         assert _verify(client, data["challenge_id"], old_code).status_code == 400
     assert _verify(client, data["challenge_id"], new_code).status_code == 200
-
-
-def test_register_as_coordinator_requires_code(client, make_user, sent):
-    admin = make_user("admin")
-    invite = client.post("/api/invites", json={"role": "coordinator"}, headers=admin["headers"])
-    assert invite.status_code == 201
-    payload = {
-        "name": "Nueva Coordinadora",
-        "email": f"coord-{uuid.uuid4().hex}@test.com",
-        "password": PASSWORD,
-        "invite_code": invite.json()["code"],
-    }
-    response = client.post("/api/auth/register", json=payload)
-    assert response.status_code == 201
-    data = response.json()
-    assert data["requires_code"] is True
-    assert "token" not in data
-    assert _verify(client, data["challenge_id"], _code_from(sent)).status_code == 200

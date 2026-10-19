@@ -15,7 +15,7 @@ from .daily_summary import (
 )
 from .database import SessionLocal
 from .email_analysis import _now
-from .notifications import STATUS_LABELS
+from .notifications import STATUS_LABELS, display_name
 
 # Alertas por correo, una sola vez por ticket o borrador y tipo.
 # Privacidad: solo número, título (enmascarado), nivel, estado, responsable y fecha límite.
@@ -81,7 +81,7 @@ def _single_email(alert: _Alert) -> tuple[str, str]:
         lines += [
             f"Nivel: {_level_text(alert.draft.ai_level)}",
             "Estado: Pendiente de revisión",
-            f"Solicitante: {alert.draft.requester.name}",
+            f"Solicitante: {display_name(alert.draft.requester)}",
             "Fecha límite: Sin fecha límite",
         ]
     lines += ["", f"Puede verlo en {config.APP_URL}"]

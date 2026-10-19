@@ -10,7 +10,7 @@ from . import chatbot, config, mailer, models
 from .business_hours import add_business_hours, day_hours
 from .database import SessionLocal
 from .email_parser import _PREFIX_RE, _SUPPORT_TAG_RE, _clean_title, normalize, strip_quoted
-from .notifications import STATUS_LABELS
+from .notifications import STATUS_LABELS, display_name
 
 # Fase 1: el análisis solo se muestra y se mide. Nunca cambia el ticket ni responde correos.
 # Nunca registrar en logs el contenido del correo ni la respuesta del modelo.
@@ -338,7 +338,7 @@ def status_reply_body(db: Session, user: models.User, text: str) -> str:
         tickets = own.filter(models.Ticket.status.in_(OPEN_STATUSES)).order_by(models.Ticket.id).all()
         intro = "Este es el estado de sus tickets abiertos:"
 
-    lines = [f"Buen día, {user.name}.", ""]
+    lines = [f"Buen día, {display_name(user)}.", ""]
     if not tickets:
         lines.append("En este momento no tiene tickets abiertos.")
     else:
@@ -355,7 +355,7 @@ def status_reply_body(db: Session, user: models.User, text: str) -> str:
 
 def _unclear_body(user: models.User) -> str:
     return "\n".join([
-        f"Buen día, {user.name}.",
+        f"Buen día, {display_name(user)}.",
         "",
         "Recibimos su correo, pero necesitamos más información para poder atender su solicitud.",
         "Le agradecemos que nos indique:",
@@ -420,7 +420,7 @@ def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User, fo
 
 def _received_body(user: models.User, missing_contact: bool) -> str:
     lines = [
-        f"Buen día, {user.name}.",
+        f"Buen día, {display_name(user)}.",
         "",
         "Recibimos su correo. Un técnico está revisando su solicitud y recibirá el número de ticket cuando se confirme.",
     ]
@@ -493,6 +493,12 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         draft.category_id = result["category_id"]
         draft.priority_id = priority.id if priority else None
         missing_contact = not draft.contact_phone or not draft.contact_id_number
+        # Con un motivo anotado (por ejemplo, cédula de otra cuenta) lo decide una persona
+        has_reason = (
+            db.query(models.DraftPendingReason).filter(models.DraftPendingReason.draft_id == draft.id).first()
+            is not None
+        )
+        missing_contact = missing_contact and not has_reason
         draft.status = "waiting_contact" if missing_contact else "pending_review"
         db.commit()
         mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user, missing_contact))

@@ -2,27 +2,36 @@ import hmac
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import config, mailer, models
+from .. import config, identity, mailer, models
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
+    SignupStarted, EmailCodeRequest, EmailRequest, ActivationResult,
 )
 from ..security import (
     hash_password, verify_password, new_token, get_current_user, hash_code,
-    generate_login_code, mask_email,
+    generate_login_code, generate_password, mask_email,
 )
 
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
-TWO_FACTOR_ROLES = ("coordinator", "admin")
+TWO_FACTOR_ROLES = ("admin",)
 CODE_MINUTES = 10
 MAX_CODE_ATTEMPTS = 5
 RESEND_SECONDS = 60
 CODE_ERROR = "Error: Intente Nuevamente"
+# Registro de clientes e invitaciones del personal
+CONFIRM_MINUTES = 15
+INVITE_HOURS = 72
+# Mismo mensaje para código incorrecto, vencido, con demasiados intentos o correo desconocido
+CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
+CONFIRM_EMAIL = "Confirme su correo para iniciar sesión"
+ACTIVATE_PATH = "/#activar-cuenta"
 
 
 def _now() -> datetime:
@@ -37,16 +46,38 @@ def _create_session(db: Session, user: models.User) -> AuthResponse:
     return AuthResponse(token=token, user=user)
 
 
+def send_code_email(to: str, subject: str, body: str, code: str) -> bool:
+    sent = mailer.send_email(to, subject, body)
+    # Solo sin correo real; con el correo encendido el código nunca va a los logs
+    if not config.EMAIL_ENABLED:
+        logging.warning("[SOLO DESARROLLO] Código para %s: %s", mask_email(to), code)
+    return sent
+
+
 def _send_code(user: models.User, code: str) -> None:
-    mailer.send_email(
+    send_code_email(
         user.email,
         "Código de verificación de la Ticketera",
         f"Tu código de verificación es: {code}. Vence en {CODE_MINUTES} minutos. "
         "Si no fuiste tú, ignora este correo y avisa al administrador.",
+        code,
     )
-    # Solo sin correo real; con el correo encendido el código nunca va a los logs
-    if not config.EMAIL_ENABLED:
-        logging.warning("[SOLO DESARROLLO] Código de verificación para %s: %s", mask_email(user.email), code)
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _code_matches(code: str, code_hash: str) -> bool:
+    return hmac.compare_digest(hash_code((code or "").strip()), code_hash)
+
+
+def _can_resend(sent_at: datetime | None) -> bool:
+    return sent_at is None or (_now() - sent_at).total_seconds() >= RESEND_SECONDS
+
+
+def _find_user(db: Session, email: str) -> models.User | None:
+    return db.query(models.User).filter(func.lower(models.User.email) == email).first()
 
 
 def start_challenge(db: Session, user: models.User) -> LoginChallengeResponse:
@@ -65,55 +96,186 @@ def start_challenge(db: Session, user: models.User) -> LoginChallengeResponse:
     return LoginChallengeResponse(challenge_id=challenge.id, email_hint=mask_email(user.email))
 
 
-@router.post("/auth/register", response_model=AuthResponse | LoginChallengeResponse, status_code=status.HTTP_201_CREATED)
-def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
-    email = user_data.email.strip().lower()
-    existente = db.query(models.User).filter(models.User.email == email).first()
-    if existente:
-        raise HTTPException(status_code=409, detail="El correo ya está registrado")
-
-    role = "requester"
-    invite = None
-
-    if user_data.invite_code and user_data.invite_code.strip():
-        c_hash = hash_code(user_data.invite_code)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        invite = db.query(models.InviteCode).filter(
-            models.InviteCode.code_hash == c_hash,
-            models.InviteCode.used_by == None,
-            models.InviteCode.expires_at > now
-        ).first()
-        if not invite:
-            raise HTTPException(status_code=400, detail="Código de invitación inválido o vencido")
-        role = invite.role
-
-    pwd_hash = hash_password(user_data.password)
-    db_user = models.User(
-        name=user_data.name.strip(),
-        email=email,
-        role=role,
-        password_hash=pwd_hash
+def _send_signup_code(email: str, code: str) -> None:
+    send_code_email(
+        email,
+        "Confirme su cuenta de la Ticketera",
+        f"Su código para confirmar la cuenta es: {code}. Vence en {CONFIRM_MINUTES} minutos.\n\n"
+        "Si usted no creó una cuenta, ignore este correo.",
+        code,
     )
-    db.add(db_user)
-    db.flush()
 
-    if invite:
-        invite.used_by = db_user.id
-        invite.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
+def _new_signup_code(pending: models.PendingSignup) -> str:
+    code = generate_login_code()
+    now = _now()
+    pending.code_hash = hash_code(code)
+    pending.expires_at = now + timedelta(minutes=CONFIRM_MINUTES)
+    pending.attempts = 0
+    pending.sent_at = now
+    return code
+
+
+@router.post("/auth/register", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
+def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
+    # Misma respuesta exista o no el correo: no se revela quién tiene cuenta
+    email = normalize_email(user_data.email)
+    response = SignupStarted(email_hint=mask_email(email))
+    if "@" not in email:
+        raise HTTPException(status_code=422, detail="Escriba un correo válido")
+
+    # Se calcula siempre: el tiempo de respuesta no delata si el correo ya tenía cuenta
+    password_hash = hash_password(user_data.password)
+    pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
+    if _find_user(db, email) is not None:
+        # Aviso al dueño (como mucho uno por minuto); no se crea cuenta.
+        # La fila con hash "!" solo marca cuándo se avisó: nunca se puede confirmar.
+        if pending is None:
+            pending = models.PendingSignup(
+                email=email, password_hash="!", code_hash="!", expires_at=_now(), attempts=MAX_CODE_ATTEMPTS, sent_at=None,
+            )
+        if _can_resend(pending.sent_at):
+            pending.sent_at = _now()
+            db.add(pending)
+            db.commit()
+            mailer.send_email(
+                email,
+                "Intento de crear una cuenta con su correo",
+                "Alguien intentó crear una cuenta de cliente en la Ticketera con este correo, "
+                "pero ya tiene una cuenta. Si fue usted, inicie sesión con su contraseña. "
+                "Si no fue usted, puede ignorar este correo.",
+            )
+        return response
+
+    if pending is None:
+        pending = models.PendingSignup(email=email, sent_at=None)
+        db.add(pending)
+    pending.password_hash = password_hash
+    if _can_resend(pending.sent_at):
+        code = _new_signup_code(pending)
+        db.commit()
+        _send_signup_code(email, code)
+    else:
+        db.commit()
+    return response
+
+
+@router.post("/auth/register/verify", response_model=AuthResponse)
+def verify_signup(data: EmailCodeRequest, db: Session = Depends(get_db)):
+    email = normalize_email(data.email)
+    pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
+    if (
+        pending is None
+        or pending.password_hash == "!"
+        or pending.expires_at <= _now()
+        or pending.attempts >= MAX_CODE_ATTEMPTS
+    ):
+        raise HTTPException(status_code=400, detail=CODE_INVALID)
+    if not _code_matches(data.code, pending.code_hash):
+        pending.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail=CODE_INVALID)
+    if _find_user(db, email) is not None:
+        db.delete(pending)
+        db.commit()
+        raise HTTPException(status_code=400, detail=CODE_INVALID)
+
+    # El nombre, la cédula y el teléfono se piden en "Complete su perfil"
+    user = models.User(name="", email=email, role="requester", password_hash=pending.password_hash)
+    db.add(user)
+    db.delete(pending)
     db.commit()
-    db.refresh(db_user)
+    db.refresh(user)
+    return _create_session(db, user)
 
-    if db_user.role == "coordinator":
-        return start_challenge(db, db_user)
 
-    return _create_session(db, db_user)
+@router.post("/auth/register/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
+def resend_signup(data: EmailRequest, db: Session = Depends(get_db)):
+    email = normalize_email(data.email)
+    pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
+    if pending is not None and pending.password_hash != "!" and _can_resend(pending.sent_at):
+        code = _new_signup_code(pending)
+        db.commit()
+        _send_signup_code(email, code)
+    return SignupStarted(email_hint=mask_email(email))
+
+
+def _active_invitation(db: Session, email: str) -> models.StaffInvitation | None:
+    return (
+        db.query(models.StaffInvitation)
+        .filter(models.StaffInvitation.email == email, models.StaffInvitation.used_by.is_(None))
+        .order_by(models.StaffInvitation.id.desc())
+        .first()
+    )
+
+
+def send_invitation(invitation: models.StaffInvitation) -> bool:
+    """Código nuevo con 72 horas y correo con el enlace a la página de activación."""
+    code = generate_login_code()
+    now = _now()
+    invitation.code_hash = hash_code(code)
+    invitation.expires_at = now + timedelta(hours=INVITE_HOURS)
+    invitation.attempts = 0
+    invitation.sent_at = now
+    role = "técnico" if invitation.role == "technician" else "coordinador"
+    body = "\n".join([
+        f"Buen día, {invitation.name}.",
+        "",
+        f"Le invitamos a la Ticketera de Soporte como {role}.",
+        f"Para activar su cuenta entre a {config.APP_URL.rstrip('/')}{ACTIVATE_PATH}, "
+        "escriba este correo y el código:",
+        "",
+        f"Código: {code}",
+        "",
+        f"El código vence en {INVITE_HOURS} horas. Al activarla verá su contraseña una sola vez.",
+    ])
+    return send_code_email(invitation.email, "Active su cuenta de la Ticketera", body, code)
+
+
+@router.post("/auth/activate", response_model=ActivationResult)
+def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Depends(get_db)):
+    email = normalize_email(data.email)
+    invitation = _active_invitation(db, email)
+    if invitation is None or invitation.expires_at <= _now() or invitation.attempts >= MAX_CODE_ATTEMPTS:
+        raise HTTPException(status_code=400, detail=CODE_INVALID)
+    if not _code_matches(data.code, invitation.code_hash):
+        invitation.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail=CODE_INVALID)
+    if _find_user(db, email) is not None:
+        raise HTTPException(status_code=400, detail=CODE_INVALID)
+
+    password = generate_password()
+    user = models.User(name=invitation.name, email=email, role=invitation.role, password_hash=hash_password(password))
+    db.add(user)
+    db.flush()
+    invitation.used_by = user.id
+    invitation.used_at = _now()
+    db.commit()
+    # Única respuesta con la contraseña: que el navegador no la guarde
+    response.headers["Cache-Control"] = "no-store"
+    return ActivationResult(email=email, password=password)
+
+
+@router.post("/auth/activate/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
+def resend_activation(data: EmailRequest, db: Session = Depends(get_db)):
+    email = normalize_email(data.email)
+    invitation = _active_invitation(db, email)
+    if invitation is not None and _can_resend(invitation.sent_at):
+        send_invitation(invitation)
+        db.commit()
+    return SignupStarted(email_hint=mask_email(email))
 
 
 @router.post("/auth/login", response_model=AuthResponse | LoginChallengeResponse)
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     email = credentials.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
+    if user is None:
+        pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
+        # Solo quien sabe la contraseña se entera de que falta confirmar
+        if pending is not None and verify_password(credentials.password, pending.password_hash):
+            raise HTTPException(status_code=403, detail=CONFIRM_EMAIL)
     if not user or not verify_password(credentials.password, user.password_hash) or user.role == "agent" or not user.is_active:
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
@@ -170,16 +332,24 @@ def resend_code(data: ResendCodeRequest, db: Session = Depends(get_db)):
     return LoginChallengeResponse(challenge_id=challenge.id, email_hint=mask_email(user.email))
 
 
-@router.get("/auth/me", response_model=MeRead)
-def get_me(current_user: models.User = Depends(get_current_user)):
+def me_read(db: Session, user: models.User) -> MeRead:
+    locked = identity.is_locked(db, user)
+    db.commit()
     return MeRead(
-        id=current_user.id,
-        name=current_user.name,
-        email=current_user.email,
-        role=current_user.role,
-        phone=current_user.phone,
-        id_number=current_user.id_number,
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        role=user.role,
+        phone=user.phone,
+        id_number=user.id_number,
+        profile_complete=identity.profile_complete(user),
+        identity_locked=locked,
     )
+
+
+@router.get("/auth/me", response_model=MeRead)
+def get_me(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return me_read(db, current_user)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)

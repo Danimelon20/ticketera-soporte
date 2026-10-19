@@ -1,14 +1,18 @@
+import hashlib
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 
 from . import config
+from .email_parser import normalize
 
 HACIENDA_URL = "https://api.hacienda.go.cr/fe/ae?identificacion={}"
 TIMEOUT_SECONDS = 5
 
-# Caché en memoria: cédula -> {"tipo": ...} o None. Nunca se guarda el nombre.
+# Caché en memoria: cédula -> {"tipo": ..., "name_tokens": ...} o None.
+# Nunca se guarda el nombre: solo el hash de cada palabra, para compararlo.
 _cache: dict[str, dict | None] = {}
 
 
@@ -42,9 +46,41 @@ def lookup_id(id_number: str) -> dict | None:
 
     if not isinstance(data, dict):
         raise HaciendaUnavailable("Respuesta inesperada de Hacienda")
-    result = {"tipo": data.get("tipoIdentificacion")}
+    nombre = data.get("nombre")
+    result = {
+        "tipo": data.get("tipoIdentificacion"),
+        "name_tokens": name_tokens(nombre) if isinstance(nombre, str) else frozenset(),
+    }
     _cache[id_number] = result
     return result
+
+
+def name_tokens(name: str) -> frozenset[str]:
+    """Hash de cada palabra del nombre, sin tildes ni mayúsculas."""
+    words = re.findall(r"[a-zñ]+", normalize(name or ""))
+    return frozenset(hashlib.sha256(w.encode("utf-8")).hexdigest() for w in words)
+
+
+def identity_result(id_number: str, name: str) -> str:
+    """Compara el nombre con el de Hacienda: match, mismatch, not_found o unverified.
+
+    Coincide si las palabras de un nombre están todas en el otro (en cualquier
+    dirección) y comparten al menos 2. El resultado nunca se muestra al usuario.
+    """
+    if not config.hacienda_check_enabled():
+        return "unverified"
+    try:
+        result = lookup_id(id_number)
+    except HaciendaUnavailable:
+        logger.warning("Hacienda no disponible; la identidad queda sin verificar")
+        return "unverified"
+    if result is None:
+        return "not_found"
+    theirs = result.get("name_tokens") or frozenset()
+    ours = name_tokens(name)
+    if len(ours & theirs) >= 2 and (ours <= theirs or theirs <= ours):
+        return "match"
+    return "mismatch"
 
 
 def check_id_number(id_number: str) -> str | None:

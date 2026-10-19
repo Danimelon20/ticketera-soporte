@@ -10,6 +10,11 @@ STATUS_LABELS = {
     "closed": "Cerrado",
 }
 
+def display_name(user: models.User) -> str:
+    """Nombre del perfil o, si la cuenta todavía no lo completó, su correo."""
+    return user.name or user.email
+
+
 FOLLOW_NOTICE = (
     "Recibes este correo porque das seguimiento a este ticket. "
     "Puedes desactivarlo desde la página del ticket."
@@ -37,7 +42,7 @@ def notify_followers(
     )
     for user in followers:
         body = "\n".join(
-            [f"Hola {user.name}.", ""]
+            [f"Hola {display_name(user)}.", ""]
             + lines
             + [
                 "",

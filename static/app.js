@@ -17,12 +17,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const authScreen = document.getElementById('authScreen');
     const topbar = document.querySelector('.topbar');
     const mainContent = document.querySelector('main');
-    const tabLogin = document.getElementById('tabLogin');
-    const tabRegister = document.getElementById('tabRegister');
-    const loginFormContainer = document.getElementById('loginFormContainer');
-    const registerFormContainer = document.getElementById('registerFormContainer');
+    const loginPanel = document.getElementById('loginPanel');
+    const signupPanel = document.getElementById('signupPanel');
+    const activatePanel = document.getElementById('activatePanel');
     const loginForm = document.getElementById('loginForm');
-    const registerForm = document.getElementById('registerForm');
+    const signupForm = document.getElementById('signupForm');
+    const activateForm = document.getElementById('activateForm');
+    const confirmEmailNotice = document.getElementById('confirmEmailNotice');
     const switchAccountBtn = document.getElementById('switchAccount');
     const currentUserDisplay = document.getElementById('currentUserDisplay');
 
@@ -125,14 +126,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             let message = errorData.detail;
-            if (response.status === 422 && endpoint.startsWith('/auth/')) {
+            if (response.status === 422 && endpoint.startsWith('/auth/') && Array.isArray(message)) {
                 message = 'La contraseña debe tener al menos 8 caracteres';
-            } else if (endpoint === '/tickets' && options.method === 'POST') {
+            } else if ((endpoint === '/tickets' || endpoint === '/profile') && ['POST', 'PUT'].includes(options.method)) {
                 message = getErrorMessage(errorData);
             } else if (response.status === 401 && endpoint.includes('/auth/login')) {
                 message = errorData.detail || 'Correo o contraseña incorrectos';
-            } else if (response.status === 409) {
-                message = errorData.detail || 'El correo ya está registrado';
             } else if (Array.isArray(message)) {
                 message = message.map(m => (m && m.msg) ? m.msg : String(m)).join('. ');
             }
@@ -174,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const userRoleEl = document.querySelector('.topbar-user-role');
             const userAvatarEl = document.querySelector('.topbar-avatar');
             const openNewTicketBtn = document.getElementById('openNewTicket');
-            if (userNameEl) userNameEl.textContent = currentUser.name;
+            if (userNameEl) userNameEl.textContent = currentUser.name || currentUser.email;
             if (userRoleEl) userRoleEl.textContent = ROLE_MAP[currentUser.role] || currentUser.role;
             if (userAvatarEl) {
                 userAvatarEl.textContent = getInitials(currentUser.name);
@@ -190,13 +189,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderInvitesSection();
         updateRoleTabs();
-        showView('tickets');
+        if (profileRequired()) {
+            showProfile();
+        } else {
+            showView('tickets');
+        }
         refreshDraftsBadge();
         startDraftsPolling();
         setupChat();
     }
 
     function showAuthScreen() {
+        document.body.classList.remove('profile-required');
         stopDraftsPolling();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
@@ -207,38 +211,31 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDetailPlaceholder();
         selectedTicketId = null;
 
-        if (tabLogin && tabRegister && loginFormContainer && registerFormContainer) {
-            tabLogin.classList.add('active');
-            tabLogin.setAttribute('aria-pressed', 'true');
-            tabRegister.classList.remove('active');
-            tabRegister.setAttribute('aria-pressed', 'false');
-            loginFormContainer.style.display = 'block';
-            registerFormContainer.style.display = 'none';
-        }
+        showAuthPanel();
     }
 
-    // Auth tab switching
-    if (tabLogin && tabRegister && loginFormContainer && registerFormContainer) {
-        tabLogin.addEventListener('click', () => {
-            tabLogin.classList.add('active');
-            tabLogin.setAttribute('aria-pressed', 'true');
-            tabRegister.classList.remove('active');
-            tabRegister.setAttribute('aria-pressed', 'false');
-            loginFormContainer.style.display = 'block';
-            registerFormContainer.style.display = 'none';
-            hideError();
-        });
+    // ===== Pantallas de inicio: iniciar sesión, crear cuenta de cliente, activar cuenta de personal =====
+    const AUTH_ROUTES = { '#crear-cuenta': 'signup', '#activar-cuenta': 'activate' };
 
-        tabRegister.addEventListener('click', () => {
-            tabRegister.classList.add('active');
-            tabRegister.setAttribute('aria-pressed', 'true');
-            tabLogin.classList.remove('active');
-            tabLogin.setAttribute('aria-pressed', 'false');
-            registerFormContainer.style.display = 'block';
-            loginFormContainer.style.display = 'none';
-            hideError();
-        });
+    function showAuthPanel() {
+        const panel = AUTH_ROUTES[window.location.hash] || 'login';
+        loginPanel.hidden = panel !== 'login';
+        signupPanel.hidden = panel !== 'signup';
+        activatePanel.hidden = panel !== 'activate';
+        confirmEmailNotice.hidden = true;
+        if (panel !== 'activate') clearActivationResult();
+        hideError();
     }
+
+    function goToLogin() {
+        // Sin "#" en la dirección: vuelve al inicio de sesión
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        showAuthPanel();
+    }
+
+    window.addEventListener('hashchange', () => {
+        if (!currentUser) showAuthPanel();
+    });
 
     // Login submit
     if (loginForm) {
@@ -261,48 +258,171 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 completeLogin(data);
             } catch (err) {
-                // handled by apiFetch
+                // apiFetch ya mostró el error; si falta confirmar el correo se ofrece el código
+                if (err.message === CONFIRM_EMAIL_MESSAGE) {
+                    pendingSignupEmail = email;
+                    confirmEmailNotice.hidden = false;
+                }
             }
         });
     }
 
-    // Register submit
-    if (registerForm) {
-        registerForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            hideError();
-            const name = document.getElementById('regName').value.trim();
-            const email = document.getElementById('regEmail').value.trim();
-            const password = document.getElementById('regPassword').value;
-            const inviteCodeInput = document.getElementById('regInviteCode');
-            const inviteCode = inviteCodeInput.value.trim().toUpperCase().replace(/\s+/g, '');
+    const CONFIRM_EMAIL_MESSAGE = 'Confirme su correo para iniciar sesión';
+    let pendingSignupEmail = null;
 
-            try {
-                const body = { name, email, password };
-                if (inviteCode) {
-                    body.invite_code = inviteCode;
-                }
-                const data = await apiFetch('/auth/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                registerForm.reset();
-                if (data.requires_code) {
-                    showVerifyScreen(data);
-                    return;
-                }
-                completeLogin(data);
-            } catch (err) {
-                // handled by apiFetch
-            }
-        });
+    document.getElementById('confirmEmailBtn').addEventListener('click', async () => {
+        if (!pendingSignupEmail) return;
+        let result;
+        try {
+            result = await postAuth('/auth/register/resend', { email: pendingSignupEmail });
+        } catch (err) {
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        loginForm.reset();
+        showSignupVerify(pendingSignupEmail, result.data.email_hint);
+    });
+
+    signupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const email = document.getElementById('signupEmail').value.trim();
+        const password = document.getElementById('signupPassword').value;
+        let result;
+        try {
+            result = await postAuth('/auth/register', { email, password });
+        } catch (err) {
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            showError(result.status === 422 && Array.isArray(result.data.detail)
+                ? 'La contraseña debe tener al menos 8 caracteres'
+                : getErrorMessage(result.data));
+            return;
+        }
+        signupForm.reset();
+        showSignupVerify(email, result.data.email_hint);
+    });
+
+    // ----- Activar cuenta de personal -----
+    const activateResult = document.getElementById('activateResult');
+    const activatePassword = document.getElementById('activatePassword');
+    const activateLinks = document.getElementById('activateLinks');
+    const activateNotice = document.getElementById('activateNotice');
+    const activateResendBtn = document.getElementById('activateResend');
+    const copyPasswordBtn = document.getElementById('copyPasswordBtn');
+    let activationPassword = null;
+    let activateResendTimer = null;
+
+    function clearActivationResult() {
+        // La contraseña se muestra una sola vez: al salir se borra
+        activationPassword = null;
+        activatePassword.textContent = '';
+        activateResult.hidden = true;
+        activateForm.hidden = false;
+        activateLinks.hidden = false;
+        copyPasswordBtn.textContent = 'Copiar';
     }
 
-    function completeLogin(data) {
+    activateForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        activateNotice.textContent = '';
+        const email = document.getElementById('activateEmail').value.trim();
+        const code = document.getElementById('activateCode').value.replace(/\D/g, '');
+        if (code.length !== 6) {
+            showError('Escriba los 6 dígitos del código');
+            return;
+        }
+        let result;
+        try {
+            result = await postAuth('/auth/activate', { email, code });
+        } catch (err) {
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        activateForm.reset();
+        activationPassword = result.data.password;
+        activatePassword.textContent = activationPassword;
+        activateForm.hidden = true;
+        activateLinks.hidden = true;
+        activateResult.hidden = false;
+        copyPasswordBtn.focus();
+    });
+
+    copyPasswordBtn.addEventListener('click', async () => {
+        if (!activationPassword) return;
+        try {
+            await navigator.clipboard.writeText(activationPassword);
+            copyPasswordBtn.textContent = 'Copiada';
+        } catch (err) {
+            showError('No se pudo copiar. Selecciónela y cópiela a mano.');
+        }
+    });
+
+    document.getElementById('activateToLogin').addEventListener('click', () => {
+        clearActivationResult();
+        goToLogin();
+        document.getElementById('loginEmail').focus();
+    });
+
+    activateResendBtn.addEventListener('click', async () => {
+        hideError();
+        const email = document.getElementById('activateEmail').value.trim();
+        if (!email) {
+            showError('Escriba su correo para reenviar el código');
+            return;
+        }
+        activateResendBtn.disabled = true;
+        let result;
+        try {
+            result = await postAuth('/auth/activate/resend', { email });
+        } catch (err) {
+            activateResendBtn.disabled = false;
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            activateResendBtn.disabled = false;
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        activateNotice.textContent = 'Si hay una invitación para ese correo, le enviamos un código nuevo.';
+        // Misma espera que el servidor: un reenvío por minuto
+        let left = RESEND_WAIT_SECONDS;
+        clearInterval(activateResendTimer);
+        activateResendBtn.textContent = `Reenviar código en ${left} s`;
+        activateResendTimer = setInterval(() => {
+            left -= 1;
+            if (left <= 0) {
+                clearInterval(activateResendTimer);
+                activateResendBtn.disabled = false;
+                activateResendBtn.textContent = 'Reenviar código';
+                return;
+            }
+            activateResendBtn.textContent = `Reenviar código en ${left} s`;
+        }, 1000);
+    });
+
+    async function completeLogin(data) {
         sessionStorage.setItem('ticketeraToken', data.token);
         authToken = data.token;
         currentUser = data.user;
+        try {
+            // Trae también si el perfil está completo
+            currentUser = await apiFetch('/auth/me');
+        } catch (err) {
+            if (!authToken) return; // apiFetch ya volvió al inicio de sesión
+        }
         showApp();
     }
 
@@ -320,10 +440,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const resendNotice = document.getElementById('resendNotice');
     const backToLoginBtn = document.getElementById('backToLogin');
 
-    const CODE_SECONDS = 10 * 60;
+    const verifyTitle = document.getElementById('verifyTitle');
+    // Inicio de sesión del administrador: 10 minutos. Confirmar una cuenta nueva: 15 minutos.
+    const CODE_SECONDS = { login: 10 * 60, signup: 15 * 60 };
     const RESEND_WAIT_SECONDS = 60;
 
     let challengeId = null;
+    let verifyMode = 'login';
+    let verifyEmail = null;
     let expiryTimer = null;
     let resendTimer = null;
     let verifyBusy = false;
@@ -337,12 +461,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function startExpiryCountdown() {
         clearInterval(expiryTimer);
-        const deadline = Date.now() + CODE_SECONDS * 1000;
+        const deadline = Date.now() + CODE_SECONDS[verifyMode] * 1000;
         const tick = () => {
             const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
             if (left === 0) {
                 clearInterval(expiryTimer);
-                verifyTimer.textContent = 'El código venció. Inicia sesión de nuevo.';
+                verifyTimer.textContent = verifyMode === 'signup'
+                    ? 'El código venció. Pida uno nuevo.'
+                    : 'El código venció. Inicia sesión de nuevo.';
                 verifySubmit.disabled = true;
                 return;
             }
@@ -385,9 +511,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showVerifyScreen(data) {
+        verifyMode = 'login';
+        verifyEmail = null;
+        verifyTitle.textContent = 'Verificación de seguridad';
+        openVerifyScreen(data.challenge_id, data.email_hint);
+    }
+
+    // Confirmar el correo de una cuenta de cliente nueva
+    function showSignupVerify(email, emailHint) {
+        verifyMode = 'signup';
+        verifyEmail = email;
+        verifyTitle.textContent = 'Confirme su correo';
+        openVerifyScreen(null, emailHint);
+    }
+
+    function openVerifyScreen(newChallengeId, emailHint) {
         resetChat();
-        challengeId = data.challenge_id;
-        verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + data.email_hint;
+        challengeId = newChallengeId;
+        verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + emailHint;
         clearTimeout(verifyRedirectTimer);
         verifyBusy = false;
         clearDigits();
@@ -408,10 +549,12 @@ document.addEventListener('DOMContentLoaded', () => {
         clearInterval(resendTimer);
         clearTimeout(verifyRedirectTimer);
         challengeId = null;
+        verifyEmail = null;
         verifyBusy = false;
         clearDigits();
         hideVerifyError();
         verifyScreen.hidden = true;
+        history.replaceState(null, '', window.location.pathname + window.location.search);
         showAuthScreen();
     }
 
@@ -434,7 +577,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function submitCode() {
         const code = digitInputs.map(input => input.value).join('');
-        if (verifyBusy || !challengeId) return;
+        if (verifyBusy || !(challengeId || verifyEmail)) return;
         if (!/^\d{6}$/.test(code)) {
             showVerifyError('Escribe los 6 dígitos del código');
             return;
@@ -445,7 +588,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let result;
         try {
-            result = await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
+            result = verifyMode === 'signup'
+                ? await postAuth('/auth/register/verify', { email: verifyEmail, code })
+                : await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
         } catch (err) {
             verifyBusy = false;
             verifySubmit.disabled = false;
@@ -461,7 +606,9 @@ document.addEventListener('DOMContentLoaded', () => {
             verifyRedirectTimer = setTimeout(() => {
                 verifyScreen.hidden = true;
                 challengeId = null;
+                verifyEmail = null;
                 verifyBusy = false;
+                history.replaceState(null, '', window.location.pathname + window.location.search);
                 completeLogin(result.data);
             }, 1500);
             return;
@@ -535,14 +682,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     resendCodeBtn.addEventListener('click', async () => {
-        if (!challengeId) return;
+        if (!(challengeId || verifyEmail)) return;
         resendCodeBtn.disabled = true;
         resendNotice.textContent = '';
         hideVerifyError();
 
         let result;
         try {
-            result = await postAuth('/auth/resend-code', { challenge_id: challengeId });
+            result = verifyMode === 'signup'
+                ? await postAuth('/auth/register/resend', { email: verifyEmail })
+                : await postAuth('/auth/resend-code', { challenge_id: challengeId });
         } catch (err) {
             resendCodeBtn.disabled = false;
             showVerifyError('No se pudo conectar con el servidor');
@@ -550,7 +699,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (result.ok) {
-            challengeId = result.data.challenge_id;
+            if (verifyMode === 'login') challengeId = result.data.challenge_id;
+            verifyBusy = false;
             verifySubmit.disabled = false;
             clearDigits();
             startExpiryCountdown();
@@ -1771,10 +1921,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            // Nombre y cédula salen del perfil; solo el teléfono de contacto se puede cambiar
             const contactPhone = document.getElementById('contactPhone').value.trim();
-            const contactIdNumber = document.getElementById('contactIdNumber').value.trim();
-
-            const contactError = validatePhone(contactPhone) || validateIdNumber(contactIdNumber);
+            const contactError = validatePhone(contactPhone);
             if (contactError) {
                 showError(contactError);
                 return;
@@ -1791,7 +1940,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     category_id: parseInt(categoryId),
                     priority_id: parseInt(priorityId),
                     contact_phone: contactPhone,
-                    contact_id_number: contactIdNumber,
                     ...(selectedRequesterId !== null ? { requester_id: selectedRequesterId } : {})
                 })
             });
@@ -1869,6 +2017,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const adminView = document.getElementById('adminView');
     const navDrafts = document.getElementById('navDrafts');
     const draftsView = document.getElementById('draftsView');
+    const navProfile = document.getElementById('navProfile');
+    const profileView = document.getElementById('profileView');
 
     function setActiveTab(activeTab) {
         document.querySelectorAll('.topbar-tab').forEach(tab => {
@@ -1884,6 +2034,7 @@ document.addEventListener('DOMContentLoaded', () => {
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
         navAdmin.hidden = role !== 'admin';
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
+        navProfile.hidden = role !== 'requester';
     }
 
     function showView(name) {
@@ -1891,7 +2042,8 @@ document.addEventListener('DOMContentLoaded', () => {
         directoryView.hidden = name !== 'directory';
         adminView.hidden = name !== 'admin';
         draftsView.hidden = name !== 'drafts';
-        const tabs = { tickets: navTickets, directory: navDirectory, admin: navAdmin, drafts: navDrafts };
+        profileView.hidden = name !== 'profile';
+        const tabs = { tickets: navTickets, directory: navDirectory, admin: navAdmin, drafts: navDrafts, profile: navProfile };
         setActiveTab(tabs[name]);
         if (name === 'directory') loadDirectory();
         if (name === 'admin') loadAdminPanel();
@@ -1901,6 +2053,70 @@ document.addEventListener('DOMContentLoaded', () => {
     navDirectory.addEventListener('click', () => showView('directory'));
     navAdmin.addEventListener('click', () => showView('admin'));
     navDrafts.addEventListener('click', () => showView('drafts'));
+    navProfile.addEventListener('click', () => showProfile());
+
+    // ----- Perfil del solicitante -----
+    const profileForm = document.getElementById('profileForm');
+    const profileName = document.getElementById('profileName');
+    const profileIdNumber = document.getElementById('profileIdNumber');
+    const profilePhone = document.getElementById('profilePhone');
+    const profileCancel = document.getElementById('profileCancel');
+
+    function profileRequired() {
+        return Boolean(currentUser && currentUser.role === 'requester' && !currentUser.profile_complete);
+    }
+
+    function showProfile() {
+        const required = profileRequired();
+        // Mientras falte el perfil no se puede usar el resto de la página
+        document.body.classList.toggle('profile-required', required);
+        document.getElementById('profileTitle').textContent = required ? 'Complete su perfil' : 'Mi perfil';
+        document.getElementById('profileIntro').hidden = !required;
+        profileCancel.hidden = required;
+        profileName.value = currentUser.name || '';
+        profileIdNumber.value = currentUser.id_number || '';
+        profilePhone.value = currentUser.phone || '';
+        const locked = Boolean(currentUser.identity_locked);
+        profileName.readOnly = locked;
+        profileIdNumber.readOnly = locked;
+        document.getElementById('profileLockedNote').hidden = !locked;
+        showView('profile');
+        (locked ? profilePhone : profileName).focus();
+    }
+
+    profileForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const name = profileName.value.trim();
+        const idNumber = profileIdNumber.value.trim();
+        const phone = profilePhone.value.trim();
+        if (name.split(/\s+/).length < 2 && !currentUser.identity_locked) {
+            showError('Escriba su nombre completo (nombre y apellidos)');
+            return;
+        }
+        const contactError = validatePhone(phone) || validateIdNumber(idNumber);
+        if (contactError) {
+            showError(contactError);
+            return;
+        }
+        try {
+            currentUser = await apiFetch('/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, id_number: idNumber, phone })
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        document.body.classList.remove('profile-required');
+        // Nombre e iniciales en la barra
+        document.querySelector('.topbar-user-name').textContent = currentUser.name;
+        document.querySelector('.topbar-avatar').textContent = getInitials(currentUser.name);
+        showView('tickets');
+        showSuccess('Perfil guardado');
+    });
+
+    profileCancel.addEventListener('click', () => showView('tickets'));
 
     // ----- Borradores de correos -----
     const DRAFT_ROLES = ['technician', 'coordinator', 'admin'];
@@ -2060,6 +2276,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
         document.getElementById('draftMeta').textContent =
             `${draft.requester_name} · ${formatDateTime(draft.created_at)} · ${DRAFT_STATUS_LABELS[draft.status] || draft.status}`;
+        const draftReason = document.getElementById('draftReason');
+        draftReason.textContent = draft.pending_reason ? `Pendiente: ${draft.pending_reason}` : '';
+        draftReason.hidden = !draft.pending_reason;
         document.getElementById('draftBody').textContent = draft.body;
 
         const ai = document.getElementById('draftAi');
@@ -2554,7 +2773,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('contactName').value = person.name || '';
         document.getElementById('contactEmail').value = person.email || '';
         document.getElementById('contactPhone').value = person.phone || '';
-        document.getElementById('contactIdNumber').value = person.id_number || '';
     }
 
     function clearRequesterSelection() {
@@ -2636,9 +2854,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('contactEmail').value = currentUser.email;
                 if (currentUser.phone) {
                     document.getElementById('contactPhone').value = currentUser.phone;
-                }
-                if (currentUser.id_number) {
-                    document.getElementById('contactIdNumber').value = currentUser.id_number;
                 }
             }
         });
@@ -2857,200 +3072,155 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderInvitesSection() {
-        if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) {
-            const section = document.getElementById('invitesSection');
-            if (section) section.style.display = 'none';
-            return;
-        }
+    // ----- Invitaciones del personal (admin: técnicos y coordinadores; coordinador: técnicos) -----
+    const INVITE_STATUS = { available: 'Disponible', expired: 'Vencida', used: 'Activada' };
+    const INVITE_ROLES = { technician: 'Técnico', coordinator: 'Coordinador' };
 
-        let section = document.getElementById('invitesSection');
+    function inviteField(labelText, input) {
+        const group = document.createElement('div');
+        group.className = 'form-group';
+        const label = document.createElement('label');
+        label.htmlFor = input.id;
+        label.textContent = labelText;
+        group.append(label, input);
+        return group;
+    }
+
+    function renderInvitesSection() {
+        const old = document.getElementById('invitesSection');
+        if (old) old.remove();
+        if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) return;
         const modalBody = document.querySelector('#usersModal .modal-body');
         if (!modalBody) return;
 
-        if (section) {
-            section.remove();
-        }
-        section = document.createElement('div');
+        const section = document.createElement('section');
         section.id = 'invitesSection';
-        section.style.marginTop = '12px';
-        section.style.padding = '12px';
-        section.style.background = '#FFF8F0';
-        section.style.borderRadius = '8px';
-        section.style.border = '1px solid #8A4B00';
-        section.style.display = 'block';
+        section.className = 'invites-section';
+        const title = document.createElement('h3');
+        title.textContent = 'Invitar personal';
+        const help = document.createElement('p');
+        help.className = 'help-text';
+        help.textContent = 'Le enviamos un correo con el código y el enlace para activar su cuenta. Vence en 72 horas.';
 
-        const isAdmin = currentUser.role === 'admin';
-        let buttonsHtml = `<button id="generateTechnicianCodeBtn" class="btn-action">Generar código de técnico</button>`;
-            if (isAdmin) {
-                buttonsHtml += `<button id="generateCoordinatorCodeBtn" class="btn-action" style="margin-left: 8px;">Generar código de coordinador</button>`;
-            }
-            section.innerHTML += `<div style="margin-bottom: 12px;">${buttonsHtml}</div>`;
+        const form = document.createElement('form');
+        form.className = 'invite-form';
+        const email = document.createElement('input');
+        email.type = 'email';
+        email.id = 'inviteEmail';
+        email.required = true;
+        email.maxLength = 150;
+        const name = document.createElement('input');
+        name.type = 'text';
+        name.id = 'inviteName';
+        name.required = true;
+        name.maxLength = 100;
+        const role = document.createElement('select');
+        role.id = 'inviteRole';
+        const roles = currentUser.role === 'admin' ? ['technician', 'coordinator'] : ['technician'];
+        roles.forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = INVITE_ROLES[value];
+            role.appendChild(option);
+        });
+        const submit = document.createElement('button');
+        submit.type = 'submit';
+        submit.className = 'btn-action';
+        submit.textContent = 'Enviar invitación';
+        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role), submit);
 
-            section.innerHTML += `<div id="codeDisplay" style="margin: 12px 0; padding: 12px; background: var(--bg); font-family: var(--mono); font-size: 20px; min-height: 44px; border: 1px solid var(--line); border-radius: 4px; display: none;">
-                <span id="codeText">---</span>
-            </div>`;
-
-            section.innerHTML += `<button id="copyCodeBtn" class="btn-action" style="display: none;">Copiar</button>`;
-
-            section.innerHTML += `<div id="codeWarning" style="margin-top: 8px; color: #8A4B00; font-size: 12px; display: none;">
-                Guárdalo ahora: no se volverá a mostrar. Vence en 7 días y sirve una sola vez.
-            </div>`;
-
-            const isAdmin2 = currentUser.role === 'admin';
-            section.innerHTML += `<div style="margin-top: 12px; font-size: 14px;">
-                <strong>Códigos de invitación</strong>
-                <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
-                    <thead>
-                        <tr style="background: #F0F2F5;">
-                            <th style="padding: 8px; text-align: left;">Rol</th>
-                            <th style="padding: 8px; text-align: left;">Creado</th>
-                            <th style="padding: 8px; text-align: left;">Vence</th>
-                            <th style="padding: 8px; text-align: left;">Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody id="invitesTableBody"></tbody>
-                </table>
-            </div>`;
-
-            modalBody.prepend(section);
-
-            // Add event listeners
-            document.getElementById('generateTechnicianCodeBtn').addEventListener('click', async () => {
-                try {
-                    const data = await apiFetch('/invites', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ role: 'technician' })
-                    });
-                    const codeText = document.getElementById('codeText');
-                    const codeDisplay = document.getElementById('codeDisplay');
-                    const copyBtn = document.getElementById('copyCodeBtn');
-                    const codeWarning = document.getElementById('codeWarning');
-
-                    codeText.textContent = data.code;
-                    codeDisplay.style.display = 'block';
-                    copyBtn.style.display = 'inline-block';
-                    codeWarning.style.display = 'block';
-
-                    loadInvitesTable();
-
-                    // Set up copy button
-                    copyBtn.onclick = async () => {
-                        try {
-                            await navigator.clipboard.writeText(data.code);
-                            copyBtn.textContent = 'Copiado';
-                            copyBtn.style.color = 'var(--exito)';
-                            setTimeout(() => {
-                                copyBtn.textContent = 'Copiar';
-                                copyBtn.style.color = '';
-                            }, 2000);
-                        } catch (err) {
-                            showError('No se pudo copiar al portapapeles');
-                        }
-                    };
-                } catch (err) {
-                    showError(err.message || 'Error al generar código');
-                }
-            });
-
-            if (isAdmin2) {
-                document.getElementById('generateCoordinatorCodeBtn').addEventListener('click', async () => {
-                    try {
-                        const data = await apiFetch('/invites', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ role: 'coordinator' })
-                        });
-                        const codeText = document.getElementById('codeText');
-                        const codeDisplay = document.getElementById('codeDisplay');
-                        const copyBtn = document.getElementById('copyCodeBtn');
-                        const codeWarning = document.getElementById('codeWarning');
-
-codeText.textContent = data.code;
-                    codeDisplay.style.display = 'block';
-                    copyBtn.style.display = 'inline-block';
-                    codeWarning.style.display = 'block';
-
-                    loadInvitesTable();
-
-                    // Set up copy button
-                        copyBtn.onclick = async () => {
-                            try {
-                                await navigator.clipboard.writeText(data.code);
-                                copyBtn.textContent = 'Copiado';
-                                copyBtn.style.color = 'var(--exito)';
-                                setTimeout(() => {
-                                    copyBtn.textContent = 'Copiar';
-                                    copyBtn.style.color = '';
-                                }, 2000);
-                            } catch (err) {
-                                showError('No se pudo copiar al portapapeles');
-                            }
-                        };
-                    } catch (err) {
-                        showError(err.message || 'Error al generar código');
-                    }
+        // Cada sección es nueva: el listener se registra una sola vez por formulario
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            submit.disabled = true;
+            try {
+                const data = await apiFetch('/staff-invitations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email.value.trim(), name: name.value.trim(), role: role.value })
                 });
+                form.reset();
+                if (data.email_sent) {
+                    showSuccess('Invitación enviada');
+                } else {
+                    showError('La invitación se guardó, pero no se pudo enviar el correo. Revise el correo y use Reenviar.');
+                }
+                loadInvitesTable();
+            } catch (err) {
+                // apiFetch ya mostró el error
+            } finally {
+                submit.disabled = false;
             }
+        });
 
-        // Load invites table
+        const tableTitle = document.createElement('h4');
+        tableTitle.textContent = 'Invitaciones';
+        const table = document.createElement('table');
+        table.className = 'invites-table';
+        const head = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        ['Correo', 'Nombre', 'Rol', 'Vence', 'Estado', ''].forEach(text => {
+            const th = document.createElement('th');
+            th.textContent = text;
+            headRow.appendChild(th);
+        });
+        head.appendChild(headRow);
+        const body = document.createElement('tbody');
+        body.id = 'invitesTableBody';
+        body.addEventListener('click', async (e) => {
+            const button = e.target.closest('button[data-invite-id]');
+            if (!button) return;
+            button.disabled = true;
+            try {
+                const data = await apiFetch(`/staff-invitations/${button.dataset.inviteId}/resend`, { method: 'POST' });
+                if (data.email_sent) showSuccess('Invitación reenviada');
+                else showError('No se pudo enviar el correo. Intente de nuevo más tarde.');
+                loadInvitesTable();
+            } catch (err) {
+                button.disabled = false;
+            }
+        });
+        table.append(head, body);
+        const tableWrap = document.createElement('div');
+        tableWrap.className = 'invites-table-wrap';
+        tableWrap.appendChild(table);
+
+        section.append(title, help, form, tableTitle, tableWrap);
+        modalBody.prepend(section);
         loadInvitesTable();
     }
 
-async function loadInvitesTable() {
+    async function loadInvitesTable() {
         if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) return;
-
+        let invites;
         try {
-            const invites = await apiFetch('/invites');
-            const tableBody = document.getElementById('invitesTableBody');
-            if (!tableBody) return;
-
-            tableBody.innerHTML = '';
-
-            invites.forEach(invite => {
-                const roleLabel = { technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador' }[invite.role] || invite.role;
-
-                let statusText;
-                if (invite.used) {
-                    statusText = `Usado por ${invite.used_by_name}`;
-                } else if (new Date(invite.expires_at + 'Z') < new Date()) {
-                    statusText = 'Vencido';
-                } else {
-                    statusText = 'Disponible';
-                }
-
-                const row = document.createElement('tr');
-
-                const td1 = document.createElement('td');
-                td1.style.padding = '8px';
-                td1.style.textAlign = 'left';
-                td1.textContent = roleLabel;
-                row.appendChild(td1);
-
-                const td2 = document.createElement('td');
-                td2.style.padding = '8px';
-                td2.style.textAlign = 'left';
-                td2.textContent = formatDate(invite.created_at);
-                row.appendChild(td2);
-
-                const td3 = document.createElement('td');
-                td3.style.padding = '8px';
-                td3.style.textAlign = 'left';
-                td3.textContent = invite.expires_at ? formatDate(invite.expires_at) : '—';
-                row.appendChild(td3);
-
-                const td4 = document.createElement('td');
-                td4.style.padding = '8px';
-                td4.style.textAlign = 'left';
-                td4.textContent = statusText;
-                row.appendChild(td4);
-
-                tableBody.appendChild(row);
-            });
+            invites = await apiFetch('/staff-invitations');
         } catch (err) {
-            showError(err.message || 'Error al cargar códigos');
+            return; // apiFetch ya mostró el error
         }
+        const tableBody = document.getElementById('invitesTableBody');
+        if (!tableBody) return;
+        tableBody.replaceChildren();
+        invites.forEach(invite => {
+            const row = document.createElement('tr');
+            [invite.email, invite.name, INVITE_ROLES[invite.role] || invite.role,
+                formatDate(invite.expires_at), INVITE_STATUS[invite.status] || invite.status].forEach(text => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                row.appendChild(td);
+            });
+            const actions = document.createElement('td');
+            if (invite.status !== 'used') {
+                const resend = document.createElement('button');
+                resend.type = 'button';
+                resend.className = 'btn-secondary btn-small';
+                resend.dataset.inviteId = invite.id;
+                resend.textContent = 'Reenviar';
+                actions.appendChild(resend);
+            }
+            row.appendChild(actions);
+            tableBody.appendChild(row);
+        });
     }
 
     initApp();

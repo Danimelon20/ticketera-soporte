@@ -5,9 +5,9 @@ from email.header import decode_header, make_header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, hacienda, mailer, models
+from . import config, hacienda, identity, mailer, models
 from .email_parser import extract_sender, get_plain_body, parse_ticket_email, strip_quoted
-from .notifications import notify_followers
+from .notifications import display_name, notify_followers
 
 IGNORED_PRECEDENCE = ("bulk", "junk", "auto_reply")
 AGENT_COMMENT = "Ticket creado por el Agente virtual a partir de un correo."
@@ -65,7 +65,7 @@ def _save_result(db: Session, message_id: str, result: str) -> None:
 
 def send_ticket_created(ticket: models.Ticket, user: models.User, category: models.Category, priority: models.Priority) -> None:
     body = "\n".join([
-        f"Buen día, {user.name}.",
+        f"Buen día, {display_name(user)}.",
         "",
         f"Recibimos su solicitud y creamos el ticket #{ticket.id}.",
         "",
@@ -109,7 +109,7 @@ def _handle_ticket_reply(db: Session, msg, message_id: str, sender: str, subject
             sender,
             f"[Ticket #{ticket.id}] El ticket está cerrado",
             "\n".join([
-                f"Buen día, {user.name}.",
+                f"Buen día, {display_name(user)}.",
                 "",
                 f"El ticket #{ticket.id} ya fue cerrado y no admite comentarios, por lo que su mensaje no se agregó.",
                 "Si necesita más ayuda, por favor escriba un correo nuevo con \"[Soporte]\" en el asunto.",
@@ -128,10 +128,20 @@ def _handle_ticket_reply(db: Session, msg, message_id: str, sender: str, subject
     db.commit()
     notify_followers(
         db, _RunNow(), ticket, user,
-        f"[Ticket #{ticket.id}] Nuevo comentario de {user.name}",
+        f"[Ticket #{ticket.id}] Nuevo comentario de {display_name(user)}",
         [content],
     )
     return "comment_added"
+
+
+def mark_pending(db: Session, draft: models.EmailDraft, reason: str) -> None:
+    """Deja anotado por qué el borrador necesita revisión. No hace commit."""
+    db.flush()
+    row = db.query(models.DraftPendingReason).filter(models.DraftPendingReason.draft_id == draft.id).first()
+    if row is None:
+        db.add(models.DraftPendingReason(draft_id=draft.id, reason=reason))
+    else:
+        row.reason = reason
 
 
 def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User, subject: str,
@@ -153,15 +163,17 @@ def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User
     if not phone and not id_number:
         return None
 
+    # Al perfil con las mismas reglas que "Complete su perfil"
+    reason = identity.apply_contact_from_email(db, user, phone, id_number)
     if phone:
         draft.contact_phone = phone
-        if not user.phone:
-            user.phone = phone
-    if id_number:
+    if id_number and reason is None:
         draft.contact_id_number = id_number
-        if not user.id_number:
-            user.id_number = id_number
     missing = [name for name, value in (("Teléfono", draft.contact_phone), ("Cédula", draft.contact_id_number)) if not value]
+    if reason is not None:
+        # La cédula es de otra cuenta: no se guarda y lo revisa una persona
+        mark_pending(db, draft, reason)
+        missing = []
     if not missing:
         draft.status = "pending_review"
     _save_result(db, message_id, "contact_updated")
@@ -172,7 +184,7 @@ def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User
             user.email,
             "[Soporte] Falta un dato de contacto",
             "\n".join([
-                f"Buen día, {user.name}.",
+                f"Buen día, {display_name(user)}.",
                 "",
                 "Gracias, recibimos parte de sus datos de contacto.",
                 f"Todavía falta: {missing[0]}. Por favor responda este correo con la línea:",
@@ -185,7 +197,7 @@ def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User
             user.email,
             "[Soporte] Gracias, recibimos sus datos de contacto",
             "\n".join([
-                f"Buen día, {user.name}.",
+                f"Buen día, {display_name(user)}.",
                 "",
                 "Gracias, recibimos sus datos de contacto.",
                 "Un técnico está revisando su solicitud y recibirá el número de ticket cuando se confirme.",
@@ -255,14 +267,21 @@ def process_message(db: Session, msg) -> str:
     if not id_number and not any(e.startswith("La cédula") for e in errors):
         errors.append("Falta la línea Cédula")
     hacienda_error = None
-    if parsed["id_number"]:
+    id_taken = False
+    if parsed["id_number"] and parsed["id_number"] != user.id_number:
+        # Cédula de otra cuenta: no se usa (se queda la del perfil, si tiene)
+        id_taken = identity.id_number_taken(db, parsed["id_number"], user.id)
+        if id_taken:
+            id_number = user.id_number
+            errors.append(identity.ID_IN_USE)
+    if parsed["id_number"] and not id_taken:
         hacienda_error = hacienda.check_id_number(parsed["id_number"])
         if hacienda_error:
             errors.append(hacienda_error)
 
     # Sin plantilla y con la IA encendida: borrador que confirma una persona (todavía no se responde)
     if errors and free_text and config.AI_ANALYSIS_ENABLED:
-        db.add(models.EmailDraft(
+        draft = models.EmailDraft(
             message_id=message_id,
             requester_id=user.id,
             subject=subject[:300],
@@ -271,7 +290,10 @@ def process_message(db: Session, msg) -> str:
             status="analyzing",
             contact_phone=phone,
             contact_id_number=user.id_number if hacienda_error else id_number,
-        ))
+        )
+        db.add(draft)
+        if id_taken:
+            mark_pending(db, draft, identity.ID_IN_USE_REASON)
         _save_result(db, message_id, "draft_created")
         db.commit()
         return "draft_created"
@@ -281,7 +303,7 @@ def process_message(db: Session, msg) -> str:
         _save_result(db, message_id, "incomplete")
         db.commit()
         body = "\n".join(
-            [f"Buen día, {user.name}.", "", "No pudimos crear su ticket porque:"]
+            [f"Buen día, {display_name(user)}.", "", "No pudimos crear su ticket porque:"]
             + [f"- {e}" for e in errors]
             + [
                 "",
@@ -310,13 +332,12 @@ def process_message(db: Session, msg) -> str:
         contact_id_number=id_number,
         source="email",
     )
+    # Al perfil con las mismas reglas que "Complete su perfil"; si ya estaba fija, vale la del perfil
+    identity.apply_contact_from_email(db, user, phone, id_number)
+    ticket.contact_id_number = user.id_number or id_number
     db.add(ticket)
     db.flush()
-
-    if not user.phone:
-        user.phone = phone
-    if not user.id_number:
-        user.id_number = id_number
+    identity.lock(db, user)
     db.add(models.TicketFollower(ticket_id=ticket.id, user_id=user.id))
     # La IA lo analiza después, en la revisión del buzón (solo se muestra)
     db.add(models.TicketAIAnalysis(ticket_id=ticket.id, status="pending"))

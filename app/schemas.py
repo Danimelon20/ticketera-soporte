@@ -32,10 +32,27 @@ class UserCreate(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    name: str
-    email: str
-    invite_code: Optional[str] = None
+    email: str = Field(min_length=3, max_length=150)
     password: str = Field(min_length=8)
+
+
+class SignupStarted(BaseModel):
+    email_hint: str
+
+
+class EmailCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+class EmailRequest(BaseModel):
+    email: str
+
+
+class StaffInvitationCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=150)
+    name: str = Field(min_length=1, max_length=100)
+    role: Literal["technician", "coordinator"]
 
     @field_validator("name")
     @classmethod
@@ -45,27 +62,20 @@ class RegisterRequest(BaseModel):
         return v.strip()
 
 
-class InviteCreate(BaseModel):
-    role: Literal["technician", "coordinator"]
-
-
-class InviteCreated(BaseModel):
-    code: str
-    role: str
-    expires_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class InviteRead(BaseModel):
+class StaffInvitationRead(BaseModel):
     id: int
+    email: str
+    name: str
     role: str
     created_at: datetime
     expires_at: datetime
-    used: bool
-    used_by_name: Optional[str] = None
+    status: Literal["available", "expired", "used"]
+    email_sent: Optional[bool] = None
 
-    model_config = ConfigDict(from_attributes=True)
+
+class ActivationResult(BaseModel):
+    email: str
+    password: str
 
 
 class LoginRequest(BaseModel):
@@ -91,28 +101,51 @@ class MeRead(BaseModel):
     role: str
     phone: Optional[str] = None
     id_number: Optional[str] = None
+    profile_complete: bool = True
+    identity_locked: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProfileUpdate(BaseModel):
+    name: str = Field(max_length=100)
+    phone: str
+    id_number: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Escriba su nombre completo")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        return normalize_phone(v)
+
+    @field_validator("id_number")
+    @classmethod
+    def validate_id_number(cls, v):
+        return normalize_id_number(v)
+
+
 class TicketCreate(BaseModel):
+    # Nombre y cédula salen del perfil del dueño del ticket; el teléfono es opcional
     title: str
     description: str
     category_id: int
     priority_id: int
-    contact_phone: str
-    contact_id_number: str
+    contact_phone: Optional[str] = None
     requester_id: Optional[int] = None
 
     @field_validator("contact_phone")
     @classmethod
     def validate_contact_phone(cls, v):
+        if v is None or not v.strip():
+            return None
         return normalize_phone(v)
-
-    @field_validator("contact_id_number")
-    @classmethod
-    def validate_contact_id_number(cls, v):
-        return normalize_id_number(v)
 
 
 class TicketUpdate(BaseModel):
@@ -273,6 +306,7 @@ class DraftRead(BaseModel):
     summary: Optional[str] = None
     needs_review: bool = False
     ticket_id: Optional[int] = None
+    pending_reason: Optional[str] = None
 
 
 class DraftConfirm(BaseModel):

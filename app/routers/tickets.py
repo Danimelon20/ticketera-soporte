@@ -9,7 +9,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import email_analysis
+from .. import email_analysis, identity
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -82,13 +82,17 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     if ticket.requester_id is not None:
         if current_user.role not in ("coordinator", "admin"):
             raise HTTPException(status_code=403, detail="No puedes crear tickets a nombre de otra persona")
-        requester = db.query(models.User).filter(models.User.id == ticket.requester_id).first()
-        if not requester or requester.role != "requester":
+        owner = db.query(models.User).filter(models.User.id == ticket.requester_id).first()
+        if not owner or owner.role != "requester":
             raise HTTPException(status_code=400, detail="El solicitante no existe")
-        created_by = ticket.requester_id
     else:
-        created_by = current_user.id
-    
+        owner = current_user
+
+    # El ticket queda a nombre del perfil: sin nombre, cédula y teléfono no se crea
+    if not identity.profile_complete(owner):
+        detail = identity.INCOMPLETE_OWN if owner.id == current_user.id else identity.INCOMPLETE_OTHER
+        raise HTTPException(status_code=400, detail=detail)
+
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")
@@ -96,32 +100,22 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     if not prioridad:
         raise HTTPException(status_code=400, detail="La prioridad no existe")
 
-    verify_id_number(ticket.contact_id_number)
-    
     db_ticket = models.Ticket(
         title=ticket.title,
         description=ticket.description,
         category_id=ticket.category_id,
         priority_id=ticket.priority_id,
         status="new",
-        created_by=created_by,
-        contact_phone=ticket.contact_phone,
-        contact_id_number=ticket.contact_id_number,
+        created_by=owner.id,
+        contact_phone=ticket.contact_phone or owner.phone,
+        contact_id_number=owner.id_number,
         source="web",
     )
     db.add(db_ticket)
+    # Desde el primer ticket, nombre y cédula quedan fijos
+    identity.lock(db, owner)
     db.commit()
     db.refresh(db_ticket)
-    
-    # Si el dueño del ticket tiene phone o id_number vacíos, guárdalos en su perfil
-    owner = db.query(models.User).filter(models.User.id == db_ticket.created_by).first()
-    if owner:
-        if not owner.phone:
-            owner.phone = ticket.contact_phone
-        if not owner.id_number:
-            owner.id_number = ticket.contact_id_number
-        db.add(owner)
-        db.commit()
 
     # Mismo análisis que los tickets por correo, después de responder: no espera al modelo
     if config.AI_ANALYSIS_ENABLED:

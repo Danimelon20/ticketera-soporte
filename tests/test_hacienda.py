@@ -36,9 +36,11 @@ def test_lookup_200_returns_tipo_without_name(lookup, monkeypatch):
         return _FakeResponse(json.dumps(body).encode("utf-8"))
 
     monkeypatch.setattr(hacienda.urllib.request, "urlopen", _urlopen)
-    assert lookup("102340567") == {"tipo": "01"}
+    result = lookup("102340567")
+    assert result["tipo"] == "01"
+    assert result["name_tokens"] == hacienda.name_tokens("Persona de Prueba")
     assert calls == [5]
-    assert "PERSONA DE PRUEBA" not in repr(hacienda._cache)
+    assert "PERSONA" not in repr(hacienda._cache).upper()
 
 
 def test_lookup_uses_cache(lookup, monkeypatch):
@@ -49,8 +51,8 @@ def test_lookup_uses_cache(lookup, monkeypatch):
         return _FakeResponse(b'{"tipoIdentificacion": "03"}')
 
     monkeypatch.setattr(hacienda.urllib.request, "urlopen", _urlopen)
-    assert lookup("123456789012") == {"tipo": "03"}
-    assert lookup("123456789012") == {"tipo": "03"}
+    assert lookup("123456789012")["tipo"] == "03"
+    assert lookup("123456789012")["tipo"] == "03"
     assert len(calls) == 1
 
 
@@ -79,3 +81,58 @@ def test_lookup_5xx_raises_unavailable(lookup, monkeypatch):
     monkeypatch.setattr(hacienda.urllib.request, "urlopen", _urlopen)
     with pytest.raises(hacienda.HaciendaUnavailable):
         lookup("102340567")
+
+
+def _hacienda_name(monkeypatch, name):
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "01", "name_tokens": hacienda.name_tokens(name)})
+
+
+@pytest.mark.parametrize("ours, theirs", [
+    ("Daniel Alejandro Sáenz Maroto", "SAENZ MAROTO DANIEL"),
+    ("Daniel Sáenz Maroto", "SAENZ MAROTO DANIEL ALEJANDRO"),
+    ("Daniel Alejandro Sáenz Maroto", "Daniel Sáenz Maroto"),
+    ("daniel   SÁENZ maroto", "SAENZ MAROTO DANIEL"),
+])
+def test_identity_match_in_both_directions(monkeypatch, ours, theirs):
+    _hacienda_name(monkeypatch, theirs)
+    assert hacienda.identity_result("102340567", ours) == "match"
+
+
+@pytest.mark.parametrize("ours, theirs", [
+    ("Daniel Pérez", "SAENZ MAROTO DANIEL"),
+    ("Daniel Sáenz Rojas", "SAENZ MAROTO DANIEL"),
+    ("Daniel", "DANIEL"),
+])
+def test_identity_mismatch(monkeypatch, ours, theirs):
+    _hacienda_name(monkeypatch, theirs)
+    assert hacienda.identity_result("102340567", ours) == "mismatch"
+
+
+def test_identity_not_found(monkeypatch):
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: None)
+    assert hacienda.identity_result("102340567", "Daniel Sáenz Maroto") == "not_found"
+
+
+def test_identity_unverified_when_hacienda_is_down(monkeypatch):
+    def _unavailable(id_number):
+        raise hacienda.HaciendaUnavailable("caído")
+
+    monkeypatch.setattr(hacienda, "lookup_id", _unavailable)
+    assert hacienda.identity_result("102340567", "Daniel Sáenz Maroto") == "unverified"
+
+
+def test_identity_unverified_when_check_is_off(monkeypatch):
+    monkeypatch.setenv("HACIENDA_CHECK", "false")
+    assert hacienda.identity_result("102340567", "Daniel Sáenz Maroto") == "unverified"
+
+
+def test_real_lookup_compares_names_without_storing_them(lookup, monkeypatch):
+    def _urlopen(request, timeout):
+        body = {"nombre": "SAENZ MAROTO DANIEL", "tipoIdentificacion": "01"}
+        return _FakeResponse(json.dumps(body).encode("utf-8"))
+
+    monkeypatch.setattr(hacienda.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(hacienda, "lookup_id", lookup)
+    assert hacienda.identity_result("102340567", "Daniel Alejandro Sáenz Maroto") == "match"
+    cache = repr(hacienda._cache).upper()
+    assert "SAENZ" not in cache and "MAROTO" not in cache and "DANIEL" not in cache

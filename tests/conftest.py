@@ -1,3 +1,4 @@
+import itertools
 import os
 import tempfile
 import uuid
@@ -73,21 +74,36 @@ def client():
         yield WrappedClient(test_client)
 
 
+_id_numbers = itertools.count(1)
+
+
+def unique_id_number() -> str:
+    """Cédula física de 9 dígitos distinta en cada llamada (una cédula no puede estar en dos cuentas)."""
+    return f"7{next(_id_numbers) + int(uuid.uuid4().int % 10**4) * 10**4:08d}"
+
+
 @pytest.fixture
 def make_user(client):
-    """Fábrica: crea un usuario directamente en la base de datos de prueba."""
-    def _make(role="coordinator", name="Usuario de prueba"):
+    """Fábrica: crea un usuario directamente en la base de datos de prueba.
+
+    Los solicitantes vienen con el perfil completo (nombre, teléfono y cédula única),
+    salvo con profile=False.
+    """
+    def _make(role="coordinator", name="Usuario de prueba", profile=True):
         from app.database import SessionLocal
         from app import models
         from app.security import hash_password, new_token
         
         db = SessionLocal()
         try:
+            with_profile = role == "requester" and profile
             user = models.User(
                 name=name,
                 email=f"{role}-{uuid.uuid4().hex}@test.com",
                 role=role,
-                password_hash=hash_password("clave-segura-123")
+                password_hash=hash_password("clave-segura-123"),
+                phone="88881234" if with_profile else None,
+                id_number=unique_id_number() if with_profile else None,
             )
             db.add(user)
             db.commit()
@@ -103,6 +119,8 @@ def make_user(client):
                 "name": user.name,
                 "email": user.email,
                 "role": user.role,
+                "phone": user.phone,
+                "id_number": user.id_number,
                 "token": token,
                 "headers": {"Authorization": f"Bearer {token}"}
             }
@@ -122,7 +140,6 @@ def make_ticket(client):
             "category_id": category_id,
             "priority_id": priority_id,
             "contact_phone": "8888-1234",
-            "contact_id_number": "1-0234-0567",
         }
         response = client.post("/api/tickets", json=payload, headers=actor["headers"])
         assert response.status_code == 200, response.text
@@ -136,9 +153,55 @@ def fake_hacienda(monkeypatch):
     from app import hacienda
 
     def _fake_lookup(id_number):
-        return {"tipo": "01"} if len(id_number) == 9 else {"tipo": "03"}
+        # Sin nombre: la comparación da "mismatch" salvo que la prueba lo cambie
+        return {"tipo": "01" if len(id_number) == 9 else "03", "name_tokens": frozenset()}
 
     monkeypatch.setattr(hacienda, "lookup_id", _fake_lookup)
     # Que un .env real (cargado por docker compose) no cambie el resultado de las pruebas
     monkeypatch.setenv("HACIENDA_CHECK", "true")
     monkeypatch.delenv("HACIENDA_STRICT", raising=False)
+
+
+# Cédulas fijas que usan muchas pruebas para cuentas distintas
+SHARED_TEST_ID_NUMBERS = ("102340567", "109870654", "123456789012", "310123456")
+
+
+@pytest.fixture(autouse=True)
+def free_shared_id_numbers():
+    """Cada prueba empieza sin ninguna cuenta dueña de las cédulas fijas de las pruebas."""
+    from sqlalchemy import bindparam, text
+    from sqlalchemy.exc import OperationalError
+    from app.database import engine
+
+    statement = text("UPDATE users SET id_number = NULL WHERE id_number IN :ids").bindparams(
+        bindparam("ids", expanding=True)
+    )
+    try:
+        with engine.begin() as conn:
+            conn.execute(statement, {"ids": list(SHARED_TEST_ID_NUMBERS)})
+    except OperationalError:
+        # Todavía no existen las tablas (la app no ha arrancado)
+        pass
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Correos simulados: (destinatario, asunto, cuerpo). Nunca se conecta a Microsoft Graph."""
+    from app import mailer
+
+    calls = []
+
+    def _fake_send(to, subject, body):
+        calls.append((to, subject, body))
+        return True
+
+    monkeypatch.setattr(mailer, "send_email", _fake_send)
+    return calls
+
+
+def code_from(body: str) -> str:
+    import re
+
+    match = re.search(r"\b(\d{6})\b", body)
+    assert match, "El correo no trae un código de 6 dígitos"
+    return match.group(1)

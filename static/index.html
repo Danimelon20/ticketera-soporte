@@ -18,7 +18,7 @@
                 <rect x="9" y="11" width="6" height="5" rx="1"/>
                 <path d="M10 11V9.5a2 2 0 0 1 4 0V11"/>
             </svg>
-            <h1 class="verify-title">Verificación de seguridad</h1>
+            <h1 id="verifyTitle" class="verify-title">Verificación de seguridad</h1>
             <p id="verifyHint" class="verify-hint"></p>
             <form id="verifyForm" class="verify-form" novalidate>
                 <div class="verify-digits" id="verifyDigits">
@@ -56,45 +56,74 @@
         </section>
         <div class="auth-card-container">
             <div class="auth-card">
-                <div class="auth-tabs" role="tablist">
-                    <button type="button" id="tabLogin" class="tab-btn active" aria-pressed="true">Iniciar sesión</button>
-                    <button type="button" id="tabRegister" class="tab-btn" aria-pressed="false">Registrarse</button>
-                </div>
-                <div id="loginFormContainer" class="auth-form-panel">
+                <div id="loginPanel" class="auth-form-panel">
+                    <h1 class="auth-title">Iniciar sesión</h1>
                     <form id="loginForm">
                         <div class="form-group" style="margin-bottom: 16px;">
                             <label for="loginEmail">Correo</label>
-                            <input type="email" id="loginEmail" name="email" required>
+                            <input type="email" id="loginEmail" name="email" autocomplete="username" required>
                         </div>
                         <div class="form-group" style="margin-bottom: 24px;">
                             <label for="loginPassword">Contraseña</label>
-                            <input type="password" id="loginPassword" name="password" required>
+                            <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
                         </div>
                         <button type="submit" class="btn-submit">Entrar</button>
                     </form>
+                    <div id="confirmEmailNotice" class="auth-notice" hidden>
+                        <p>Su cuenta todavía no está confirmada.</p>
+                        <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
+                    </div>
+                    <nav class="auth-links" aria-label="Otras opciones">
+                        <a href="#crear-cuenta" class="auth-link">Crear cuenta de cliente</a>
+                        <a href="#activar-cuenta" class="auth-link">Activar cuenta de personal</a>
+                    </nav>
                 </div>
-                <div id="registerFormContainer" class="auth-form-panel" style="display: none;">
-                    <form id="registerForm">
+                <div id="signupPanel" class="auth-form-panel" hidden>
+                    <h1 class="auth-title">Crear cuenta de cliente</h1>
+                    <p class="help-text">Le enviaremos un código de 6 dígitos para confirmar su correo.</p>
+                    <form id="signupForm">
                         <div class="form-group" style="margin-bottom: 16px;">
-                            <label for="regName">Nombre</label>
-                            <input type="text" id="regName" name="name" required>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 16px;">
-                            <label for="regEmail">Correo</label>
-                            <input type="email" id="regEmail" name="email" required>
+                            <label for="signupEmail">Correo</label>
+                            <input type="email" id="signupEmail" name="email" autocomplete="email" required>
                         </div>
                         <div class="form-group" style="margin-bottom: 24px;">
-                            <label for="regPassword">Contraseña</label>
-                            <input type="password" id="regPassword" name="password" minlength="8" required>
+                            <label for="signupPassword">Contraseña</label>
+                            <input type="password" id="signupPassword" name="password" minlength="8" autocomplete="new-password" required>
                             <small class="help-text">Mínimo 8 caracteres</small>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 16px;">
-                            <label for="regInviteCode">Código de invitación (opcional)</label>
-                            <input type="text" id="regInviteCode" name="invite_code">
-                            <small class="help-text">Solo para técnicos y coordinadores. Si eres cliente, déjalo vacío.</small>
                         </div>
                         <button type="submit" class="btn-submit">Crear cuenta</button>
                     </form>
+                    <nav class="auth-links">
+                        <a href="#" class="auth-link">Volver al inicio de sesión</a>
+                    </nav>
+                </div>
+                <div id="activatePanel" class="auth-form-panel" hidden>
+                    <h1 class="auth-title">Activar cuenta de personal</h1>
+                    <form id="activateForm">
+                        <p class="help-text">Escriba su correo y el código que le llegó en la invitación.</p>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="activateEmail">Correo</label>
+                            <input type="email" id="activateEmail" name="email" autocomplete="email" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="activateCode">Código</label>
+                            <input type="text" id="activateCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
+                        </div>
+                        <button type="submit" id="activateSubmit" class="btn-submit">Activar cuenta</button>
+                        <button type="button" id="activateResend" class="btn-secondary auth-secondary">Reenviar código</button>
+                        <p id="activateNotice" class="help-text" aria-live="polite"></p>
+                    </form>
+                    <div id="activateResult" class="password-reveal" hidden>
+                        <p class="password-reveal-title">Cuenta activada</p>
+                        <p>Esta es su contraseña:</p>
+                        <code id="activatePassword" class="password-value"></code>
+                        <button type="button" id="copyPasswordBtn" class="btn-secondary">Copiar</button>
+                        <p class="password-warning" role="alert">Guárdela ahora; no se volverá a mostrar.</p>
+                        <button type="button" id="activateToLogin" class="btn-submit">Ir a iniciar sesión</button>
+                    </div>
+                    <nav id="activateLinks" class="auth-links">
+                        <a href="#" class="auth-link">Volver al inicio de sesión</a>
+                    </nav>
                 </div>
             </div>
         </div>
@@ -114,6 +143,7 @@
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
     <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
+    <button type="button" id="navProfile" class="topbar-tab" hidden>Mi perfil</button>
   </nav>
   <div class="topbar-section topbar-action">
     <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
@@ -167,6 +197,31 @@
             </section>
         </div>
 
+        <section id="profileView" class="page-view" hidden aria-labelledby="profileTitle">
+            <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
+            <p id="profileIntro" class="view-note">Antes de crear tickets necesitamos su nombre completo, cédula y teléfono.</p>
+            <form id="profileForm" class="profile-form">
+                <div class="form-group">
+                    <label for="profileName">Nombre completo</label>
+                    <input type="text" id="profileName" maxlength="100" autocomplete="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="profileIdNumber">Cédula</label>
+                    <input type="text" id="profileIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
+                    <small class="help-text">9 dígitos, o 11 o 12 si es DIMEX</small>
+                </div>
+                <div class="form-group">
+                    <label for="profilePhone">Teléfono</label>
+                    <input type="tel" id="profilePhone" placeholder="8888-1234" maxlength="16" inputmode="numeric" autocomplete="tel" required>
+                </div>
+                <p id="profileLockedNote" class="help-text" hidden>El nombre y la cédula quedaron fijos al crear su primer ticket. Si hay un error, contacte a soporte.</p>
+                <div class="profile-actions">
+                    <button type="submit" class="btn-submit">Guardar</button>
+                    <button type="button" id="profileCancel" class="btn-secondary" hidden>Cancelar</button>
+                </div>
+            </form>
+        </section>
+
         <section id="directoryView" class="page-view" hidden aria-labelledby="directoryTitle">
             <h1 id="directoryTitle" class="view-title">Directorio</h1>
             <div class="directory-filters">
@@ -213,6 +268,7 @@
                         <p id="draftNumber" class="draft-meta"></p>
                         <h2 id="draftSubject" class="draft-subject"></h2>
                         <p id="draftMeta" class="draft-meta"></p>
+                        <p id="draftReason" class="draft-reason" hidden></p>
                         <h3 class="draft-section">Correo original</h3>
                         <pre id="draftBody" class="draft-body" tabindex="0"></pre>
                         <h3 class="draft-section">Análisis de la IA</h3>
@@ -350,15 +406,10 @@
                                 <input type="email" id="contactEmail" name="contactEmail" autocomplete="email" readonly style="background: #F6F7F9;">
                             </div>
                         </div>
-                        <div class="form-row" style="margin-bottom: 15px;">
-                            <div class="form-group">
-                                <label for="contactPhone">Teléfono</label>
-                                <input type="tel" id="contactPhone" name="contactPhone" autocomplete="tel" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="contactIdNumber">Cédula</label>
-                                <input type="text" id="contactIdNumber" name="contactIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
-                            </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label for="contactPhone">Teléfono de contacto</label>
+                            <input type="tel" id="contactPhone" name="contactPhone" autocomplete="tel" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
+                            <small class="help-text">El ticket queda a nombre del perfil; la cédula sale del perfil.</small>
                         </div>
                         <div class="form-group" style="margin-bottom: 15px;">
                             <label for="title">Título</label>
