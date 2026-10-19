@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
-from .. import alerts, config, daily_summary, email_analysis, email_poller, models
-from ..schemas import AdminUserUpdate, DirectoryUser
-from ..security import get_current_user
+from .. import alerts, audit, config, daily_summary, email_analysis, email_poller, models
+from ..schemas import AccountChangePage, AccountChangeRead, AdminUserUpdate, DirectoryUser
+from ..security import get_current_user, mask_email
 
 router = APIRouter(prefix="/api", tags=["admin"])
 
@@ -91,8 +91,14 @@ def update_user(user_id: int, data: AdminUserUpdate, db: Session = Depends(get_d
     if user.id == admin.id:
         raise HTTPException(status_code=400, detail="No puedes cambiar tu propio rol ni desactivarte")
 
-    if data.role is not None:
+    if data.role is not None and data.role != user.role:
+        audit.record(
+            db, admin.id, "role_changed", target=user,
+            old=audit.role_name(user.role), new=audit.role_name(data.role),
+        )
         user.role = data.role
+    if data.is_active is not None and data.is_active != user.is_active:
+        audit.record(db, admin.id, "account_activated" if data.is_active else "account_deactivated", target=user)
     if data.is_active is not None:
         user.is_active = data.is_active
         if not data.is_active:
@@ -101,6 +107,60 @@ def update_user(user_id: int, data: AdminUserUpdate, db: Session = Depends(get_d
     db.commit()
     db.refresh(user)
     return _directory_rows(db, [user])[0]
+
+
+ACCOUNT_CHANGES_PAGE = 20
+
+
+@router.get("/admin/account-changes", response_model=AccountChangePage)
+def account_changes(
+    account: Optional[str] = None,
+    action: Optional[str] = None,
+    page: int = 1,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    query = db.query(models.AccountChange).outerjoin(
+        models.User, models.User.id == models.AccountChange.target_user_id
+    )
+    if action:
+        query = query.filter(models.AccountChange.action == action)
+    if account and account.strip():
+        term = f"%{account.strip().lower()}%"
+        query = query.filter(
+            func.lower(models.User.name).like(term)
+            | func.lower(models.User.email).like(term)
+            | func.lower(models.AccountChange.target_label).like(term)
+        )
+    total = query.count()
+    pages = max(1, -(-total // ACCOUNT_CHANGES_PAGE))
+    page = min(max(page, 1), pages)
+    rows = (
+        query.order_by(models.AccountChange.created_at.desc(), models.AccountChange.id.desc())
+        .offset((page - 1) * ACCOUNT_CHANGES_PAGE)
+        .limit(ACCOUNT_CHANGES_PAGE)
+        .all()
+    )
+
+    def _account(row: models.AccountChange) -> str:
+        if row.target is not None:
+            label = mask_email(row.target.email)
+            return f"{row.target.name} ({label})" if row.target.name else label
+        return row.target_label or "—"
+
+    items = [
+        AccountChangeRead(
+            id=row.id,
+            created_at=row.created_at,
+            action=row.action,
+            actor=(row.actor.name or mask_email(row.actor.email)) if row.actor is not None else "Sistema",
+            account=_account(row),
+            old_value=row.old_value,
+            new_value=row.new_value,
+        )
+        for row in rows
+    ]
+    return AccountChangePage(items=items, total=total, page=page, pages=pages)
 
 
 @router.get("/admin/health")

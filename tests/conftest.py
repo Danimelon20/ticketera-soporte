@@ -41,18 +41,16 @@ def client():
                 if actor_id is not None:
                     from app.database import SessionLocal
                     from app import models
-                    from app.security import new_token
+                    from app.security import hash_token, new_token
                     db = SessionLocal()
                     try:
                         user = db.query(models.User).filter(models.User.id == actor_id).first()
                         if user:
-                            db_session = db.query(models.Session).filter(models.Session.user_id == actor_id).first()
-                            if not db_session:
-                                token = new_token()
-                                db_session = models.Session(user_id=actor_id, token=token)
-                                db.add(db_session)
-                                db.commit()
-                            headers["Authorization"] = f"Bearer {db_session.token}"
+                            # La base solo guarda el hash del token: cada vez una sesión nueva
+                            token = new_token()
+                            db.add(models.Session(user_id=actor_id, token=hash_token(token)))
+                            db.commit()
+                            headers["Authorization"] = f"Bearer {token}"
                     finally:
                         db.close()
                 kwargs["headers"] = headers
@@ -92,7 +90,7 @@ def make_user(client):
     def _make(role="coordinator", name="Usuario de prueba", profile=True):
         from app.database import SessionLocal
         from app import models
-        from app.security import hash_password, new_token
+        from app.security import hash_password, hash_token, new_token
         
         db = SessionLocal()
         try:
@@ -110,7 +108,7 @@ def make_user(client):
             db.refresh(user)
 
             token = new_token()
-            db_session = models.Session(token=token, user_id=user.id)
+            db_session = models.Session(token=hash_token(token), user_id=user.id)
             db.add(db_session)
             db.commit()
 

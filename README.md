@@ -22,6 +22,16 @@ y validado manualmente en cada paso.
   invitación y código por correo para el administrador.
 - Perfil del cliente con cédula única que queda fija desde su primer
   ticket.
+- "Mi cuenta" para todos los roles: cambiar contraseña (mínimo 8
+  caracteres para solicitantes y 12 para el personal), teléfono y
+  correo (con código al correo nuevo y aviso al anterior). Al
+  cambiar contraseña o correo se cierran las demás sesiones.
+- Bloqueo de 15 minutos tras 5 contraseñas o códigos incorrectos
+  seguidos para un mismo correo, exista o no la cuenta.
+- Sesiones que vencen por inactividad o por tiempo total, y
+  "Cerrar sesión" que invalida el token en el servidor.
+- Registro de cambios de cuentas en el panel del Administrador, con
+  valores enmascarados y sin contraseñas ni códigos.
 - Tickets por correo atendidos por el Agente virtual (Microsoft 365).
 - Directorio de usuarios y panel de Administración.
 - Asistente de la página con un modelo local (Qwen3 con Ollama).
@@ -184,6 +194,8 @@ nunca se sube a Git.
 | `CHATBOT_ENABLED` | `true`: el asistente de la página responde. `false`: responde que no está disponible |
 | `LLM_BASE_URL` | Dirección de Ollama dentro de la red de Docker Compose (`http://ollama:11434`) |
 | `LLM_MODEL` | Modelo que usa el asistente (`qwen3:1.7b`) |
+| `SESSION_IDLE_MINUTES` | Minutos sin uso tras los que vence una sesión (por defecto 240) |
+| `SESSION_MAX_HOURS` | Horas desde que se abrió tras las que vence una sesión, aunque se use (por defecto 12) |
 
 `APP_URL` (por defecto `http://localhost:8000`) es el enlace a la
 página que aparece en los correos. Con `EMAIL_ENABLED=true` y sin
@@ -236,7 +248,21 @@ ni Ollama: esas llamadas se simulan.
 ## Decisiones de diseño
 
 - **Sesión con token.** Cada persona inicia sesión con correo y
-  contraseña; el token se guarda en la pestaña del navegador.
+  contraseña; el token se guarda en la pestaña del navegador y la
+  base solo guarda su hash SHA-256. La sesión vence tras
+  `SESSION_IDLE_MINUTES` sin uso o `SESSION_MAX_HOURS` desde que se
+  abrió; la página vuelve al inicio con "Su sesión venció. Inicie
+  sesión de nuevo."
+- **Bloqueo por intentos.** Contraseñas incorrectas, códigos del
+  administrador y códigos de cambio de correo suman a un mismo
+  contador por correo. Con 5 seguidos el correo queda bloqueado 15
+  minutos ("Demasiados intentos. Intente de nuevo en unos minutos."),
+  aun con la contraseña correcta. Un inicio de sesión completo lo
+  reinicia.
+- **Registro de cambios de cuentas.** Quién, a qué cuenta, qué
+  acción, cuándo y el valor anterior y nuevo: teléfono y cédula con
+  los últimos 4 dígitos y correos enmascarados. Solo lo ve el
+  Administrador.
 - **Estado cerrado es final.** Un ticket cerrado no se modifica ni
   se comenta.
 - **Historial y comentarios separados.** El historial registra
@@ -265,7 +291,12 @@ todas las rutas exigen el encabezado `Authorization: Bearer <token>`.
 | POST | /api/auth/verify-code | Confirmar el código de 6 dígitos y obtener la sesión |
 | POST | /api/auth/resend-code | Enviar un código nuevo (una vez por minuto) |
 | GET | /api/auth/me | Obtener usuario actual |
-| POST | /api/auth/logout | Cerrar sesión |
+| POST | /api/auth/logout | Cerrar sesión (borra la sesión en el servidor) |
+| PUT | /api/account/password | Cambiar contraseña con la actual; cierra las demás sesiones |
+| PUT | /api/account/phone | Cambiar teléfono |
+| POST | /api/account/email | Pedir cambio de correo con la contraseña actual; envía un código al correo nuevo |
+| POST | /api/account/email/resend | Reenviar el código (una vez por minuto) |
+| POST | /api/account/email/verify | Confirmar el código; cambia el correo, avisa al anterior y cierra las demás sesiones |
 | POST | /api/invites | Generar un código de invitación (coordinador y administrador) |
 | GET | /api/invites | Listar códigos generados, sin el código |
 | GET | /api/users | Usuarios activos |
@@ -284,6 +315,7 @@ todas las rutas exigen el encabezado `Authorization: Bearer <token>`.
 | GET | /api/admin/health | Estado de la base de datos, el correo y el asistente, y conteos (administrador) |
 | GET | /api/admin/backup | Descargar una copia de la base de datos (administrador) |
 | GET | /api/admin/logs | Últimas 200 líneas del registro del servidor (administrador) |
+| GET | /api/admin/account-changes | Registro de cambios de cuentas con filtros `account`, `action` y `page` (administrador) |
 | POST | /api/chat | Preguntar al asistente |
 
 ## Uso de asistentes de desarrollo
@@ -334,7 +366,8 @@ agotarse su límite, otro modelo disponible en OpenCode.
 - El Administrador no modifica código desde la página: los cambios
   al código se hacen con Git y GitHub.
 - No hay recuperación de contraseña.
-- La sesión dura mientras la pestaña esté abierta.
+- La sesión dura mientras la pestaña esté abierta y no haya
+  vencido.
 - La pantalla no tiene pruebas automáticas; se verifica a mano en
   el navegador.
 - Las pruebas muestran advertencias de librerías externas

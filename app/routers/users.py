@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import identity, models
+from .. import audit, identity, models
 from ..schemas import MeRead, ProfileUpdate, RequesterRead, UserRead
 from ..security import get_current_user
 from .auth import me_read
@@ -48,8 +48,20 @@ def update_profile(data: ProfileUpdate, db: Session = Depends(get_db), current_u
         if error:
             raise HTTPException(status_code=400, detail=error)
 
+    if data.phone != current_user.phone:
+        audit.record(
+            db, current_user.id, "phone_changed", target=current_user,
+            old=audit.masked_digits(current_user.phone), new=audit.masked_digits(data.phone),
+        )
     current_user.phone = data.phone
     if identity_changed:
+        if name_changed:
+            audit.record(db, current_user.id, "name_changed", target=current_user, old=current_user.name or None, new=data.name)
+        if data.id_number != current_user.id_number:
+            audit.record(
+                db, current_user.id, "id_number_changed", target=current_user,
+                old=audit.masked_digits(current_user.id_number), new=audit.masked_digits(data.id_number),
+            )
         current_user.name = data.name
         current_user.id_number = data.id_number
         identity.save_hacienda_result(db, current_user, data.name, data.id_number)

@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import models
+from .. import audit, models
 from ..schemas import StaffInvitationCreate, StaffInvitationRead
-from ..security import get_current_user
+from ..security import get_current_user, mask_email
 from .auth import _can_resend, _find_user, _now, normalize_email, send_invitation
 
 
@@ -18,6 +18,13 @@ def _check_can_invite(current_user: models.User, role: str) -> None:
             raise HTTPException(status_code=403, detail="Solo el administrador puede invitar coordinadores")
         return
     raise HTTPException(status_code=403, detail="No tienes permiso para invitar personal")
+
+
+def _record_sent(db: Session, actor: models.User, invitation: models.StaffInvitation) -> None:
+    audit.record(
+        db, actor.id, "invitation_sent",
+        target_label=mask_email(invitation.email), new=audit.role_name(invitation.role),
+    )
 
 
 def _invitation_read(invitation: models.StaffInvitation, email_sent: bool | None = None) -> StaffInvitationRead:
@@ -59,6 +66,7 @@ def create_invitation(
     invitation = models.StaffInvitation(email=email, name=data.name, role=data.role, created_by=current_user.id)
     db.add(invitation)
     sent = send_invitation(invitation)
+    _record_sent(db, current_user, invitation)
     db.commit()
     db.refresh(invitation)
     return _invitation_read(invitation, email_sent=sent)
@@ -90,6 +98,7 @@ def resend_invitation(
     if not _can_resend(invitation.sent_at):
         raise HTTPException(status_code=429, detail="Espera un minuto antes de reenviarla.")
     sent = send_invitation(invitation)
+    _record_sent(db, current_user, invitation)
     db.commit()
     db.refresh(invitation)
     return _invitation_read(invitation, email_sent=sent)

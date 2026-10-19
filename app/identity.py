@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from . import hacienda, models
+from . import audit, hacienda, models
 
 ID_IN_USE = "No es posible usar esta cédula. Si le pertenece, contacte a soporte."
 ID_IN_USE_REASON = "cédula en uso por otra cuenta"
@@ -94,11 +94,21 @@ def check_id_number(db: Session, user: models.User, id_number: str) -> str | Non
     return hacienda.check_id_number(id_number)
 
 
-def apply_contact_from_email(db: Session, user: models.User, phone: str | None, id_number: str | None) -> str | None:
+def apply_contact_from_email(
+    db: Session, user: models.User, phone: str | None, id_number: str | None, actor_id: int | None = None
+) -> str | None:
     """Datos que el cliente mandó por correo, con las reglas del perfil. No hace commit.
 
     El teléfono siempre se guarda. Devuelve el motivo si la cédula pertenece a otra cuenta.
+    actor_id: quién confirma el cambio en el registro (sin indicar, el Agente virtual).
     """
+    if actor_id is None:
+        actor_id = audit.agent_id(db)
+    if phone and phone != user.phone:
+        audit.record(
+            db, actor_id, "phone_changed", target=user,
+            old=audit.masked_digits(user.phone), new=audit.masked_digits(phone),
+        )
     if phone:
         user.phone = phone
     if not id_number or id_number == user.id_number:
@@ -108,6 +118,10 @@ def apply_contact_from_email(db: Session, user: models.User, phone: str | None, 
     if user.id_number and is_locked(db, user):
         # Ya quedó fija: se conserva la del perfil
         return None
+    audit.record(
+        db, actor_id, "id_number_changed", target=user,
+        old=audit.masked_digits(user.id_number), new=audit.masked_digits(id_number),
+    )
     user.id_number = id_number
     if (user.name or "").strip():
         save_hacienda_result(db, user, user.name, id_number)

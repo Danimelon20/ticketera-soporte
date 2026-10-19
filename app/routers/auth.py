@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import config, identity, mailer, models
+from .. import audit, config, identity, mailer, models, throttle
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
     SignupStarted, EmailCodeRequest, EmailRequest, ActivationResult,
 )
 from ..security import (
-    hash_password, verify_password, new_token, get_current_user, hash_code,
+    hash_password, verify_password, new_token, get_current_user, hash_code, hash_token,
     generate_login_code, generate_password, mask_email,
 )
 
@@ -28,6 +28,8 @@ PORTAL_ROLES = {
     "requester": ("requester",),
 }
 LOGIN_ERROR = "Correo o contraseña incorrectos"
+# Para que un correo sin cuenta tarde lo mismo que uno con cuenta
+_DUMMY_HASH = hash_password("contraseña-de-relleno")
 CODE_MINUTES = 10
 MAX_CODE_ATTEMPTS = 5
 RESEND_SECONDS = 60
@@ -48,7 +50,11 @@ def _now() -> datetime:
 
 def _create_session(db: Session, user: models.User) -> AuthResponse:
     token = new_token()
-    db.add(models.Session(token=token, user_id=user.id))
+    # Solo el hash queda en la base; el token en claro va únicamente en la respuesta
+    db_session = models.Session(token=hash_token(token), user_id=user.id)
+    db.add(db_session)
+    db.flush()
+    db.add(models.SessionActivity(session_id=db_session.id, last_used_at=_now()))
     db.commit()
     return AuthResponse(token=token, user=user)
 
@@ -258,6 +264,7 @@ def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Dep
     db.flush()
     invitation.used_by = user.id
     invitation.used_at = _now()
+    audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
     db.commit()
     # Única respuesta con la contraseña: que el navegador no la guarde
     response.headers["Cache-Control"] = "no-store"
@@ -277,6 +284,9 @@ def resend_activation(data: EmailRequest, db: Session = Depends(get_db)):
 @router.post("/auth/login", response_model=AuthResponse | LoginChallengeResponse)
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     email = credentials.email.strip().lower()
+    # Bloqueado: ni se revisa la contraseña, ni se crea reto, ni se envían correos
+    if throttle.is_locked(db, email):
+        raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
     allowed_roles = PORTAL_ROLES.get(credentials.portal or "", ())
     user = db.query(models.User).filter(models.User.email == email).first()
     if user is None:
@@ -289,17 +299,18 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         ):
             raise HTTPException(status_code=403, detail=CONFIRM_EMAIL)
     # La contraseña se revisa antes que la opción: rol equivocado y contraseña incorrecta responden igual
-    if (
-        not user
-        or not verify_password(credentials.password, user.password_hash)
-        or not user.is_active
-        or user.role not in allowed_roles
-    ):
+    password_ok = verify_password(credentials.password, user.password_hash if user else _DUMMY_HASH)
+    if not user or not password_ok or not user.is_active or user.role not in allowed_roles:
+        # Cualquier 401 cuenta como fallo: el bloqueo no revela si la contraseña era correcta
+        if throttle.register_failure(db, email, user):
+            raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
         raise HTTPException(status_code=401, detail=LOGIN_ERROR)
 
     if user.role in TWO_FACTOR_ROLES:
+        # El contador se reinicia cuando el código también es correcto
         return start_challenge(db, user)
 
+    throttle.reset(db, email)
     return _create_session(db, user)
 
 
@@ -313,16 +324,22 @@ def verify_code(data: VerifyCodeRequest, db: Session = Depends(get_db)):
     if challenge.attempts >= MAX_CODE_ATTEMPTS:
         raise HTTPException(status_code=429, detail="Demasiados intentos. Inicia sesión de nuevo.")
 
-    if not hmac.compare_digest(hash_code(data.code.strip()), challenge.code_hash):
-        challenge.attempts += 1
-        db.commit()
-        raise HTTPException(status_code=400, detail=CODE_ERROR)
-
     user = db.query(models.User).filter(models.User.id == challenge.user_id, models.User.is_active == True).first()
     if not user:
         raise HTTPException(status_code=400, detail=CODE_ERROR)
+    email = normalize_email(user.email)
+    if throttle.is_locked(db, email):
+        raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
+
+    if not hmac.compare_digest(hash_code(data.code.strip()), challenge.code_hash):
+        challenge.attempts += 1
+        # Mismo contador que las contraseñas incorrectas
+        if throttle.register_failure(db, email, user):
+            raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
+        raise HTTPException(status_code=400, detail=CODE_ERROR)
 
     challenge.used = True
+    throttle.reset(db, email)
     db.commit()
     return _create_session(db, user)
 
@@ -373,8 +390,7 @@ def get_me(current_user: models.User = Depends(get_current_user), db: Session = 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
     if authorization and authorization.startswith("Bearer "):
-        token = authorization[7:]
-        db_session = db.query(models.Session).filter(models.Session.token == token).first()
+        db_session = db.query(models.Session).filter(models.Session.token == hash_token(authorization[7:])).first()
         if db_session:
             db.delete(db_session)
             db.commit()

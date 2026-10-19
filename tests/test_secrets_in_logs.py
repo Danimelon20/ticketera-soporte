@@ -31,7 +31,25 @@ def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplo
     challenge = client.post("/api/auth/login", json={"email": admin["email"], "password": "clave-segura-123", "portal": "admin"}).json()
     code = code_from(sent[-1][2])
     secrets.append(code)
-    assert client.post("/api/auth/verify-code", json={"challenge_id": challenge["challenge_id"], "code": code}).status_code == 200
+    response = client.post("/api/auth/verify-code", json={"challenge_id": challenge["challenge_id"], "code": code})
+    assert response.status_code == 200
+    token = response.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    secrets.append(token)
+
+    # Mi cuenta: contraseña nueva y código del cambio de correo
+    new_password = "contraseña-nueva-larga"
+    response = client.put(
+        "/api/account/password", json={"current_password": "clave-segura-123", "new_password": new_password},
+        headers=headers,
+    )
+    assert response.status_code == 204
+    secrets.append(new_password)
+    new_email = f"admin-nuevo-{uuid.uuid4().hex}@example.com"
+    client.post("/api/account/email", json={"current_password": new_password, "new_email": new_email}, headers=headers)
+    code = code_from(sent[-1][2])
+    secrets.append(code)
+    assert client.post("/api/account/email/verify", json={"code": code}, headers=headers).status_code == 200
 
     for secret in secrets:
         assert secret not in caplog.text

@@ -134,6 +134,47 @@ class ProfileUpdate(BaseModel):
         return normalize_id_number(v)
 
 
+class PasswordChange(BaseModel):
+    current_password: str
+    # El mínimo depende del rol (8 o 12): se valida en la ruta
+    new_password: str = Field(max_length=200)
+
+
+class PhoneUpdate(BaseModel):
+    phone: str
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        return normalize_phone(v)
+
+
+class EmailChangeRequest(BaseModel):
+    current_password: str
+    new_email: str = Field(min_length=3, max_length=150)
+
+
+class CodeRequest(BaseModel):
+    code: str
+
+
+class AccountChangeRead(BaseModel):
+    id: int
+    created_at: datetime
+    action: str
+    actor: str
+    account: str
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+
+
+class AccountChangePage(BaseModel):
+    items: list[AccountChangeRead]
+    total: int
+    page: int
+    pages: int
+
+
 class TicketCreate(BaseModel):
     # Nombre y cédula salen del perfil del dueño del ticket; el teléfono es opcional
     title: str

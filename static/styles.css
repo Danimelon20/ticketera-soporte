@@ -1405,3 +1405,21 @@ section {
 .invites-table th {
     background: #F0F2F5;
 }
+
+/* ===== Mi cuenta ===== */
+.account-section { margin-top: 28px; max-width: 480px; }
+.account-section[hidden], .profile-form[hidden], .session-notice[hidden] { display: none; }
+.account-title { font-size: 16px; font-weight: 600; margin: 0; }
+.account-section .profile-form { margin-top: 12px; }
+.account-current { margin: 8px 0 0; overflow-wrap: anywhere; }
+.session-notice { margin: 0 0 16px; }
+
+/* ===== Registro de cambios ===== */
+.changes-list { list-style: none; margin: 0; padding: 0; }
+.change-item { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.change-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+.change-time { color: var(--muted); font-size: 13px; }
+.change-line { font-size: 14px; }
+.change-label { color: var(--muted); }
+.changes-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.changes-pager .btn-secondary { min-height: 44px; }

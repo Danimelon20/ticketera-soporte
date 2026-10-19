@@ -42,3 +42,7 @@ def hacienda_check_enabled() -> bool:
 
 def hacienda_strict() -> bool:
     return os.getenv("HACIENDA_STRICT", "false").lower() == "true"
+
+# Vencimiento de sesión: sin uso durante SESSION_IDLE_MINUTES o SESSION_MAX_HOURS desde que se abrió
+SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "240"))
+SESSION_MAX_HOURS = int(os.getenv("SESSION_MAX_HOURS", "12"))

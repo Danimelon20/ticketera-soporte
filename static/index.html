@@ -56,6 +56,7 @@
         </section>
         <div class="auth-card-container">
             <div class="auth-card">
+                <p id="sessionNotice" class="auth-notice session-notice" role="status" hidden></p>
                 <div id="portalChooser" class="auth-form-panel">
                     <h1 class="auth-title">Iniciar sesión</h1>
                     <p class="help-text">Elija cómo quiere entrar.</p>
@@ -160,7 +161,7 @@
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
     <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
-    <button type="button" id="navProfile" class="topbar-tab" hidden>Mi perfil</button>
+    <button type="button" id="navProfile" class="topbar-tab" hidden>Mi cuenta</button>
   </nav>
   <div class="topbar-section topbar-action">
     <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
@@ -217,6 +218,8 @@
         <section id="profileView" class="page-view" hidden aria-labelledby="profileTitle">
             <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
             <p id="profileIntro" class="view-note">Antes de crear tickets necesitamos su nombre completo, cédula y teléfono.</p>
+            <section id="accountPersonal" class="account-section" aria-labelledby="accountPersonalTitle">
+            <h2 id="accountPersonalTitle" class="account-title">Datos personales</h2>
             <form id="profileForm" class="profile-form">
                 <div class="form-group">
                     <label for="profileName">Nombre completo</label>
@@ -237,6 +240,74 @@
                     <button type="button" id="profileCancel" class="btn-secondary" hidden>Cancelar</button>
                 </div>
             </form>
+            </section>
+
+            <section id="accountPhone" class="account-section" aria-labelledby="accountPhoneTitle" hidden>
+                <h2 id="accountPhoneTitle" class="account-title">Teléfono</h2>
+                <form id="accountPhoneForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="accountPhoneInput">Teléfono</label>
+                        <input type="tel" id="accountPhoneInput" placeholder="8888-1234" maxlength="16" inputmode="numeric" autocomplete="tel" required>
+                    </div>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Guardar teléfono</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="accountEmail" class="account-section" aria-labelledby="accountEmailTitle">
+                <h2 id="accountEmailTitle" class="account-title">Correo</h2>
+                <p class="account-current">Correo actual: <strong id="accountCurrentEmail"></strong></p>
+                <form id="emailChangeForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="emailChangeNew">Correo nuevo</label>
+                        <input type="email" id="emailChangeNew" maxlength="150" autocomplete="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="emailChangePassword">Contraseña actual</label>
+                        <input type="password" id="emailChangePassword" autocomplete="current-password" required>
+                    </div>
+                    <small class="help-text">Le enviaremos un código al correo nuevo. El cambio se aplica al confirmarlo.</small>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Enviar código</button>
+                    </div>
+                </form>
+                <form id="emailCodeForm" class="profile-form" hidden>
+                    <p id="emailCodeNotice" class="help-text" aria-live="polite"></p>
+                    <div class="form-group">
+                        <label for="emailCodeInput">Código de 6 dígitos</label>
+                        <input type="text" id="emailCodeInput" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                    </div>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Confirmar correo</button>
+                        <button type="button" id="emailCodeResend" class="btn-secondary" disabled>Reenviar código</button>
+                        <button type="button" id="emailCodeCancel" class="btn-secondary">Cancelar</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="accountPassword" class="account-section" aria-labelledby="accountPasswordTitle">
+                <h2 id="accountPasswordTitle" class="account-title">Contraseña</h2>
+                <form id="passwordForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="passwordCurrent">Contraseña actual</label>
+                        <input type="password" id="passwordCurrent" autocomplete="current-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="passwordNew">Contraseña nueva</label>
+                        <input type="password" id="passwordNew" autocomplete="new-password" required>
+                        <small id="passwordHint" class="help-text"></small>
+                    </div>
+                    <div class="form-group">
+                        <label for="passwordConfirm">Confirmar contraseña nueva</label>
+                        <input type="password" id="passwordConfirm" autocomplete="new-password" required>
+                    </div>
+                    <small class="help-text">Al cambiarla se cierran sus sesiones en otros dispositivos.</small>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Cambiar contraseña</button>
+                    </div>
+                </form>
+            </section>
         </section>
 
         <section id="directoryView" class="page-view" hidden aria-labelledby="directoryTitle">
@@ -364,6 +435,26 @@
                 <article class="admin-card">
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
+                </article>
+                <article class="admin-card admin-card-wide">
+                    <div class="admin-card-head">
+                        <h2>Registro de cambios</h2>
+                    </div>
+                    <div class="directory-filters">
+                        <label for="changesAccount" class="sr-only">Filtrar por cuenta</label>
+                        <input type="search" id="changesAccount" placeholder="Cuenta: nombre o correo" maxlength="150">
+                        <label for="changesAction" class="sr-only">Filtrar por acción</label>
+                        <select id="changesAction">
+                            <option value="">Todas las acciones</option>
+                        </select>
+                    </div>
+                    <ul id="changesList" class="changes-list"></ul>
+                    <p id="changesEmpty" class="admin-text" hidden>No hay cambios con esos filtros.</p>
+                    <div class="changes-pager">
+                        <button type="button" id="changesPrev" class="btn-secondary">Anterior</button>
+                        <span id="changesPage" aria-live="polite"></span>
+                        <button type="button" id="changesNext" class="btn-secondary">Siguiente</button>
+                    </div>
                 </article>
                 <article class="admin-card admin-card-wide">
                     <div class="admin-card-head">

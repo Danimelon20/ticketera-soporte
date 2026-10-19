@@ -172,7 +172,9 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         due_at=email_analysis.compute_due_at(ticket.created_at, draft.ai_level),
     ))
     # Al perfil con las mismas reglas que "Complete su perfil"; desde aquí queda fijo
-    identity.apply_contact_from_email(db, requester, requester.phone or contact_phone, contact_id_number)
+    identity.apply_contact_from_email(
+        db, requester, requester.phone or contact_phone, contact_id_number, actor_id=reviewer.id
+    )
     identity.lock(db, requester)
 
     draft.status = "confirmed"

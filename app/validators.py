@@ -21,3 +21,10 @@ def mask_id_number(value: str | None) -> str | None:
     if len(digits) < 3:
         return value
     return "*" * (len(digits) - 3) + digits[-3:]
+
+def mask_last4(value: str | None) -> str | None:
+    """Solo los últimos 4 dígitos (registro de cambios de cuentas)."""
+    if not value:
+        return None
+    digits = "".join(c for c in value if c.isdigit())
+    return f"****{digits[-4:]}"

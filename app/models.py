@@ -343,3 +343,68 @@ class DraftPendingReason(Base):
     draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), unique=True, nullable=False)
     reason = Column(String(200), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class SessionActivity(Base):
+    """Último uso de una sesión, para vencerla por inactividad."""
+    __tablename__ = "session_activity"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), unique=True, nullable=False)
+    last_used_at = Column(DateTime, nullable=False)
+
+
+class LoginThrottle(Base):
+    """Intentos fallidos seguidos por correo (exista o no la cuenta) y hasta cuándo está bloqueado."""
+    __tablename__ = "login_throttles"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(150), unique=True, nullable=False)
+    failures = Column(Integer, nullable=False, default=0)
+    locked_until = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class EmailChange(Base):
+    """Cambio de correo pendiente: se aplica al confirmar el código que llegó al correo nuevo."""
+    __tablename__ = "email_changes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    new_email = Column(String(150), nullable=False)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+ACCOUNT_CHANGE_ACTIONS = (
+    "password_changed", "email_changed", "phone_changed", "name_changed", "id_number_changed",
+    "role_changed", "account_activated", "account_deactivated", "invitation_sent", "invitation_used",
+    "login_locked",
+)
+
+
+class AccountChange(Base):
+    """Registro de cambios de cuentas. Los valores se guardan ya enmascarados; nunca contraseñas ni códigos."""
+    __tablename__ = "account_changes"
+
+    id = Column(Integer, primary_key=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    target_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    target_label = Column(String(150), nullable=True)
+    action = Column(String(30), index=True, nullable=False)
+    old_value = Column(String(150), nullable=True)
+    new_value = Column(String(150), nullable=True)
+    created_at = Column(DateTime, index=True, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN (" + ", ".join(f"'{a}'" for a in ACCOUNT_CHANGE_ACTIONS) + ")",
+            name="chk_account_change_action",
+        ),
+    )
+
+    actor = relationship("User", foreign_keys=[actor_id])
+    target = relationship("User", foreign_keys=[target_user_id])

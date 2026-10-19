@@ -63,14 +63,18 @@ def test_correct_code_gives_token(client, make_user, sent):
 def test_wrong_code_and_too_many_attempts(client, make_user, sent):
     _user, data = _start(client, make_user)
     wrong = _wrong(_code_from(sent))
-    for _ in range(5):
+    for _ in range(4):
         response = _verify(client, data["challenge_id"], wrong)
         assert response.status_code == 400
         assert response.json()["detail"] == "Error: Intente Nuevamente"
 
+    # El quinto código incorrecto seguido también bloquea el correo (mismo contador que las contraseñas)
+    response = _verify(client, data["challenge_id"], wrong)
+    assert response.status_code == 429
+    assert response.json()["detail"] == "Demasiados intentos. Intente de nuevo en unos minutos."
+
     response = _verify(client, data["challenge_id"], _code_from(sent))
     assert response.status_code == 429
-    assert response.json()["detail"] == "Demasiados intentos. Inicia sesión de nuevo."
 
 
 def test_same_code_twice(client, make_user, sent):

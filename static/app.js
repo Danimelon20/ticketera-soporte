@@ -25,6 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const signupForm = document.getElementById('signupForm');
     const activateForm = document.getElementById('activateForm');
     const confirmEmailNotice = document.getElementById('confirmEmailNotice');
+    const sessionNotice = document.getElementById('sessionNotice');
+    // Mismo texto que app/security.py: la sesión venció por inactividad o por tiempo total
+    const SESSION_EXPIRED = 'Su sesión venció. Inicie sesión de nuevo.';
     const switchAccountBtn = document.getElementById('switchAccount');
     const currentUserDisplay = document.getElementById('currentUserDisplay');
 
@@ -99,6 +102,20 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'La cédula debe tener 9 dígitos, o 11 o 12 si es DIMEX';
     }
 
+    // 401: vuelve al inicio de sesión; si la sesión venció, lo avisa ahí mismo
+    function handleUnauthorized(detail) {
+        sessionStorage.removeItem('ticketeraToken');
+        authToken = null;
+        currentUser = null;
+        showAuthScreen();
+        if (detail === SESSION_EXPIRED) {
+            sessionNotice.textContent = SESSION_EXPIRED;
+            sessionNotice.hidden = false;
+        } else {
+            showError('Tu sesión terminó, inicia sesión de nuevo');
+        }
+    }
+
     async function apiFetch(endpoint, options = {}) {
         hideError();
         const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
@@ -116,11 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (response.status === 401) {
-            sessionStorage.removeItem('ticketeraToken');
-            authToken = null;
-            currentUser = null;
-            showAuthScreen();
-            showError('Tu sesión terminó, inicia sesión de nuevo');
+            const data = await response.json().catch(() => ({}));
+            handleUnauthorized(data.detail);
             throw new Error('Unauthorized');
         }
 
@@ -129,7 +143,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let message = errorData.detail;
             if (response.status === 422 && endpoint.startsWith('/auth/') && Array.isArray(message)) {
                 message = 'La contraseña debe tener al menos 8 caracteres';
-            } else if ((endpoint === '/tickets' || endpoint === '/profile') && ['POST', 'PUT'].includes(options.method)) {
+            } else if ((endpoint === '/tickets' || endpoint === '/profile' || endpoint.startsWith('/account/'))
+                && ['POST', 'PUT'].includes(options.method)) {
                 message = getErrorMessage(errorData);
             } else if (response.status === 401 && endpoint.includes('/auth/login')) {
                 message = errorData.detail || 'Correo o contraseña incorrectos';
@@ -202,6 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showAuthScreen() {
         document.body.classList.remove('profile-required');
+        sessionNotice.hidden = true;
+        resetEmailChange();
         loginPortal = null;
         stopDraftsPolling();
         resetChat();
@@ -461,6 +478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionStorage.setItem('ticketeraToken', data.token);
         authToken = data.token;
         currentUser = data.user;
+        sessionNotice.hidden = true;
         try {
             // Trae también si el perfil está completo
             currentUser = await apiFetch('/auth/me');
@@ -883,11 +901,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ message, history })
             });
             if (response.status === 401) {
-                sessionStorage.removeItem('ticketeraToken');
-                authToken = null;
-                currentUser = null;
-                showAuthScreen();
-                showError('Tu sesión terminó, inicia sesión de nuevo');
+                const data = await response.json().catch(() => ({}));
+                handleUnauthorized(data.detail);
                 return;
             }
             const data = await response.json().catch(() => ({}));
@@ -2078,7 +2093,8 @@ document.addEventListener('DOMContentLoaded', () => {
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
         navAdmin.hidden = role !== 'admin';
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
-        navProfile.hidden = role !== 'requester';
+        // Mi cuenta: todos los roles que inician sesión
+        navProfile.hidden = !role || role === 'agent';
     }
 
     function showView(name) {
@@ -2112,10 +2128,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showProfile() {
         const required = profileRequired();
+        const isRequester = currentUser.role === 'requester';
         // Mientras falte el perfil no se puede usar el resto de la página
         document.body.classList.toggle('profile-required', required);
-        document.getElementById('profileTitle').textContent = required ? 'Complete su perfil' : 'Mi perfil';
+        document.getElementById('profileTitle').textContent = required ? 'Complete su perfil' : 'Mi cuenta';
         document.getElementById('profileIntro').hidden = !required;
+        // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario
+        document.getElementById('accountPersonal').hidden = !isRequester;
+        accountPhoneSection.hidden = isRequester || required;
+        accountEmailSection.hidden = required;
+        accountPasswordSection.hidden = required;
+        fillAccountSections();
         profileCancel.hidden = required;
         profileName.value = currentUser.name || '';
         profileIdNumber.value = currentUser.id_number || '';
@@ -2125,7 +2148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         profileIdNumber.readOnly = locked;
         document.getElementById('profileLockedNote').hidden = !locked;
         showView('profile');
-        (locked ? profilePhone : profileName).focus();
+        if (isRequester) (locked ? profilePhone : profileName).focus();
     }
 
     profileForm.addEventListener('submit', async (e) => {
@@ -2161,6 +2184,177 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     profileCancel.addEventListener('click', () => showView('tickets'));
+
+    // ----- Mi cuenta: teléfono (personal), correo y contraseña (todos) -----
+    const accountPhoneSection = document.getElementById('accountPhone');
+    const accountEmailSection = document.getElementById('accountEmail');
+    const accountPasswordSection = document.getElementById('accountPassword');
+    const accountPhoneForm = document.getElementById('accountPhoneForm');
+    const accountPhoneInput = document.getElementById('accountPhoneInput');
+    const accountCurrentEmail = document.getElementById('accountCurrentEmail');
+    const emailChangeForm = document.getElementById('emailChangeForm');
+    const emailChangeNew = document.getElementById('emailChangeNew');
+    const emailChangePassword = document.getElementById('emailChangePassword');
+    const emailCodeForm = document.getElementById('emailCodeForm');
+    const emailCodeNotice = document.getElementById('emailCodeNotice');
+    const emailCodeInput = document.getElementById('emailCodeInput');
+    const emailCodeResend = document.getElementById('emailCodeResend');
+    const emailCodeCancel = document.getElementById('emailCodeCancel');
+    const passwordForm = document.getElementById('passwordForm');
+    const passwordCurrent = document.getElementById('passwordCurrent');
+    const passwordNew = document.getElementById('passwordNew');
+    const passwordConfirm = document.getElementById('passwordConfirm');
+    const passwordHint = document.getElementById('passwordHint');
+    let emailResendTimer = null;
+
+    // Mismo mínimo que app/security.py
+    function passwordMinimum() {
+        return currentUser && currentUser.role === 'requester' ? 8 : 12;
+    }
+
+    function fillAccountSections() {
+        accountPhoneInput.value = currentUser.phone || '';
+        accountCurrentEmail.textContent = currentUser.email;
+        passwordHint.textContent = `Al menos ${passwordMinimum()} caracteres.`;
+        passwordForm.reset();
+    }
+
+    function refreshTopbarUser() {
+        document.querySelector('.topbar-user-name').textContent = currentUser.name || currentUser.email;
+    }
+
+    function startEmailResendWait() {
+        let left = RESEND_WAIT_SECONDS;
+        clearInterval(emailResendTimer);
+        emailCodeResend.disabled = true;
+        emailCodeResend.textContent = `Reenviar código en ${left} s`;
+        emailResendTimer = setInterval(() => {
+            left -= 1;
+            if (left <= 0) {
+                clearInterval(emailResendTimer);
+                emailResendTimer = null;
+                emailCodeResend.disabled = false;
+                emailCodeResend.textContent = 'Reenviar código';
+                return;
+            }
+            emailCodeResend.textContent = `Reenviar código en ${left} s`;
+        }, 1000);
+    }
+
+    function resetEmailChange() {
+        clearInterval(emailResendTimer);
+        emailResendTimer = null;
+        emailChangeForm.reset();
+        emailCodeForm.reset();
+        emailCodeForm.hidden = true;
+        emailChangeForm.hidden = false;
+    }
+
+    accountPhoneForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const phone = accountPhoneInput.value.trim();
+        const phoneError = validatePhone(phone);
+        if (phoneError) {
+            showError(phoneError);
+            return;
+        }
+        try {
+            currentUser = await apiFetch('/account/phone', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone })
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        accountPhoneInput.value = currentUser.phone || '';
+        showSuccess('Teléfono guardado');
+    });
+
+    emailChangeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const newEmail = emailChangeNew.value.trim();
+        let result;
+        try {
+            result = await apiFetch('/account/email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_email: newEmail, current_password: emailChangePassword.value })
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        emailChangeForm.hidden = true;
+        emailCodeForm.hidden = false;
+        emailChangePassword.value = '';
+        emailCodeNotice.textContent = `Si el correo se puede usar, le enviamos un código a ${result.email_hint}. Vence en 15 minutos.`;
+        startEmailResendWait();
+        emailCodeInput.focus();
+    });
+
+    emailCodeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const code = emailCodeInput.value.trim();
+        if (!/^[0-9]{6}$/.test(code)) {
+            showError('Escriba el código de 6 dígitos');
+            return;
+        }
+        try {
+            currentUser = await apiFetch('/account/email/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code })
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        resetEmailChange();
+        fillAccountSections();
+        refreshTopbarUser();
+        showSuccess('Correo actualizado. Se cerraron sus sesiones en otros dispositivos.');
+    });
+
+    emailCodeResend.addEventListener('click', async () => {
+        hideError();
+        emailCodeResend.disabled = true;
+        try {
+            const result = await apiFetch('/account/email/resend', { method: 'POST' });
+            emailCodeNotice.textContent = `Si el correo se puede usar, le enviamos un código nuevo a ${result.email_hint}.`;
+            startEmailResendWait();
+        } catch (err) {
+            emailCodeResend.disabled = false;
+        }
+    });
+
+    emailCodeCancel.addEventListener('click', resetEmailChange);
+
+    passwordForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const minimum = passwordMinimum();
+        if (passwordNew.value.length < minimum) {
+            showError(`La contraseña debe tener al menos ${minimum} caracteres`);
+            return;
+        }
+        if (passwordNew.value !== passwordConfirm.value) {
+            showError('Las contraseñas nuevas no coinciden');
+            return;
+        }
+        try {
+            await apiFetch('/account/password', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ current_password: passwordCurrent.value, new_password: passwordNew.value })
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        passwordForm.reset();
+        showSuccess('Contraseña cambiada. Se cerraron sus sesiones en otros dispositivos.');
+    });
 
     // ----- Borradores de correos -----
     const DRAFT_ROLES = ['technician', 'coordinator', 'admin'];
@@ -2216,6 +2410,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`${API_BASE}/drafts`, {
                 headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${authToken}` }
             });
+            if (response.status === 401) {
+                const data = await response.json().catch(() => ({}));
+                handleUnauthorized(data.detail);
+                return;
+            }
             if (!response.ok) return;
             const list = await response.json();
             updateDraftsBadge(list.length);
@@ -2752,7 +2951,118 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadAdminPanel() {
         loadAdminHealth();
         loadAdminLogs();
+        changesPage = 1;
+        loadAccountChanges();
     }
+
+    // ----- Registro de cambios de cuentas (solo administrador) -----
+    const CHANGE_ACTIONS = {
+        password_changed: 'Contraseña cambiada',
+        email_changed: 'Correo cambiado',
+        phone_changed: 'Teléfono cambiado',
+        name_changed: 'Nombre cambiado',
+        id_number_changed: 'Cédula cambiada',
+        role_changed: 'Rol cambiado',
+        account_activated: 'Cuenta activada',
+        account_deactivated: 'Cuenta desactivada',
+        invitation_sent: 'Invitación enviada',
+        invitation_used: 'Invitación usada',
+        login_locked: 'Bloqueo por intentos'
+    };
+    const changesAccount = document.getElementById('changesAccount');
+    const changesAction = document.getElementById('changesAction');
+    const changesList = document.getElementById('changesList');
+    const changesEmpty = document.getElementById('changesEmpty');
+    const changesPrev = document.getElementById('changesPrev');
+    const changesNext = document.getElementById('changesNext');
+    const changesPageLabel = document.getElementById('changesPage');
+    let changesPage = 1;
+    let changesPages = 1;
+    let changesSearchTimer = null;
+    let changesSeq = 0;
+
+    Object.entries(CHANGE_ACTIONS).forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        changesAction.appendChild(option);
+    });
+
+    function changeLine(labelText, value) {
+        const line = document.createElement('span');
+        line.className = 'change-line';
+        const label = document.createElement('span');
+        label.className = 'change-label';
+        label.textContent = labelText;
+        line.append(label, document.createTextNode(value));
+        return line;
+    }
+
+    function renderChange(item) {
+        const li = document.createElement('li');
+        li.className = 'change-item';
+        const head = document.createElement('div');
+        head.className = 'change-head';
+        const action = document.createElement('strong');
+        action.textContent = CHANGE_ACTIONS[item.action] || item.action;
+        const when = document.createElement('time');
+        when.className = 'change-time';
+        when.textContent = formatDateTime(item.created_at);
+        head.append(action, when);
+        li.append(head, changeLine('Cuenta: ', item.account), changeLine('Por: ', item.actor));
+        if (item.old_value || item.new_value) {
+            li.appendChild(changeLine('Cambio: ', `${item.old_value || '—'} → ${item.new_value || '—'}`));
+        }
+        return li;
+    }
+
+    async function loadAccountChanges() {
+        const seq = ++changesSeq;
+        const params = new URLSearchParams({ page: String(changesPage) });
+        if (changesAccount.value.trim()) params.set('account', changesAccount.value.trim());
+        if (changesAction.value) params.set('action', changesAction.value);
+        let data;
+        try {
+            data = await apiFetch(`/admin/account-changes?${params.toString()}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        if (seq !== changesSeq) return;
+        changesPage = data.page;
+        changesPages = data.pages;
+        changesList.replaceChildren(...data.items.map(renderChange));
+        changesEmpty.hidden = data.items.length > 0;
+        changesPageLabel.textContent = `Página ${data.page} de ${data.pages}`;
+        changesPrev.disabled = data.page <= 1;
+        changesNext.disabled = data.page >= data.pages;
+    }
+
+    changesAccount.addEventListener('input', () => {
+        clearTimeout(changesSearchTimer);
+        changesSearchTimer = setTimeout(() => {
+            changesPage = 1;
+            loadAccountChanges();
+        }, 300);
+    });
+
+    changesAction.addEventListener('change', () => {
+        changesPage = 1;
+        loadAccountChanges();
+    });
+
+    changesPrev.addEventListener('click', () => {
+        if (changesPage > 1) {
+            changesPage -= 1;
+            loadAccountChanges();
+        }
+    });
+
+    changesNext.addEventListener('click', () => {
+        if (changesPage < changesPages) {
+            changesPage += 1;
+            loadAccountChanges();
+        }
+    });
 
     refreshLogsBtn.addEventListener('click', loadAdminLogs);
 
