@@ -238,6 +238,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Pantallas de inicio: iniciar sesión, crear cuenta de cliente, activar cuenta de personal =====
     const AUTH_ROUTES = { '#crear-cuenta': 'signup', '#activar-cuenta': 'activate' };
+    // Enlace del correo de restablecimiento: #restablecer?portal=staff&correo=...
+    const RESET_ROUTE = '#restablecer';
 
     // Cada opción de inicio de sesión solo deja entrar a sus roles (lo verifica el servidor)
     const PORTALS = {
@@ -252,6 +254,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let forgotMode = false;
 
     function showAuthPanel() {
+        if (window.location.hash.startsWith(RESET_ROUTE)) {
+            openResetLink();
+            return;
+        }
         const route = AUTH_ROUTES[window.location.hash];
         const panel = route || (forgotMode && loginPortal ? 'forgot' : (loginPortal ? 'login' : 'chooser'));
         portalChooser.hidden = panel !== 'chooser';
@@ -488,6 +494,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const forgotEmailInput = document.getElementById('forgotEmail');
     const forgotCodeForm = document.getElementById('forgotCodeForm');
     const forgotCodeInput = document.getElementById('forgotCode');
+    const forgotCodeEmail = document.getElementById('forgotCodeEmail');
     const forgotNotice = document.getElementById('forgotNotice');
     const forgotPasswordFields = document.getElementById('forgotPasswordFields');
     const forgotNewPassword = document.getElementById('forgotNewPassword');
@@ -537,6 +544,31 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotEmailInput.focus();
     }
 
+    // Paso de escribir el código sin pedir uno nuevo (enlace del correo o "Ya tengo un código")
+    function showForgotCodeStep(email) {
+        forgotEmailForm.hidden = true;
+        forgotCodeForm.hidden = false;
+        forgotCodeEmail.value = email;
+        forgotNotice.textContent = 'Escriba el código de 6 dígitos que le llegó al correo. Vence 15 minutos después de enviado.';
+        (email ? forgotCodeInput : forgotCodeEmail).focus();
+    }
+
+    function openResetLink() {
+        const params = new URLSearchParams(window.location.hash.slice(RESET_ROUTE.length).replace(/^\?/, ''));
+        // El correo no se queda en la barra de direcciones
+        clearHash();
+        const portal = params.get('portal');
+        if (!PORTALS[portal]) {
+            loginPortal = null;
+            forgotMode = false;
+            showAuthPanel();
+            return;
+        }
+        loginPortal = portal;
+        openForgot();
+        showForgotCodeStep(params.get('correo') || '');
+    }
+
     function backFromForgot() {
         const portal = loginPortal;
         forgotMode = false;
@@ -564,6 +596,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('forgotPasswordLink').addEventListener('click', openForgot);
     document.getElementById('forgotBack').addEventListener('click', backFromForgot);
+    document.getElementById('forgotHaveCode').addEventListener('click', () => {
+        hideError();
+        showForgotCodeStep(forgotEmailInput.value.trim());
+    });
     document.getElementById('forgotToLogin').addEventListener('click', backFromForgot);
 
     forgotEmailForm.addEventListener('submit', async (e) => {
@@ -582,6 +618,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         forgotEmail = email;
+        forgotCodeEmail.value = email;
         forgotEmailForm.hidden = true;
         forgotCodeForm.hidden = false;
         // Mismo mensaje exista o no la cuenta
@@ -594,6 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     forgotCodeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         hideError();
+        forgotEmail = forgotCodeEmail.value.trim();
         if (!forgotEmail) return;
         const code = forgotCodeInput.value.replace(/\D/g, '');
         if (code.length !== 6) {
@@ -638,7 +676,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     forgotResendBtn.addEventListener('click', async () => {
         hideError();
-        if (!forgotEmail) return;
+        forgotEmail = forgotCodeEmail.value.trim();
+        if (!forgotEmail) {
+            showError('Escriba el correo de su cuenta');
+            return;
+        }
         forgotResendBtn.disabled = true;
         let result;
         try {
@@ -3071,7 +3113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_ACTIONS = {
         deactivate: 'Desactivar',
         reactivate: 'Reactivar',
-        'reset-access': 'Restablecer acceso',
+        'reset-access': 'Forzar restablecimiento',
         unlock: 'Desbloquear'
     };
     // Mismas reglas que app/accounts.py (solo comodidad: el servidor también las revisa)
@@ -3127,7 +3169,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!confirm(`¿Desactivar la cuenta de ${name}? No podrá entrar hasta que se reactive.${extra}`)) return false;
         }
         if (action === 'reset-access'
-            && !confirm(`¿Enviar a ${name} un código para restablecer su acceso? Le llegará a su correo; usted no lo verá.`)) {
+            && !confirm('Se cerrarán todas las sesiones de esta cuenta y su contraseña actual dejará de funcionar. ¿Continuar?')) {
             return false;
         }
         button.disabled = true;
@@ -3140,7 +3182,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const messages = {
             deactivate: 'Cuenta desactivada',
             reactivate: 'Cuenta reactivada',
-            'reset-access': 'Le enviamos el código a su correo',
+            'reset-access': 'Restablecimiento forzado. Le enviamos el código a su correo',
             unlock: 'Correo desbloqueado'
         };
         showSuccess(messages[action]);
@@ -3577,6 +3619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         login_locked: 'Bloqueo por intentos',
         password_reset: 'Contraseña restablecida',
         access_reset_sent: 'Código de acceso enviado',
+        access_reset_forced: 'Restablecimiento forzado',
         login_unlocked: 'Desbloqueo de intentos',
         tickets_released: 'Tickets liberados',
         request_created: 'Solicitud creada',

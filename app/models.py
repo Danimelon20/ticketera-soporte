@@ -389,7 +389,7 @@ class EmailChangeAttempt(Base):
 ACCOUNT_CHANGE_ACTIONS = (
     "password_changed", "email_changed", "phone_changed", "name_changed", "id_number_changed",
     "role_changed", "account_activated", "account_deactivated", "invitation_sent", "invitation_used",
-    "login_locked", "password_reset", "access_reset_sent", "login_unlocked", "tickets_released",
+    "login_locked", "password_reset", "access_reset_sent", "access_reset_forced", "login_unlocked", "tickets_released",
     "request_created", "request_approved", "request_rejected",
 )
 

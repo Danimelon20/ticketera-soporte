@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import accounts, audit, config, hacienda, identity, mailer, models, throttle
 from ..schemas import AccountRequestCreate, AccountRequestRead, RejectRequest, SignupStarted
-from ..security import get_current_user, mask_email
+from ..security import get_current_user, mask_email, unusable_password_hash
 from ..validators import mask_last4, normalize_id_number
 from .admin import require_admin
 from .auth import _can_resend, _now, normalize_email, send_reset_code
@@ -62,8 +62,11 @@ def reset_access(user_id: int, db: Session = Depends(get_db), current_user: mode
     reset = db.query(models.PasswordReset).filter(models.PasswordReset.user_id == user.id).first()
     if reset is not None and not _can_resend(reset.sent_at):
         raise HTTPException(status_code=429, detail=WAIT_MESSAGE)
-    audit.record(db, current_user.id, "access_reset_sent", target=user)
-    # El código va solo al correo de la persona: la respuesta nunca lo trae
+    # Restablecimiento forzado: fuera de todas sus sesiones y sin contraseña válida hasta usar el código
+    user.password_hash = unusable_password_hash()
+    accounts.close_sessions(db, user.id)
+    audit.record(db, current_user.id, "access_reset_forced", target=user)
+    # El código va solo al correo de la persona: la respuesta nunca lo trae (send_reset_code hace commit)
     send_reset_code(db, user, requested_by=current_user)
     return SignupStarted(email_hint=mask_email(user.email))
 

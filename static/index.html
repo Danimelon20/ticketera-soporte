@@ -126,9 +126,14 @@
                             <input type="email" id="forgotEmail" name="email" autocomplete="email" required>
                         </div>
                         <button type="submit" class="btn-submit">Enviar código</button>
+                        <button type="button" id="forgotHaveCode" class="auth-link auth-link-btn">Ya tengo un código</button>
                     </form>
                     <form id="forgotCodeForm" hidden>
                         <p id="forgotNotice" class="help-text" aria-live="polite"></p>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="forgotCodeEmail">Correo</label>
+                            <input type="email" id="forgotCodeEmail" name="email" autocomplete="email" required>
+                        </div>
                         <div class="form-group" style="margin-bottom: 16px;">
                             <label for="forgotCode">Código</label>
                             <input type="text" id="forgotCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>

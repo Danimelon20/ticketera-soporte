@@ -19,6 +19,11 @@ def hash_password(password: str) -> str:
     return f"{salt.hex()}${pwd_hash.hex()}"
 
 
+def unusable_password_hash() -> str:
+    """Hash de una contraseña aleatoria que nadie conoce: no coincide con ninguna y tarda lo mismo en revisarse."""
+    return hash_password(secrets.token_urlsafe(32))
+
+
 def verify_password(password: str, stored: str) -> bool:
     try:
         salt_hex, hash_hex = stored.split("$")

@@ -1,6 +1,7 @@
 import hmac
 import logging
 import uuid
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
@@ -42,6 +43,8 @@ INVITE_HOURS = 72
 CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
 CONFIRM_EMAIL = "Confirme su correo para iniciar sesión"
 ACTIVATE_PATH = "/#activar-cuenta"
+# Abre directo el paso de escribir el código (el correo va en el fragmento: no llega al servidor)
+RESET_PATH = "/#restablecer"
 
 
 def _now() -> datetime:
@@ -285,6 +288,12 @@ def resend_activation(data: EmailRequest, db: Session = Depends(get_db)):
     return SignupStarted(email_hint=mask_email(email))
 
 
+def reset_link(user: models.User) -> str:
+    """Enlace al paso de escribir el código, con la opción de inicio y el correo ya puestos."""
+    portal = next((p for p, roles in PORTAL_ROLES.items() if user.role in roles), "")
+    return f"{config.APP_URL.rstrip('/')}{RESET_PATH}?{urlencode({'portal': portal, 'correo': user.email})}"
+
+
 def send_reset_code(db: Session, user: models.User, requested_by: models.User | None = None) -> bool:
     """Código nuevo de 15 minutos al correo de la persona. Quien lo pidió nunca lo ve. Hace commit."""
     reset = db.query(models.PasswordReset).filter(models.PasswordReset.user_id == user.id).first()
@@ -300,16 +309,21 @@ def send_reset_code(db: Session, user: models.User, requested_by: models.User | 
     reset.requested_by = requested_by.id if requested_by is not None else None
     db.commit()
     if requested_by is not None:
-        intro = "El equipo de soporte restableció el acceso a su cuenta de la Ticketera."
+        intro = [
+            "El equipo de soporte forzó el restablecimiento de la contraseña de su cuenta de la Ticketera.",
+            "Su contraseña anterior ya no funciona: cree una nueva con este código.",
+        ]
+        closing = "Si tiene dudas, comuníquese con el equipo de soporte."
     else:
-        intro = "Recibimos una solicitud para restablecer la contraseña de su cuenta de la Ticketera."
+        intro = ["Recibimos una solicitud para restablecer la contraseña de su cuenta de la Ticketera."]
+        closing = "Si usted no lo pidió, ignore este correo; su contraseña no cambia hasta que se use el código."
     body = "\n".join([
-        intro,
+        *intro,
         "",
         f"Su código es: {code}. Vence en {CONFIRM_MINUTES} minutos.",
-        "Entre a la página de inicio, elija su opción y use \"Olvidé mi contraseña\" para escribirlo.",
+        f"Para escribirlo entre a {reset_link(user)}",
         "",
-        "Si usted no lo pidió, ignore este correo; su contraseña no cambia hasta que se use el código.",
+        closing,
     ])
     return send_code_email(user.email, "Restablecer el acceso a la Ticketera", body, code)
 

@@ -6,6 +6,9 @@ import pytest
 from app import models
 from app.database import SessionLocal
 from app.security import verify_password
+import re
+from urllib.parse import parse_qs
+
 from conftest import code_from
 
 CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
@@ -192,9 +195,93 @@ def test_reset_is_recorded_without_codes_or_passwords(client, make_user, sent):
             .order_by(models.AccountChange.id)
             .all()
         )
-        assert [r.action for r in rows] == ["access_reset_sent", "password_reset"]
+        assert [r.action for r in rows] == ["access_reset_forced", "password_reset"]
         assert rows[0].actor_id == admin["id"]
         text = " ".join(f"{r.old_value} {r.new_value} {r.target_label}" for r in rows)
         assert code not in text and password not in text
+    finally:
+        db.close()
+
+
+def _reset_links(sent, email):
+    return [m for to, _, body in sent if to == email for m in re.findall(r"\S+/#restablecer\?\S+", body)]
+
+
+@pytest.mark.parametrize("role,portal", [("requester", "requester"), ("technician", "staff"), ("admin", "admin")])
+def test_forgot_email_links_to_code_step(client, make_user, sent, role, portal):
+    user = make_user(role)
+    _request(client, user["email"], portal)
+    links = _reset_links(sent, user["email"])
+    assert len(links) == 1
+    # El enlace abre el paso del código con la opción de inicio y el correo ya puestos
+    params = parse_qs(links[0].split("#restablecer?", 1)[1])
+    assert params == {"portal": [portal], "correo": [user["email"]]}
+
+
+def test_forced_reset_email_links_to_code_step(client, make_user, sent):
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    client.post(f"/api/accounts/{technician['id']}/reset-access", headers=coordinator["headers"])
+    links = _reset_links(sent, technician["email"])
+    assert len(links) == 1
+    assert parse_qs(links[0].split("#restablecer?", 1)[1]) == {"portal": ["staff"], "correo": [technician["email"]]}
+
+
+def test_having_a_code_sends_no_new_email(client, make_user, sent):
+    # "Ya tengo un código" solo muestra el paso del código: confirmar no pide otro correo
+    requester = make_user("requester")
+    _request(client, requester["email"], "requester")
+    code = _codes_to(sent, requester["email"])[-1]
+    before = len(sent)
+    response = _confirm(client, requester["email"], "requester", code, "nueva-clave-456")
+    assert response.status_code == 204
+    assert len(sent) == before
+
+
+@pytest.mark.parametrize("actor_role,target_role", [
+    ("coordinator", "technician"), ("admin", "technician"), ("admin", "coordinator"),
+])
+def test_forced_reset_closes_sessions_and_disables_password(client, make_user, sent, actor_role, target_role):
+    actor = make_user(actor_role)
+    target = make_user(target_role)
+    assert client.get("/api/auth/me", headers=target["headers"]).status_code == 200
+
+    response = client.post(f"/api/accounts/{target['id']}/reset-access", headers=actor["headers"])
+    assert response.status_code == 202
+    # La sesión abierta deja de servir de inmediato
+    assert client.get("/api/auth/me", headers=target["headers"]).status_code == 401
+    assert _sessions(target["id"]) == 0
+    # La contraseña vieja responde igual que una incorrecta
+    old = client.post("/api/auth/login", json={"email": target["email"], "password": "clave-segura-123", "portal": "staff"})
+    wrong = client.post("/api/auth/login", json={"email": target["email"], "password": "otra-cualquiera", "portal": "staff"})
+    assert old.status_code == wrong.status_code == 401
+    assert old.json()["detail"] == wrong.json()["detail"]
+
+    # Con el código se crea la nueva y se puede entrar
+    code = _codes_to(sent, target["email"])[-1]
+    password = _confirm(client, target["email"], "staff", code).json()["password"]
+    login = client.post("/api/auth/login", json={"email": target["email"], "password": password, "portal": "staff"})
+    assert login.status_code == 200
+    assert "token" in login.json()
+
+
+def test_forced_reset_is_recorded(client, make_user, sent):
+    admin = make_user("admin")
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    client.post(f"/api/accounts/{technician['id']}/reset-access", headers=coordinator["headers"])
+    response = client.get(
+        "/api/admin/account-changes", params={"action": "access_reset_forced", "account": technician["email"]},
+        headers=admin["headers"],
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    db = SessionLocal()
+    try:
+        row = db.query(models.AccountChange).filter(
+            models.AccountChange.target_user_id == technician["id"],
+            models.AccountChange.action == "access_reset_forced",
+        ).one()
+        assert row.actor_id == coordinator["id"]
     finally:
         db.close()
