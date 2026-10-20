@@ -9,7 +9,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import email_analysis, identity
+from .. import comments as internal_comments, email_analysis, identity
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -47,8 +47,9 @@ def ticket_read(ticket: models.Ticket, current_user) -> TicketRead:
     return data
 
 
-def comment_read(comment: models.Comment, ticket: models.Ticket, current_user) -> CommentRead:
+def comment_read(comment: models.Comment, ticket: models.Ticket, current_user, internal: bool = False) -> CommentRead:
     data = CommentRead.model_validate(comment)
+    data.internal = internal
     if hides_personal_data(ticket, current_user):
         data.content = _redact(data.content)
     return data
@@ -199,12 +200,12 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         .order_by(models.History.id.asc())
         .all()
     )
-    comments = (
-        db.query(models.Comment)
-        .filter(models.Comment.ticket_id == ticket_id)
-        .order_by(models.Comment.id.asc())
-        .all()
-    )
+    comments_query = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id)
+    if current_user.role == "requester":
+        # El solicitante nunca recibe los comentarios internos
+        comments_query = internal_comments.not_internal(comments_query)
+    comments = comments_query.order_by(models.Comment.id.asc()).all()
+    internal = internal_comments.internal_ids(db, [c.id for c in comments])
     following = (
         db.query(models.TicketFollower)
         .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
@@ -218,7 +219,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
     return TicketDetail(
         **ticket_read(db_ticket, current_user).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
-        comments=[comment_read(c, db_ticket, current_user) for c in comments],
+        comments=[comment_read(c, db_ticket, current_user, c.id in internal) for c in comments],
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
         following=following,
@@ -335,7 +336,8 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     if data.assigned_to is not None:
         user = db.query(models.User).filter(models.User.id == data.assigned_to).first()
         assignee = user
-        if not user:
+        # Una cuenta desactivada no recibe tickets
+        if not user or not user.is_active:
             raise HTTPException(status_code=400, detail="El usuario asignado no existe")
         # Regla: solo técnicos y coordinadores pueden ser asignados
         if user.role not in ("technician", "coordinator"):

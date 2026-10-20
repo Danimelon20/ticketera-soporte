@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
-from .. import alerts, audit, config, daily_summary, email_analysis, email_poller, models
+from .. import accounts, alerts, config, daily_summary, email_analysis, email_poller, identity, models, throttle
 from ..schemas import AccountChangePage, AccountChangeRead, AdminUserUpdate, DirectoryUser
 from ..security import get_current_user, mask_email
 
@@ -45,7 +45,7 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
         .group_by(models.Ticket.assigned_to)
         .all()
     )
-    return [
+    rows = [
         DirectoryUser(
             id=u.id,
             name=u.name,
@@ -56,15 +56,21 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
             is_active=u.is_active,
             tickets_created=created.get(u.id, 0),
             tickets_assigned_open=assigned_open.get(u.id, 0),
+            login_locked=throttle.is_locked(db, u.email.strip().lower()),
+            identity_locked=identity.is_locked(db, u),
         )
         for u in users
     ]
+    # identity.is_locked puede guardar la fecha de bloqueo de cuentas anteriores
+    db.commit()
+    return rows
 
 
 @router.get("/directory", response_model=list[DirectoryUser])
 def get_directory(
     role: Optional[Literal["requester", "technician", "coordinator", "admin"]] = None,
     q: Optional[str] = None,
+    state: Optional[Literal["active", "inactive"]] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -74,6 +80,8 @@ def get_directory(
     query = db.query(models.User).filter(models.User.role != "agent")
     if role:
         query = query.filter(models.User.role == role)
+    if state:
+        query = query.filter(models.User.is_active.is_(state == "active"))
     if q and q.strip():
         term = f"%{q.strip().lower()}%"
         query = query.filter(func.lower(models.User.name).like(term) | func.lower(models.User.email).like(term))
@@ -82,28 +90,28 @@ def get_directory(
 
 
 @router.patch("/admin/users/{user_id}", response_model=DirectoryUser)
-def update_user(user_id: int, data: AdminUserUpdate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+def update_user(
+    user_id: int,
+    data: AdminUserUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="El usuario no existe")
     if user.role == "agent":
-        raise HTTPException(status_code=400, detail="El Agente virtual no se puede modificar")
+        raise HTTPException(status_code=400, detail=accounts.AGENT_LOCKED)
     if user.id == admin.id:
-        raise HTTPException(status_code=400, detail="No puedes cambiar tu propio rol ni desactivarte")
-
-    if data.role is not None and data.role != user.role:
-        audit.record(
-            db, admin.id, "role_changed", target=user,
-            old=audit.role_name(user.role), new=audit.role_name(data.role),
-        )
-        user.role = data.role
+        raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
     if data.is_active is not None and data.is_active != user.is_active:
-        audit.record(db, admin.id, "account_activated" if data.is_active else "account_deactivated", target=user)
+        # Con el rol que tiene ahora: un administrador no se desactiva desde aquí
+        accounts.check_can_manage(admin, user, "active")
+
+    if data.role is not None:
+        accounts.change_role(db, admin, user, data.role)
     if data.is_active is not None:
-        user.is_active = data.is_active
-        if not data.is_active:
-            # Sin sesiones abiertas: sale de inmediato en todos sus dispositivos
-            db.query(models.Session).filter(models.Session.user_id == user.id).delete()
+        accounts.set_active(db, admin, user, data.is_active, background_tasks)
     db.commit()
     db.refresh(user)
     return _directory_rows(db, [user])[0]

@@ -21,6 +21,8 @@ class CommentRead(BaseModel):
     user_id: int
     content: str
     created_at: datetime
+    # Solo el personal recibe comentarios internos
+    internal: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -311,6 +313,71 @@ class DirectoryUser(BaseModel):
     is_active: bool
     tickets_created: int = 0
     tickets_assigned_open: int = 0
+    login_locked: bool = False
+    identity_locked: bool = False
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(max_length=150)
+    # Opción de la pantalla de inicio; se valida en la ruta para responder siempre igual
+    portal: Optional[str] = None
+
+
+class PasswordResetConfirm(BaseModel):
+    email: str = Field(max_length=150)
+    portal: Optional[str] = None
+    code: str
+    # Solo el solicitante elige su contraseña; al personal se le genera una
+    new_password: Optional[str] = Field(default=None, max_length=200)
+
+
+class AccountRequestCreate(BaseModel):
+    kind: Literal["role", "name", "id_number"]
+    target_user_id: int
+    new_value: str = Field(min_length=1, max_length=150)
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_not_blank(cls, v):
+        if not v.strip():
+            raise ValueError("Escriba el motivo de la solicitud")
+        return v.strip()
+
+    @field_validator("new_value")
+    @classmethod
+    def new_value_not_blank(cls, v):
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Escriba el valor nuevo")
+        return v
+
+
+class AccountRequestRead(BaseModel):
+    id: int
+    kind: str
+    target_user_id: int
+    target_name: str
+    created_by_name: str
+    reason: str
+    new_value: str
+    old_value: Optional[str] = None
+    status: str
+    resolved_by_name: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    created_at: datetime
+
+
+class RejectRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_not_blank(cls, v):
+        if not v.strip():
+            raise ValueError("Escriba el motivo del rechazo")
+        return v.strip()
 
 
 class AdminUserUpdate(BaseModel):

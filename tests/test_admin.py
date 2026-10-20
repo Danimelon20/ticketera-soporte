@@ -133,7 +133,7 @@ def test_inactive_user_with_token_gets_401(client, make_user):
 def test_admin_cannot_change_self_or_agent(client, make_user):
     admin = make_user("admin")
     response = _patch_user(client, admin, admin["id"], is_active=False)
-    assert response.status_code == 400
+    assert response.status_code == 403
     assert response.json()["detail"] == "No puedes cambiar tu propio rol ni desactivarte"
 
     response = _patch_user(client, admin, _agent_id(), is_active=False)

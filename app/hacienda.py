@@ -83,10 +83,11 @@ def identity_result(id_number: str, name: str) -> str:
     return "mismatch"
 
 
-def check_id_number(id_number: str) -> str | None:
+def check_id_number(id_number: str, tolerant: bool = False) -> str | None:
     """Verifica en Hacienda que la cédula (ya normalizada) sea física o DIMEX.
 
-    Devuelve el mensaje de error, o None si se acepta.
+    Devuelve el mensaje de error, o None si se acepta. tolerant: una cédula que Hacienda
+    no encuentra se acepta aunque HACIENDA_STRICT esté encendido.
     """
     if not config.hacienda_check_enabled():
         return None
@@ -98,7 +99,7 @@ def check_id_number(id_number: str) -> str | None:
         return None
 
     if result is None:
-        if config.hacienda_strict():
+        if config.hacienda_strict() and not tolerant:
             return "La cédula no está registrada en Hacienda"
         return None
 

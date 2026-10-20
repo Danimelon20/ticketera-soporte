@@ -93,6 +93,7 @@
                         <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
                     </div>
                     <nav class="auth-links" aria-label="Otras opciones">
+                        <button type="button" id="forgotPasswordLink" class="auth-link auth-link-btn">Olvidé mi contraseña</button>
                         <a id="loginExtraLink" href="#crear-cuenta" class="auth-link" hidden></a>
                         <button type="button" id="backToPortals" class="auth-link auth-link-btn">Volver a las opciones</button>
                     </nav>
@@ -114,6 +115,48 @@
                     </form>
                     <nav class="auth-links">
                         <a href="#" class="auth-link">Volver al inicio de sesión</a>
+                    </nav>
+                </div>
+                <div id="forgotPanel" class="auth-form-panel" hidden>
+                    <h1 id="forgotTitle" class="auth-title">Olvidé mi contraseña</h1>
+                    <form id="forgotEmailForm">
+                        <p class="help-text">Escriba el correo de su cuenta. Le enviaremos un código de 6 dígitos.</p>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="forgotEmail">Correo</label>
+                            <input type="email" id="forgotEmail" name="email" autocomplete="email" required>
+                        </div>
+                        <button type="submit" class="btn-submit">Enviar código</button>
+                    </form>
+                    <form id="forgotCodeForm" hidden>
+                        <p id="forgotNotice" class="help-text" aria-live="polite"></p>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="forgotCode">Código</label>
+                            <input type="text" id="forgotCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
+                        </div>
+                        <div id="forgotPasswordFields">
+                            <div class="form-group" style="margin-bottom: 16px;">
+                                <label for="forgotNewPassword">Contraseña nueva</label>
+                                <input type="password" id="forgotNewPassword" minlength="8" autocomplete="new-password">
+                                <small class="help-text">Mínimo 8 caracteres</small>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="forgotConfirmPassword">Confirmar contraseña nueva</label>
+                                <input type="password" id="forgotConfirmPassword" minlength="8" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-submit">Restablecer contraseña</button>
+                        <button type="button" id="forgotResend" class="btn-secondary auth-secondary">Reenviar código</button>
+                    </form>
+                    <div id="forgotResult" class="password-reveal" hidden>
+                        <p class="password-reveal-title">Contraseña restablecida</p>
+                        <p>Esta es su contraseña nueva:</p>
+                        <code id="forgotPassword" class="password-value"></code>
+                        <button type="button" id="forgotCopyBtn" class="btn-secondary">Copiar</button>
+                        <p class="password-warning" role="alert">Guárdela ahora; no se volverá a mostrar.</p>
+                        <button type="button" id="forgotToLogin" class="btn-submit">Ir a iniciar sesión</button>
+                    </div>
+                    <nav id="forgotLinks" class="auth-links">
+                        <button type="button" id="forgotBack" class="auth-link auth-link-btn">Volver al inicio de sesión</button>
                     </nav>
                 </div>
                 <div id="activatePanel" class="auth-form-panel" hidden>
@@ -161,6 +204,7 @@
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
+    <button type="button" id="navAccounts" class="topbar-tab" hidden>Cuentas</button>
     <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
     <button type="button" id="navProfile" class="topbar-tab" hidden>Mi cuenta</button>
   </nav>
@@ -325,6 +369,12 @@
                     <option value="coordinator">Coordinadores</option>
                     <option value="admin">Administradores</option>
                 </select>
+                <label for="directoryState" class="sr-only">Filtrar por estado</label>
+                <select id="directoryState">
+                    <option value="">Todos los estados</option>
+                    <option value="active">Activas</option>
+                    <option value="inactive">Desactivadas</option>
+                </select>
             </div>
             <div class="table-scroll">
                 <table class="directory-table">
@@ -345,6 +395,55 @@
                 </table>
             </div>
             <p id="directoryEmpty" class="view-note" hidden>No hay usuarios con esos filtros.</p>
+        </section>
+
+        <section id="accountsView" class="page-view" hidden aria-labelledby="accountsTitle">
+            <h1 id="accountsTitle" class="view-title">Cuentas</h1>
+            <section class="account-section" aria-labelledby="teamTitle">
+                <h2 id="teamTitle" class="account-title">Equipo</h2>
+                <p class="help-text">Técnicos. Al desactivar uno, sus tickets abiertos quedan sin asignar.</p>
+                <div class="table-scroll">
+                    <table class="directory-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Nombre</th>
+                                <th scope="col">Correo</th>
+                                <th scope="col">Abiertos asignados</th>
+                                <th scope="col">Estado</th>
+                                <th scope="col">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="teamBody"></tbody>
+                    </table>
+                </div>
+                <p id="teamEmpty" class="view-note" hidden>No hay técnicos.</p>
+            </section>
+            <section class="account-section" aria-labelledby="clientsTitle">
+                <h2 id="clientsTitle" class="account-title">Clientes</h2>
+                <div class="directory-filters">
+                    <label for="clientsSearch" class="sr-only">Buscar solicitantes por nombre o correo</label>
+                    <input type="search" id="clientsSearch" placeholder="Buscar solicitantes por nombre o correo" maxlength="150">
+                </div>
+                <div class="table-scroll">
+                    <table class="directory-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Nombre</th>
+                                <th scope="col">Correo</th>
+                                <th scope="col">Estado</th>
+                                <th scope="col">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientsBody"></tbody>
+                    </table>
+                </div>
+                <p id="clientsEmpty" class="view-note">Escriba un nombre o correo para buscar.</p>
+            </section>
+            <section class="account-section" aria-labelledby="myRequestsTitle">
+                <h2 id="myRequestsTitle" class="account-title">Mis solicitudes</h2>
+                <ul id="myRequestsList" class="changes-list"></ul>
+                <p id="myRequestsEmpty" class="view-note" hidden>Todavía no ha creado solicitudes.</p>
+            </section>
         </section>
 
         <section id="draftsView" class="page-view" hidden aria-labelledby="draftsTitle">
@@ -437,6 +536,13 @@
                 <article class="admin-card">
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
+                </article>
+                <article class="admin-card admin-card-wide">
+                    <div class="admin-card-head">
+                        <h2>Solicitudes pendientes</h2>
+                    </div>
+                    <ul id="pendingRequestsList" class="changes-list"></ul>
+                    <p id="pendingRequestsEmpty" class="admin-text" hidden>No hay solicitudes pendientes.</p>
                 </article>
                 <article class="admin-card admin-card-wide">
                     <div class="admin-card-head">

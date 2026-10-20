@@ -604,7 +604,10 @@ section {
 .auth-notice[hidden],
 .password-reveal[hidden],
 .auth-links[hidden],
-#activateForm[hidden] {
+#activateForm[hidden],
+#forgotEmailForm[hidden],
+#forgotCodeForm[hidden],
+#forgotPasswordFields[hidden] {
     display: none;
 }
 
@@ -1094,6 +1097,13 @@ section {
 .link-btn { min-height: 32px; padding: 0 6px; border: none; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
 .state-active { color: #1D6B43; font-weight: 600; }
 .state-inactive { color: var(--muted); }
+.state-locked { display: block; color: #8A4B00; font-size: 12px; font-weight: 600; }
+
+/* ===== Acciones sobre cuentas ===== */
+.account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.account-actions select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--surface); }
+#accountsView .account-section + .account-section { margin-top: 24px; }
+.comment-internal { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: #FFF4E0; color: #8A4B00; font-size: 12px; font-weight: 600; }
 .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .admin-card { background: #FFFFFF; border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; min-width: 0; }
 .admin-card h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; border-bottom: none; padding-bottom: 0; }

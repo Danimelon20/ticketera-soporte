@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginPanel = document.getElementById('loginPanel');
     const signupPanel = document.getElementById('signupPanel');
     const activatePanel = document.getElementById('activatePanel');
+    const forgotPanel = document.getElementById('forgotPanel');
     const loginForm = document.getElementById('loginForm');
     const signupForm = document.getElementById('signupForm');
     const activateForm = document.getElementById('activateForm');
@@ -143,7 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let message = errorData.detail;
             if (response.status === 422 && endpoint.startsWith('/auth/') && Array.isArray(message)) {
                 message = 'La contraseña debe tener al menos 8 caracteres';
-            } else if ((endpoint === '/tickets' || endpoint === '/profile' || endpoint.startsWith('/account/'))
+            } else if ((endpoint === '/tickets' || endpoint === '/profile' || endpoint.startsWith('/account/')
+                || endpoint.startsWith('/accounts/') || endpoint.startsWith('/account-requests'))
                 && ['POST', 'PUT'].includes(options.method)) {
                 message = getErrorMessage(errorData);
             } else if (response.status === 401 && endpoint.includes('/auth/login')) {
@@ -220,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionNotice.hidden = true;
         resetEmailChange();
         loginPortal = null;
+        forgotMode = false;
         stopDraftsPolling();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
@@ -245,16 +248,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginTitle = document.getElementById('loginTitle');
     const loginExtraLink = document.getElementById('loginExtraLink');
     let loginPortal = null;
+    // "Olvidé mi contraseña" de la opción elegida (loginPortal)
+    let forgotMode = false;
 
     function showAuthPanel() {
         const route = AUTH_ROUTES[window.location.hash];
-        const panel = route || (loginPortal ? 'login' : 'chooser');
+        const panel = route || (forgotMode && loginPortal ? 'forgot' : (loginPortal ? 'login' : 'chooser'));
         portalChooser.hidden = panel !== 'chooser';
         loginPanel.hidden = panel !== 'login';
         signupPanel.hidden = panel !== 'signup';
         activatePanel.hidden = panel !== 'activate';
+        forgotPanel.hidden = panel !== 'forgot';
         confirmEmailNotice.hidden = true;
         if (panel !== 'activate') clearActivationResult();
+        if (panel !== 'forgot') clearForgot();
         hideError();
     }
 
@@ -296,6 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentUser) return;
         // Desde registro o activación, "Volver al inicio de sesión" lleva a las opciones
         loginPortal = null;
+        forgotMode = false;
         showAuthPanel();
     });
 
@@ -472,6 +480,191 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             activateResendBtn.textContent = `Reenviar código en ${left} s`;
         }, 1000);
+    });
+
+    // ----- Olvidé mi contraseña -----
+    const forgotTitle = document.getElementById('forgotTitle');
+    const forgotEmailForm = document.getElementById('forgotEmailForm');
+    const forgotEmailInput = document.getElementById('forgotEmail');
+    const forgotCodeForm = document.getElementById('forgotCodeForm');
+    const forgotCodeInput = document.getElementById('forgotCode');
+    const forgotNotice = document.getElementById('forgotNotice');
+    const forgotPasswordFields = document.getElementById('forgotPasswordFields');
+    const forgotNewPassword = document.getElementById('forgotNewPassword');
+    const forgotConfirmPassword = document.getElementById('forgotConfirmPassword');
+    const forgotResendBtn = document.getElementById('forgotResend');
+    const forgotResult = document.getElementById('forgotResult');
+    const forgotPasswordValue = document.getElementById('forgotPassword');
+    const forgotCopyBtn = document.getElementById('forgotCopyBtn');
+    const forgotLinks = document.getElementById('forgotLinks');
+    let forgotEmail = null;
+    let forgotGenerated = null;
+    let forgotResendTimer = null;
+
+    function clearForgot() {
+        // La contraseña generada se muestra una sola vez: al salir se borra
+        forgotGenerated = null;
+        forgotEmail = null;
+        forgotPasswordValue.textContent = '';
+        forgotResult.hidden = true;
+        forgotEmailForm.hidden = false;
+        forgotCodeForm.hidden = true;
+        forgotLinks.hidden = false;
+        forgotEmailForm.reset();
+        forgotCodeForm.reset();
+        forgotNotice.textContent = '';
+        forgotCopyBtn.textContent = 'Copiar';
+        clearInterval(forgotResendTimer);
+        forgotResendBtn.disabled = false;
+        forgotResendBtn.textContent = 'Reenviar código';
+    }
+
+    function forgotIsRequester() {
+        return loginPortal === 'requester';
+    }
+
+    function openForgot() {
+        if (!PORTALS[loginPortal]) return;
+        forgotMode = true;
+        clearForgot();
+        forgotTitle.textContent = `Olvidé mi contraseña — ${PORTALS[loginPortal].title}`;
+        // El solicitante elige su contraseña; al personal se le genera una
+        forgotPasswordFields.hidden = !forgotIsRequester();
+        forgotNewPassword.required = forgotIsRequester();
+        forgotConfirmPassword.required = forgotIsRequester();
+        clearHash();
+        showAuthPanel();
+        forgotEmailInput.focus();
+    }
+
+    function backFromForgot() {
+        const portal = loginPortal;
+        forgotMode = false;
+        clearForgot();
+        openPortal(portal);
+    }
+
+    function startForgotResendCountdown() {
+        // Misma espera que el servidor: un reenvío por minuto
+        let left = RESEND_WAIT_SECONDS;
+        clearInterval(forgotResendTimer);
+        forgotResendBtn.disabled = true;
+        forgotResendBtn.textContent = `Reenviar código en ${left} s`;
+        forgotResendTimer = setInterval(() => {
+            left -= 1;
+            if (left <= 0) {
+                clearInterval(forgotResendTimer);
+                forgotResendBtn.disabled = false;
+                forgotResendBtn.textContent = 'Reenviar código';
+                return;
+            }
+            forgotResendBtn.textContent = `Reenviar código en ${left} s`;
+        }, 1000);
+    }
+
+    document.getElementById('forgotPasswordLink').addEventListener('click', openForgot);
+    document.getElementById('forgotBack').addEventListener('click', backFromForgot);
+    document.getElementById('forgotToLogin').addEventListener('click', backFromForgot);
+
+    forgotEmailForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        const email = forgotEmailInput.value.trim();
+        let result;
+        try {
+            result = await postAuth('/auth/password-reset', { email, portal: loginPortal });
+        } catch (err) {
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        forgotEmail = email;
+        forgotEmailForm.hidden = true;
+        forgotCodeForm.hidden = false;
+        // Mismo mensaje exista o no la cuenta
+        forgotNotice.textContent = 'Si el correo tiene una cuenta activa, le enviamos un código. '
+            + 'Vence en 15 minutos. Revise también la carpeta de spam.';
+        startForgotResendCountdown();
+        forgotCodeInput.focus();
+    });
+
+    forgotCodeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        if (!forgotEmail) return;
+        const code = forgotCodeInput.value.replace(/\D/g, '');
+        if (code.length !== 6) {
+            showError('Escriba los 6 dígitos del código');
+            return;
+        }
+        const body = { email: forgotEmail, portal: loginPortal, code };
+        if (forgotIsRequester()) {
+            if (forgotNewPassword.value.length < 8) {
+                showError('La contraseña debe tener al menos 8 caracteres');
+                return;
+            }
+            if (forgotNewPassword.value !== forgotConfirmPassword.value) {
+                showError('Las contraseñas no coinciden');
+                return;
+            }
+            body.new_password = forgotNewPassword.value;
+        }
+        let result;
+        try {
+            result = await postAuth('/auth/password-reset/confirm', body);
+        } catch (err) {
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        if (forgotIsRequester()) {
+            backFromForgot();
+            showSuccess('Contraseña restablecida. Inicie sesión con la nueva.');
+            return;
+        }
+        forgotGenerated = result.data.password;
+        forgotPasswordValue.textContent = forgotGenerated;
+        forgotCodeForm.hidden = true;
+        forgotLinks.hidden = true;
+        forgotResult.hidden = false;
+        forgotCopyBtn.focus();
+    });
+
+    forgotResendBtn.addEventListener('click', async () => {
+        hideError();
+        if (!forgotEmail) return;
+        forgotResendBtn.disabled = true;
+        let result;
+        try {
+            result = await postAuth('/auth/password-reset/resend', { email: forgotEmail, portal: loginPortal });
+        } catch (err) {
+            forgotResendBtn.disabled = false;
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            forgotResendBtn.disabled = false;
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        forgotNotice.textContent = 'Si el correo tiene una cuenta activa, le enviamos un código nuevo.';
+        startForgotResendCountdown();
+    });
+
+    forgotCopyBtn.addEventListener('click', async () => {
+        if (!forgotGenerated) return;
+        try {
+            await navigator.clipboard.writeText(forgotGenerated);
+            forgotCopyBtn.textContent = 'Copiada';
+        } catch (err) {
+            showError('No se pudo copiar. Selecciónela y cópiela a mano.');
+        }
     });
 
     async function completeLogin(data) {
@@ -1799,6 +1992,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 strongName.textContent = authorName;
                 metaP.appendChild(strongName);
                 metaP.appendChild(document.createTextNode(` · ${authorRole} · ${formatDateTime(comment.created_at)}`));
+                if (comment.internal) {
+                    // Solo el personal recibe estos comentarios
+                    const badge = document.createElement('span');
+                    badge.className = 'comment-internal';
+                    badge.textContent = 'Interno';
+                    metaP.appendChild(badge);
+                }
                 rightDiv.appendChild(metaP);
 
                 const contentDiv = document.createElement('div');
@@ -2087,6 +2287,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const navAdmin = document.getElementById('navAdmin');
     const splitView = document.querySelector('main .split');
     const directoryView = document.getElementById('directoryView');
+    const navAccounts = document.getElementById('navAccounts');
+    const accountsView = document.getElementById('accountsView');
     const adminView = document.getElementById('adminView');
     const navDrafts = document.getElementById('navDrafts');
     const draftsView = document.getElementById('draftsView');
@@ -2106,6 +2308,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const role = currentUser ? currentUser.role : '';
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
         navAdmin.hidden = role !== 'admin';
+        navAccounts.hidden = role !== 'coordinator';
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
@@ -2114,17 +2317,23 @@ document.addEventListener('DOMContentLoaded', () => {
     function showView(name) {
         if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
         directoryView.hidden = name !== 'directory';
+        accountsView.hidden = name !== 'accounts';
         adminView.hidden = name !== 'admin';
         draftsView.hidden = name !== 'drafts';
         profileView.hidden = name !== 'profile';
-        const tabs = { tickets: navTickets, directory: navDirectory, admin: navAdmin, drafts: navDrafts, profile: navProfile };
+        const tabs = {
+            tickets: navTickets, directory: navDirectory, accounts: navAccounts,
+            admin: navAdmin, drafts: navDrafts, profile: navProfile
+        };
         setActiveTab(tabs[name]);
         if (name === 'directory') loadDirectory();
+        if (name === 'accounts') loadAccountsView();
         if (name === 'admin') loadAdminPanel();
         if (name === 'drafts') loadDrafts();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
+    navAccounts.addEventListener('click', () => showView('accounts'));
     navAdmin.addEventListener('click', () => showView('admin'));
     navDrafts.addEventListener('click', () => showView('drafts'));
     navProfile.addEventListener('click', () => showProfile());
@@ -2676,6 +2885,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Directorio -----
     const directorySearch = document.getElementById('directorySearch');
     const directoryRole = document.getElementById('directoryRole');
+    const directoryState = document.getElementById('directoryState');
     const directoryBody = document.getElementById('directoryBody');
     const directoryEmpty = document.getElementById('directoryEmpty');
     const directoryActionsHead = document.querySelector('#directoryHead .admin-only-col');
@@ -2700,6 +2910,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const q = directorySearch.value.trim();
         if (q) params.set('q', q);
         if (directoryRole.value) params.set('role', directoryRole.value);
+        if (directoryState.value) params.set('state', directoryState.value);
         const seq = ++directorySeq;
         try {
             const query = params.toString();
@@ -2729,7 +2940,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSelf = currentUser && user.id === currentUser.id;
             const row = document.createElement('tr');
             row.dataset.userId = user.id;
-            row.dataset.userName = user.name;
+            row.dataset.userName = user.name || user.email;
+            row.dataset.userRole = user.role;
 
             row.appendChild(makeCell(user.name));
             row.appendChild(makeCell(user.email));
@@ -2789,12 +3001,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isAdmin) {
                 const actionsTd = document.createElement('td');
                 if (!isSelf) {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'btn-secondary directory-toggle-active';
-                    btn.dataset.activate = user.is_active ? 'false' : 'true';
-                    btn.textContent = user.is_active ? 'Desactivar' : 'Activar';
-                    actionsTd.appendChild(btn);
+                    actionsTd.appendChild(accountActionsWrap(accountActionButtons(user)));
                 }
                 row.appendChild(actionsTd);
             }
@@ -2835,17 +3042,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const activeBtn = e.target.closest('.directory-toggle-active');
-        if (activeBtn) {
-            const row = activeBtn.closest('tr');
-            const activate = activeBtn.dataset.activate === 'true';
-            if (!activate && !confirm(`¿Desactivar la cuenta de ${row.dataset.userName}? No podrá entrar hasta que la actives de nuevo.`)) {
-                return;
-            }
-            activeBtn.disabled = true;
-            updateDirectoryUser(row.dataset.userId, { is_active: activate });
+        const actionBtn = e.target.closest('.account-action');
+        if (actionBtn) {
+            runAccountAction(actionBtn).then(done => {
+                if (done) loadDirectory();
+            });
         }
     });
+
+    directoryState.addEventListener('change', loadDirectory);
 
     directoryBody.addEventListener('change', (e) => {
         const select = e.target.closest('.directory-role-select');
@@ -2853,6 +3058,370 @@ document.addEventListener('DOMContentLoaded', () => {
             select.disabled = true;
             updateDirectoryUser(select.closest('tr').dataset.userId, { role: select.value });
         }
+    });
+
+    // ----- Acciones sobre cuentas (Directorio del administrador y Cuentas del coordinador) -----
+    const ACCOUNT_ACTIONS = {
+        deactivate: 'Desactivar',
+        reactivate: 'Reactivar',
+        'reset-access': 'Restablecer acceso',
+        unlock: 'Desbloquear'
+    };
+    // Mismas reglas que app/accounts.py (solo comodidad: el servidor también las revisa)
+    const MANAGE_RULES = {
+        admin: {
+            active: ['coordinator', 'technician', 'requester'],
+            reset: ['coordinator', 'technician'],
+            unlock: ['admin', 'coordinator', 'technician', 'requester']
+        },
+        coordinator: {
+            active: ['technician', 'requester'],
+            reset: ['technician'],
+            unlock: ['technician', 'requester']
+        }
+    };
+
+    function canManage(user, kind) {
+        const rules = currentUser ? MANAGE_RULES[currentUser.role] : null;
+        return Boolean(rules && user.id !== currentUser.id && rules[kind].includes(user.role));
+    }
+
+    function makeActionButton(action, label) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary btn-small account-action';
+        button.dataset.action = action;
+        button.textContent = label || ACCOUNT_ACTIONS[action];
+        return button;
+    }
+
+    function accountActionButtons(user) {
+        const buttons = [];
+        if (canManage(user, 'active')) buttons.push(makeActionButton(user.is_active ? 'deactivate' : 'reactivate'));
+        if (user.is_active && canManage(user, 'reset')) buttons.push(makeActionButton('reset-access'));
+        if (user.login_locked && canManage(user, 'unlock')) buttons.push(makeActionButton('unlock'));
+        return buttons;
+    }
+
+    function accountActionsWrap(buttons) {
+        const wrap = document.createElement('div');
+        wrap.className = 'account-actions';
+        buttons.forEach(button => wrap.appendChild(button));
+        return wrap;
+    }
+
+    // Devuelve true si la acción se hizo (para volver a cargar la tabla)
+    async function runAccountAction(button) {
+        const row = button.closest('tr');
+        const name = row.dataset.userName;
+        const action = button.dataset.action;
+        if (action === 'deactivate') {
+            const extra = row.dataset.userRole === 'technician' ? ' Sus tickets abiertos quedarán sin asignar.' : '';
+            if (!confirm(`¿Desactivar la cuenta de ${name}? No podrá entrar hasta que se reactive.${extra}`)) return false;
+        }
+        if (action === 'reset-access'
+            && !confirm(`¿Enviar a ${name} un código para restablecer su acceso? Le llegará a su correo; usted no lo verá.`)) {
+            return false;
+        }
+        button.disabled = true;
+        try {
+            await apiFetch(`/accounts/${row.dataset.userId}/${action}`, { method: 'POST' });
+        } catch (err) {
+            button.disabled = false;
+            return false; // apiFetch ya mostró el error
+        }
+        const messages = {
+            deactivate: 'Cuenta desactivada',
+            reactivate: 'Cuenta reactivada',
+            'reset-access': 'Le enviamos el código a su correo',
+            unlock: 'Correo desbloqueado'
+        };
+        showSuccess(messages[action]);
+        return true;
+    }
+
+    // ----- Solicitudes con doble aprobación -----
+    const REQUEST_KINDS = { role: 'Cambio de rol', name: 'Corrección de nombre', id_number: 'Corrección de cédula' };
+    const REQUEST_STATUS = { pending: 'Pendiente', approved: 'Aprobada', rejected: 'Rechazada' };
+
+    function requestValue(item, value) {
+        if (!value) return '—';
+        return item.kind === 'role' ? (ROLE_MAP[value] || value) : value;
+    }
+
+    function requestLine(label, value) {
+        const p = document.createElement('p');
+        p.className = 'change-line';
+        const span = document.createElement('span');
+        span.className = 'change-label';
+        span.textContent = `${label}: `;
+        p.append(span, document.createTextNode(value));
+        return p;
+    }
+
+    function renderRequestItem(item, withActions) {
+        const li = document.createElement('li');
+        li.className = 'change-item';
+        const head = document.createElement('div');
+        head.className = 'change-head';
+        const title = document.createElement('strong');
+        title.textContent = `${REQUEST_KINDS[item.kind] || item.kind} · ${item.target_name}`;
+        const time = document.createElement('span');
+        time.className = 'change-time';
+        time.textContent = formatDateTime(item.created_at);
+        head.append(title, time);
+        li.appendChild(head);
+        li.appendChild(requestLine('Cambio', `${requestValue(item, item.old_value)} → ${requestValue(item, item.new_value)}`));
+        li.appendChild(requestLine('Pedido por', item.created_by_name));
+        li.appendChild(requestLine('Motivo', item.reason));
+        let state = REQUEST_STATUS[item.status] || item.status;
+        if (item.resolved_by_name) state += ` por ${item.resolved_by_name} (${formatDateTime(item.resolved_at)})`;
+        li.appendChild(requestLine('Estado', state));
+        if (item.rejection_reason) li.appendChild(requestLine('Motivo del rechazo', item.rejection_reason));
+        if (withActions) {
+            const actions = document.createElement('div');
+            actions.className = 'account-actions';
+            [['approve', 'Aprobar'], ['reject', 'Rechazar']].forEach(([decision, label]) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = decision === 'approve' ? 'btn-action btn-small' : 'btn-secondary btn-small';
+                button.dataset.requestId = item.id;
+                button.dataset.decision = decision;
+                button.textContent = label;
+                actions.appendChild(button);
+            });
+            li.appendChild(actions);
+        }
+        return li;
+    }
+
+    const pendingRequestsList = document.getElementById('pendingRequestsList');
+    const pendingRequestsEmpty = document.getElementById('pendingRequestsEmpty');
+
+    async function loadPendingRequests() {
+        let items;
+        try {
+            items = await apiFetch('/account-requests?status=pending');
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        pendingRequestsList.replaceChildren(...items.map(item => renderRequestItem(item, true)));
+        pendingRequestsEmpty.hidden = items.length > 0;
+    }
+
+    pendingRequestsList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-decision]');
+        if (!button) return;
+        const approve = button.dataset.decision === 'approve';
+        let body;
+        if (approve) {
+            if (!confirm('¿Aprobar la solicitud y aplicar el cambio?')) return;
+        } else {
+            const reason = prompt('Motivo del rechazo (obligatorio):');
+            if (reason === null) return;
+            if (!reason.trim()) {
+                showError('Escriba el motivo del rechazo');
+                return;
+            }
+            body = JSON.stringify({ reason: reason.trim() });
+        }
+        button.disabled = true;
+        try {
+            await apiFetch(`/account-requests/${button.dataset.requestId}/${approve ? 'approve' : 'reject'}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                ...(body ? { body } : {})
+            });
+            showSuccess(approve ? 'Solicitud aprobada' : 'Solicitud rechazada');
+        } catch (err) {
+            // apiFetch ya mostró el error; la solicitud sigue pendiente
+        }
+        loadPendingRequests();
+        changesPage = 1;
+        loadAccountChanges();
+    });
+
+    // ----- Cuentas del coordinador: Equipo, Clientes y Mis solicitudes -----
+    const teamBody = document.getElementById('teamBody');
+    const teamEmpty = document.getElementById('teamEmpty');
+    const clientsSearch = document.getElementById('clientsSearch');
+    const clientsBody = document.getElementById('clientsBody');
+    const clientsEmpty = document.getElementById('clientsEmpty');
+    const myRequestsList = document.getElementById('myRequestsList');
+    const myRequestsEmpty = document.getElementById('myRequestsEmpty');
+    let clientsTimer = null;
+    let clientsSeq = 0;
+
+    function loadAccountsView() {
+        loadTeam();
+        loadClients();
+        loadMyRequests();
+    }
+
+    function accountRow(user) {
+        const row = document.createElement('tr');
+        row.dataset.userId = user.id;
+        row.dataset.userName = user.name || user.email;
+        row.dataset.userRole = user.role;
+        row.appendChild(makeCell(user.name || '—'));
+        row.appendChild(makeCell(user.email));
+        return row;
+    }
+
+    function stateCell(user) {
+        const td = document.createElement('td');
+        const state = document.createElement('span');
+        state.className = user.is_active ? 'state-active' : 'state-inactive';
+        state.textContent = user.is_active ? 'Activa' : 'Desactivada';
+        td.appendChild(state);
+        if (user.login_locked) {
+            const locked = document.createElement('span');
+            locked.className = 'state-locked';
+            locked.textContent = 'Bloqueada por intentos';
+            td.appendChild(locked);
+        }
+        return td;
+    }
+
+    async function loadTeam() {
+        let users;
+        try {
+            users = await apiFetch('/directory?role=technician');
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        teamBody.replaceChildren();
+        teamEmpty.hidden = users.length > 0;
+        users.forEach(user => {
+            const row = accountRow(user);
+            row.appendChild(makeCell(String(user.tickets_assigned_open), 'num'));
+            row.appendChild(stateCell(user));
+            const actionsTd = document.createElement('td');
+            const buttons = accountActionButtons(user);
+            const select = document.createElement('select');
+            select.className = 'team-role-select';
+            select.setAttribute('aria-label', `Rol nuevo para ${row.dataset.userName}`);
+            [['', 'Cambiar rol a…'], ['coordinator', 'Coordinador'], ['requester', 'Solicitante']].forEach(([value, label]) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = label;
+                select.appendChild(option);
+            });
+            buttons.push(select, makeActionButton('request-role', 'Solicitar cambio de rol'));
+            actionsTd.appendChild(accountActionsWrap(buttons));
+            row.appendChild(actionsTd);
+            teamBody.appendChild(row);
+        });
+    }
+
+    async function loadClients() {
+        const q = clientsSearch.value.trim();
+        const seq = ++clientsSeq;
+        if (!q) {
+            clientsBody.replaceChildren();
+            clientsEmpty.textContent = 'Escriba un nombre o correo para buscar.';
+            clientsEmpty.hidden = false;
+            return;
+        }
+        let users;
+        try {
+            users = await apiFetch(`/directory?${new URLSearchParams({ role: 'requester', q }).toString()}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        // Solo la última búsqueda pinta la tabla
+        if (seq !== clientsSeq) return;
+        clientsBody.replaceChildren();
+        clientsEmpty.textContent = 'No hay solicitantes con esa búsqueda.';
+        clientsEmpty.hidden = users.length > 0;
+        users.forEach(user => {
+            const row = accountRow(user);
+            row.appendChild(stateCell(user));
+            const actionsTd = document.createElement('td');
+            const buttons = accountActionButtons(user);
+            // Nombre y cédula fijos: solo se corrigen con aprobación del administrador
+            if (user.identity_locked) {
+                buttons.push(makeActionButton('request-name', 'Corregir nombre'));
+                buttons.push(makeActionButton('request-id_number', 'Corregir cédula'));
+            }
+            actionsTd.appendChild(accountActionsWrap(buttons));
+            row.appendChild(actionsTd);
+            clientsBody.appendChild(row);
+        });
+    }
+
+    async function loadMyRequests() {
+        let items;
+        try {
+            items = await apiFetch('/account-requests');
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        myRequestsList.replaceChildren(...items.map(item => renderRequestItem(item, false)));
+        myRequestsEmpty.hidden = items.length > 0;
+    }
+
+    async function createAccountRequest(button) {
+        const row = button.closest('tr');
+        const name = row.dataset.userName;
+        const kind = button.dataset.action.replace('request-', '');
+        let newValue;
+        if (kind === 'role') {
+            newValue = row.querySelector('.team-role-select').value;
+            if (!newValue) {
+                showError('Elija el rol nuevo');
+                return false;
+            }
+        } else {
+            const value = prompt(kind === 'name' ? `Nombre completo correcto de ${name}:` : `Cédula correcta de ${name}:`);
+            if (value === null) return false;
+            newValue = value.trim();
+            const error = kind === 'name'
+                ? (newValue.split(/\s+/).length < 2 ? 'Escriba el nombre completo (nombre y apellidos)' : null)
+                : validateIdNumber(newValue);
+            if (error) {
+                showError(error);
+                return false;
+            }
+        }
+        const reason = prompt('Motivo de la solicitud (obligatorio):');
+        if (reason === null) return false;
+        if (!reason.trim()) {
+            showError('Escriba el motivo de la solicitud');
+            return false;
+        }
+        button.disabled = true;
+        try {
+            await apiFetch('/account-requests', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    kind, target_user_id: parseInt(row.dataset.userId, 10), new_value: newValue, reason: reason.trim()
+                })
+            });
+        } catch (err) {
+            button.disabled = false;
+            return false; // apiFetch ya mostró el error
+        }
+        showSuccess('Solicitud enviada al administrador');
+        loadMyRequests();
+        return true;
+    }
+
+    async function handleAccountsClick(e, reload) {
+        const button = e.target.closest('.account-action');
+        if (!button) return;
+        const done = button.dataset.action.startsWith('request-')
+            ? await createAccountRequest(button)
+            : await runAccountAction(button);
+        if (done) reload();
+    }
+
+    teamBody.addEventListener('click', (e) => handleAccountsClick(e, loadTeam));
+    clientsBody.addEventListener('click', (e) => handleAccountsClick(e, loadClients));
+    clientsSearch.addEventListener('input', () => {
+        clearTimeout(clientsTimer);
+        clientsTimer = setTimeout(loadClients, 300);
     });
 
     // ----- Administración -----
@@ -2983,6 +3552,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadAdminLogs();
         changesPage = 1;
         loadAccountChanges();
+        loadPendingRequests();
     }
 
     // ----- Registro de cambios de cuentas (solo administrador) -----
@@ -2997,7 +3567,14 @@ document.addEventListener('DOMContentLoaded', () => {
         account_deactivated: 'Cuenta desactivada',
         invitation_sent: 'Invitación enviada',
         invitation_used: 'Invitación usada',
-        login_locked: 'Bloqueo por intentos'
+        login_locked: 'Bloqueo por intentos',
+        password_reset: 'Contraseña restablecida',
+        access_reset_sent: 'Código de acceso enviado',
+        login_unlocked: 'Desbloqueo de intentos',
+        tickets_released: 'Tickets liberados',
+        request_created: 'Solicitud creada',
+        request_approved: 'Solicitud aprobada',
+        request_rejected: 'Solicitud rechazada'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');

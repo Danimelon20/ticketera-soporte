@@ -6,7 +6,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, models
+from . import comments as internal_comments, config, models
 from .notifications import STATUS_LABELS
 
 ROLE_LABELS = {
@@ -60,20 +60,19 @@ def _naive(value: datetime) -> datetime:
     return value.replace(tzinfo=None) if value.tzinfo else value
 
 
-def _last_comments(db: Session, ticket_id: int, limit: int) -> list[models.Comment]:
-    comments = (
-        db.query(models.Comment)
-        .filter(models.Comment.ticket_id == ticket_id)
-        .order_by(models.Comment.id.desc())
-        .limit(limit)
-        .all()
-    )
+def _last_comments(db: Session, ticket_id: int, limit: int, include_internal: bool) -> list[models.Comment]:
+    # El solicitante nunca recibe comentarios internos, tampoco a través del asistente
+    query = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id)
+    if not include_internal:
+        query = internal_comments.not_internal(query)
+    comments = query.order_by(models.Comment.id.desc()).limit(limit).all()
     return list(reversed(comments))
 
 
-def _comment_line(comment: models.Comment) -> str:
+def _comment_line(comment: models.Comment, internal: bool = False) -> str:
     author = comment.user.name if comment.user else "Desconocido"
-    return f"    - {author}: {_redact(comment.content)[:COMMENT_CHARS]}"
+    mark = " (interno)" if internal else ""
+    return f"    - {author}{mark}: {_redact(comment.content)[:COMMENT_CHARS]}"
 
 
 def _requester_context(db: Session, user: models.User) -> list[str]:
@@ -92,7 +91,7 @@ def _requester_context(db: Session, user: models.User) -> list[str]:
             f"- Ticket #{t.id}: {_redact(t.title)} | estado: {_status(t)} | prioridad: {t.priority.name} "
             f"| categoría: {t.category.name} | asignado: {_assignee(t)}"
         )
-        comments = _last_comments(db, t.id, 3)
+        comments = _last_comments(db, t.id, 3, include_internal=False)
         if comments:
             lines.append("  Últimos comentarios:")
             lines.extend(_comment_line(c) for c in comments)
@@ -115,10 +114,11 @@ def _technician_context(db: Session, user: models.User) -> list[str]:
             f"- Ticket #{t.id}: {_redact(t.title)} | estado: {_status(t)} | prioridad: {t.priority.name} "
             f"| creado: {_naive(t.created_at):%Y-%m-%d}"
         )
-        last = _last_comments(db, t.id, 1)
+        last = _last_comments(db, t.id, 1, include_internal=True)
         if last:
             lines.append("  Último comentario:")
-            lines.append(_comment_line(last[0]))
+            internal = bool(internal_comments.internal_ids(db, [last[0].id]))
+            lines.append(_comment_line(last[0], internal))
 
     unassigned_query = db.query(models.Ticket).filter(
         models.Ticket.status == "new", models.Ticket.assigned_to.is_(None)

@@ -50,6 +50,8 @@ def record(
     new: str | None = None,
 ) -> None:
     """Agrega una fila al registro. No hace commit."""
+    if action not in models.ACCOUNT_CHANGE_ACTIONS:
+        raise ValueError(f"Acción desconocida para el registro de cambios: {action}")
     db.add(models.AccountChange(
         actor_id=actor_id,
         target_user_id=target.id if target is not None else None,

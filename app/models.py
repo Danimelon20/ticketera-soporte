@@ -312,9 +312,7 @@ class StaffInvitation(Base):
     used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
-    __table_args__ = (
-        CheckConstraint("role IN ('technician', 'coordinator')", name="chk_staff_invitation_role"),
-    )
+    # Sin CHECK de roles: la lista la validan el esquema y _check_can_invite
 
 
 class RequesterIdentity(Base):
@@ -391,7 +389,8 @@ class EmailChangeAttempt(Base):
 ACCOUNT_CHANGE_ACTIONS = (
     "password_changed", "email_changed", "phone_changed", "name_changed", "id_number_changed",
     "role_changed", "account_activated", "account_deactivated", "invitation_sent", "invitation_used",
-    "login_locked",
+    "login_locked", "password_reset", "access_reset_sent", "login_unlocked", "tickets_released",
+    "request_created", "request_approved", "request_rejected",
 )
 
 
@@ -406,14 +405,64 @@ class AccountChange(Base):
     action = Column(String(30), index=True, nullable=False)
     old_value = Column(String(150), nullable=True)
     new_value = Column(String(150), nullable=True)
+    # Sin CHECK: audit.record valida la acción contra ACCOUNT_CHANGE_ACTIONS (agregar una no obliga a borrar la base)
     created_at = Column(DateTime, index=True, nullable=False)
-
-    __table_args__ = (
-        CheckConstraint(
-            "action IN (" + ", ".join(f"'{a}'" for a in ACCOUNT_CHANGE_ACTIONS) + ")",
-            name="chk_account_change_action",
-        ),
-    )
 
     actor = relationship("User", foreign_keys=[actor_id])
     target = relationship("User", foreign_keys=[target_user_id])
+
+
+class PasswordReset(Base):
+    """Código para restablecer la contraseña (lo pide la persona o quien gestiona su cuenta)."""
+    __tablename__ = "password_resets"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    sent_at = Column(DateTime, nullable=False)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+ACCOUNT_REQUEST_KINDS = ("role", "name", "id_number")
+ACCOUNT_REQUEST_STATUSES = ("pending", "approved", "rejected")
+
+
+class AccountRequest(Base):
+    """Cambio pedido por un coordinador que aplica el administrador. Tipo y estado se validan en Python."""
+    __tablename__ = "account_requests"
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(20), nullable=False)
+    target_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(String(500), nullable=False)
+    # Cédula en claro solo mientras está pendiente; al resolverse queda enmascarada
+    new_value = Column(String(150), nullable=False)
+    old_value = Column(String(150), nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(String(500), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_account_request_pending", "target_user_id", "kind",
+            unique=True, sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+    target = relationship("User", foreign_keys=[target_user_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    resolver = relationship("User", foreign_keys=[resolved_by])
+
+
+class InternalComment(Base):
+    """Marca un comentario como interno: solo lo ve el personal."""
+    __tablename__ = "internal_comments"
+
+    id = Column(Integer, primary_key=True)
+    comment_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), unique=True, nullable=False)
