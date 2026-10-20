@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -51,6 +52,7 @@ def _read(row: models.AccountReport) -> AccountReportRead:
         target_email=mask_email(row.target.email),
         reporter_id=row.reporter_id,
         reporter=_name(row.reporter),
+        reporter_role=row.reporter.role,
         reason=row.reason,
         reason_label=models.REPORT_REASONS.get(row.reason, row.reason),
         comment=row.comment,
@@ -68,7 +70,11 @@ def _seen_by_technician(db: Session, user: models.User) -> bool:
     return has_ticket or db.query(models.EmailDraft.id).filter(models.EmailDraft.requester_id == user.id).first() is not None
 
 
-@router.post("/account-reports", response_model=AccountReportRead, status_code=status.HTTP_201_CREATED)
+# exclude_unset: el técnico nunca recibe other_open (sus reportes son independientes)
+@router.post(
+    "/account-reports", response_model=AccountReportRead, response_model_exclude_unset=True,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_report(data: AccountReportCreate, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     _require(current_user, REPORTER_ROLES)
     target = db.get(models.User, data.target_user_id)
@@ -115,6 +121,7 @@ def create_report(data: AccountReportCreate, db: Session = Depends(get_db), curr
 @router.get("/account-reports", response_model=list[AccountReportRead])
 def list_reports(
     status_filter: Optional[Literal["open", "confirmed", "dismissed"]] = Query(default=None, alias="status"),
+    target_user_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -122,14 +129,42 @@ def list_reports(
     query = db.query(models.AccountReport)
     if status_filter:
         query = query.filter(models.AccountReport.status == status_filter)
+    if target_user_id is not None:
+        query = query.filter(models.AccountReport.target_user_id == target_user_id)
     rows = query.order_by(models.AccountReport.created_at.desc(), models.AccountReport.id.desc()).limit(200).all()
-    return [_read(r) for r in rows]
+    open_by_target = _open_by_target(db, list({r.target_user_id for r in rows}))
+    return [
+        _read(r).model_copy(update={
+            "other_open": open_by_target.get(r.target_user_id, 0) - (1 if r.status == "open" else 0),
+        })
+        for r in rows
+    ]
+
+
+def _open_by_target(db: Session, target_ids: list[int]) -> dict[int, int]:
+    if not target_ids:
+        return {}
+    return dict(
+        db.query(models.AccountReport.target_user_id, func.count(models.AccountReport.id))
+        .filter(models.AccountReport.target_user_id.in_(target_ids), models.AccountReport.status == "open")
+        .group_by(models.AccountReport.target_user_id)
+        .all()
+    )
 
 
 @router.get("/account-reports/open-count", response_model=AccountReportCount)
-def open_count(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def open_count(
+    target_user_id: Optional[int] = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)
+):
+    """Abiertos en total; con target_user_id, los de esa cuenta hechos por otras personas. Nunca para técnicos."""
     _require(current_user, REVIEW_ROLES)
-    return AccountReportCount(open=db.query(models.AccountReport).filter(models.AccountReport.status == "open").count())
+    query = db.query(models.AccountReport).filter(models.AccountReport.status == "open")
+    if target_user_id is not None:
+        query = query.filter(
+            models.AccountReport.target_user_id == target_user_id,
+            models.AccountReport.reporter_id != current_user.id,
+        )
+    return AccountReportCount(open=query.count())
 
 
 def _resolve(db: Session, report_id: int, reviewer: models.User, new_status: str, note: str) -> AccountReportRead:

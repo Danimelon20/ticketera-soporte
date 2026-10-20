@@ -1463,3 +1463,11 @@ section {
     .dialog-actions { flex-direction: column-reverse; }
     .dialog-actions button { width: 100%; min-height: 44px; }
 }
+.report-existing { margin: 0; padding: 10px 12px; border-radius: 8px; background: #FFF4E0; color: #8A4B00; }
+.report-existing[hidden] { display: none; }
+.report-existing p { margin: 0 0 4px; font-weight: 600; }
+.report-others { margin: 4px 0 0; color: #8A4B00; font-weight: 600; overflow-wrap: anywhere; }
+.reports-account-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.reports-account-filter[hidden] { display: none; }
+.tag-review { background: var(--accent-soft); color: var(--accent-dark); }
+.report-waiting { margin: 6px 0 0; color: var(--muted); font-size: 13px; }

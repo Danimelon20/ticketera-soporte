@@ -2418,7 +2418,10 @@ document.addEventListener('DOMContentLoaded', () => {
     navAdmin.addEventListener('click', () => showView('admin'));
     navDrafts.addEventListener('click', () => showView('drafts'));
     navProfile.addEventListener('click', () => showProfile());
-    navReports.addEventListener('click', () => showView('reports'));
+    navReports.addEventListener('click', () => {
+        setReportsAccount(null);
+        showView('reports');
+    });
 
     // ----- Perfil del solicitante -----
     const profileForm = document.getElementById('profileForm');
@@ -3440,7 +3443,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const reportReason = document.getElementById('reportReason');
     const reportComment = document.getElementById('reportComment');
     const reportError = document.getElementById('reportError');
+    const reportExisting = document.getElementById('reportExisting');
     let reportTargetId = null;
+    let reportTargetName = '';
     let reportDone = null;
 
     function syncReportComment() {
@@ -3457,9 +3462,31 @@ document.addEventListener('DOMContentLoaded', () => {
             syncReportComment();
             document.getElementById('reportDialogTarget').textContent = `Cuenta: ${name}`;
             reportError.hidden = true;
+            reportExisting.hidden = true;
+            reportTargetName = name;
             reportDialog.showModal();
             reportReason.focus();
+            showExistingReports(reportTargetId);
         });
+    }
+
+    function openReportsText(count) {
+        return count === 1 ? '1 reporte abierto' : `${count} reportes abiertos`;
+    }
+
+    // Solo coordinador y admin: el técnico reporta sin saber de otros reportes (el servidor tampoco se lo envía)
+    async function showExistingReports(targetId) {
+        if (!REPORT_REVIEW_ROLES.includes(currentUser.role)) return;
+        let data;
+        try {
+            data = await apiFetch(`/account-reports/open-count?target_user_id=${targetId}`, { silent: true });
+        } catch (err) {
+            return; // Sin el aviso se puede reportar igual
+        }
+        // El diálogo pudo cerrarse o abrirse para otra cuenta mientras llegaba la respuesta
+        if (!reportDialog.open || reportTargetId !== targetId || data.open === 0) return;
+        document.getElementById('reportExistingText').textContent = `Esta cuenta ya tiene ${openReportsText(data.open)}.`;
+        reportExisting.hidden = false;
     }
 
     function closeReportDialog(done) {
@@ -3470,6 +3497,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     reportReason.addEventListener('change', syncReportComment);
+    document.getElementById('reportExistingLink').addEventListener('click', () => {
+        const target = { id: reportTargetId, name: reportTargetName };
+        closeReportDialog(false);
+        openReportsForAccount(target.id, target.name);
+    });
     document.getElementById('reportCancel').addEventListener('click', () => closeReportDialog(false));
     reportDialog.addEventListener('cancel', (e) => {
         e.preventDefault();
@@ -3510,6 +3542,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const reportsEmpty = document.getElementById('reportsEmpty');
     const reportsStatus = document.getElementById('reportsStatus');
     const reportsBadge = document.getElementById('reportsBadge');
+    const reportsAccountFilter = document.getElementById('reportsAccountFilter');
+    // Filtro por cuenta: { id, name } o null
+    let reportsAccount = null;
+
+    function setReportsAccount(account) {
+        reportsAccount = account;
+        reportsAccountFilter.hidden = !account;
+        document.getElementById('reportsAccountName').textContent = account ? `Cuenta: ${account.name}` : '';
+    }
+
+    function openReportsForAccount(id, name) {
+        setReportsAccount({ id: parseInt(id, 10), name });
+        reportsStatus.value = 'open';
+        showView('reports');
+    }
 
     async function refreshReportsBadge() {
         if (!currentUser || !REPORT_REVIEW_ROLES.includes(currentUser.role)) return;
@@ -3534,6 +3581,7 @@ document.addEventListener('DOMContentLoaded', () => {
         time.textContent = formatDateTime(item.created_at);
         head.append(title, time);
         li.appendChild(head);
+        if (needsMyReview(item)) li.appendChild(makeTag('Requiere su revisión', 'tag-review'));
         li.appendChild(requestLine('Motivo', item.reason_label));
         if (item.comment) li.appendChild(requestLine('Comentario', item.comment));
         li.appendChild(requestLine('Reportado por', item.reporter));
@@ -3541,11 +3589,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (item.resolver) state += ` por ${item.resolver} (${formatDateTime(item.resolved_at)})`;
         li.appendChild(requestLine('Estado', state));
         if (item.resolution_note) li.appendChild(requestLine('Nota', item.resolution_note));
+        if (item.other_open > 0) {
+            const others = document.createElement('p');
+            others.className = 'report-others';
+            others.textContent = item.other_open === 1
+                ? 'Esta cuenta tiene otro reporte abierto'
+                : `Esta cuenta tiene otros ${item.other_open} reportes abiertos`;
+            if (!reportsAccount) {
+                const filterBtn = document.createElement('button');
+                filterBtn.type = 'button';
+                filterBtn.className = 'link-btn';
+                filterBtn.dataset.filterTarget = item.target_user_id;
+                filterBtn.dataset.filterName = item.target_name;
+                filterBtn.textContent = 'Ver solo esta cuenta';
+                others.append(' · ', filterBtn);
+            }
+            li.appendChild(others);
+        }
         if (item.status === 'open') {
             const actions = document.createElement('div');
             actions.className = 'account-actions';
             // Quien reportó puede retirarlo, pero la confirmación la da otra persona
-            const options = item.reporter_id === currentUser.id
+            const own = item.reporter_id === currentUser.id;
+            const options = own
                 ? [['dismiss', 'Retirar reporte']]
                 : [['confirm', 'Confirmar'], ['dismiss', 'Descartar']];
             options.forEach(([decision, label]) => {
@@ -3558,25 +3624,54 @@ document.addEventListener('DOMContentLoaded', () => {
                 actions.appendChild(button);
             });
             li.appendChild(actions);
+            if (own) {
+                const waiting = document.createElement('p');
+                waiting.className = 'report-waiting';
+                waiting.textContent = 'Esperando revisión de otro coordinador o un administrador.';
+                li.appendChild(waiting);
+            }
         }
         return li;
     }
 
+    // Reporte abierto de un coordinador: solo lo confirma otra persona, así que va primero para ella
+    function needsMyReview(item) {
+        return item.status === 'open' && item.reporter_role === 'coordinator' && item.reporter_id !== currentUser.id;
+    }
+
     async function loadReports() {
-        const status = reportsStatus.value;
+        const params = new URLSearchParams();
+        if (reportsStatus.value) params.set('status', reportsStatus.value);
+        if (reportsAccount) params.set('target_user_id', String(reportsAccount.id));
+        const query = params.toString();
         let items;
         try {
-            items = await apiFetch(`/account-reports${status ? `?status=${status}` : ''}`);
+            items = await apiFetch(`/account-reports${query ? `?${query}` : ''}`);
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
+        // sort es estable: dentro de cada grupo se mantiene el orden del servidor (más recientes primero)
+        items.sort((a, b) => Number(needsMyReview(b)) - Number(needsMyReview(a)));
         reportsList.replaceChildren(...items.map(renderReportItem));
+        reportsEmpty.textContent = reportsAccount
+            ? 'Esta cuenta no tiene reportes con ese estado.'
+            : 'No hay reportes con ese estado.';
         reportsEmpty.hidden = items.length > 0;
         refreshReportsBadge();
     }
 
     reportsStatus.addEventListener('change', loadReports);
+    document.getElementById('reportsAccountClear').addEventListener('click', () => {
+        setReportsAccount(null);
+        loadReports();
+    });
     reportsList.addEventListener('click', async (e) => {
+        const filterBtn = e.target.closest('button[data-filter-target]');
+        if (filterBtn) {
+            setReportsAccount({ id: parseInt(filterBtn.dataset.filterTarget, 10), name: filterBtn.dataset.filterName });
+            loadReports();
+            return;
+        }
         const button = e.target.closest('button[data-decision]');
         if (!button) return;
         const confirming = button.dataset.decision === 'confirm';

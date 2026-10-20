@@ -485,6 +485,10 @@
                     <option value="dismissed">Descartados</option>
                     <option value="">Todos</option>
                 </select>
+                <div id="reportsAccountFilter" class="reports-account-filter" hidden>
+                    <span id="reportsAccountName"></span>
+                    <button type="button" id="reportsAccountClear" class="link-btn">Quitar filtro</button>
+                </div>
             </div>
             <ul id="reportsList" class="changes-list"></ul>
             <p id="reportsEmpty" class="view-note" hidden>No hay reportes con ese estado.</p>
@@ -704,6 +708,10 @@
         <form id="reportForm" class="profile-form">
             <h2 id="reportDialogTitle" class="modal-title">Reportar cuenta</h2>
             <p id="reportDialogTarget" class="help-text"></p>
+            <div id="reportExisting" class="report-existing" role="status" hidden>
+                <p id="reportExistingText"></p>
+                <button type="button" id="reportExistingLink" class="link-btn">Ver en Reportes</button>
+            </div>
             <div class="form-group">
                 <label for="reportReason">Motivo</label>
                 <select id="reportReason" required>

@@ -502,6 +502,7 @@ class AccountReportRead(BaseModel):
     target_email: str
     reporter_id: int
     reporter: str
+    reporter_role: str
     reason: str
     reason_label: str
     comment: Optional[str] = None
@@ -510,6 +511,8 @@ class AccountReportRead(BaseModel):
     resolution_note: Optional[str] = None
     created_at: datetime
     resolved_at: Optional[datetime] = None
+    # Solo en la lista de coordinador y admin: otros reportes abiertos sobre la misma cuenta
+    other_open: Optional[int] = None
 
 
 class AccountReportCount(BaseModel):
