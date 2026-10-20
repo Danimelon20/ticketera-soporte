@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import config, email_analysis, identity, models
+from .. import account_reports, config, email_analysis, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import DraftConfirm, DraftRead
@@ -65,6 +65,8 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
         needs_review=draft.needs_review,
         ticket_id=draft.ticket_id,
         pending_reason=_pending_reason(db, draft),
+        # Los borradores solo los ve el personal
+        requester_flags=account_reports.staff_flags(db, requester),
     )
     if viewer.role == "technician":
         # El técnico no ve datos personales completos (como en el detalle del ticket)

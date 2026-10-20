@@ -47,7 +47,8 @@ def test_technician_gets_only_active_staff_without_emails(client, make_user):
     assert response.status_code == 200
     rows = response.json()
     assert not EMAIL_RE.search(response.text)
-    assert all(set(r) == {"id", "name", "role"} for r in rows)
+    # La disponibilidad no es un dato personal: sirve para elegir a quién asignar
+    assert all(set(r) == {"id", "name", "role", "availability"} for r in rows)
     assert all(r["role"] in ("technician", "coordinator", "admin") for r in rows)
     ids = {r["id"] for r in rows}
     assert coordinator["id"] in ids and technician["id"] in ids

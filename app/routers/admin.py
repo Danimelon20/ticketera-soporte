@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
-from .. import accounts, alerts, config, daily_summary, email_analysis, email_poller, identity, models, throttle
+from .. import (
+    account_reports, accounts, alerts, availability, config, daily_summary, email_analysis, email_poller, identity,
+    models, throttle,
+)
 from ..schemas import AccountChangePage, AccountChangeRead, AdminUserUpdate, DirectoryUser
 from ..security import get_current_user, mask_email
 
@@ -45,6 +48,10 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
         .group_by(models.Ticket.assigned_to)
         .all()
     )
+    statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    requester_ids = [u.id for u in users if u.role == "requester"]
+    identities = identity.hacienda_codes(db, requester_ids)
+    reported = account_reports.reported_ids(db, requester_ids)
     rows = [
         DirectoryUser(
             id=u.id,
@@ -58,6 +65,10 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
             tickets_assigned_open=assigned_open.get(u.id, 0),
             login_locked=throttle.is_locked(db, u.email.strip().lower()),
             identity_locked=identity.is_locked(db, u),
+            availability=statuses[u.id][0] if u.id in statuses else None,
+            return_date=statuses[u.id][1] if u.id in statuses else None,
+            identity=identities.get(u.id),
+            reported=u.id in reported,
         )
         for u in users
     ]

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from . import config, mailer, models
+from . import availability, config, mailer, models
 from .business_hours import business_hours_between
 from .chatbot import _redact
 from .daily_summary import (
@@ -24,6 +24,7 @@ from .notifications import STATUS_LABELS, display_name
 CRITICAL = "critical"
 DUE_SOON = "due_soon"
 OVERDUE = "overdue"
+RETURN_DATE = "return_date"
 SUBJECT_LABELS = {CRITICAL: "CRÍTICO", DUE_SOON: "Por vencer", OVERDUE: "Vencido"}
 GROUP_LABELS = {CRITICAL: "CRÍTICO", DUE_SOON: "Por vencer", OVERDUE: "Vencidos"}
 INTROS = {
@@ -55,9 +56,12 @@ class _Alert:
         return _redact(self.ticket.title if self.ticket else (self.draft.title or "Sin título"))
 
 
-def _active_assignee(ticket: models.Ticket) -> str | None:
+def _active_assignee(db: Session, ticket: models.Ticket) -> str | None:
+    """Correo del responsable, salvo que esté desactivado o no esté Disponible (vacaciones o ausente)."""
     user = ticket.assigned_user
-    return user.email if user is not None and user.is_active else None
+    if user is None or not user.is_active or not availability.is_available(db, user):
+        return None
+    return user.email
 
 
 def _deadline(ticket: models.Ticket) -> str:
@@ -200,7 +204,7 @@ def _run_overdue(db: Session, now: datetime, staff: list[str]) -> int:
         due = _due_at(ticket)
         if due is None or due >= now or ticket.id in sent_tickets:
             continue
-        assignee = _active_assignee(ticket)
+        assignee = _active_assignee(db, ticket)
         to = staff + ([assignee] if assignee and assignee not in staff else [])
         alerts.append(_Alert(OVERDUE, ticket=ticket, to=to))
     return _dispatch(db, OVERDUE, alerts, now)
@@ -217,9 +221,64 @@ def _run_due_soon(db: Session, now: datetime, staff: list[str]) -> int:
         total = business_hours_between(ticket.created_at, due)
         if total <= 0 or business_hours_between(ticket.created_at, now) < total * config.ALERT_WARN_PERCENT / 100:
             continue
-        assignee = _active_assignee(ticket)
+        assignee = _active_assignee(db, ticket)
         alerts.append(_Alert(DUE_SOON, ticket=ticket, to=[assignee] if assignee else staff))
     return _dispatch(db, DUE_SOON, alerts, now)
+
+
+def _return_notice(user: models.User, return_date) -> tuple[str, str]:
+    name = user.name or "Técnico sin nombre"
+    subject = f"[Ticketera] Fecha de regreso: {name}"
+    body = "\n".join([
+        "Buen día.",
+        "",
+        f"La fecha de regreso de {name} era el {return_date.strftime('%d/%m/%Y')}, "
+        "pero su disponibilidad sigue sin actualizarse.",
+        "Si ya regresó, márquelo como Disponible; si no, actualice la fecha de regreso.",
+        "",
+        f"Puede actualizarla en {config.APP_URL}",
+    ])
+    return subject, body
+
+
+def _run_return_dates(db: Session, now: datetime, staff: list[str]) -> int:
+    """Aviso, una sola vez por fecha, cuando llega el regreso de un técnico. El estado no cambia solo."""
+    local = _local(now)
+    # Como el resumen diario: a partir de DAILY_SUMMARY_HOUR, no apenas pasa la medianoche
+    if local.hour < config.DAILY_SUMMARY_HOUR:
+        return 0
+    rows = (
+        db.query(models.TechnicianAvailability)
+        .join(models.User, models.User.id == models.TechnicianAvailability.user_id)
+        .filter(
+            models.TechnicianAvailability.status != "available",
+            models.TechnicianAvailability.return_date.isnot(None),
+            models.TechnicianAvailability.return_date <= local.date(),
+            models.User.role == "technician",
+            models.User.is_active.is_(True),
+        )
+        .order_by(models.TechnicianAvailability.user_id)
+        .all()
+    )
+    sent = 0
+    for row in rows:
+        if row.return_notice_for == row.return_date:
+            continue
+        subject, body = _return_notice(row.user, row.return_date)
+        to = [row.user.email] + [email for email in staff if email != row.user.email]
+        if config.EMAIL_ENABLED:
+            ok = sum(1 for email in to if mailer.send_email(email, subject, body))
+        else:
+            # Sin correo real: queda en el log y cuenta como enviado para no repetirlo en cada revisión
+            logging.warning("[SOLO DESARROLLO] Aviso de fecha de regreso del técnico %s para %s destinatarios",
+                            row.user_id, len(to))
+            ok = len(to)
+        logging.info("Aviso de regreso técnico %s: %s destinatarios", row.user_id, ok)
+        if ok:
+            row.return_notice_for = row.return_date
+            sent += 1
+    db.commit()
+    return sent
 
 
 def run_alerts(db: Session, now: datetime | None = None) -> dict[str, int]:
@@ -232,6 +291,7 @@ def run_alerts(db: Session, now: datetime | None = None) -> dict[str, int]:
         CRITICAL: _run_critical(db, now, staff),
         OVERDUE: _run_overdue(db, now, staff),
         DUE_SOON: _run_due_soon(db, now, staff),
+        RETURN_DATE: _run_return_dates(db, now, staff),
     }
 
 

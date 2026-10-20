@@ -210,6 +210,7 @@
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
     <button type="button" id="navAccounts" class="topbar-tab" hidden>Cuentas</button>
+    <button type="button" id="navReports" class="topbar-tab" hidden>Reportes <span id="reportsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
     <button type="button" id="navProfile" class="topbar-tab" hidden>Mi cuenta</button>
   </nav>
@@ -301,6 +302,28 @@
                     </div>
                     <div class="profile-actions">
                         <button type="submit" class="btn-submit">Guardar teléfono</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="accountAvailability" class="account-section" aria-labelledby="accountAvailabilityTitle" hidden>
+                <h2 id="accountAvailabilityTitle" class="account-title">Disponibilidad</h2>
+                <form id="accountAvailabilityForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="ownAvailabilityStatus">Estado</label>
+                        <select id="ownAvailabilityStatus">
+                            <option value="available">Disponible</option>
+                            <option value="vacation">Vacaciones</option>
+                            <option value="away">Ausente</option>
+                        </select>
+                    </div>
+                    <div id="ownAvailabilityReturnGroup" class="form-group" hidden>
+                        <label for="ownAvailabilityReturn">Fecha de regreso (opcional)</label>
+                        <input type="date" id="ownAvailabilityReturn">
+                    </div>
+                    <small class="help-text">Mientras no esté Disponible, las alertas de sus tickets van a los coordinadores.</small>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Guardar disponibilidad</button>
                     </div>
                 </form>
             </section>
@@ -451,6 +474,22 @@
             </section>
         </section>
 
+        <section id="reportsView" class="page-view" hidden aria-labelledby="reportsTitle">
+            <h1 id="reportsTitle" class="view-title">Reportes de cuentas</h1>
+            <p class="view-note">Cuentas de solicitante reportadas por el personal. El reporte solo marca la cuenta; para bloquearla use Desactivar.</p>
+            <div class="directory-filters">
+                <label for="reportsStatus" class="sr-only">Filtrar por estado</label>
+                <select id="reportsStatus">
+                    <option value="open">Abiertos</option>
+                    <option value="confirmed">Confirmados</option>
+                    <option value="dismissed">Descartados</option>
+                    <option value="">Todos</option>
+                </select>
+            </div>
+            <ul id="reportsList" class="changes-list"></ul>
+            <p id="reportsEmpty" class="view-note" hidden>No hay reportes con ese estado.</p>
+        </section>
+
         <section id="draftsView" class="page-view" hidden aria-labelledby="draftsTitle">
             <h1 id="draftsTitle" class="view-title">Borradores de correos</h1>
             <p class="view-note drafts-intro">Correos escritos sin la plantilla que la IA preparó como ticket. Revíselos y confírmelos o descártelos.</p>
@@ -462,6 +501,10 @@
                         <p id="draftNumber" class="draft-meta"></p>
                         <h2 id="draftSubject" class="draft-subject"></h2>
                         <p id="draftMeta" class="draft-meta"></p>
+                        <div id="draftFlags" class="requester-tags" hidden>
+                            <span id="draftFlagTags" class="requester-tag-list"></span>
+                            <button type="button" id="draftReportBtn" class="btn-secondary btn-small">Reportar cuenta</button>
+                        </div>
                         <p id="draftReason" class="draft-reason" hidden></p>
                         <h3 class="draft-section">Correo original</h3>
                         <pre id="draftBody" class="draft-body" tabindex="0"></pre>
@@ -656,6 +699,57 @@
             </div>
         </div>
     </div>
+
+    <dialog id="reportDialog" class="app-dialog" aria-labelledby="reportDialogTitle">
+        <form id="reportForm" class="profile-form">
+            <h2 id="reportDialogTitle" class="modal-title">Reportar cuenta</h2>
+            <p id="reportDialogTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="reportReason">Motivo</label>
+                <select id="reportReason" required>
+                    <option value="foreign_id">Cédula ajena</option>
+                    <option value="name_mismatch">El nombre no coincide</option>
+                    <option value="repeated_tickets">Tickets repetidos o masivos</option>
+                    <option value="fake_data">Datos falsos</option>
+                    <option value="other">Otro</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="reportComment" id="reportCommentLabel">Comentario (opcional)</label>
+                <textarea id="reportComment" maxlength="500" rows="3"></textarea>
+            </div>
+            <small class="help-text">El solicitante no verá este reporte y su cuenta sigue activa.</small>
+            <p id="reportError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="reportCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Enviar reporte</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="availabilityDialog" class="app-dialog" aria-labelledby="availabilityDialogTitle">
+        <form id="availabilityForm" class="profile-form">
+            <h2 id="availabilityDialogTitle" class="modal-title">Cambiar disponibilidad</h2>
+            <p id="availabilityTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="availabilityStatus">Estado</label>
+                <select id="availabilityStatus">
+                    <option value="available">Disponible</option>
+                    <option value="vacation">Vacaciones</option>
+                    <option value="away">Ausente</option>
+                </select>
+            </div>
+            <div id="availabilityReturnGroup" class="form-group" hidden>
+                <label for="availabilityReturn">Fecha de regreso (opcional)</label>
+                <input type="date" id="availabilityReturn">
+            </div>
+            <p id="availabilityError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="availabilityCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
 
     <button type="button" id="chatToggle" class="chat-fab" aria-label="Abrir asistente" aria-expanded="false" aria-controls="chatPanel" hidden>
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

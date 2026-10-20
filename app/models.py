@@ -391,6 +391,7 @@ ACCOUNT_CHANGE_ACTIONS = (
     "role_changed", "account_activated", "account_deactivated", "invitation_sent", "invitation_used",
     "login_locked", "password_reset", "access_reset_sent", "access_reset_forced", "login_unlocked", "tickets_released",
     "request_created", "request_approved", "request_rejected",
+    "availability_changed", "report_created", "report_confirmed", "report_dismissed",
 )
 
 
@@ -466,3 +467,59 @@ class InternalComment(Base):
 
     id = Column(Integer, primary_key=True)
     comment_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+
+AVAILABILITY_STATUSES = ("available", "vacation", "away")
+
+
+class TechnicianAvailability(Base):
+    """Disponibilidad de un técnico. Sin fila: Disponible. Estado validado en Python."""
+    __tablename__ = "technician_availability"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    status = Column(String(20), nullable=False, default="available")
+    return_date = Column(Date, nullable=True)
+    # Fecha de regreso cuyo aviso ya se envió: uno solo por fecha
+    return_notice_for = Column(Date, nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+REPORT_REASONS = {
+    "foreign_id": "Cédula ajena",
+    "name_mismatch": "El nombre no coincide",
+    "repeated_tickets": "Tickets repetidos o masivos",
+    "fake_data": "Datos falsos",
+    "other": "Otro",
+}
+REPORT_STATUSES = ("open", "confirmed", "dismissed")
+
+
+class AccountReport(Base):
+    """Reporte del personal sobre una cuenta de solicitante. Motivo y estado se validan en Python."""
+    __tablename__ = "account_reports"
+
+    id = Column(Integer, primary_key=True)
+    target_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    reporter_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(String(30), nullable=False)
+    comment = Column(String(500), nullable=True)
+    status = Column(String(20), nullable=False, default="open")
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution_note = Column(String(500), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_account_report_open", "target_user_id", "reporter_id",
+            unique=True, sqlite_where=text("status = 'open'"),
+        ),
+    )
+
+    target = relationship("User", foreign_keys=[target_user_id])
+    reporter = relationship("User", foreign_keys=[reporter_id])
+    resolver = relationship("User", foreign_keys=[resolved_by])

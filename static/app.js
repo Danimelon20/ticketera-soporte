@@ -52,6 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let priorityLevelMap = {};
     let userMap = {};
     let userRoleMap = {};
+    // Solo técnicos: available, vacation o away
+    let userAvailabilityMap = {};
     let currentStatus = '';
     let selectedTicketId = null;
     let activityFilter = 'all';
@@ -117,7 +119,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // silent: no muestra el error (quien llama lo muestra donde corresponde); el error lleva .status
     async function apiFetch(endpoint, options = {}) {
+        const { silent, ...fetchOptions } = options;
         hideError();
         const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
         const headers = {
@@ -129,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const response = await fetch(url, {
-            ...options,
+            ...fetchOptions,
             headers
         });
 
@@ -145,7 +149,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.status === 422 && endpoint.startsWith('/auth/') && Array.isArray(message)) {
                 message = 'La contraseña debe tener al menos 8 caracteres';
             } else if ((endpoint === '/tickets' || endpoint === '/profile' || endpoint.startsWith('/account/')
-                || endpoint.startsWith('/accounts/') || endpoint.startsWith('/account-requests'))
+                || endpoint.startsWith('/accounts/') || endpoint.startsWith('/account-requests')
+                || endpoint.startsWith('/account-reports'))
                 && ['POST', 'PUT'].includes(options.method)) {
                 message = getErrorMessage(errorData);
             } else if (response.status === 401 && endpoint.includes('/auth/login')) {
@@ -153,8 +158,10 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (Array.isArray(message)) {
                 message = message.map(m => (m && m.msg) ? m.msg : String(m)).join('. ');
             }
-            showError(message || `Error ${response.status}: ${response.statusText}`);
-            throw new Error(message || `Error ${response.status}`);
+            if (!silent) showError(message || `Error ${response.status}: ${response.statusText}`);
+            const error = new Error(message || `Error ${response.status}`);
+            error.status = response.status;
+            throw error;
         }
 
         if (response.status === 204) {
@@ -213,6 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showView('tickets');
         }
         refreshDraftsBadge();
+        refreshReportsBadge();
         startDraftsPolling();
         setupChat();
     }
@@ -1462,6 +1470,21 @@ document.addEventListener('DOMContentLoaded', () => {
         topMeta.textContent = `#${ticket.id} · ${categoryName} · Creado por ${createdByName} · ${formatDateTime(ticket.created_at)}`;
         detailContent.appendChild(topMeta);
 
+        // Solo llega al personal: el solicitante nunca recibe requester_flags
+        if (ticket.requester_flags) {
+            const flagsRow = document.createElement('div');
+            flagsRow.className = 'requester-tags';
+            const tagList = document.createElement('span');
+            tagList.className = 'requester-tag-list';
+            requesterTags(ticket.requester_flags).forEach(tag => tagList.appendChild(tag));
+            const reportAccountBtn = document.createElement('button');
+            reportAccountBtn.type = 'button';
+            reportAccountBtn.className = 'btn-secondary btn-small btn-report-account';
+            reportAccountBtn.textContent = 'Reportar cuenta';
+            flagsRow.append(tagList, reportAccountBtn);
+            detailContent.appendChild(flagsRow);
+        }
+
         const h1 = document.createElement('h1');
         h1.style.fontSize = '26px';
         h1.style.fontWeight = '600';
@@ -1642,7 +1665,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (role === 'technician' || role === 'coordinator') {
                     const opt = document.createElement('option');
                     opt.value = userId;
-                    opt.textContent = userMap[userId];
+                    const availability = userAvailabilityMap[userId];
+                    // El estado al lado del nombre: se puede asignar igual, con confirmación
+                    opt.textContent = availability && availability !== 'available'
+                        ? `${userMap[userId]} — ${AVAILABILITY_LABELS[availability]}`
+                        : userMap[userId];
                     assignSelect.appendChild(opt);
                 }
             });
@@ -2341,6 +2368,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftsView = document.getElementById('draftsView');
     const navProfile = document.getElementById('navProfile');
     const profileView = document.getElementById('profileView');
+    const navReports = document.getElementById('navReports');
+    const reportsView = document.getElementById('reportsView');
 
     function setActiveTab(activeTab) {
         document.querySelectorAll('.topbar-tab').forEach(tab => {
@@ -2356,6 +2385,7 @@ document.addEventListener('DOMContentLoaded', () => {
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
         navAdmin.hidden = role !== 'admin';
         navAccounts.hidden = role !== 'coordinator';
+        navReports.hidden = !REPORT_REVIEW_ROLES.includes(role);
         // La lista de cuentas con correos solo es para quien gestiona cuentas
         navUsers.hidden = !(role === 'coordinator' || role === 'admin');
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
@@ -2370,15 +2400,17 @@ document.addEventListener('DOMContentLoaded', () => {
         adminView.hidden = name !== 'admin';
         draftsView.hidden = name !== 'drafts';
         profileView.hidden = name !== 'profile';
+        reportsView.hidden = name !== 'reports';
         const tabs = {
             tickets: navTickets, directory: navDirectory, accounts: navAccounts,
-            admin: navAdmin, drafts: navDrafts, profile: navProfile
+            admin: navAdmin, drafts: navDrafts, profile: navProfile, reports: navReports
         };
         setActiveTab(tabs[name]);
         if (name === 'directory') loadDirectory();
         if (name === 'accounts') loadAccountsView();
         if (name === 'admin') loadAdminPanel();
         if (name === 'drafts') loadDrafts();
+        if (name === 'reports') loadReports();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
@@ -2386,6 +2418,7 @@ document.addEventListener('DOMContentLoaded', () => {
     navAdmin.addEventListener('click', () => showView('admin'));
     navDrafts.addEventListener('click', () => showView('drafts'));
     navProfile.addEventListener('click', () => showProfile());
+    navReports.addEventListener('click', () => showView('reports'));
 
     // ----- Perfil del solicitante -----
     const profileForm = document.getElementById('profileForm');
@@ -2408,6 +2441,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario
         document.getElementById('accountPersonal').hidden = !isRequester;
         accountPhoneSection.hidden = isRequester || required;
+        accountAvailabilitySection.hidden = currentUser.role !== 'technician';
         accountEmailSection.hidden = required;
         accountPasswordSection.hidden = required;
         fillAccountSections();
@@ -2459,6 +2493,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ----- Mi cuenta: teléfono (personal), correo y contraseña (todos) -----
     const accountPhoneSection = document.getElementById('accountPhone');
+    const accountAvailabilitySection = document.getElementById('accountAvailability');
+    const ownAvailabilityStatus = document.getElementById('ownAvailabilityStatus');
+    const ownAvailabilityReturn = document.getElementById('ownAvailabilityReturn');
+    const ownAvailabilityReturnGroup = document.getElementById('ownAvailabilityReturnGroup');
     const accountEmailSection = document.getElementById('accountEmail');
     const accountPasswordSection = document.getElementById('accountPassword');
     const accountPhoneForm = document.getElementById('accountPhoneForm');
@@ -2490,6 +2528,10 @@ document.addEventListener('DOMContentLoaded', () => {
         accountCurrentEmail.textContent = currentUser.email;
         passwordHint.textContent = `Al menos ${passwordMinimum()} caracteres.`;
         passwordForm.reset();
+        if (currentUser.role === 'technician') {
+            fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
+                currentUser.availability, currentUser.return_date);
+        }
     }
 
     function refreshTopbarUser() {
@@ -2549,6 +2591,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         accountPhoneInput.value = currentUser.phone || '';
         showSuccess('Teléfono guardado');
+    });
+
+    ownAvailabilityStatus.addEventListener('change', () => {
+        syncReturnField(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup);
+    });
+
+    document.getElementById('accountAvailabilityForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        try {
+            currentUser = await apiFetch('/account/availability', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(availabilityPayload(ownAvailabilityStatus, ownAvailabilityReturn))
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
+            currentUser.availability, currentUser.return_date);
+        showSuccess('Disponibilidad guardada');
     });
 
     emailChangeForm.addEventListener('submit', async (e) => {
@@ -2673,6 +2736,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftDetailsBtn = document.getElementById('draftDetailsBtn');
     let drafts = [];
     let selectedDraftId = null;
+    let shownDraft = null;
+    const draftFlags = document.getElementById('draftFlags');
+    const draftFlagTags = document.getElementById('draftFlagTags');
+
+    function renderDraftFlags(draft) {
+        draftFlags.hidden = !draft.requester_flags;
+        draftFlagTags.replaceChildren(...(draft.requester_flags ? requesterTags(draft.requester_flags) : []));
+    }
+
+    document.getElementById('draftReportBtn').addEventListener('click', async () => {
+        if (!shownDraft) return;
+        const draft = shownDraft;
+        if (await openReportDialog(draft.requester_id, draft.requester_name) && draft.requester_flags) {
+            draft.requester_flags.reported = true;
+            if (shownDraft === draft) renderDraftFlags(draft);
+        }
+    });
 
     function updateDraftsBadge(count) {
         draftsBadge.textContent = String(count);
@@ -2807,6 +2887,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
         document.getElementById('draftMeta').textContent =
             `${draft.requester_name} · ${formatDateTime(draft.created_at)} · ${DRAFT_STATUS_LABELS[draft.status] || draft.status}`;
+        shownDraft = draft;
+        renderDraftFlags(draft);
         const draftReason = document.getElementById('draftReason');
         draftReason.textContent = draft.pending_reason ? `Pendiente: ${draft.pending_reason}` : '';
         draftReason.hidden = !draft.pending_reason;
@@ -3045,6 +3127,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.className = user.is_active ? 'state-active' : 'state-inactive';
             state.textContent = user.is_active ? 'Activa' : 'Desactivada';
             stateTd.appendChild(state);
+            accountTags(user).forEach(tag => stateTd.appendChild(tag));
             row.appendChild(stateTd);
 
             if (isAdmin) {
@@ -3121,12 +3204,14 @@ document.addEventListener('DOMContentLoaded', () => {
         admin: {
             active: ['coordinator', 'technician', 'requester'],
             reset: ['coordinator', 'technician'],
-            unlock: ['admin', 'coordinator', 'technician', 'requester']
+            unlock: ['admin', 'coordinator', 'technician', 'requester'],
+            availability: ['technician']
         },
         coordinator: {
             active: ['technician', 'requester'],
             reset: ['technician'],
-            unlock: ['technician', 'requester']
+            unlock: ['technician', 'requester'],
+            availability: ['technician']
         }
     };
 
@@ -3149,6 +3234,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (canManage(user, 'active')) buttons.push(makeActionButton(user.is_active ? 'deactivate' : 'reactivate'));
         if (user.is_active && canManage(user, 'reset')) buttons.push(makeActionButton('reset-access'));
         if (user.login_locked && canManage(user, 'unlock')) buttons.push(makeActionButton('unlock'));
+        if (canManage(user, 'availability')) {
+            const button = makeActionButton('availability', 'Cambiar disponibilidad');
+            button.dataset.availability = user.availability || 'available';
+            button.dataset.returnDate = user.return_date || '';
+            buttons.push(button);
+        }
+        // Solo cuentas de solicitante; el servidor también lo revisa
+        if (user.role === 'requester') buttons.push(makeActionButton('report', 'Reportar cuenta'));
         return buttons;
     }
 
@@ -3164,6 +3257,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = button.closest('tr');
         const name = row.dataset.userName;
         const action = button.dataset.action;
+        if (action === 'availability') return openAvailabilityDialog(row.dataset.userId, name, button.dataset);
+        if (action === 'report') return openReportDialog(row.dataset.userId, name);
         if (action === 'deactivate') {
             const extra = row.dataset.userRole === 'technician' ? ' Sus tickets abiertos quedarán sin asignar.' : '';
             if (!confirm(`¿Desactivar la cuenta de ${name}? No podrá entrar hasta que se reactive.${extra}`)) return false;
@@ -3188,6 +3283,322 @@ document.addEventListener('DOMContentLoaded', () => {
         showSuccess(messages[action]);
         return true;
     }
+
+    // ----- Disponibilidad, identidad y reportes (solo personal) -----
+    const AVAILABILITY_LABELS = { available: 'Disponible', vacation: 'Vacaciones', away: 'Ausente' };
+    const IDENTITY_LABELS = {
+        match: 'Verificado', mismatch: 'No coincide', not_found: 'No encontrado', unverified: 'Sin verificar'
+    };
+    const REPORT_STATUS = { open: 'Abierto', confirmed: 'Confirmado', dismissed: 'Descartado' };
+    const REPORT_REVIEW_ROLES = ['coordinator', 'admin'];
+
+    // "2026-11-03" → "03/11/2026" sin pasar por la zona horaria
+    function formatPlainDate(value) {
+        const [year, month, day] = value.split('-');
+        return `${day}/${month}/${year}`;
+    }
+
+    function localToday() {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+
+    function makeTag(text, className) {
+        const tag = document.createElement('span');
+        tag.className = `account-tag ${className}`;
+        tag.textContent = text;
+        return tag;
+    }
+
+    function requesterTags(flags) {
+        const identity = flags.identity || 'unverified';
+        const tags = [makeTag(IDENTITY_LABELS[identity] || IDENTITY_LABELS.unverified, `tag-identity-${identity}`)];
+        if (flags.reported) tags.push(makeTag('Reportada', 'tag-reported'));
+        return tags;
+    }
+
+    function accountTags(user) {
+        if (user.role === 'technician' && user.availability && user.availability !== 'available') {
+            const back = user.return_date ? ` · regresa ${formatPlainDate(user.return_date)}` : '';
+            return [makeTag(`${AVAILABILITY_LABELS[user.availability]}${back}`, 'tag-away')];
+        }
+        if (user.role === 'requester' && user.identity) return requesterTags(user);
+        return [];
+    }
+
+    function syncReturnField(statusSelect, dateInput, group) {
+        const away = statusSelect.value !== 'available';
+        group.hidden = !away;
+        if (!away) dateInput.value = '';
+        dateInput.min = localToday();
+    }
+
+    function fillAvailabilityFields(statusSelect, dateInput, group, status, returnDate) {
+        statusSelect.value = status || 'available';
+        dateInput.value = returnDate || '';
+        syncReturnField(statusSelect, dateInput, group);
+    }
+
+    function availabilityPayload(statusSelect, dateInput) {
+        const status = statusSelect.value;
+        return { status, return_date: status !== 'available' && dateInput.value ? dateInput.value : null };
+    }
+
+    // Asignar: si el técnico no está disponible, el servidor responde 409 y se pide confirmación
+    async function assignTicket(userId) {
+        const send = (confirmUnavailable) => apiFetch(`/tickets/${selectedTicketId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(confirmUnavailable
+                ? { assigned_to: userId, confirm_unavailable: true }
+                : { assigned_to: userId }),
+            silent: !confirmUnavailable
+        });
+        try {
+            await send(false);
+            return true;
+        } catch (err) {
+            if (err.status !== 409) {
+                if (err.status !== undefined) showError(err.message);
+                return false;
+            }
+            if (!confirm(err.message)) return false;
+        }
+        try {
+            await send(true);
+        } catch (err) {
+            return false; // apiFetch ya mostró el error
+        }
+        return true;
+    }
+
+    // Diálogo de disponibilidad (coordinador y admin sobre técnicos)
+    const availabilityDialog = document.getElementById('availabilityDialog');
+    const availabilityForm = document.getElementById('availabilityForm');
+    const availabilityStatus = document.getElementById('availabilityStatus');
+    const availabilityReturn = document.getElementById('availabilityReturn');
+    const availabilityReturnGroup = document.getElementById('availabilityReturnGroup');
+    const availabilityError = document.getElementById('availabilityError');
+    let availabilityUserId = null;
+    let availabilityDone = null;
+
+    function openAvailabilityDialog(userId, name, current) {
+        return new Promise(resolve => {
+            availabilityUserId = userId;
+            availabilityDone = resolve;
+            document.getElementById('availabilityTarget').textContent = name;
+            fillAvailabilityFields(availabilityStatus, availabilityReturn, availabilityReturnGroup,
+                current.availability, current.returnDate);
+            availabilityError.hidden = true;
+            availabilityDialog.showModal();
+            availabilityStatus.focus();
+        });
+    }
+
+    function closeAvailabilityDialog(done) {
+        if (availabilityDialog.open) availabilityDialog.close();
+        const resolve = availabilityDone;
+        availabilityDone = null;
+        if (resolve) resolve(done);
+    }
+
+    availabilityStatus.addEventListener('change', () => {
+        syncReturnField(availabilityStatus, availabilityReturn, availabilityReturnGroup);
+    });
+    document.getElementById('availabilityCancel').addEventListener('click', () => closeAvailabilityDialog(false));
+    availabilityDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeAvailabilityDialog(false);
+    });
+    availabilityForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        availabilityError.hidden = true;
+        try {
+            await apiFetch(`/accounts/${availabilityUserId}/availability`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(availabilityPayload(availabilityStatus, availabilityReturn)),
+                silent: true
+            });
+        } catch (err) {
+            if (err.status === undefined) {
+                closeAvailabilityDialog(false);
+                return;
+            }
+            availabilityError.textContent = err.message;
+            availabilityError.hidden = false;
+            return;
+        }
+        closeAvailabilityDialog(true);
+        showSuccess('Disponibilidad guardada');
+        loadUsers();
+    });
+
+    // Diálogo para reportar una cuenta de solicitante
+    const reportDialog = document.getElementById('reportDialog');
+    const reportForm = document.getElementById('reportForm');
+    const reportReason = document.getElementById('reportReason');
+    const reportComment = document.getElementById('reportComment');
+    const reportError = document.getElementById('reportError');
+    let reportTargetId = null;
+    let reportDone = null;
+
+    function syncReportComment() {
+        const other = reportReason.value === 'other';
+        reportComment.required = other;
+        document.getElementById('reportCommentLabel').textContent = other ? 'Describa el motivo' : 'Comentario (opcional)';
+    }
+
+    function openReportDialog(userId, name) {
+        return new Promise(resolve => {
+            reportTargetId = parseInt(userId, 10);
+            reportDone = resolve;
+            reportForm.reset();
+            syncReportComment();
+            document.getElementById('reportDialogTarget').textContent = `Cuenta: ${name}`;
+            reportError.hidden = true;
+            reportDialog.showModal();
+            reportReason.focus();
+        });
+    }
+
+    function closeReportDialog(done) {
+        if (reportDialog.open) reportDialog.close();
+        const resolve = reportDone;
+        reportDone = null;
+        if (resolve) resolve(done);
+    }
+
+    reportReason.addEventListener('change', syncReportComment);
+    document.getElementById('reportCancel').addEventListener('click', () => closeReportDialog(false));
+    reportDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeReportDialog(false);
+    });
+    reportForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        reportError.hidden = true;
+        const comment = reportComment.value.trim();
+        if (reportReason.value === 'other' && !comment) {
+            reportError.textContent = 'Describa el motivo del reporte';
+            reportError.hidden = false;
+            return;
+        }
+        try {
+            await apiFetch('/account-reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_user_id: reportTargetId, reason: reportReason.value, comment: comment || null }),
+                silent: true
+            });
+        } catch (err) {
+            if (err.status === undefined) {
+                closeReportDialog(false);
+                return;
+            }
+            reportError.textContent = err.message;
+            reportError.hidden = false;
+            return;
+        }
+        closeReportDialog(true);
+        showSuccess('Reporte enviado');
+        refreshReportsBadge();
+    });
+
+    // Vista Reportes (coordinador y admin)
+    const reportsList = document.getElementById('reportsList');
+    const reportsEmpty = document.getElementById('reportsEmpty');
+    const reportsStatus = document.getElementById('reportsStatus');
+    const reportsBadge = document.getElementById('reportsBadge');
+
+    async function refreshReportsBadge() {
+        if (!currentUser || !REPORT_REVIEW_ROLES.includes(currentUser.role)) return;
+        try {
+            const data = await apiFetch('/account-reports/open-count');
+            reportsBadge.textContent = String(data.open);
+            reportsBadge.hidden = data.open === 0;
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+    }
+
+    function renderReportItem(item) {
+        const li = document.createElement('li');
+        li.className = 'change-item';
+        const head = document.createElement('div');
+        head.className = 'change-head';
+        const title = document.createElement('strong');
+        title.textContent = `${item.target_name} (${item.target_email})`;
+        const time = document.createElement('span');
+        time.className = 'change-time';
+        time.textContent = formatDateTime(item.created_at);
+        head.append(title, time);
+        li.appendChild(head);
+        li.appendChild(requestLine('Motivo', item.reason_label));
+        if (item.comment) li.appendChild(requestLine('Comentario', item.comment));
+        li.appendChild(requestLine('Reportado por', item.reporter));
+        let state = REPORT_STATUS[item.status] || item.status;
+        if (item.resolver) state += ` por ${item.resolver} (${formatDateTime(item.resolved_at)})`;
+        li.appendChild(requestLine('Estado', state));
+        if (item.resolution_note) li.appendChild(requestLine('Nota', item.resolution_note));
+        if (item.status === 'open') {
+            const actions = document.createElement('div');
+            actions.className = 'account-actions';
+            // Quien reportó puede retirarlo, pero la confirmación la da otra persona
+            const options = item.reporter_id === currentUser.id
+                ? [['dismiss', 'Retirar reporte']]
+                : [['confirm', 'Confirmar'], ['dismiss', 'Descartar']];
+            options.forEach(([decision, label]) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = decision === 'confirm' ? 'btn-action btn-small' : 'btn-secondary btn-small';
+                button.dataset.reportId = item.id;
+                button.dataset.decision = decision;
+                button.textContent = label;
+                actions.appendChild(button);
+            });
+            li.appendChild(actions);
+        }
+        return li;
+    }
+
+    async function loadReports() {
+        const status = reportsStatus.value;
+        let items;
+        try {
+            items = await apiFetch(`/account-reports${status ? `?status=${status}` : ''}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        reportsList.replaceChildren(...items.map(renderReportItem));
+        reportsEmpty.hidden = items.length > 0;
+        refreshReportsBadge();
+    }
+
+    reportsStatus.addEventListener('change', loadReports);
+    reportsList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-decision]');
+        if (!button) return;
+        const confirming = button.dataset.decision === 'confirm';
+        const note = prompt(confirming ? 'Nota para confirmar el reporte (obligatoria):' : 'Nota para descartar el reporte (obligatoria):');
+        if (note === null) return;
+        if (!note.trim()) {
+            showError('Escriba una nota');
+            return;
+        }
+        button.disabled = true;
+        try {
+            await apiFetch(`/account-reports/${button.dataset.reportId}/${button.dataset.decision}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ note: note.trim() })
+            });
+            showSuccess(confirming ? 'Reporte confirmado' : 'Reporte descartado');
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+        loadReports();
+    });
 
     // ----- Solicitudes con doble aprobación -----
     const REQUEST_KINDS = { role: 'Cambio de rol', name: 'Corrección de nombre', id_number: 'Corrección de cédula' };
@@ -3329,6 +3740,7 @@ document.addEventListener('DOMContentLoaded', () => {
             locked.textContent = 'Bloqueada por intentos';
             td.appendChild(locked);
         }
+        accountTags(user).forEach(tag => td.appendChild(tag));
         return td;
     }
 
@@ -3875,6 +4287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadUsers() {
         userMap = {};
         userRoleMap = {};
+        userAvailabilityMap = {};
         if (usersList) {
             usersList.replaceChildren();
         }
@@ -3897,6 +4310,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             userMap[user.id] = user.name;
             userRoleMap[user.id] = user.role || '';
+            userAvailabilityMap[user.id] = user.availability || null;
         });
     }
 
@@ -3996,11 +4410,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const assignMeBtn = e.target.closest('.btn-assign-me');
         if (assignMeBtn) {
             try {
-                await apiFetch(`/tickets/${selectedTicketId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ assigned_to: currentUser.id })
-                });
+                if (!(await assignTicket(currentUser.id))) return;
                 await reloadSelectedTicketAndList();
                 showSuccess('Ticket asignado');
             } catch (err) {
@@ -4017,16 +4427,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             try {
-                await apiFetch(`/tickets/${selectedTicketId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ assigned_to: parseInt(selectedUser) })
-                });
+                if (!(await assignTicket(parseInt(selectedUser, 10)))) return;
                 await reloadSelectedTicketAndList();
                 showSuccess('Ticket asignado');
             } catch (err) {
                 showError(err.message || 'Error al asignar el ticket');
             }
+        }
+
+        const reportBtn = e.target.closest('.btn-report-account');
+        if (reportBtn && currentTicket) {
+            const done = await openReportDialog(currentTicket.created_by, userMap[currentTicket.created_by] || 'el solicitante');
+            if (done) await reloadSelectedTicketAndList();
+            return;
         }
 
         const addCommentBtn = e.target.closest('.btn-add-comment');

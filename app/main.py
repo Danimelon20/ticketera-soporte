@@ -22,6 +22,7 @@ from .routers.chat import router as chat_router
 from .routers.drafts import router as drafts_router
 from .routers.account import router as account_router
 from .routers.accounts import router as accounts_router
+from .routers.reports import router as reports_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -139,6 +140,7 @@ app.include_router(chat_router)
 app.include_router(drafts_router)
 app.include_router(account_router)
 app.include_router(accounts_router)
+app.include_router(reports_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

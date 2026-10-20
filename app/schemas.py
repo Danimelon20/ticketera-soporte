@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Literal
 from .validators import normalize_phone, normalize_id_number, mask_id_number
@@ -95,6 +95,8 @@ class UserRead(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+    # Solo técnicos: available, vacation o away
+    availability: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -104,6 +106,7 @@ class StaffRead(BaseModel):
     id: int
     name: str
     role: str
+    availability: Optional[str] = None
 
 
 class PersonRead(BaseModel):
@@ -122,6 +125,8 @@ class MeRead(BaseModel):
     id_number: Optional[str] = None
     profile_complete: bool = True
     identity_locked: bool = False
+    availability: Optional[str] = None
+    return_date: Optional[date] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -213,6 +218,8 @@ class TicketUpdate(BaseModel):
     assigned_to: Optional[int] = None
     priority_id: Optional[int] = None
     category_id: Optional[int] = None
+    # Asignar a un técnico no disponible solo con confirmación explícita
+    confirm_unavailable: bool = False
 
 
 class TicketRead(BaseModel):
@@ -279,6 +286,12 @@ class AILevelUpdate(BaseModel):
     level: int = Field(ge=0, le=4)
 
 
+class RequesterFlags(BaseModel):
+    """Solo para el personal: resultado de Hacienda (sin el nombre) y si la cuenta está reportada."""
+    identity: str
+    reported: bool = False
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
@@ -287,6 +300,7 @@ class TicketDetail(TicketRead):
     following: bool = False
     ai_analysis: Optional[AIAnalysisRead] = None
     people: list[PersonRead] = []
+    requester_flags: Optional[RequesterFlags] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -332,6 +346,10 @@ class DirectoryUser(BaseModel):
     tickets_assigned_open: int = 0
     login_locked: bool = False
     identity_locked: bool = False
+    availability: Optional[str] = None
+    return_date: Optional[date] = None
+    identity: Optional[str] = None
+    reported: bool = False
 
 
 class PasswordResetRequest(BaseModel):
@@ -435,6 +453,7 @@ class DraftRead(BaseModel):
     needs_review: bool = False
     ticket_id: Optional[int] = None
     pending_reason: Optional[str] = None
+    requester_flags: Optional[RequesterFlags] = None
 
 
 class DraftConfirm(BaseModel):
@@ -452,3 +471,46 @@ class DraftConfirm(BaseModel):
         if not v.strip():
             raise ValueError("Este campo no puede estar vacío")
         return v.strip()
+
+
+class AvailabilityUpdate(BaseModel):
+    status: Literal["available", "vacation", "away"]
+    return_date: Optional[date] = None
+
+
+class AccountReportCreate(BaseModel):
+    target_user_id: int
+    reason: str = Field(max_length=30)
+    comment: Optional[str] = Field(default=None, max_length=500)
+
+
+class AccountReportResolve(BaseModel):
+    note: str = Field(max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def note_required(cls, v):
+        if not v.strip():
+            raise ValueError("Escriba una nota")
+        return v.strip()
+
+
+class AccountReportRead(BaseModel):
+    id: int
+    target_user_id: int
+    target_name: str
+    target_email: str
+    reporter_id: int
+    reporter: str
+    reason: str
+    reason_label: str
+    comment: Optional[str] = None
+    status: str
+    resolver: Optional[str] = None
+    resolution_note: Optional[str] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+
+
+class AccountReportCount(BaseModel):
+    open: int

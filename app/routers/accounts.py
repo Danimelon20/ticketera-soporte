@@ -4,8 +4,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, config, hacienda, identity, mailer, models, throttle
-from ..schemas import AccountRequestCreate, AccountRequestRead, RejectRequest, SignupStarted
+from .. import accounts, audit, availability, config, hacienda, identity, mailer, models, throttle
+from ..schemas import AccountRequestCreate, AccountRequestRead, AvailabilityUpdate, RejectRequest, SignupStarted
 from ..security import get_current_user, mask_email, unusable_password_hash
 from ..validators import mask_last4, normalize_id_number
 from .admin import require_admin
@@ -69,6 +69,18 @@ def reset_access(user_id: int, db: Session = Depends(get_db), current_user: mode
     # El código va solo al correo de la persona: la respuesta nunca lo trae (send_reset_code hace commit)
     send_reset_code(db, user, requested_by=current_user)
     return SignupStarted(email_hint=mask_email(user.email))
+
+
+@router.put("/accounts/{user_id}/availability", status_code=status.HTTP_204_NO_CONTENT)
+def change_availability(
+    user_id: int, data: AvailabilityUpdate, db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    user = _target(db, user_id)
+    accounts.check_can_manage(current_user, user, "availability")
+    availability.set_availability(db, current_user, user, data.status, data.return_date)
+    db.commit()
+    return None
 
 
 @router.post("/accounts/{user_id}/unlock", status_code=status.HTTP_204_NO_CONTENT)

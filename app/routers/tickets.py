@@ -9,7 +9,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import comments as internal_comments, email_analysis, identity
+from .. import account_reports, availability, comments as internal_comments, email_analysis, identity
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -32,6 +32,13 @@ def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Tick
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
     return db_ticket
+
+
+def unavailable_message(user: models.User, status: str, return_date) -> str:
+    label = availability.LABELS.get(status, status).lower()
+    state = "está de vacaciones" if status == "vacation" else f"está {label}"
+    back = f" (regresa el {return_date.strftime('%d/%m/%Y')})" if return_date else ""
+    return f"{person_name(user)} {state}{back}. ¿Asignar de todas formas?"
 
 
 def hides_personal_data(ticket: models.Ticket, current_user) -> bool:
@@ -233,6 +240,11 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
     if current_user.role in AI_ROLES:
         row = db_ticket.ai_analysis
         extra["ai_analysis"] = ai_analysis_read(row, db_ticket) if row else None
+    if current_user.role != "requester":
+        # Solo el personal: el solicitante nunca recibe esta clave
+        flags = account_reports.staff_flags(db, db.get(models.User, db_ticket.created_by))
+        if flags is not None:
+            extra["requester_flags"] = flags
     return TicketDetail(
         **ticket_read(db_ticket, current_user).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
@@ -366,6 +378,14 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
                 raise HTTPException(status_code=403, detail="Un técnico solo puede asignarse tickets a sí mismo")
             if db_ticket.assigned_to is not None and db_ticket.assigned_to != current_user.id:
                 raise HTTPException(status_code=403, detail="Este ticket ya está asignado a otra persona")
+        # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
+        if (
+            data.assigned_to != db_ticket.assigned_to
+            and not data.confirm_unavailable
+            and not availability.is_available(db, user)
+        ):
+            status_, return_date = availability.get(db, user)
+            raise HTTPException(status_code=409, detail=unavailable_message(user, status_, return_date))
         # Regla 3: Asignar en cualquier estado abierto (new, in_progress, resolved).
         # (El coordinador debe poder asignar o reasignar el ticket a un técnico o coordinador en los estados "new", "in_progress" y "resolved" - no en "closed", que ya da error).
         # Anteriormente ¿había alguna restricción para el coordinador que impedía asignar cuando el estado no es "new"?

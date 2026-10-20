@@ -80,6 +80,20 @@ def id_number_taken(db: Session, id_number: str, user_id: int | None) -> bool:
     return query.first() is not None
 
 
+def hacienda_label_code(db: Session, user: models.User) -> str:
+    """Solo el resultado (match, mismatch, not_found o unverified), nunca el nombre de Hacienda."""
+    row = _row(db, user)
+    return row.hacienda_result if row is not None and row.hacienda_result else "unverified"
+
+
+def hacienda_codes(db: Session, user_ids: list[int]) -> dict[int, str]:
+    if not user_ids:
+        return {}
+    rows = db.query(models.RequesterIdentity).filter(models.RequesterIdentity.user_id.in_(user_ids)).all()
+    found = {r.user_id: r.hacienda_result for r in rows if r.hacienda_result}
+    return {uid: found.get(uid, "unverified") for uid in user_ids}
+
+
 def save_hacienda_result(db: Session, user: models.User, name: str, id_number: str) -> None:
     """Guarda si el nombre coincide con Hacienda (nunca el nombre de Hacienda). No hace commit."""
     row = _get_or_create(db, user)

@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+import logging
+from datetime import date, datetime, timedelta
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +19,7 @@ def _clean_db():
     db = SessionLocal()
     try:
         db.query(models.AlertSent).delete()
+        db.query(models.TechnicianAvailability).delete()
         db.query(models.EmailDraft).delete()
         # Los tickets abiertos de otras pruebas también dispararían alertas
         db.query(models.Ticket).update({"status": "closed"})
@@ -141,7 +143,7 @@ def test_alert_is_not_repeated(make_user, make_ticket, sent):
     assert first["critical"] == 1 and first["overdue"] == 1
     count = len(sent)
     again = _run(MONDAY_9AM + timedelta(minutes=2))
-    assert again == {"critical": 0, "overdue": 0, "due_soon": 0}
+    assert again == {"critical": 0, "overdue": 0, "due_soon": 0, "return_date": 0}
     assert len(sent) == count
 
 
@@ -357,3 +359,120 @@ def test_health_shows_alerts(client, make_user, make_ticket, sent):
     _run()
     health = client.get("/api/admin/health", headers=admin["headers"]).json()
     assert health["alerts_last"].startswith("2031-03-03T15:00:00")
+
+
+# ----- Técnicos no disponibles -----
+
+def _set_availability(user_id, status, return_date=None):
+    db = SessionLocal()
+    try:
+        db.add(models.TechnicianAvailability(
+            user_id=user_id, status=status, return_date=return_date, updated_at=datetime(2031, 3, 1),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _availability(user_id):
+    db = SessionLocal()
+    try:
+        return db.query(models.TechnicianAvailability).filter(models.TechnicianAvailability.user_id == user_id).one()
+    finally:
+        db.close()
+
+
+def test_due_soon_of_unavailable_technician_goes_to_coordinators(make_user, make_ticket, sent):
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    _set_availability(technician["id"], "vacation")
+    _ticket(make_ticket, make_user("requester"), title="Impresora", due_at=MONDAY_8AM + timedelta(hours=8),
+            assigned_to=technician["id"], status="in_progress")
+    assert _run(MONDAY_8AM + timedelta(hours=7))["due_soon"] == 1
+    to = {call[0] for call in _alerts_sent(sent, "[Ticketera] Por vencer")}
+    assert coordinator["email"] in to
+    assert technician["email"] not in to
+
+
+def test_overdue_of_unavailable_technician_skips_technician(make_user, make_ticket, sent):
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    _set_availability(technician["id"], "away")
+    _ticket(make_ticket, make_user("requester"), due_at=MONDAY_9AM - timedelta(hours=1),
+            assigned_to=technician["id"], status="in_progress")
+    assert _run()["overdue"] == 1
+    to = {call[0] for call in _alerts_sent(sent, "[Ticketera] Vencido")}
+    assert coordinator["email"] in to
+    assert technician["email"] not in to
+
+
+@pytest.fixture
+def summary_hour(monkeypatch):
+    monkeypatch.setattr(config, "DAILY_SUMMARY_HOUR", 8)
+
+
+def _return_notices(sent):
+    return [call for call in sent if call[1].startswith("[Ticketera] Fecha de regreso")]
+
+
+def test_return_date_notice_once_and_state_unchanged(make_user, sent, summary_hour, monkeypatch):
+    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    coordinator = make_user("coordinator")
+    technician = make_user("technician", "Luis Rojas")
+    _set_availability(technician["id"], "vacation", date(2031, 3, 3))
+
+    assert _run()["return_date"] == 1
+    notices = _return_notices(sent)
+    assert {call[0] for call in notices} >= {technician["email"], coordinator["email"]}
+    assert "Luis Rojas" in notices[0][2] and "03/03/2031" in notices[0][2]
+    # El estado no vuelve solo a Disponible
+    assert _availability(technician["id"]).status == "vacation"
+
+    count = len(sent)
+    assert _run(MONDAY_9AM + timedelta(hours=3))["return_date"] == 0
+    assert len(sent) == count
+
+
+def test_return_date_notice_again_for_a_new_date(make_user, sent, summary_hour, monkeypatch):
+    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    make_user("coordinator")
+    technician = make_user("technician")
+    _set_availability(technician["id"], "away", date(2031, 3, 3))
+    assert _run()["return_date"] == 1
+    db = SessionLocal()
+    try:
+        row = db.query(models.TechnicianAvailability).filter(models.TechnicianAvailability.user_id == technician["id"]).one()
+        row.return_date = date(2031, 3, 4)
+        db.commit()
+    finally:
+        db.close()
+    assert _run()["return_date"] == 0
+    assert _run(MONDAY_9AM + timedelta(days=1))["return_date"] == 1
+
+
+def test_return_date_notice_waits_for_summary_hour(make_user, sent, summary_hour, monkeypatch):
+    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    make_user("coordinator")
+    technician = make_user("technician")
+    _set_availability(technician["id"], "vacation", date(2031, 3, 3))
+    # 07:00 en Costa Rica: todavía no
+    assert _run(MONDAY_8AM - timedelta(hours=1))["return_date"] == 0
+    assert _return_notices(sent) == []
+    # 08:00 en adelante: sí
+    assert _run(MONDAY_8AM)["return_date"] == 1
+    assert _return_notices(sent)
+
+
+def test_return_date_notice_without_email_goes_to_log_once(make_user, summary_hour, monkeypatch, caplog):
+    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    make_user("coordinator")
+    technician = make_user("technician")
+    _set_availability(technician["id"], "vacation", date(2031, 3, 3))
+    with caplog.at_level(logging.WARNING):
+        assert _run()["return_date"] == 1
+        assert _run(MONDAY_9AM + timedelta(minutes=2))["return_date"] == 0
+    marks = [r for r in caplog.records if "[SOLO DESARROLLO] Aviso de fecha de regreso" in r.getMessage()]
+    assert len(marks) == 1
+    # El log no lleva correos
+    assert technician["email"] not in caplog.text
+    assert _availability(technician["id"]).return_notice_for == date(2031, 3, 3)

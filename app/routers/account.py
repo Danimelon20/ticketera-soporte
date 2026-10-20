@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import audit, mailer, models, throttle
-from ..schemas import CodeRequest, EmailChangeRequest, MeRead, PasswordChange, PhoneUpdate, SignupStarted
+from .. import audit, availability, mailer, models, throttle
+from ..schemas import AvailabilityUpdate, CodeRequest, EmailChangeRequest, MeRead, PasswordChange, PhoneUpdate, SignupStarted
 from ..security import (
     generate_login_code, get_current_session, get_current_user, hash_code, hash_password,
     mask_email, password_min, verify_password,
@@ -55,6 +55,17 @@ def change_password(
     audit.record(db, current_user.id, "password_changed", target=current_user)
     db.commit()
     return None
+
+
+@router.put("/availability", response_model=MeRead)
+def change_own_availability(
+    data: AvailabilityUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != "technician":
+        raise HTTPException(status_code=403, detail=availability.ONLY_TECHNICIANS)
+    availability.set_availability(db, current_user, current_user, data.status, data.return_date)
+    db.commit()
+    return me_read(db, current_user)
 
 
 @router.put("/phone", response_model=MeRead)
