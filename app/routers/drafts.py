@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, config, email_analysis, identity, models
+from .. import account_reports, auto_assign, config, email_analysis, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import DraftConfirm, DraftRead
@@ -191,6 +191,8 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         db.refresh(obj)
 
     background_tasks.add_task(send_ticket_created, ticket, requester, category, priority)
+    # El nivel ya existe (viene del análisis del borrador)
+    background_tasks.add_task(auto_assign.assign_new, ticket.id)
     return _draft_read(db, draft, reviewer)
 
 

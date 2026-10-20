@@ -116,6 +116,18 @@ class PersonRead(BaseModel):
     role: str
 
 
+class ScheduleDay(BaseModel):
+    """Un día del horario de un técnico: 0 = lunes … 6 = domingo, horas "HH:MM" (se validan en la ruta)."""
+    weekday: int
+    start: str = Field(max_length=5)
+    end: str = Field(max_length=5)
+
+
+class ScheduleUpdate(BaseModel):
+    # Lista vacía: sin horario (no recibe asignaciones automáticas)
+    days: list[ScheduleDay] = Field(default_factory=list, max_length=7)
+
+
 class MeRead(BaseModel):
     id: int
     name: str
@@ -127,6 +139,9 @@ class MeRead(BaseModel):
     identity_locked: bool = False
     availability: Optional[str] = None
     return_date: Optional[date] = None
+    # Solo técnicos: lo ven, pero lo definen coordinador y admin
+    schedule: Optional[list[ScheduleDay]] = None
+    schedule_summary: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -301,6 +316,7 @@ class TicketDetail(TicketRead):
     ai_analysis: Optional[AIAnalysisRead] = None
     people: list[PersonRead] = []
     requester_flags: Optional[RequesterFlags] = None
+    auto_assigned: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -350,6 +366,9 @@ class DirectoryUser(BaseModel):
     return_date: Optional[date] = None
     identity: Optional[str] = None
     reported: bool = False
+    schedule: Optional[list[ScheduleDay]] = None
+    schedule_summary: Optional[str] = None
+    on_shift: Optional[bool] = None
 
 
 class PasswordResetRequest(BaseModel):

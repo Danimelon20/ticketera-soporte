@@ -392,6 +392,7 @@ ACCOUNT_CHANGE_ACTIONS = (
     "login_locked", "password_reset", "access_reset_sent", "access_reset_forced", "login_unlocked", "tickets_released",
     "request_created", "request_approved", "request_rejected",
     "availability_changed", "report_created", "report_confirmed", "report_dismissed",
+    "schedule_changed",
 )
 
 
@@ -523,3 +524,36 @@ class AccountReport(Base):
     target = relationship("User", foreign_keys=[target_user_id])
     reporter = relationship("User", foreign_keys=[reporter_id])
     resolver = relationship("User", foreign_keys=[resolved_by])
+
+
+class TechnicianSchedule(Base):
+    """Horario de un técnico: un rango por día (0 = lunes … 6 = domingo). Día sin fila: no trabaja."""
+    __tablename__ = "technician_schedules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    weekday = Column(Integer, nullable=False)
+    # "HH:MM" en OFFICE_TZ; se validan en Python
+    start_time = Column(String(5), nullable=False)
+    end_time = Column(String(5), nullable=False)
+
+    __table_args__ = (UniqueConstraint("user_id", "weekday", name="uq_schedule_user_day"),)
+
+
+AUTO_ASSIGN_STATUSES = ("waiting", "assigned", "cancelled")
+
+
+class TicketAutoAssignment(Base):
+    """Asignación automática de un ticket: pendiente (sin candidato), hecha o ya no aplica. Estado en Python."""
+    __tablename__ = "ticket_auto_assignments"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    status = Column(String(20), nullable=False, default="waiting")
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    # Entrada del historial de la asignación: si después hay otra, ya no es automática
+    history_id = Column(Integer, ForeignKey("history.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    ticket = relationship("Ticket")

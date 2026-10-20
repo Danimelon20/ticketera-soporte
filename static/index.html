@@ -328,6 +328,13 @@
                 </form>
             </section>
 
+            <section id="accountSchedule" class="account-section" aria-labelledby="accountScheduleTitle" hidden>
+                <h2 id="accountScheduleTitle" class="account-title">Horario</h2>
+                <p id="accountScheduleSummary" class="account-current"></p>
+                <ul id="accountScheduleDays" class="schedule-view"></ul>
+                <small class="help-text">Lo definen el coordinador o el administrador. Fuera de su horario no recibe tickets automáticamente.</small>
+            </section>
+
             <section id="accountEmail" class="account-section" aria-labelledby="accountEmailTitle">
                 <h2 id="accountEmailTitle" class="account-title">Correo</h2>
                 <p class="account-current">Correo actual: <strong id="accountCurrentEmail"></strong></p>
@@ -731,6 +738,20 @@
             <div class="dialog-actions">
                 <button type="button" id="reportCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-submit">Enviar reporte</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="scheduleDialog" class="app-dialog" aria-labelledby="scheduleDialogTitle">
+        <form id="scheduleForm" class="profile-form">
+            <h2 id="scheduleDialogTitle" class="modal-title">Horario</h2>
+            <p id="scheduleTarget" class="help-text"></p>
+            <div id="scheduleRows" class="schedule-rows"></div>
+            <small class="help-text">Hora de la oficina. Un día sin marcar es un día que no trabaja.</small>
+            <p id="scheduleError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="scheduleCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar horario</button>
             </div>
         </form>
     </dialog>

@@ -348,4 +348,8 @@ def process_message(db: Session, msg) -> str:
     db.commit()
 
     send_ticket_created(ticket, user, category, priority)
+    # Con la IA se asigna al terminar su análisis (analyze_pending); sin ella, ya mismo
+    if not config.AI_ANALYSIS_ENABLED:
+        from . import auto_assign
+        auto_assign.assign_new(ticket.id)
     return "created"

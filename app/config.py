@@ -34,6 +34,12 @@ ALERTS_ENABLED = os.getenv("ALERTS_ENABLED", "false").lower() == "true"
 ALERT_WARN_PERCENT = int(os.getenv("ALERT_WARN_PERCENT", "75"))
 ALERTS_CHECK_SECONDS = int(os.getenv("ALERTS_CHECK_SECONDS", "120"))
 
+# Asignación automática por carga a técnicos disponibles y en turno (no depende del correo)
+AUTO_ASSIGN_ENABLED = os.getenv("AUTO_ASSIGN_ENABLED", "false").lower() == "true"
+# levels: suma de niveles de sus tickets abiertos; count: cantidad de tickets abiertos
+AUTO_ASSIGN_LOAD_MODE = os.getenv("AUTO_ASSIGN_LOAD_MODE", "levels").lower()
+AUTO_ASSIGN_CHECK_SECONDS = int(os.getenv("AUTO_ASSIGN_CHECK_SECONDS", "60"))
+
 
 # Hacienda: se leen en cada llamada para poder cambiarlas sin reiniciar (y en pruebas)
 def hacienda_check_enabled() -> bool:

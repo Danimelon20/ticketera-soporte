@@ -1538,7 +1538,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const fieldsData = [
             { title: 'Estado', content: statusBadge },
             { title: 'Prioridad', content: priorityBadge },
-            { title: 'Asignado a', text: assignedTo },
+            { title: 'Asignado a', text: assignedTo, content: ticket.auto_assigned ? autoAssignedContent(assignedTo) : null },
             { title: 'Teléfono', text: ticket.contact_phone || '' },
             { title: 'Cédula', text: ticket.contact_id_number || '' }
         ];
@@ -2085,7 +2085,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } else {
                 const entry = ev.data;
-                const changedByName = userMap[entry.changed_by] || 'Usuario';
+                // Las asignaciones automáticas las registra el Agente virtual: se muestran como "Sistema"
+                const changedByName = entry.field === 'assigned_to' && userRoleMap[entry.changed_by] === 'agent'
+                    ? 'Sistema'
+                    : userMap[entry.changed_by] || 'Usuario';
 
                 const dotContainer = document.createElement('div');
                 dotContainer.style.width = '32px';
@@ -2445,6 +2448,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('accountPersonal').hidden = !isRequester;
         accountPhoneSection.hidden = isRequester || required;
         accountAvailabilitySection.hidden = currentUser.role !== 'technician';
+        accountScheduleSection.hidden = currentUser.role !== 'technician';
         accountEmailSection.hidden = required;
         accountPasswordSection.hidden = required;
         fillAccountSections();
@@ -2497,6 +2501,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Mi cuenta: teléfono (personal), correo y contraseña (todos) -----
     const accountPhoneSection = document.getElementById('accountPhone');
     const accountAvailabilitySection = document.getElementById('accountAvailability');
+    const accountScheduleSection = document.getElementById('accountSchedule');
     const ownAvailabilityStatus = document.getElementById('ownAvailabilityStatus');
     const ownAvailabilityReturn = document.getElementById('ownAvailabilityReturn');
     const ownAvailabilityReturnGroup = document.getElementById('ownAvailabilityReturnGroup');
@@ -2532,6 +2537,7 @@ document.addEventListener('DOMContentLoaded', () => {
         passwordHint.textContent = `Al menos ${passwordMinimum()} caracteres.`;
         passwordForm.reset();
         if (currentUser.role === 'technician') {
+            renderOwnSchedule(currentUser.schedule || [], currentUser.schedule_summary);
             fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
                 currentUser.availability, currentUser.return_date);
         }
@@ -3208,13 +3214,15 @@ document.addEventListener('DOMContentLoaded', () => {
             active: ['coordinator', 'technician', 'requester'],
             reset: ['coordinator', 'technician'],
             unlock: ['admin', 'coordinator', 'technician', 'requester'],
-            availability: ['technician']
+            availability: ['technician'],
+            schedule: ['technician']
         },
         coordinator: {
             active: ['technician', 'requester'],
             reset: ['technician'],
             unlock: ['technician', 'requester'],
-            availability: ['technician']
+            availability: ['technician'],
+            schedule: ['technician']
         }
     };
 
@@ -3237,6 +3245,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (canManage(user, 'active')) buttons.push(makeActionButton(user.is_active ? 'deactivate' : 'reactivate'));
         if (user.is_active && canManage(user, 'reset')) buttons.push(makeActionButton('reset-access'));
         if (user.login_locked && canManage(user, 'unlock')) buttons.push(makeActionButton('unlock'));
+        if (canManage(user, 'schedule')) {
+            const button = makeActionButton('schedule', 'Horario');
+            button.dataset.schedule = JSON.stringify(user.schedule || []);
+            buttons.push(button);
+        }
         if (canManage(user, 'availability')) {
             const button = makeActionButton('availability', 'Cambiar disponibilidad');
             button.dataset.availability = user.availability || 'available';
@@ -3261,6 +3274,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = row.dataset.userName;
         const action = button.dataset.action;
         if (action === 'availability') return openAvailabilityDialog(row.dataset.userId, name, button.dataset);
+        if (action === 'schedule') return openScheduleDialog(row.dataset.userId, name, JSON.parse(button.dataset.schedule));
         if (action === 'report') return openReportDialog(row.dataset.userId, name);
         if (action === 'deactivate') {
             const extra = row.dataset.userRole === 'technician' ? ' Sus tickets abiertos quedarán sin asignar.' : '';
@@ -3321,9 +3335,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function accountTags(user) {
-        if (user.role === 'technician' && user.availability && user.availability !== 'available') {
-            const back = user.return_date ? ` · regresa ${formatPlainDate(user.return_date)}` : '';
-            return [makeTag(`${AVAILABILITY_LABELS[user.availability]}${back}`, 'tag-away')];
+        if (user.role === 'technician') {
+            const tags = [];
+            if (user.availability && user.availability !== 'available') {
+                const back = user.return_date ? ` · regresa ${formatPlainDate(user.return_date)}` : '';
+                tags.push(makeTag(`${AVAILABILITY_LABELS[user.availability]}${back}`, 'tag-away'));
+            }
+            if (user.schedule_summary) {
+                const summary = document.createElement('span');
+                summary.className = 'schedule-summary';
+                summary.textContent = user.schedule_summary;
+                tags.push(summary);
+                if (user.schedule && user.schedule.length) {
+                    tags.push(user.on_shift ? makeTag('En turno', 'tag-on-shift') : makeTag('Fuera de turno', 'tag-off-shift'));
+                }
+            }
+            return tags;
         }
         if (user.role === 'requester' && user.identity) return requesterTags(user);
         return [];
@@ -3374,6 +3401,169 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return true;
     }
+
+    // ----- Horarios (los definen coordinador y admin; el técnico solo los ve) -----
+    const WEEKDAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const DEFAULT_START = '08:00';
+    const DEFAULT_END = '17:00';
+
+    function autoAssignedContent(name) {
+        const wrap = document.createElement('span');
+        wrap.className = 'assigned-auto';
+        wrap.appendChild(document.createTextNode(name));
+        wrap.appendChild(makeTag('Asignado automáticamente', 'tag-auto'));
+        return wrap;
+    }
+
+    function renderOwnSchedule(days, summary) {
+        document.getElementById('accountScheduleSummary').textContent = summary || 'Sin horario';
+        const byDay = Object.fromEntries(days.map(d => [d.weekday, d]));
+        const list = document.getElementById('accountScheduleDays');
+        list.replaceChildren(...WEEKDAY_NAMES.map((dayName, weekday) => {
+            const li = document.createElement('li');
+            const label = document.createElement('span');
+            label.className = 'schedule-day';
+            label.textContent = dayName;
+            const value = document.createElement('span');
+            const day = byDay[weekday];
+            value.textContent = day ? `${day.start} – ${day.end}` : 'No trabaja';
+            li.append(label, value);
+            return li;
+        }));
+    }
+
+    const scheduleDialog = document.getElementById('scheduleDialog');
+    const scheduleForm = document.getElementById('scheduleForm');
+    const scheduleRows = document.getElementById('scheduleRows');
+    const scheduleError = document.getElementById('scheduleError');
+    let scheduleUserId = null;
+    let scheduleDone = null;
+
+    function syncScheduleRow(row) {
+        const works = row.querySelector('.schedule-works').checked;
+        row.querySelectorAll('input[type="time"]').forEach(input => {
+            input.disabled = !works;
+            input.required = works;
+        });
+    }
+
+    // Las 7 filas se crean una sola vez; al abrir solo se llenan
+    WEEKDAY_NAMES.forEach((dayName, weekday) => {
+        const row = document.createElement('fieldset');
+        row.className = 'schedule-row';
+        row.dataset.weekday = String(weekday);
+        const legend = document.createElement('legend');
+        legend.className = 'schedule-day';
+        legend.textContent = dayName;
+        const worksLabel = document.createElement('label');
+        worksLabel.className = 'schedule-works-label';
+        const works = document.createElement('input');
+        works.type = 'checkbox';
+        works.className = 'schedule-works';
+        worksLabel.append(works, document.createTextNode(' Trabaja'));
+        const times = document.createElement('div');
+        times.className = 'schedule-times';
+        [['start', 'Inicio'], ['end', 'Fin']].forEach(([key, text]) => {
+            const label = document.createElement('label');
+            const input = document.createElement('input');
+            input.type = 'time';
+            input.step = 60;
+            input.className = `schedule-${key}`;
+            input.setAttribute('aria-label', `${text} del ${dayName.toLowerCase()}`);
+            label.append(document.createTextNode(`${text} `), input);
+            times.appendChild(label);
+        });
+        row.append(legend, worksLabel, times);
+        scheduleRows.appendChild(row);
+    });
+
+    scheduleRows.addEventListener('change', (e) => {
+        if (!e.target.classList.contains('schedule-works')) return;
+        const row = e.target.closest('.schedule-row');
+        // Al marcar un día vacío se propone el horario de oficina
+        if (e.target.checked) {
+            const start = row.querySelector('.schedule-start');
+            const end = row.querySelector('.schedule-end');
+            if (!start.value) start.value = DEFAULT_START;
+            if (!end.value) end.value = DEFAULT_END;
+        }
+        syncScheduleRow(row);
+    });
+
+    function openScheduleDialog(userId, name, days) {
+        return new Promise(resolve => {
+            scheduleUserId = userId;
+            scheduleDone = resolve;
+            document.getElementById('scheduleTarget').textContent = name;
+            const byDay = Object.fromEntries(days.map(d => [d.weekday, d]));
+            scheduleRows.querySelectorAll('.schedule-row').forEach(row => {
+                const day = byDay[Number(row.dataset.weekday)];
+                row.querySelector('.schedule-works').checked = Boolean(day);
+                row.querySelector('.schedule-start').value = day ? day.start : '';
+                row.querySelector('.schedule-end').value = day ? day.end : '';
+                syncScheduleRow(row);
+            });
+            scheduleError.hidden = true;
+            scheduleDialog.showModal();
+            scheduleRows.querySelector('.schedule-works').focus();
+        });
+    }
+
+    function closeScheduleDialog(done) {
+        if (scheduleDialog.open) scheduleDialog.close();
+        const resolve = scheduleDone;
+        scheduleDone = null;
+        if (resolve) resolve(done);
+    }
+
+    function showScheduleError(message) {
+        scheduleError.textContent = message;
+        scheduleError.hidden = false;
+    }
+
+    document.getElementById('scheduleCancel').addEventListener('click', () => closeScheduleDialog(false));
+    scheduleDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeScheduleDialog(false);
+    });
+    scheduleForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        scheduleError.hidden = true;
+        const days = [];
+        for (const row of scheduleRows.querySelectorAll('.schedule-row')) {
+            if (!row.querySelector('.schedule-works').checked) continue;
+            const start = row.querySelector('.schedule-start').value;
+            const end = row.querySelector('.schedule-end').value;
+            const dayName = WEEKDAY_NAMES[Number(row.dataset.weekday)];
+            if (!start || !end) {
+                showScheduleError(`Escriba la hora de inicio y de fin del ${dayName.toLowerCase()}`);
+                return;
+            }
+            // Mismas reglas que app/schedules.py (el servidor también valida)
+            if (start >= end) {
+                showScheduleError(`${dayName}: la hora de inicio debe ser anterior a la de fin`);
+                return;
+            }
+            days.push({ weekday: Number(row.dataset.weekday), start, end });
+        }
+        try {
+            await apiFetch(`/accounts/${scheduleUserId}/schedule`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days }),
+                silent: true
+            });
+        } catch (err) {
+            if (err.status === undefined) {
+                closeScheduleDialog(false);
+                return;
+            }
+            showScheduleError(err.message);
+            return;
+        }
+        closeScheduleDialog(true);
+        showSuccess('Horario guardado');
+    });
 
     // Diálogo de disponibilidad (coordinador y admin sobre técnicos)
     const availabilityDialog = document.getElementById('availabilityDialog');

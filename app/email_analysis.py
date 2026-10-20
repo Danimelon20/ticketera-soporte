@@ -208,16 +208,23 @@ def analyze_pending(limit: int = 2) -> int:
         db.close()
 
     for row_id in ids:
+        result = None
+        ticket_id = None
         with ANALYSIS_LOCK:
             db = SessionLocal()
             try:
                 row = db.get(models.TicketAIAnalysis, row_id)
+                ticket_id = row.ticket_id if row is not None else None
                 if row is not None and row.status == "pending":
-                    analyze_ticket(db, row.ticket)
+                    result = analyze_ticket(db, row.ticket)
             except Exception:
                 logging.exception("Falló el análisis de un ticket")
             finally:
                 db.close()
+        # Fuera del turno del análisis: terminado o fallido ya tiene su nivel (o cuenta como 2)
+        if result in ("done", "error") and ticket_id is not None:
+            from . import auto_assign
+            auto_assign.assign_new(ticket_id)
     return len(ids)
 
 

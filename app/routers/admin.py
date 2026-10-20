@@ -14,8 +14,8 @@ from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
 from .. import (
-    account_reports, accounts, alerts, availability, config, daily_summary, email_analysis, email_poller, identity,
-    models, throttle,
+    account_reports, accounts, alerts, auto_assign, availability, config, daily_summary, email_analysis, email_poller,
+    identity, models, schedules, throttle,
 )
 from ..schemas import AccountChangePage, AccountChangeRead, AdminUserUpdate, DirectoryUser
 from ..security import get_current_user, mask_email
@@ -48,7 +48,10 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
         .group_by(models.Ticket.assigned_to)
         .all()
     )
-    statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    technician_ids = [u.id for u in users if u.role == "technician"]
+    statuses = availability.statuses_for(db, technician_ids)
+    shifts = schedules.for_users(db, technician_ids)
+    now = auto_assign._now()
     requester_ids = [u.id for u in users if u.role == "requester"]
     identities = identity.hacienda_codes(db, requester_ids)
     reported = account_reports.reported_ids(db, requester_ids)
@@ -69,12 +72,20 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
             return_date=statuses[u.id][1] if u.id in statuses else None,
             identity=identities.get(u.id),
             reported=u.id in reported,
+            **_schedule_fields(shifts.get(u.id), now),
         )
         for u in users
     ]
     # identity.is_locked puede guardar la fecha de bloqueo de cuentas anteriores
     db.commit()
     return rows
+
+
+def _schedule_fields(rows: list[models.TechnicianSchedule] | None, now: datetime) -> dict:
+    if rows is None:
+        return {}
+    days = schedules.as_dicts(rows)
+    return {"schedule": days, "schedule_summary": schedules.summary(days), "on_shift": schedules.on_shift(rows, now)}
 
 
 @router.get("/directory", response_model=list[DirectoryUser])

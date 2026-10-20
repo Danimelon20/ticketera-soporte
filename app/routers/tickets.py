@@ -9,7 +9,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import account_reports, availability, comments as internal_comments, email_analysis, identity
+from .. import account_reports, auto_assign, availability, comments as internal_comments, email_analysis, identity
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -142,8 +142,11 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     db.commit()
     db.refresh(db_ticket)
 
-    # Mismo análisis que los tickets por correo, después de responder: no espera al modelo
-    if config.AI_ANALYSIS_ENABLED:
+    # Mismo análisis que los tickets por correo, después de responder: no espera al modelo.
+    # La asignación automática va después del análisis, para que el nivel ya exista.
+    if config.AUTO_ASSIGN_ENABLED:
+        background_tasks.add_task(auto_assign.analyze_then_assign, db_ticket.id)
+    elif config.AI_ANALYSIS_ENABLED:
         background_tasks.add_task(email_analysis.analyze_ticket_by_id, db_ticket.id)
     return db_ticket
 
@@ -253,6 +256,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         contact_id_number=contact_id_number,
         following=following,
         people=ticket_people(db, db_ticket, comments, history),
+        auto_assigned=auto_assign.is_auto_assigned(db, db_ticket),
         **extra,
     )
 
@@ -422,6 +426,8 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
 
     if data.assigned_to is not None and data.assigned_to != db_ticket.assigned_to:
         db_ticket.assigned_to = data.assigned_to
+        # Asignado a mano: el sistema ya no lo asigna
+        auto_assign.cancel_waiting(db, db_ticket.id)
         if data.assigned_to != old_assigned_to:
             db.add(models.History(
                 ticket_id=db_ticket.id,

@@ -19,12 +19,14 @@ PERMISSIONS = {
         "reset": ("coordinator", "technician"),
         "unlock": ("admin", "coordinator", "technician", "requester"),
         "availability": ("technician",),
+        "schedule": ("technician",),
     },
     "coordinator": {
         "active": ("technician", "requester"),
         "reset": ("technician",),
         "unlock": ("technician", "requester"),
         "availability": ("technician",),
+        "schedule": ("technician",),
     },
 }
 

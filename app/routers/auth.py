@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import accounts, audit, availability, config, identity, mailer, models, throttle
+from .. import accounts, audit, availability, config, identity, mailer, models, schedules, throttle
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
@@ -511,7 +511,11 @@ def _availability_fields(db: Session, user: models.User) -> dict:
     if user.role != "technician":
         return {}
     status_, return_date = availability.get(db, user)
-    return {"availability": status_, "return_date": return_date}
+    days = schedules.as_dicts(schedules.get(db, user.id))
+    return {
+        "availability": status_, "return_date": return_date,
+        "schedule": days, "schedule_summary": schedules.summary(days),
+    }
 
 
 @router.get("/auth/me", response_model=MeRead)

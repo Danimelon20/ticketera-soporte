@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import config, models
+from . import auto_assign, config, models
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -113,9 +113,18 @@ async def lifespan(app: FastAPI):
         else:
             logging.warning("ALERTS_ENABLED=true pero EMAIL_ENABLED=false: no se enviarán alertas")
 
+    # La asignación automática no depende del correo ni de las alertas
+    assign_task = None
+    if config.AUTO_ASSIGN_ENABLED:
+        if config.AUTO_ASSIGN_LOAD_MODE not in auto_assign.LOAD_MODES:
+            logging.warning("AUTO_ASSIGN_LOAD_MODE=%s no es válido: se usa levels", config.AUTO_ASSIGN_LOAD_MODE)
+        assign_task = asyncio.create_task(auto_assign.auto_assign_forever())
+        logging.info("Asignación automática activa (modo %s), pendientes cada %s segundos",
+                     auto_assign.load_mode(), config.AUTO_ASSIGN_CHECK_SECONDS)
+
     yield
 
-    for task in (poller, summary, alerts_task):
+    for task in (poller, summary, alerts_task, assign_task):
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):
