@@ -10,7 +10,7 @@ from .. import config, email_analysis, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import DraftConfirm, DraftRead
-from ..security import get_current_user
+from ..security import get_current_user, mask_email
 from ..validators import mask_id_number, normalize_id_number, normalize_phone
 from .tickets import verify_id_number
 
@@ -74,6 +74,8 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
         data.description = _redact(data.description) if data.description else None
         data.contact_phone = mask_id_number(phone)
         data.contact_id_number = mask_id_number(id_number)
+        # Sin nombre en el perfil: el correo enmascarado, nunca el completo
+        data.requester_name = requester.name or mask_email(requester.email)
     return data
 
 

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate
+from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
@@ -42,9 +42,26 @@ def hides_personal_data(ticket: models.Ticket, current_user) -> bool:
 def ticket_read(ticket: models.Ticket, current_user) -> TicketRead:
     # En la base queda el texto original; solo se enmascara la respuesta
     data = TicketRead.model_validate(ticket)
+    data.assigned_name = person_name(ticket.assigned_user) if ticket.assigned_user else None
     if hides_personal_data(ticket, current_user):
         data.description = _redact(data.description)
     return data
+
+
+def person_name(user: models.User) -> str:
+    # Nunca el correo como respaldo: puede verlo otra persona
+    return user.name or "Sin nombre"
+
+
+def ticket_people(db: Session, ticket: models.Ticket, comments: list, history: list) -> list[PersonRead]:
+    """Nombre y rol de quienes aparecen en el ticket (sin correos ni datos personales)."""
+    ids = {ticket.created_by, ticket.assigned_to}
+    ids |= {c.user_id for c in comments}
+    ids |= {h.changed_by for h in history}
+    ids |= {int(v) for h in history if h.field == "assigned_to" for v in (h.old_value, h.new_value) if v and v.isdigit()}
+    ids.discard(None)
+    users = db.query(models.User).filter(models.User.id.in_(ids)).all() if ids else []
+    return [PersonRead(id=u.id, name=person_name(u), role=u.role) for u in users]
 
 
 def comment_read(comment: models.Comment, ticket: models.Ticket, current_user, internal: bool = False) -> CommentRead:
@@ -223,6 +240,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
         following=following,
+        people=ticket_people(db, db_ticket, comments, history),
         **extra,
     )
 

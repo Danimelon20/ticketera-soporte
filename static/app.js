@@ -1333,7 +1333,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const assignedSpan = document.createElement('span');
                 assignedSpan.style.marginLeft = 'auto';
                 assignedSpan.style.color = 'var(--muted)';
-                assignedSpan.textContent = userMap[ticket.assigned_to] || ticket.assigned_to;
+                assignedSpan.textContent = ticket.assigned_name || userMap[ticket.assigned_to] || ticket.assigned_to;
                 line3.appendChild(assignedSpan);
             }
 
@@ -1398,6 +1398,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showTicketDetail(ticket) {
         currentTicket = ticket;
+        // Nombres de quienes aparecen en el ticket (el solicitante no recibe la lista de cuentas)
+        (ticket.people || []).forEach(person => {
+            userMap[person.id] = person.name;
+            userRoleMap[person.id] = person.role;
+        });
         detailContent.replaceChildren();
         const detailPanelEl = document.getElementById('detailPanel');
         if (detailPanelEl) detailPanelEl.scrollTop = 0;
@@ -2309,6 +2314,8 @@ document.addEventListener('DOMContentLoaded', () => {
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
         navAdmin.hidden = role !== 'admin';
         navAccounts.hidden = role !== 'coordinator';
+        // La lista de cuentas con correos solo es para quien gestiona cuentas
+        navUsers.hidden = !(role === 'coordinator' || role === 'admin');
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
@@ -3823,16 +3830,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const usersList = document.getElementById('usersList');
 
     async function loadUsers() {
-        const users = await apiFetch('/users');
+        userMap = {};
+        userRoleMap = {};
         if (usersList) {
             usersList.replaceChildren();
         }
-        
-        userMap = {};
-        userRoleMap = {};
-        
+        // El solicitante no recibe la lista de cuentas: los nombres vienen en cada ticket
+        if (!currentUser || !['technician', 'coordinator', 'admin'].includes(currentUser.role)) return;
+        const users = await apiFetch('/users');
+        // El técnico recibe solo nombre y rol del personal: la lista con correos es para quien gestiona cuentas
+        const showList = currentUser.role === 'coordinator' || currentUser.role === 'admin';
+
         users.forEach(user => {
-            if (usersList) {
+            if (usersList && showList) {
                 const li = document.createElement('li');
                 li.style.padding = '8px 12px';
                 li.style.background = '#f8f9fa';

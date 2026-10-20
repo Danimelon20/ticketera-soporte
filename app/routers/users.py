@@ -3,16 +3,31 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import audit, identity, models
-from ..schemas import MeRead, ProfileUpdate, RequesterRead, UserRead
+from ..schemas import MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
 from ..security import get_current_user
 from .auth import me_read
 
 router = APIRouter(prefix="/api", tags=["users"])
 
 
-@router.get("/users", response_model=list[UserRead])
+STAFF_ROLES = ("technician", "coordinator", "admin")
+
+
+@router.get("/users", response_model=list[UserRead | StaffRead])
 def get_users(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    return db.query(models.User).filter(models.User.is_active == True).all()
+    if current_user.role in ("coordinator", "admin"):
+        users = db.query(models.User).filter(models.User.is_active == True).all()
+        return [UserRead.model_validate(u) for u in users]
+    if current_user.role == "technician":
+        # Solo el personal activo y sin correos; nunca la lista de solicitantes
+        staff = (
+            db.query(models.User)
+            .filter(models.User.is_active == True, models.User.role.in_(STAFF_ROLES))
+            .order_by(models.User.name)
+            .all()
+        )
+        return [StaffRead(id=u.id, name=u.name, role=u.role) for u in staff]
+    raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
 
 
 @router.get("/requesters", response_model=list[RequesterRead])

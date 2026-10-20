@@ -99,6 +99,20 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StaffRead(BaseModel):
+    """Personal activo para el técnico: sin correo."""
+    id: int
+    name: str
+    role: str
+
+
+class PersonRead(BaseModel):
+    """Persona que aparece en un ticket: solo nombre y rol, nunca correo, teléfono ni cédula."""
+    id: int
+    name: str
+    role: str
+
+
 class MeRead(BaseModel):
     id: int
     name: str
@@ -212,6 +226,8 @@ class TicketRead(BaseModel):
     created_by: int
     created_at: datetime
     updated_at: datetime
+    # Nombre de quien lo atiende: el solicitante no tiene acceso a la lista de cuentas
+    assigned_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -270,6 +286,7 @@ class TicketDetail(TicketRead):
     contact_id_number: Optional[str] = None
     following: bool = False
     ai_analysis: Optional[AIAnalysisRead] = None
+    people: list[PersonRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 
