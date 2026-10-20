@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
 
-from . import audit, availability, config, email_analysis, models, schedules
+from . import assignment_notice, audit, availability, config, email_analysis, models, schedules
 from .database import SessionLocal
 from .email_processing import _RunNow
 from .notifications import notify_followers
@@ -116,10 +116,13 @@ def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment
     db.refresh(ticket)
     logging.info("Ticket %s asignado automáticamente al técnico %s", ticket.id, user.id)
     agent = db.get(models.User, agent_id)
+    # Al técnico su aviso; a los demás seguidores el de siempre (un solo correo por persona)
+    assignment_notice.schedule(_RunNow(), ticket, user)
     notify_followers(
         db, _RunNow(), ticket, agent,
         f"[Ticket #{ticket.id}] Nueva asignación",
         [f"El ticket se asignó automáticamente a {user.name or 'un técnico'}."],
+        exclude_ids=(user.id,),
     )
     return True
 

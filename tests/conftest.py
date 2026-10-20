@@ -9,6 +9,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_tmp_dir}/test.db"
 os.environ["EMAIL_ENABLED"] = "false"
 os.environ["CHATBOT_ENABLED"] = "false"
 os.environ["AI_ANALYSIS_ENABLED"] = "false"
+# Que un .env real no asigne tickets ni arranque el ciclo de asignación durante las pruebas
+os.environ["AUTO_ASSIGN_ENABLED"] = "false"
 os.environ["MS_TOKEN_CACHE"] = f"{_tmp_dir}/ms_token_cache.json"
 
 import pytest  # noqa: E402

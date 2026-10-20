@@ -9,7 +9,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import account_reports, auto_assign, availability, comments as internal_comments, email_analysis, identity
+from .. import account_reports, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -470,9 +470,14 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         old_label = STATUS_LABELS.get(old_status, old_status)
         lines.append(f"{current_user.name} cambió el estado de {old_label} a {new_label}.")
         subject = f"[Ticket #{db_ticket.id}] Cambió de estado: {new_label}"
+    notified = ()
     if db_ticket.assigned_to != old_assigned_to and assignee is not None:
         lines.append(f"{current_user.name} asignó el ticket a {assignee.name}.")
         subject = subject or f"[Ticket #{db_ticket.id}] Nueva asignación"
+        # "Asignarme a mí" no se avisa
+        if assignment_notice.should_notify(assignee, current_user):
+            assignment_notice.schedule(background_tasks, db_ticket, assignee)
+            notified = (assignee.id,)
     if lines:
-        notify_followers(db, background_tasks, db_ticket, current_user, subject, lines)
+        notify_followers(db, background_tasks, db_ticket, current_user, subject, lines, exclude_ids=notified)
     return ticket_read(db_ticket, current_user)

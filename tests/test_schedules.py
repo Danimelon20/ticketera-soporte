@@ -8,6 +8,18 @@ from app.database import SessionLocal
 WEEKDAYS = [{"weekday": d, "start": "08:00", "end": "17:00"} for d in range(5)]
 
 
+@pytest.fixture(autouse=True)
+def clean_schedules(client):
+    yield
+    # Un técnico con horario sería candidato a asignación automática en otras pruebas
+    db = SessionLocal()
+    try:
+        db.query(models.TechnicianSchedule).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
 def _put(client, actor, user_id, days):
     return client.put(f"/api/accounts/{user_id}/schedule", json={"days": days}, headers=actor["headers"])
 

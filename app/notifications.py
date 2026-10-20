@@ -28,14 +28,17 @@ def notify_followers(
     actor: models.User,
     subject: str,
     lines: list[str],
+    exclude_ids: tuple[int, ...] = (),
 ) -> None:
-    # Solo título y las líneas del cambio: nunca teléfono ni cédula del ticket
+    # Solo título y las líneas del cambio: nunca teléfono ni cédula del ticket.
+    # exclude_ids: quien ya recibe otro correo por el mismo cambio (un solo correo por persona)
     followers = (
         db.query(models.User)
         .join(models.TicketFollower, models.TicketFollower.user_id == models.User.id)
         .filter(
             models.TicketFollower.ticket_id == ticket.id,
             models.User.id != actor.id,
+            models.User.id.notin_(exclude_ids),
             models.User.is_active.is_(True),
         )
         .all()
