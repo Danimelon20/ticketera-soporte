@@ -158,6 +158,9 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
                 "pero ya tiene una cuenta. Si fue usted, inicie sesión con su contraseña. "
                 "Si no fue usted, puede ignorar este correo.",
             )
+            # Solo sin correo real, para probar en desarrollo; el aviso no lleva códigos
+            if not config.EMAIL_ENABLED:
+                logging.warning("[SOLO DESARROLLO] aviso de cuenta existente para %s", mask_email(email))
         return response
 
     if pending is None:
@@ -320,9 +323,9 @@ def verify_code(data: VerifyCodeRequest, db: Session = Depends(get_db)):
     if not challenge or challenge.used:
         raise HTTPException(status_code=400, detail=CODE_ERROR)
     if challenge.expires_at <= _now():
-        raise HTTPException(status_code=400, detail="El código venció. Inicia sesión de nuevo.")
+        raise HTTPException(status_code=400, detail="El código venció. Inicie sesión de nuevo.")
     if challenge.attempts >= MAX_CODE_ATTEMPTS:
-        raise HTTPException(status_code=429, detail="Demasiados intentos. Inicia sesión de nuevo.")
+        raise HTTPException(status_code=429, detail="Demasiados intentos. Inicie sesión de nuevo.")
 
     user = db.query(models.User).filter(models.User.id == challenge.user_id, models.User.is_active == True).first()
     if not user:
@@ -349,13 +352,13 @@ def resend_code(data: ResendCodeRequest, db: Session = Depends(get_db)):
     challenge = db.query(models.LoginChallenge).filter(models.LoginChallenge.id == data.challenge_id).first()
     now = _now()
     if not challenge or challenge.used or challenge.expires_at <= now:
-        raise HTTPException(status_code=400, detail="Inicia sesión de nuevo.")
+        raise HTTPException(status_code=400, detail="Inicie sesión de nuevo.")
     if (now - challenge.created_at).total_seconds() < RESEND_SECONDS:
-        raise HTTPException(status_code=429, detail="Espera un minuto antes de pedir otro código.")
+        raise HTTPException(status_code=429, detail="Espere un minuto antes de pedir otro código.")
 
     user = db.query(models.User).filter(models.User.id == challenge.user_id, models.User.is_active == True).first()
     if not user:
-        raise HTTPException(status_code=400, detail="Inicia sesión de nuevo.")
+        raise HTTPException(status_code=400, detail="Inicie sesión de nuevo.")
 
     code = generate_login_code()
     challenge.code_hash = hash_code(code)

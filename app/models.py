@@ -379,6 +379,15 @@ class EmailChange(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class EmailChangeAttempt(Base):
+    """Última solicitud de cambio de correo (libre o en uso): marca la espera de 60 segundos."""
+    __tablename__ = "email_change_attempts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    requested_at = Column(DateTime, nullable=False)
+
+
 ACCOUNT_CHANGE_ACTIONS = (
     "password_changed", "email_changed", "phone_changed", "name_changed", "id_number_changed",
     "role_changed", "account_activated", "account_deactivated", "invitation_sent", "invitation_used",

@@ -12,6 +12,8 @@ PORTALS = {"admin": "admin", "coordinator": "staff", "technician": "staff", "req
 WRONG_PASSWORD = "La contraseña actual no es correcta"
 CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
 OLD_EMAIL_NOTICE = "El correo de su cuenta cambió; si no fue usted, contacte a soporte."
+EMAIL_IN_USE = "Ese correo ya está en uso por otra cuenta. Use otro correo."
+WAIT_MESSAGE = "Espere un minuto antes de pedir otro código."
 
 
 def _email():
@@ -44,6 +46,17 @@ def _set_change(user_id, **values):
     db = SessionLocal()
     try:
         row = db.query(models.EmailChange).filter(models.EmailChange.user_id == user_id).first()
+        for key, value in values.items():
+            setattr(row, key, value)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _set_attempt(user_id, **values):
+    db = SessionLocal()
+    try:
+        row = db.query(models.EmailChangeAttempt).filter(models.EmailChangeAttempt.user_id == user_id).first()
         for key, value in values.items():
             setattr(row, key, value)
         db.commit()
@@ -175,20 +188,52 @@ def test_email_change_wrong_password_sends_nothing_and_counts(client, make_user,
     assert _failures(user["email"]) == 1
 
 
-def test_email_in_use_is_not_revealed(client, make_user, sent):
+def test_email_in_use_gets_409_and_sends_nothing(client, make_user, sent):
     owner = make_user("coordinator")
     user = make_user("requester")
-    free = _request_email(client, user, _email())
-    taken = _request_email(client, make_user("requester"), owner["email"])
-    assert taken.status_code == free.status_code == 202
-    assert taken.json() == {"email_hint": owner["email"][:2] + "***@test.com"}
-    # Solo se envió el código al correo libre
-    assert len(sent) == 1 and sent[0][0] != owner["email"]
+    response = _request_email(client, user, owner["email"])
+    assert response.status_code == 409
+    assert response.json()["detail"] == EMAIL_IN_USE
+    assert sent == []
+    assert _change(user["id"]) is None
+    assert _failures(user["email"]) == 0
 
-    # Ningún código sirve para un correo en uso
-    for code in ("000000", "123456"):
-        response = client.post("/api/account/email/verify", json={"code": code}, headers=user["headers"])
-        assert response.status_code == 400
+
+def test_email_in_use_still_checks_password_first(client, make_user, sent):
+    owner = make_user("coordinator")
+    user = make_user("requester")
+    response = _request_email(client, user, owner["email"], password="otra-clave-999")
+    assert response.status_code == 400
+    assert response.json()["detail"] == WRONG_PASSWORD
+    assert sent == []
+
+
+def test_free_email_gets_code(client, make_user, sent):
+    user = make_user("requester")
+    new_email = _email()
+    response = _request_email(client, user, new_email)
+    assert response.status_code == 202
+    assert [to for to, _s, _b in sent] == [new_email]
+    assert _change(user["id"]).new_email == new_email
+
+
+@pytest.mark.parametrize("first_taken", [True, False])
+@pytest.mark.parametrize("second_taken", [True, False])
+def test_email_requests_wait_60_seconds(client, make_user, sent, first_taken, second_taken):
+    owner = make_user("coordinator")
+    user = make_user("requester")
+    first = _request_email(client, user, owner["email"] if first_taken else _email())
+    assert first.status_code == (409 if first_taken else 202)
+    sent_before = len(sent)
+
+    second = _request_email(client, user, owner["email"] if second_taken else _email())
+    assert second.status_code == 429
+    assert second.json()["detail"] == WAIT_MESSAGE
+    assert len(sent) == sent_before
+
+    _set_attempt(user["id"], requested_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=61))
+    third = _request_email(client, user, owner["email"] if second_taken else _email())
+    assert third.status_code == (409 if second_taken else 202)
 
 
 def test_email_code_expires_in_15_minutes_and_allows_5_attempts(client, make_user, sent):

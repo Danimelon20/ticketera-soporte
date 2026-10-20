@@ -98,7 +98,7 @@ def test_expired_code(client, make_user, sent):
 
     response = _verify(client, data["challenge_id"], _code_from(sent))
     assert response.status_code == 400
-    assert response.json()["detail"] == "El código venció. Inicia sesión de nuevo."
+    assert response.json()["detail"] == "El código venció. Inicie sesión de nuevo."
 
 
 def test_unknown_challenge(client, sent):
@@ -126,7 +126,7 @@ def test_resend_too_soon(client, make_user, sent):
     _user, data = _start(client, make_user)
     response = client.post("/api/auth/resend-code", json={"challenge_id": data["challenge_id"]})
     assert response.status_code == 429
-    assert response.json()["detail"] == "Espera un minuto antes de pedir otro código."
+    assert response.json()["detail"] == "Espere un minuto antes de pedir otro código."
     assert len(sent) == 1
 
 

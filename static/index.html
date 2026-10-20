@@ -44,6 +44,7 @@
             <button type="button" id="resendCode" class="verify-link" disabled>Reenviar código en 60 s</button>
             <p id="resendNotice" class="verify-notice" aria-live="polite"></p>
             <button type="button" id="backToLogin" class="verify-link">Volver al inicio de sesión</button>
+            <button type="button" id="signupHaveAccount" class="verify-link" hidden>Ya tengo cuenta: iniciar sesión</button>
         </div>
     </section>
     <section id="authScreen" class="auth-screen">
@@ -268,6 +269,7 @@
                         <input type="password" id="emailChangePassword" autocomplete="current-password" required>
                     </div>
                     <small class="help-text">Le enviaremos un código al correo nuevo. El cambio se aplica al confirmarlo.</small>
+                    <p id="emailChangeError" class="form-error" role="alert" hidden></p>
                     <div class="profile-actions">
                         <button type="submit" class="btn-submit">Enviar código</button>
                     </div>

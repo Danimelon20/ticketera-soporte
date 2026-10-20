@@ -20,6 +20,8 @@ router = APIRouter(prefix="/api/account", tags=["account"])
 
 WRONG_PASSWORD = "La contraseña actual no es correcta"
 OLD_EMAIL_NOTICE = "El correo de su cuenta cambió; si no fue usted, contacte a soporte."
+EMAIL_IN_USE = "Ese correo ya está en uso por otra cuenta. Use otro correo."
+WAIT_MESSAGE = "Espere un minuto antes de pedir otro código."
 
 
 def _check_password(db: Session, user: models.User, password: str) -> None:
@@ -98,26 +100,29 @@ def request_email_change(
         raise HTTPException(status_code=422, detail="Escriba un correo válido")
     if new_email == normalize_email(current_user.email):
         raise HTTPException(status_code=400, detail="Ese ya es el correo de su cuenta")
-    response = SignupStarted(email_hint=mask_email(new_email))
+
+    # La espera cuenta para correos libres y en uso: así no se pueden probar muchos correos seguidos
+    attempt = db.query(models.EmailChangeAttempt).filter(models.EmailChangeAttempt.user_id == current_user.id).first()
+    if attempt is not None and not _can_resend(attempt.requested_at):
+        raise HTTPException(status_code=429, detail=WAIT_MESSAGE)
+    if attempt is None:
+        attempt = models.EmailChangeAttempt(user_id=current_user.id)
+        db.add(attempt)
+    attempt.requested_at = _now()
+
+    if _find_user(db, new_email) is not None:
+        # No se crea cambio pendiente ni se envía nada
+        db.commit()
+        raise HTTPException(status_code=409, detail=EMAIL_IN_USE)
 
     change = _pending(db, current_user)
-    if change is not None and change.new_email == new_email and not _can_resend(change.sent_at):
-        return response
     if change is None:
         change = models.EmailChange(user_id=current_user.id)
         db.add(change)
     change.new_email = new_email
-    if _find_user(db, new_email) is not None:
-        # Misma respuesta que un correo libre; el hash "!" nunca coincide con un código
-        change.code_hash = "!"
-        change.expires_at = _now() + timedelta(minutes=CONFIRM_MINUTES)
-        change.attempts = 0
-        change.sent_at = _now()
-        db.commit()
-        return response
     _send_change_code(change)
     db.commit()
-    return response
+    return SignupStarted(email_hint=mask_email(new_email))
 
 
 @router.post("/email/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
@@ -126,7 +131,7 @@ def resend_email_change(db: Session = Depends(get_db), current_user: models.User
     if change is None:
         raise HTTPException(status_code=400, detail=CODE_INVALID)
     if not _can_resend(change.sent_at):
-        raise HTTPException(status_code=429, detail="Espere un minuto antes de pedir otro código.")
+        raise HTTPException(status_code=429, detail=WAIT_MESSAGE)
     if change.code_hash == "!":
         change.sent_at = _now()
     else:

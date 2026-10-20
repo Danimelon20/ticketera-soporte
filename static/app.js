@@ -112,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sessionNotice.textContent = SESSION_EXPIRED;
             sessionNotice.hidden = false;
         } else {
-            showError('Tu sesión terminó, inicia sesión de nuevo');
+            showError('Su sesión terminó, inicie sesión de nuevo');
         }
     }
 
@@ -501,6 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resendCodeBtn = document.getElementById('resendCode');
     const resendNotice = document.getElementById('resendNotice');
     const backToLoginBtn = document.getElementById('backToLogin');
+    const signupHaveAccountBtn = document.getElementById('signupHaveAccount');
 
     const verifyTitle = document.getElementById('verifyTitle');
     // Inicio de sesión del administrador: 10 minutos. Confirmar una cuenta nueva: 15 minutos.
@@ -530,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInterval(expiryTimer);
                 verifyTimer.textContent = verifyMode === 'signup'
                     ? 'El código venció. Pida uno nuevo.'
-                    : 'El código venció. Inicia sesión de nuevo.';
+                    : 'El código venció. Inicie sesión de nuevo.';
                 verifySubmit.disabled = true;
                 return;
             }
@@ -590,7 +591,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function openVerifyScreen(newChallengeId, emailHint) {
         resetChat();
         challengeId = newChallengeId;
-        verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + emailHint;
+        // Registro: no se sabe si el correo ya tenía cuenta (la API responde igual)
+        verifyHint.textContent = verifyMode === 'signup'
+            ? 'Si ese correo está disponible, le enviamos un código de confirmación. '
+                + 'Si ya tiene una cuenta con ese correo, le enviamos un aviso para que inicie sesión. '
+                + 'Revise también la carpeta de spam.'
+            : 'Enviamos un código de 6 dígitos a ' + emailHint;
+        signupHaveAccountBtn.hidden = verifyMode !== 'signup';
         clearTimeout(verifyRedirectTimer);
         verifyBusy = false;
         clearDigits();
@@ -641,7 +648,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const code = digitInputs.map(input => input.value).join('');
         if (verifyBusy || !(challengeId || verifyEmail)) return;
         if (!/^\d{6}$/.test(code)) {
-            showVerifyError('Escribe los 6 dígitos del código');
+            showVerifyError('Escriba los 6 dígitos del código');
             return;
         }
         verifyBusy = true;
@@ -678,7 +685,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const message = getErrorMessage(result.data);
         showVerifyError(message);
-        if (result.status === 429 || message.includes('Inicia sesión de nuevo')) {
+        if (result.status === 429 || message.includes('Inicie sesión de nuevo')) {
             clearInterval(expiryTimer);
             clearInterval(resendTimer);
             resendCodeBtn.disabled = true;
@@ -767,7 +774,9 @@ document.addEventListener('DOMContentLoaded', () => {
             clearDigits();
             startExpiryCountdown();
             startResendCountdown();
-            resendNotice.textContent = 'Te enviamos un código nuevo';
+            resendNotice.textContent = verifyMode === 'signup'
+                ? 'Si ese correo está disponible, le enviamos un código nuevo. Revise también la carpeta de spam.'
+                : 'Le enviamos un código nuevo';
             digitInputs[0].focus();
             return;
         }
@@ -783,6 +792,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     backToLoginBtn.addEventListener('click', backToLogin);
+
+    signupHaveAccountBtn.addEventListener('click', () => {
+        backToLogin();
+        openPortal('requester');
+    });
 
     // ===== Asistente =====
     const chatToggle = document.getElementById('chatToggle');
@@ -2195,6 +2209,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const emailChangeForm = document.getElementById('emailChangeForm');
     const emailChangeNew = document.getElementById('emailChangeNew');
     const emailChangePassword = document.getElementById('emailChangePassword');
+    const emailChangeError = document.getElementById('emailChangeError');
     const emailCodeForm = document.getElementById('emailCodeForm');
     const emailCodeNotice = document.getElementById('emailCodeNotice');
     const emailCodeInput = document.getElementById('emailCodeInput');
@@ -2241,9 +2256,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 1000);
     }
 
+    function hideEmailChangeError() {
+        emailChangeError.hidden = true;
+        emailChangeError.textContent = '';
+    }
+
     function resetEmailChange() {
         clearInterval(emailResendTimer);
         emailResendTimer = null;
+        hideEmailChangeError();
         emailChangeForm.reset();
         emailCodeForm.reset();
         emailCodeForm.hidden = true;
@@ -2275,6 +2296,7 @@ document.addEventListener('DOMContentLoaded', () => {
     emailChangeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         hideError();
+        hideEmailChangeError();
         const newEmail = emailChangeNew.value.trim();
         let result;
         try {
@@ -2284,12 +2306,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ new_email: newEmail, current_password: emailChangePassword.value })
             });
         } catch (err) {
-            return; // apiFetch ya mostró el error
+            // Correo en uso, espera de 60 s, contraseña incorrecta...: el error va dentro del formulario
+            // (err.message ya viene de getErrorMessage en apiFetch)
+            if (err.message !== 'Unauthorized') {
+                hideError();
+                emailChangeError.textContent = err.message;
+                emailChangeError.hidden = false;
+            }
+            return;
         }
         emailChangeForm.hidden = true;
         emailCodeForm.hidden = false;
         emailChangePassword.value = '';
-        emailCodeNotice.textContent = `Si el correo se puede usar, le enviamos un código a ${result.email_hint}. Vence en 15 minutos.`;
+        emailCodeNotice.textContent = 'Si ese correo está disponible, le enviamos un código. '
+            + 'Si no le llega en unos minutos, revise la carpeta de spam o pruebe con otro correo.';
         startEmailResendWait();
         emailCodeInput.focus();
     });

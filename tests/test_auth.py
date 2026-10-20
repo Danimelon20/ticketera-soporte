@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -170,6 +171,16 @@ def test_existing_email_gets_same_answer(client, make_user, sent):
     assert to == user["email"] and subject == "Intento de crear una cuenta con su correo"
     assert _verify(client, user["email"], "000000").json()["detail"] == CODE_INVALID
     assert _login(client, user["email"], "clave-segura-123").status_code == 200
+
+
+def test_existing_email_notice_logged_in_development(client, make_user, sent, caplog):
+    caplog.set_level(logging.WARNING)
+    user = make_user("requester")
+    _register(client, user["email"])
+    masked = user["email"][:2] + "***@" + user["email"].split("@")[1]
+    assert f"[SOLO DESARROLLO] aviso de cuenta existente para {masked}" in caplog.text
+    assert user["email"] not in caplog.text
+    assert "Código para" not in caplog.text
 
 
 def test_register_short_password(client):
