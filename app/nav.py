@@ -179,6 +179,7 @@ def queue(
     assigned_to: int | None = None,
     source: str | None = None,
     search: str | None = None,
+    requester_id: int | None = None,
     page: int = 1,
     now: datetime | None = None,
 ) -> dict:
@@ -208,6 +209,9 @@ def queue(
         query = query.filter(models.Ticket.status == status)
     if source:
         query = query.filter(models.Ticket.source == source)
+    if requester_id is not None:
+        # "Ver sus tickets" desde Cuentas
+        query = query.filter(models.Ticket.created_by == requester_id)
     if assigned_to is not None and user.role != "technician":
         # 0: sin asignar
         query = query.filter(

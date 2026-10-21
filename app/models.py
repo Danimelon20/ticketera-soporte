@@ -392,8 +392,11 @@ ACCOUNT_CHANGE_ACTIONS = (
     "login_locked", "password_reset", "access_reset_sent", "access_reset_forced", "login_unlocked", "tickets_released",
     "request_created", "request_approved", "request_rejected",
     "availability_changed", "report_created", "report_confirmed", "report_dismissed",
-    "schedule_changed", "sessions_closed",
+    "schedule_changed", "sessions_closed", "invitation_cancelled",
+    # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
+    "server_account_deactivated", "server_account_activated", "server_role_changed",
 )
+SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
 
 
 class AccountChange(Base):

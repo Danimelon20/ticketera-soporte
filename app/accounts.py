@@ -12,16 +12,19 @@ RELEASED_COMMENT = "Técnico desactivado; ticket liberado"
 RELEASED_LIST_MAX = 10
 OPEN_STATUSES = ("new", "in_progress")
 
-# Roles de las cuentas que cada rol puede gestionar, por acción
+# Roles de las cuentas que cada rol puede gestionar, por acción. Ningún administrador actúa sobre otro
+# administrador (el primero y los siguientes se crean con app.create_admin)
 PERMISSIONS = {
     "admin": {
         "active": ("coordinator", "technician", "requester"),
         "reset": ("coordinator", "technician"),
-        "unlock": ("admin", "coordinator", "technician", "requester"),
+        "unlock": ("coordinator", "technician", "requester"),
         "availability": ("technician",),
         # Horario del coordinador: informativo (la asignación automática solo usa técnicos)
         "schedule": ("technician", "coordinator"),
         "sessions": ("coordinator", "technician", "requester"),
+        # Cambio directo de rol
+        "role": ("coordinator", "technician", "requester"),
     },
     "coordinator": {
         "active": ("technician", "requester"),
@@ -30,6 +33,8 @@ PERMISSIONS = {
         "availability": ("technician",),
         "schedule": ("technician",),
         "sessions": ("technician", "requester"),
+        # Solo como solicitud con aprobación del administrador
+        "role": ("technician", "requester"),
     },
 }
 

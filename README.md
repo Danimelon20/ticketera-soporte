@@ -130,6 +130,23 @@ las categorías (Hardware, Software, Red, Accesos), las prioridades
 4. Los clientes crean su cuenta en "Crear cuenta de cliente" y la
    confirman con el código que les llega al correo.
 
+### Cuentas de administrador
+
+Desde la página nadie actúa sobre un administrador (tampoco sobre sí
+mismo). Para desactivar, reactivar o quitar el rol a un administrador
+se usa este comando en el servidor:
+
+```bash
+docker compose exec -it app python -m scripts.admin_tools deactivate --email persona@empresa.com
+docker compose exec -it app python -m scripts.admin_tools reactivate --email persona@empresa.com
+docker compose exec -it app python -m scripts.admin_tools demote --email persona@empresa.com --to coordinator
+```
+
+Pide escribir el correo para confirmar, no deja el sistema sin un
+administrador activo y cierra las sesiones de la cuenta. En el
+Registro de cambios aparece hecho por "Servidor". `--to` solo aplica a
+`demote` (coordinator, technician o requester; por defecto coordinator).
+
 ## Tickets por correo
 
 El Agente virtual revisa la carpeta `MAIL_FOLDER` del buzón de

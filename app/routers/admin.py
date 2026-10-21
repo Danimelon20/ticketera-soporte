@@ -18,8 +18,8 @@ from .. import (
     identity, models, schedules, throttle,
 )
 from ..schemas import (
-    AccountChangePage, AccountChangeRead, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate,
-    DirectoryUser, TeamMember,
+    AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
+    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, TeamMember,
 )
 from ..security import get_current_user, mask_email, session_expired
 from ..validators import mask_id_number, mask_last4
@@ -156,6 +156,8 @@ def update_user(
         raise HTTPException(status_code=400, detail=accounts.AGENT_LOCKED)
     if user.id == admin.id:
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
+    if data.role is not None and data.role != user.role:
+        accounts.check_can_manage(admin, user, "role")
     if data.is_active is not None and data.is_active != user.is_active:
         # Con el rol que tiene ahora: un administrador no se desactiva desde aquí
         accounts.check_can_manage(admin, user, "active")
@@ -182,7 +184,10 @@ def _change_read(row: models.AccountChange) -> AccountChangeRead:
         id=row.id,
         created_at=row.created_at,
         action=row.action,
-        actor=(row.actor.name or mask_email(row.actor.email)) if row.actor is not None else "Sistema",
+        actor=(
+            (row.actor.name or mask_email(row.actor.email)) if row.actor is not None
+            else "Servidor" if row.action in models.SERVER_ACTIONS else "Sistema"
+        ),
         account=account,
         old_value=row.old_value,
         new_value=row.new_value,
@@ -386,6 +391,236 @@ def admin_account_detail(user_id: int, db: Session = Depends(get_db), admin=Depe
         schedule_summary=schedules.summary(schedules.as_dicts(schedule_rows)) if schedule_rows is not None else None,
         alerts=alerts,
         recent_changes=[_change_read(row) for row in changes],
+    )
+
+
+# ----- Cuentas: una sola lista con filtros rápidos (administrador y coordinador) -----
+ACCOUNT_FILTERS = ("all", "staff", "clients", "locked", "reported", "unverified", "invitations")
+STAFF_ACCOUNT_ROLES = ("technician", "coordinator", "admin")
+RECENT_ITEMS = 5
+# Cuentas que ve cada rol: el coordinador, solo técnicos y clientes
+ACCOUNT_SCOPE = {
+    "admin": ("requester", "technician", "coordinator", "admin"),
+    "coordinator": ("requester", "technician"),
+}
+
+
+def require_account_viewer(current_user=Depends(get_current_user)) -> models.User:
+    if current_user.role not in ACCOUNT_SCOPE:
+        raise HTTPException(status_code=403, detail="No tiene permiso para ver esta información")
+    return current_user
+
+
+def _open_tickets(db: Session, users: list[models.User]) -> dict[int, int]:
+    """Clientes: abiertos que crearon. Personal: abiertos asignados."""
+    requester_ids = [u.id for u in users if u.role == "requester"]
+    staff_ids = [u.id for u in users if u.role != "requester"]
+    found: dict[int, int] = {}
+    for column, ids in ((models.Ticket.created_by, requester_ids), (models.Ticket.assigned_to, staff_ids)):
+        if ids:
+            found.update(
+                db.query(column, func.count(models.Ticket.id))
+                .filter(column.in_(ids), models.Ticket.status.in_(accounts.OPEN_STATUSES))
+                .group_by(column)
+                .all()
+            )
+    return found
+
+
+def _can(viewer: models.User, user: models.User, action: str) -> bool:
+    try:
+        accounts.check_can_manage(viewer, user, action)
+    except HTTPException:
+        return False
+    return True
+
+
+def _account_actions(
+    db: Session, viewer: models.User, user: models.User, state: str, alerts: AdminAccountAlerts,
+) -> list[str]:
+    """Acciones del menú "Acciones ▾", con las reglas de accounts.PERMISSIONS (una sola fuente)."""
+    if user.id == viewer.id or user.role == "admin":
+        return []
+    actions = []
+    if user.role == "requester":
+        actions.append("view-tickets")
+        actions.append("review-reports" if alerts.open_reports else "report")
+        # Nombre y cédula fijos: el coordinador pide la corrección al administrador
+        if viewer.role == "coordinator" and identity.is_locked(db, user):
+            actions += ["request-name", "request-id_number"]
+        if viewer.role == "admin":
+            actions.append("full-data")
+    else:
+        if _can(viewer, user, "role"):
+            actions.append("change-role")
+        if _can(viewer, user, "schedule"):
+            actions.append("schedule")
+        if _can(viewer, user, "availability"):
+            actions.append("availability")
+    if state == "locked" and _can(viewer, user, "unlock"):
+        actions.append("unlock")
+    if _can(viewer, user, "sessions"):
+        actions.append("close-sessions")
+    if user.is_active and _can(viewer, user, "reset"):
+        actions.append("reset-access")
+    if _can(viewer, user, "active"):
+        actions.append("deactivate" if user.is_active else "reactivate")
+    if alerts.pending_role_request_id is not None:
+        actions.append("approve-role")
+    return actions
+
+
+@router.get("/accounts", response_model=AccountListPage)
+def account_list(
+    filter_: Literal[ACCOUNT_FILTERS] = Query(default="all", alias="filter"),
+    q: Optional[str] = Query(default=None, max_length=150),
+    # Filtro por horario: solo el equipo de soporte con turno ese día (0 = lunes … 6 = domingo)
+    schedule_day: Optional[int] = Query(default=None, ge=0, le=6),
+    schedule_start: Optional[str] = Query(default=None, max_length=5),
+    schedule_end: Optional[str] = Query(default=None, max_length=5),
+    schedule_match: Literal[schedules.MATCH_MODES] = "covers",
+    db: Session = Depends(get_db),
+    viewer: models.User = Depends(require_account_viewer),
+):
+    """Lista y contadores de los filtros rápidos. Los contadores usan la búsqueda y el horario, no el filtro rápido."""
+    now = auto_assign._now()
+    by_schedule = schedule_day is not None
+    if by_schedule:
+        if schedule_start is None or schedule_end is None:
+            raise HTTPException(status_code=422, detail="Indique la hora de entrada y la de salida")
+        schedules.check_range(schedule_start, schedule_end)
+    scope = ACCOUNT_SCOPE[viewer.role]
+    roles = [r for r in scope if r in schedules.SCHEDULE_ROLES] if by_schedule else list(scope)
+    term = f"%{q.strip().lower()}%" if q and q.strip() else None
+
+    query = db.query(models.User).filter(models.User.role.in_(roles))
+    if term:
+        query = query.filter(func.lower(models.User.name).like(term) | func.lower(models.User.email).like(term))
+    users = query.order_by(models.User.role, models.User.name).all()
+    ids = [u.id for u in users]
+    requester_ids = [u.id for u in users if u.role == "requester"]
+    statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    identities = identity.hacienda_codes(db, requester_ids)
+    reported = account_reports.reported_ids(db, requester_ids)
+    open_counts = _open_tickets(db, users)
+    shifts = schedules.for_users(db, ids) if by_schedule else {}
+
+    rows = []
+    for u in users:
+        shift = None
+        if by_schedule:
+            # Sin turno ese día no aparece; de vacaciones o ausente sí (con su estado visible)
+            shift = schedules.day_range(shifts[u.id], schedule_day)
+            if shift is None or not schedules.range_matches(shift, schedule_start, schedule_end, schedule_match):
+                continue
+        rows.append(AccountListRow(
+            kind="user", id=u.id, name=u.name or "Sin nombre", email=mask_email(u.email), role=u.role,
+            state=_account_state(db, u, statuses), identity=identities.get(u.id), reported=u.id in reported,
+            open_tickets=open_counts.get(u.id, 0), schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
+        ))
+
+    # Invitaciones pendientes: todavía no son cuentas (ni tienen horario). El coordinador solo ve las suyas
+    invitations = []
+    if not by_schedule:
+        query = db.query(models.StaffInvitation).filter(
+            models.StaffInvitation.used_by.is_(None), models.StaffInvitation.expires_at > now,
+            models.StaffInvitation.role.in_(scope),
+        )
+        if viewer.role != "admin":
+            query = query.filter(models.StaffInvitation.created_by == viewer.id)
+        if term:
+            query = query.filter(
+                func.lower(models.StaffInvitation.name).like(term) | func.lower(models.StaffInvitation.email).like(term)
+            )
+        invitations = [
+            AccountListRow(
+                kind="invitation", id=inv.id, name=inv.name, email=mask_email(inv.email), role=inv.role,
+                state="invited", invitation_hours_left=max(0, int((inv.expires_at - now).total_seconds() // 3600)),
+            )
+            for inv in query.order_by(models.StaffInvitation.created_at.desc()).all()
+        ]
+
+    groups = {
+        "staff": [r for r in rows if r.role in STAFF_ACCOUNT_ROLES],
+        "clients": [r for r in rows if r.role == "requester"],
+        "locked": [r for r in rows if r.state == "locked"],
+        "reported": [r for r in rows if r.role == "requester" and r.reported],
+        "unverified": [r for r in rows if r.role == "requester" and r.identity == "unverified"],
+        "invitations": invitations,
+    }
+    groups["all"] = rows + invitations
+    return AccountListPage(
+        items=groups[filter_], counts=AccountCounts(**{key: len(value) for key, value in groups.items()}),
+    )
+
+
+@router.get("/accounts/{user_id}", response_model=AccountSummary)
+def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.User = Depends(require_account_viewer)):
+    user = db.get(models.User, user_id)
+    # Fuera del alcance de quien mira: como si no existiera
+    if user is None or user.role not in ACCOUNT_SCOPE[viewer.role]:
+        raise HTTPException(status_code=404, detail="El usuario no existe")
+    now = auto_assign._now()
+    statuses = availability.statuses_for(db, [user.id]) if user.role == "technician" else {}
+    state = _account_state(db, user, statuses)
+
+    pending = (
+        db.query(models.AccountRequest)
+        .filter(models.AccountRequest.target_user_id == user.id, models.AccountRequest.kind == "role",
+                models.AccountRequest.status == "pending")
+        .first()
+    )
+    # El coordinador solo ve la solicitud si la creó él; solo el administrador la resuelve (nunca la propia)
+    if pending is not None and viewer.role != "admin" and pending.created_by != viewer.id:
+        pending = None
+    lock = db.query(models.LoginThrottle).filter(models.LoginThrottle.email == user.email.strip().lower()).first()
+    alerts = AdminAccountAlerts(
+        pending_role_request_id=(
+            pending.id if pending and viewer.role == "admin" and pending.created_by != viewer.id else None
+        ),
+        pending_role=pending.new_value if pending else None,
+        pending_role_by=(pending.creator.name if pending and pending.creator else None),
+        locked_until=lock.locked_until if lock and lock.locked_until and lock.locked_until > now else None,
+        open_reports=db.query(models.AccountReport).filter(
+            models.AccountReport.target_user_id == user.id, models.AccountReport.status == "open"
+        ).count() if user.role == "requester" else 0,
+    )
+
+    recent_tickets, recent_changes = [], []
+    if user.role == "requester":
+        tickets = (
+            db.query(models.Ticket).filter(models.Ticket.created_by == user.id)
+            .order_by(models.Ticket.created_at.desc(), models.Ticket.id.desc()).limit(RECENT_ITEMS).all()
+        )
+        recent_tickets = [AccountRecentTicket(id=t.id, title=t.title, status=t.status) for t in tickets]
+    else:
+        changes = (
+            db.query(models.AccountChange).filter(models.AccountChange.target_user_id == user.id)
+            .order_by(models.AccountChange.created_at.desc(), models.AccountChange.id.desc()).limit(RECENT_ITEMS).all()
+        )
+        recent_changes = [_change_read(row) for row in changes]
+
+    schedule_rows = schedules.get(db, user.id) if user.role in schedules.SCHEDULE_ROLES else None
+    status = statuses.get(user.id)
+    actions = _account_actions(db, viewer, user, state, alerts)
+    # identity.is_locked puede guardar la fecha de bloqueo de cuentas anteriores
+    db.commit()
+    return AccountSummary(
+        id=user.id,
+        name=user.name or "Sin nombre",
+        email=mask_email(user.email),
+        role=user.role,
+        state=state,
+        is_active=user.is_active,
+        identity=identity.hacienda_label_code(db, user) if user.role == "requester" else None,
+        reported=bool(account_reports.reported_ids(db, [user.id])) if user.role == "requester" else False,
+        availability=status[0] if status else None,
+        return_date=status[1] if status else None,
+        schedule=schedules.as_dicts(schedule_rows) if schedule_rows is not None else None,
+        alerts=alerts,
+        recent_tickets=recent_tickets,
+        recent_changes=recent_changes,
+        actions=actions,
     )
 
 

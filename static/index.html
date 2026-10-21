@@ -260,6 +260,10 @@
                         <span id="queueTotal" class="queue-total"></span>
                         <span id="queueUpdated" class="queue-updated" aria-live="off"></span>
                     </div>
+                    <div id="queueRequester" class="queue-requester" hidden>
+                        <span id="queueRequesterName"></span>
+                        <button type="button" id="queueRequesterClear" class="link-btn">Quitar filtro</button>
+                    </div>
                     <div class="queue-filters">
                         <label for="queueStatus" class="sr-only">Estado</label>
                         <select id="queueStatus">
@@ -553,27 +557,6 @@
                 </table>
                 <p id="teamEmpty" class="view-note" hidden>No hay personal.</p>
             </section>
-            <section id="accountsClients" class="account-section" data-account-section="clients" aria-labelledby="clientsTitle">
-                <h2 id="clientsTitle" class="account-title">Clientes</h2>
-                <div class="directory-filters">
-                    <label for="clientsSearch" class="sr-only">Buscar solicitantes por nombre o correo</label>
-                    <input type="search" id="clientsSearch" placeholder="Buscar solicitantes por nombre o correo" maxlength="150">
-                </div>
-                <div class="table-scroll">
-                    <table class="directory-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Nombre</th>
-                                <th scope="col">Correo</th>
-                                <th scope="col">Estado</th>
-                                <th scope="col">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody id="clientsBody"></tbody>
-                    </table>
-                </div>
-                <p id="clientsEmpty" class="view-note">Escriba un nombre o correo para buscar.</p>
-            </section>
             <!-- Solicitudes de cambio del coordinador: hoy no se muestran en ninguna opción del menú -->
             <section id="accountsMyRequests" class="account-section" data-account-section="requests" aria-labelledby="myRequestsTitle" hidden>
                 <h2 id="myRequestsTitle" class="account-title">Mis solicitudes</h2>
@@ -666,37 +649,20 @@
             <div class="aa-main">
                 <div class="aa-head">
                     <h1 id="adminAccountsTitle" class="view-title">Cuentas</h1>
+                    <label for="aaSearch" class="sr-only">Nombre o correo</label>
+                    <input type="search" id="aaSearch" class="aa-search" placeholder="Nombre o correo" maxlength="150">
                     <button type="button" id="aaInvite" class="btn-primary btn-small">Invitar personal</button>
                 </div>
-                <div class="queue-filters aa-filters">
-                    <label for="aaSearch" class="sr-only">Buscar por nombre o correo</label>
-                    <input type="search" id="aaSearch" placeholder="Buscar por nombre o correo" maxlength="150">
-                    <label for="aaRole" class="sr-only">Rol</label>
-                    <select id="aaRole">
-                        <option value="">Rol: todos</option>
-                        <option value="requester">Solicitantes</option>
-                        <option value="technician">Técnicos</option>
-                        <option value="coordinator">Coordinadores</option>
-                        <option value="admin">Administradores</option>
-                    </select>
-                    <label for="aaState" class="sr-only">Estado</label>
-                    <select id="aaState">
-                        <option value="">Estado: todos</option>
-                        <option value="active">Activa</option>
-                        <option value="locked">Bloqueada</option>
-                        <option value="invited">Invitación pendiente</option>
-                        <option value="vacation">Vacaciones</option>
-                        <option value="away">Ausente</option>
-                        <option value="inactive">Desactivada</option>
-                    </select>
-                    <label for="aaIdentity" class="sr-only">Identidad</label>
-                    <select id="aaIdentity">
-                        <option value="">Identidad: todas</option>
-                        <option value="match">Verificado</option>
-                        <option value="mismatch">No coincide</option>
-                        <option value="not_found">No encontrado</option>
-                        <option value="unverified">Sin verificar</option>
-                    </select>
+                <div id="aaQuick" class="aa-quick" role="group" aria-label="Filtros rápidos">
+                    <button type="button" class="aa-quick-btn" data-filter="all" aria-pressed="true">Todas <span class="aa-quick-count" data-count="all"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="staff" aria-pressed="false">Personal <span class="aa-quick-count" data-count="staff"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="clients" aria-pressed="false">Clientes <span class="aa-quick-count" data-count="clients"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="locked" aria-pressed="false">Bloqueadas <span class="aa-quick-count" data-count="locked" data-tone="warn"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="reported" aria-pressed="false">Reportadas <span class="aa-quick-count" data-count="reported" data-tone="alert"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="unverified" aria-pressed="false">Sin verificar <span class="aa-quick-count" data-count="unverified"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="invitations" aria-pressed="false">Invitaciones <span class="aa-quick-count" data-count="invitations"></span></button>
+                </div>
+                <div class="aa-filters">
                     <label class="aa-schedule-toggle">
                         <input type="checkbox" id="aaScheduleOn"> Filtrar por horario
                     </label>
@@ -725,13 +691,20 @@
                 </div>
                 <div class="queue-table-wrap">
                     <table class="queue-table aa-table">
+                        <colgroup>
+                            <col class="aa-col-name">
+                            <col class="aa-col-type">
+                            <col class="aa-col-state">
+                            <col class="aa-col-identity">
+                            <col class="aa-col-open">
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th scope="col">Nombre</th>
-                                <th scope="col">Rol</th>
+                                <th scope="col">Tipo</th>
                                 <th scope="col">Estado</th>
-                                <th scope="col" id="aaLastHead">Último acceso</th>
                                 <th scope="col">Identidad</th>
+                                <th scope="col" id="aaOpenHead" class="num">Abiertos</th>
                             </tr>
                         </thead>
                         <tbody id="aaBody"></tbody>
@@ -981,6 +954,7 @@
 
     <!-- Menú "Más acciones" de la tabla de personal: uno solo, se ubica junto al botón que lo abre -->
     <div id="rowMenu" class="row-menu" role="menu" aria-label="Más acciones" hidden></div>
+    <div id="accountMenu" class="row-menu account-menu" role="menu" aria-label="Acciones de la cuenta" hidden></div>
 
     <dialog id="roleDialog" class="app-dialog" aria-labelledby="roleDialogTitle">
         <form id="roleForm" class="profile-form">

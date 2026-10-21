@@ -33,7 +33,7 @@ ALLOWED = {
     for target in ("coordinator", "technician", "requester")
     for action in ("deactivate", "reactivate", "unlock")
 } | {
-    ("admin", "coordinator", "reset-access"), ("admin", "technician", "reset-access"), ("admin", "admin", "unlock"),
+    ("admin", "coordinator", "reset-access"), ("admin", "technician", "reset-access"),
 } | {
     ("coordinator", target, action)
     for target in ("technician", "requester")
@@ -106,12 +106,57 @@ def test_system_keeps_one_active_admin(client, make_user):
     assert _db_user(other["id"]).role == "admin"
 
 
-def test_admin_demotes_another_admin_while_one_remains(client, make_user):
+def _admin_request(client, actor, target_id, action):
+    """Cada acción de gestión sobre una cuenta, por la ruta que la hace."""
+    if action == "role":
+        return client.patch(f"/api/admin/users/{target_id}", json={"role": "coordinator"}, headers=actor["headers"])
+    if action == "active":
+        return client.patch(f"/api/admin/users/{target_id}", json={"is_active": False}, headers=actor["headers"])
+    return _post(client, actor, target_id, action)
+
+
+ADMIN_ACTIONS = ("deactivate", "reactivate", "active", "role", "reset-access", "unlock", "close-sessions")
+
+
+@pytest.mark.parametrize("action", ADMIN_ACTIONS)
+def test_admin_never_manages_another_admin(client, make_user, sent, action):
     admin = make_user("admin")
     other = make_user("admin")
-    response = client.patch(f"/api/admin/users/{other['id']}", json={"role": "coordinator"}, headers=admin["headers"])
-    assert response.status_code == 200
-    assert _db_user(other["id"]).role == "coordinator"
+    response = _admin_request(client, admin, other["id"], action)
+    assert response.status_code == 403, response.text
+    user = _db_user(other["id"])
+    assert user.role == "admin" and user.is_active
+    assert _sessions(other["id"]) == 1
+
+
+@pytest.mark.parametrize("action", ADMIN_ACTIONS)
+def test_admin_never_manages_own_account(client, make_user, sent, action):
+    admin = make_user("admin")
+    response = _admin_request(client, admin, admin["id"], action)
+    assert response.status_code == 403, response.text
+    user = _db_user(admin["id"])
+    assert user.role == "admin" and user.is_active
+    assert _sessions(admin["id"]) == 1
+
+
+def test_admin_cannot_approve_role_change_of_an_admin(client, make_user, sent):
+    """Si la cuenta pasó a ser administradora después de la solicitud, aprobarla no le cambia el rol."""
+    admin = make_user("admin")
+    coordinator = make_user("coordinator")
+    target = make_user("technician")
+    created = client.post("/api/account-requests", json={
+        "kind": "role", "target_user_id": target["id"], "new_value": "requester", "reason": "Ya no da soporte",
+    }, headers=coordinator["headers"])
+    assert created.status_code == 201, created.text
+    db = SessionLocal()
+    try:
+        db.get(models.User, target["id"]).role = "admin"
+        db.commit()
+    finally:
+        db.close()
+    response = client.post(f"/api/account-requests/{created.json()['id']}/approve", headers=admin["headers"])
+    assert response.status_code == 403
+    assert _db_user(target["id"]).role == "admin"
 
 
 def test_role_change_closes_sessions(client, make_user):

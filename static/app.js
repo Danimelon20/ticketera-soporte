@@ -3384,10 +3384,11 @@ document.addEventListener('DOMContentLoaded', () => {
         admin: {
             active: ['coordinator', 'technician', 'requester'],
             reset: ['coordinator', 'technician'],
-            unlock: ['admin', 'coordinator', 'technician', 'requester'],
+            unlock: ['coordinator', 'technician', 'requester'],
             availability: ['technician'],
             schedule: ['technician', 'coordinator'],
-            sessions: ['coordinator', 'technician', 'requester']
+            sessions: ['coordinator', 'technician', 'requester'],
+            role: ['coordinator', 'technician', 'requester']
         },
         coordinator: {
             active: ['technician', 'requester'],
@@ -3395,7 +3396,8 @@ document.addEventListener('DOMContentLoaded', () => {
             unlock: ['technician', 'requester'],
             availability: ['technician'],
             schedule: ['technician'],
-            sessions: ['technician', 'requester']
+            sessions: ['technician', 'requester'],
+            role: ['technician', 'requester']
         }
     };
 
@@ -4161,47 +4163,15 @@ document.addEventListener('DOMContentLoaded', () => {
         loadAccountChanges();
     });
 
-    // ----- Cuentas del coordinador: Equipo, Clientes y Mis solicitudes -----
+    // ----- Cuentas del coordinador: Equipo y Mis solicitudes (los clientes están en Cuentas) -----
     const teamBody = document.getElementById('teamBody');
     const teamEmpty = document.getElementById('teamEmpty');
-    const clientsSearch = document.getElementById('clientsSearch');
-    const clientsBody = document.getElementById('clientsBody');
-    const clientsEmpty = document.getElementById('clientsEmpty');
     const myRequestsList = document.getElementById('myRequestsList');
     const myRequestsEmpty = document.getElementById('myRequestsEmpty');
-    let clientsTimer = null;
-    let clientsSeq = 0;
 
     function loadAccountsView() {
-        // Solo la sección visible; "Mis solicitudes" no se muestra en ninguna opción del menú
-        if (accountsSection === 'clients') loadClients();
-        else loadTeam();
-    }
-
-    function accountRow(user) {
-        const row = document.createElement('tr');
-        row.dataset.userId = user.id;
-        row.dataset.userName = user.name || user.email;
-        row.dataset.userRole = user.role;
-        row.appendChild(makeCell(user.name || '—'));
-        row.appendChild(makeCell(user.email));
-        return row;
-    }
-
-    function stateCell(user) {
-        const td = document.createElement('td');
-        const state = document.createElement('span');
-        state.className = user.is_active ? 'state-active' : 'state-inactive';
-        state.textContent = user.is_active ? 'Activa' : 'Desactivada';
-        td.appendChild(state);
-        if (user.login_locked) {
-            const locked = document.createElement('span');
-            locked.className = 'state-locked';
-            locked.textContent = 'Bloqueada por intentos';
-            td.appendChild(locked);
-        }
-        accountTags(user).forEach(tag => td.appendChild(tag));
-        return td;
+        // "Mis solicitudes" no se muestra en ninguna opción del menú
+        loadTeam();
     }
 
     // Personal (técnicos, coordinadores y administradores), con acciones en "Horario" y en el menú "⋯".
@@ -4223,42 +4193,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function loadClients() {
-        const q = clientsSearch.value.trim();
-        const seq = ++clientsSeq;
-        if (!q) {
-            clientsBody.replaceChildren();
-            clientsEmpty.textContent = 'Escriba un nombre o correo para buscar.';
-            clientsEmpty.hidden = false;
-            return;
-        }
-        let users;
-        try {
-            users = await apiFetch(`/directory?${new URLSearchParams({ role: 'requester', q }).toString()}`);
-        } catch (err) {
-            return; // apiFetch ya mostró el error
-        }
-        // Solo la última búsqueda pinta la tabla
-        if (seq !== clientsSeq) return;
-        clientsBody.replaceChildren();
-        clientsEmpty.textContent = 'No hay solicitantes con esa búsqueda.';
-        clientsEmpty.hidden = users.length > 0;
-        users.forEach(user => {
-            const row = accountRow(user);
-            row.appendChild(stateCell(user));
-            const actionsTd = document.createElement('td');
-            const buttons = accountActionButtons(user);
-            // Nombre y cédula fijos: solo se corrigen con aprobación del administrador
-            if (user.identity_locked) {
-                buttons.push(makeActionButton('request-name', 'Corregir nombre'));
-                buttons.push(makeActionButton('request-id_number', 'Corregir cédula'));
-            }
-            actionsTd.appendChild(accountActionsWrap(buttons));
-            row.appendChild(actionsTd);
-            clientsBody.appendChild(row);
-        });
-    }
-
     async function loadMyRequests() {
         let items;
         try {
@@ -4271,7 +4205,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function createAccountRequest(button) {
-        const row = button.closest('tr');
+        // Fila de una tabla o panel de Cuentas: los dos traen data-user-id
+        const row = button.closest('[data-user-id]');
         const name = row.dataset.userName;
         const kind = button.dataset.action.replace('request-', '');
         let newValue;
@@ -4327,11 +4262,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     teamBody.addEventListener('click', (e) => handleAccountsClick(e, loadTeam));
-    clientsBody.addEventListener('click', (e) => handleAccountsClick(e, loadClients));
-    clientsSearch.addEventListener('input', () => {
-        clearTimeout(clientsTimer);
-        clientsTimer = setTimeout(loadClients, 300);
-    });
 
     // ----- Administración -----
     const adminStatus = document.getElementById('adminStatus');
@@ -4485,7 +4415,11 @@ document.addEventListener('DOMContentLoaded', () => {
         request_created: 'Solicitud creada',
         request_approved: 'Solicitud aprobada',
         request_rejected: 'Solicitud rechazada',
-        sessions_closed: 'Sesiones cerradas'
+        sessions_closed: 'Sesiones cerradas',
+        invitation_cancelled: 'Invitación cancelada',
+        server_account_deactivated: 'Cuenta desactivada',
+        server_account_activated: 'Cuenta activada',
+        server_role_changed: 'Rol cambiado'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -5166,15 +5100,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 // El administrador gestiona el equipo y los clientes desde el directorio
                 // El horario se edita con el botón "Horario" de cada fila del equipo
                 { id: 'team', label: 'Equipo y disponibilidad', open: () => showAccountsSection('team') },
-                // El administrador busca clientes en el directorio (con todas sus columnas)
-                { id: 'clients', label: 'Clientes',
-                  open: () => (isAdmin ? openDirectory('requester') : showAccountsSection('clients')) },
+                // Personal, clientes e invitaciones en una sola lista (antes "Clientes" iba aparte)
+                { id: 'accounts', label: 'Cuentas', open: () => openAccounts() },
                 { id: 'invites', label: 'Invitaciones', count: 'invitations_pending', open: () => navUsers.click() },
             ] },
         ];
         if (isAdmin) {
             groups.push({ title: 'Administración', items: [
-                { id: 'accounts', label: 'Cuentas', open: () => showView('adminAccounts') },
                 { id: 'approvals', label: 'Aprobaciones', count: 'approvals_pending',
                   open: () => showAdminSection('approvals') },
                 { id: 'changes', label: 'Registro de cambios', open: () => showAdminSection('changes') },
@@ -5473,17 +5405,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!button) return;
         const name = button.dataset.name;
         hideGlobalResults();
-        if (currentUser.role === 'admin') {
-            directoryRoleSelect.value = 'requester';
-            directorySearch.value = name;
-            setSideNavActive('clients');
-            showView('directory');
-        } else {
-            setSideNavActive('clients');
-            showAccountsSection('clients');
-            clientsSearch.value = name;
-            clientsSearch.dispatchEvent(new Event('input'));
-        }
+        setSideNavActive('accounts');
+        openAccounts('clients', name);
     });
 
     document.addEventListener('click', (e) => {
@@ -5547,6 +5470,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const ASK_DETAILS_TEXT = 'Para avanzar con su caso necesitamos más información: ';
     let queueView = 'open';
     let queueSearch = '';
+    // "Ver sus tickets" desde Cuentas: { id, name } del cliente
+    let queueRequester = null;
     let queuePageNum = 1;
     let queueLoadedAt = null;
     let queueSeq = 0;
@@ -5606,14 +5531,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (queueAssignee.value !== current) queueAssignee.value = '';
     }
 
-    function setQueueView(view, label, search = '') {
+    function setQueueView(view, label, search = '', requester = null) {
         queueView = view;
         queueSearch = search;
+        queueRequester = requester;
         queuePageNum = 1;
         queueTitle.textContent = label;
+        renderQueueRequester();
         showView('tickets');
         loadQueue();
     }
+
+    const queueRequesterBox = document.getElementById('queueRequester');
+
+    function renderQueueRequester() {
+        queueRequesterBox.hidden = !queueRequester;
+        document.getElementById('queueRequesterName').textContent = queueRequester ? `Cliente: ${queueRequester.name}` : '';
+    }
+
+    document.getElementById('queueRequesterClear').addEventListener('click', () => {
+        queueRequester = null;
+        queuePageNum = 1;
+        queueTitle.textContent = 'Todos los tickets';
+        renderQueueRequester();
+        loadQueue();
+    });
 
     function queueParams() {
         const params = new URLSearchParams({ view: queueView, page: String(queuePageNum) });
@@ -5623,6 +5565,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // El técnico no filtra por responsable
         if (queueAssignee.value && currentUser.role !== 'technician') params.set('assigned_to', queueAssignee.value);
         if (queueSearch) params.set('search', queueSearch);
+        if (queueRequester) params.set('requester_id', String(queueRequester.id));
         return params;
     }
 
@@ -6070,17 +6013,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ===== Admin › Cuentas =====
+    // ===== Cuentas: una sola lista con filtros rápidos (administrador y coordinador) =====
+    // El servidor decide qué cuentas llegan y qué acciones tiene cada una (y las vuelve a revisar al hacerlas)
     const aaBody = document.getElementById('aaBody');
     const aaEmpty = document.getElementById('aaEmpty');
     const aaSearch = document.getElementById('aaSearch');
-    const aaRole = document.getElementById('aaRole');
-    const aaState = document.getElementById('aaState');
-    const aaIdentity = document.getElementById('aaIdentity');
+    const aaQuick = document.getElementById('aaQuick');
     const aaDetail = document.getElementById('aaDetail');
+    const accountMenu = document.getElementById('accountMenu');
     const ACCOUNT_STATE_LABELS = {
         active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada',
         vacation: 'Vacaciones', away: 'Ausente', invited: 'Invitación pendiente'
+    };
+    const ACCOUNT_TYPE_LABELS = {
+        requester: 'Cliente', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
+    };
+    // Grupos del menú "Acciones ▾", en este orden; la zona delicada va separada y en rojo
+    const ACCOUNT_MENU_GROUPS = [
+        { title: 'Seguimiento', actions: ['view-tickets', 'report', 'review-reports', 'request-name', 'request-id_number', 'full-data'] },
+        { title: 'Rol y turno', actions: ['change-role', 'schedule', 'availability'] },
+        { title: 'Acceso', actions: ['unlock', 'close-sessions', 'reset-access'] },
+        { title: 'Zona delicada', actions: ['deactivate', 'reactivate'], danger: true },
+        { title: 'Invitación', actions: ['resend-invitation'] },
+        { title: '', actions: ['cancel-invitation'], danger: true }
+    ];
+    const ACCOUNT_MENU_LABELS = {
+        'view-tickets': 'Ver sus tickets', report: 'Reportar cuenta', 'review-reports': 'Revisar reportes',
+        'request-name': 'Corregir nombre', 'request-id_number': 'Corregir cédula', 'full-data': 'Ver datos completos',
+        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Cambiar disponibilidad',
+        unlock: 'Desbloquear', 'close-sessions': 'Cerrar sesiones', 'reset-access': 'Forzar restablecimiento',
+        deactivate: 'Desactivar', reactivate: 'Reactivar',
+        'resend-invitation': 'Reenviar invitación', 'cancel-invitation': 'Cancelar invitación'
     };
     const aaScheduleOn = document.getElementById('aaScheduleOn');
     const aaScheduleFields = document.getElementById('aaScheduleFields');
@@ -6089,20 +6052,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const aaEnd = document.getElementById('aaEnd');
     const aaMatch = document.getElementById('aaMatch');
     let aaRows = [];
-    let aaByScheduleShown = false;
+    let aaFilter = 'all';
     let aaSelected = null;
+    // Lo que muestra el panel: { kind: 'user', ...detalle } o { kind: 'invitation', ...fila }
+    let aaCurrent = null;
     let aaSeq = 0;
     let aaSearchTimer = null;
+    let accountMenuOwner = null;
+
+    function aaPlaceholder() {
+        aaCurrent = null;
+        aaDetail.replaceChildren(makeEl('p', 'sd-muted', 'Elija una cuenta para ver el detalle.'));
+    }
+
+    // Abre Cuentas con un filtro rápido y una búsqueda (desde el menú o desde la búsqueda global)
+    function openAccounts(filter = 'all', search = '') {
+        aaFilter = filter;
+        aaSearch.value = search;
+        aaSelected = null;
+        aaPlaceholder();
+        adminAccountsView.classList.remove('show-detail');
+        showView('adminAccounts');
+    }
 
     async function loadAdminAccounts() {
-        const params = new URLSearchParams();
-        if (aaRole.value) params.set('role', aaRole.value);
-        if (aaState.value) params.set('state', aaState.value);
-        if (aaIdentity.value) params.set('identity_code', aaIdentity.value);
+        const params = new URLSearchParams({ filter: aaFilter });
         if (aaSearch.value.trim()) params.set('q', aaSearch.value.trim());
         // Filtro por horario: lo resuelve el servidor (solo técnicos y coordinadores con turno ese día)
-        const bySchedule = aaScheduleOn.checked;
-        if (bySchedule) {
+        if (aaScheduleOn.checked) {
             if (!aaStart.value || !aaEnd.value) {
                 showError('Indique la hora de entrada y la de salida');
                 return;
@@ -6117,16 +6094,28 @@ document.addEventListener('DOMContentLoaded', () => {
             params.set('schedule_match', aaMatch.value);
         }
         const seq = ++aaSeq;
-        let rows;
+        let data;
         try {
-            rows = await apiFetch(`/admin/accounts?${params}`);
+            data = await apiFetch(`/accounts?${params}`);
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
         if (seq !== aaSeq) return;
-        aaRows = rows;
-        aaByScheduleShown = bySchedule;
+        aaRows = data.items;
+        renderAccountFilters(data.counts);
         renderAdminAccounts();
+    }
+
+    function renderAccountFilters(counts) {
+        aaQuick.querySelectorAll('.aa-quick-btn').forEach(button => {
+            button.setAttribute('aria-pressed', button.dataset.filter === aaFilter ? 'true' : 'false');
+        });
+        aaQuick.querySelectorAll('.aa-quick-count').forEach(el => {
+            const value = counts[el.dataset.count] || 0;
+            el.textContent = String(value);
+            el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
+            el.classList.toggle('is-alert', el.dataset.tone === 'alert' && value > 0);
+        });
     }
 
     function accountKey(row) {
@@ -6136,157 +6125,139 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderAdminAccounts() {
         aaBody.replaceChildren();
         aaEmpty.hidden = aaRows.length > 0;
-        // Con el filtro por horario, "Último acceso" se reemplaza por el horario de ese día
-        document.getElementById('aaLastHead').textContent = aaByScheduleShown ? 'Horario de ese día' : 'Último acceso';
         aaRows.forEach(row => {
             const tr = makeEl('tr', 'queue-row');
             tr.dataset.key = accountKey(row);
             tr.tabIndex = 0;
             if (tr.dataset.key === aaSelected) tr.classList.add('selected');
 
-            const name = queueCell('Nombre', 'col-subject');
+            // El nombre completo siempre se ve (puede ocupar dos líneas); el correo ya viene enmascarado
+            const name = queueCell('Nombre', 'col-subject aa-cell-name');
             name.appendChild(makeEl('div', 'queue-subject', row.name));
             name.appendChild(makeEl('div', 'queue-meta', row.email));
-            const role = queueCell('Rol');
-            role.textContent = ROLE_MAP[row.role] || row.role;
+            const type = queueCell('Tipo');
+            type.textContent = ACCOUNT_TYPE_LABELS[row.role] || row.role;
             const state = queueCell('Estado');
             state.appendChild(makeEl('span', `state-tag acc-${row.state}`, ACCOUNT_STATE_LABELS[row.state] || row.state));
-            const last = queueCell(aaByScheduleShown ? 'Horario de ese día' : 'Último acceso', 'tabular');
-            if (aaByScheduleShown) last.textContent = row.schedule_day || '';
-            else if (row.kind === 'invitation') last.textContent = `Vence en ${row.invitation_hours_left} h`;
-            else last.textContent = row.last_activity ? formatDateTime(row.last_activity) : 'Sin sesión activa';
+            if (row.kind === 'invitation') state.appendChild(makeEl('div', 'queue-meta', `Vence en ${row.invitation_hours_left} h`));
+            if (row.schedule_day) state.appendChild(makeEl('div', 'queue-meta', `Turno: ${row.schedule_day}`));
             const identity = queueCell('Identidad');
-            if (row.identity) {
-                identity.appendChild(makeTag(IDENTITY_LABELS[row.identity] || row.identity, `tag-identity-${row.identity}`));
+            if (row.kind === 'user' && row.role === 'requester') {
+                requesterTags({ identity: row.identity, reported: row.reported }).forEach(tag => identity.appendChild(tag));
             } else {
                 identity.textContent = '—';
             }
-            tr.append(name, role, state, last, identity);
+            const open = queueCell('Abiertos', 'num tabular');
+            open.textContent = row.kind === 'invitation' ? '—' : String(row.open_tickets);
+            tr.append(name, type, state, identity, open);
             aaBody.appendChild(tr);
         });
     }
 
-    function aaDataRow(list, label, value) {
-        if (value === null || value === undefined || value === '') return;
-        const box = makeEl('div', 'sd-field');
-        box.append(makeEl('dt', '', label), makeEl('dd', '', value));
-        list.appendChild(box);
+    // Encabezado del panel: nombre, tipo · correo, etiqueta de estado y "Acciones ▾" (si hay alguna)
+    function accountPanelHead(item, actions) {
+        const head = makeEl('div', 'aa-panel-head');
+        const titles = makeEl('div', 'aa-panel-titles');
+        titles.appendChild(makeEl('h2', 'aa-name', item.name));
+        titles.appendChild(makeEl('p', 'sd-meta', `${ACCOUNT_TYPE_LABELS[item.role] || item.role} · ${item.email}`));
+        const tags = makeEl('div', 'sd-client');
+        tags.appendChild(makeEl('span', `state-tag acc-${item.state}`, ACCOUNT_STATE_LABELS[item.state] || item.state));
+        titles.appendChild(tags);
+        head.appendChild(titles);
+        if (actions.length) {
+            const button = makeEl('button', 'btn-secondary btn-small aa-actions-btn', 'Acciones ▾');
+            button.type = 'button';
+            button.setAttribute('aria-haspopup', 'menu');
+            button.setAttribute('aria-expanded', 'false');
+            button.setAttribute('aria-controls', 'accountMenu');
+            head.appendChild(button);
+        }
+        return { head, tags };
+    }
+
+    function accountMenuActions(item) {
+        if (item.kind === 'invitation') return ['resend-invitation', 'cancel-invitation'];
+        // Nunca sobre la propia cuenta ni sobre otro administrador (el servidor tampoco las permite)
+        if (item.id === currentUser.id || item.role === 'admin') return [];
+        return item.actions.filter(action => ACCOUNT_MENU_LABELS[action]);
     }
 
     function renderInvitationPanel(row) {
+        closeAccountMenu(false);
         aaDetail.replaceChildren();
-        aaDetail.appendChild(makeEl('h2', 'aa-name', row.name));
-        aaDetail.appendChild(makeEl('p', 'sd-meta', row.email));
-        const data = makeEl('dl', 'sd-fields');
-        aaDataRow(data, 'Rol', ROLE_MAP[row.role] || row.role);
-        aaDataRow(data, 'Estado', ACCOUNT_STATE_LABELS.invited);
-        aaDataRow(data, 'Vence en', `${row.invitation_hours_left} h`);
-        aaDetail.appendChild(data);
-        const resend = makeEl('button', 'btn-secondary btn-small aa-resend', 'Reenviar invitación');
-        resend.type = 'button';
-        resend.dataset.invitationId = String(row.id);
-        aaDetail.appendChild(resend);
+        const box = makeEl('div', 'aa-account');
+        box.appendChild(accountPanelHead(row, accountMenuActions(row)).head);
+        const alerts = makeEl('ul', 'aa-alerts');
+        alerts.appendChild(makeEl('li', 'aa-alert', `La invitación vence en ${row.invitation_hours_left} h`));
+        box.appendChild(alerts);
+        aaDetail.appendChild(box);
     }
 
     function renderAccountPanel(d) {
+        closeAccountMenu(false);
         aaDetail.replaceChildren();
-        // runAccountAction lee estos datos del contenedor (igual que de una fila del directorio)
         const box = makeEl('div', 'aa-account');
-        box.dataset.userId = String(d.id);
-        box.dataset.userName = d.name;
-        box.dataset.userRole = d.role;
-
-        box.appendChild(makeEl('h2', 'aa-name', d.name));
-        box.appendChild(makeEl('p', 'sd-meta', d.email));
-        const tags = makeEl('div', 'sd-client');
-        tags.appendChild(makeEl('span', `state-tag acc-${d.state}`, ACCOUNT_STATE_LABELS[d.state] || d.state));
-        if (d.identity) requesterTags({ identity: d.identity, reported: d.reported }).forEach(t => tags.appendChild(t));
-        box.appendChild(tags);
-
-        const data = makeEl('dl', 'sd-fields');
-        aaDataRow(data, 'Rol', ROLE_MAP[d.role] || d.role);
-        aaDataRow(data, 'Creada', formatDateTime(d.created_at));
-        aaDataRow(data, 'Último acceso', d.last_activity ? formatDateTime(d.last_activity) : 'Sin sesión activa');
-        aaDataRow(data, 'Sesiones activas', String(d.active_sessions));
-        aaDataRow(data, 'Teléfono', d.phone);
-        aaDataRow(data, 'Cédula', d.id_number);
-        if (d.availability) {
-            const back = d.return_date ? ` · regresa ${formatPlainDate(d.return_date)}` : '';
-            aaDataRow(data, 'Disponibilidad', `${AVAILABILITY_LABELS[d.availability] || d.availability}${back}`);
-        }
-        aaDataRow(data, 'Horario', d.schedule_summary);
-        box.appendChild(data);
+        const { head, tags } = accountPanelHead(d, accountMenuActions(d));
+        if (d.role === 'requester') requesterTags({ identity: d.identity, reported: d.reported }).forEach(t => tags.appendChild(t));
+        box.appendChild(head);
 
         const alerts = makeEl('ul', 'aa-alerts');
-        if (d.alerts.pending_role) {
-            const li = makeEl('li', 'aa-alert');
-            const by = d.alerts.pending_role_by ? ` (lo pidió ${d.alerts.pending_role_by})` : '';
-            li.appendChild(makeEl('span', '', `Cambio de rol pendiente a ${ROLE_MAP[d.alerts.pending_role] || d.alerts.pending_role}${by}`));
-            const approve = makeEl('button', 'btn-secondary btn-small aa-approve', 'Aprobar');
-            approve.type = 'button';
-            approve.dataset.requestId = String(d.alerts.pending_role_request_id);
-            const reject = makeEl('button', 'btn-secondary btn-small aa-reject', 'Rechazar');
-            reject.type = 'button';
-            reject.dataset.requestId = String(d.alerts.pending_role_request_id);
-            li.append(approve, reject);
-            alerts.appendChild(li);
+        if (d.alerts.open_reports > 0) {
+            alerts.appendChild(makeEl('li', 'aa-alert',
+                `${d.alerts.open_reports} ${d.alerts.open_reports === 1 ? 'reporte abierto' : 'reportes abiertos'}`));
         }
         if (d.alerts.locked_until) {
             alerts.appendChild(makeEl('li', 'aa-alert', `Bloqueada por intentos hasta ${formatDateTime(d.alerts.locked_until)}`));
         }
-        if (d.alerts.open_reports > 0) {
-            const li = makeEl('li', 'aa-alert', `${d.alerts.open_reports} ${d.alerts.open_reports === 1 ? 'reporte abierto' : 'reportes abiertos'} `);
-            const view = makeEl('button', 'link-btn aa-reports', 'Ver reportes');
-            view.type = 'button';
-            li.appendChild(view);
+        if (d.alerts.pending_role) {
+            const li = makeEl('li', 'aa-alert');
+            const by = d.alerts.pending_role_by ? ` (lo pidió ${d.alerts.pending_role_by})` : '';
+            li.appendChild(makeEl('span', '', `Cambio de rol pendiente a ${ROLE_MAP[d.alerts.pending_role] || d.alerts.pending_role}${by}`));
+            // Solo el administrador la resuelve (nunca la que pidió él mismo)
+            if (d.actions.includes('approve-role')) {
+                ['approve', 'reject'].forEach(kind => {
+                    const button = makeEl('button', `btn-secondary btn-small aa-${kind}`, kind === 'approve' ? 'Aprobar' : 'Rechazar');
+                    button.type = 'button';
+                    button.dataset.requestId = String(d.alerts.pending_role_request_id);
+                    li.appendChild(button);
+                });
+            }
             alerts.appendChild(li);
         }
-        if (alerts.children.length) {
-            box.appendChild(makeEl('h3', 'aa-subtitle', 'Avisos'));
-            box.appendChild(alerts);
-        }
+        if (alerts.children.length) box.appendChild(alerts);
 
-        const buttons = [];
-        if (d.is_active && canManage(d, 'reset')) buttons.push(makeActionButton('reset-access'));
-        if (d.state === 'locked' && canManage(d, 'unlock')) buttons.push(makeActionButton('unlock'));
-        if (d.active_sessions > 0 && canManage(d, 'sessions')) buttons.push(makeActionButton('close-sessions'));
-        if (canManage(d, 'active')) buttons.push(makeActionButton(d.is_active ? 'deactivate' : 'reactivate'));
-        if (buttons.length) {
-            box.appendChild(makeEl('h3', 'aa-subtitle', 'Acciones'));
-            box.appendChild(accountActionsWrap(buttons));
-        }
-
-        // Cambio de rol directo del administrador (el del coordinador llega como solicitud pendiente)
-        if (d.id !== currentUser.id) {
-            const roleRow = makeEl('div', 'aa-role');
-            const label = makeEl('label', 'sr-only', 'Nuevo rol');
-            label.htmlFor = 'aaRoleSelect';
-            const select = makeEl('select');
-            select.id = 'aaRoleSelect';
-            ['requester', 'technician', 'coordinator', 'admin'].forEach(role => {
-                select.appendChild(staffOption(role, ROLE_MAP[role] || role, role === d.role));
-            });
-            const apply = makeEl('button', 'btn-secondary btn-small aa-role-apply', 'Cambiar rol');
-            apply.type = 'button';
-            roleRow.append(label, select, apply);
-            box.appendChild(makeEl('h3', 'aa-subtitle', 'Rol'));
-            box.appendChild(roleRow);
-        }
-
-        box.appendChild(makeEl('h3', 'aa-subtitle', 'Últimos cambios'));
-        if (d.recent_changes.length === 0) {
-            box.appendChild(makeEl('p', 'sd-muted', 'Sin cambios registrados.'));
+        if (d.role === 'requester') {
+            box.appendChild(makeEl('h3', 'aa-subtitle', 'Tickets recientes'));
+            if (d.recent_tickets.length === 0) {
+                box.appendChild(makeEl('p', 'sd-muted', 'Todavía no tiene tickets.'));
+            } else {
+                const list = makeEl('ul', 'aa-changes');
+                d.recent_tickets.forEach(ticket => {
+                    const li = makeEl('li');
+                    const link = makeEl('button', 'link-btn aa-ticket', `#${ticket.id} ${ticket.title}`);
+                    link.type = 'button';
+                    link.dataset.ticketId = String(ticket.id);
+                    li.append(link, makeEl('span', 'aa-change-date', ` · ${STATE_MAP[ticket.status] || ticket.status}`));
+                    list.appendChild(li);
+                });
+                box.appendChild(list);
+            }
         } else {
-            const list = makeEl('ul', 'aa-changes');
-            d.recent_changes.forEach(change => {
-                const li = makeEl('li');
-                li.appendChild(makeEl('span', 'aa-change-date tabular', formatDateTime(change.created_at)));
-                let text = ` ${CHANGE_ACTIONS[change.action] || change.action} · ${change.actor}`;
-                if (change.old_value || change.new_value) text += ` · ${change.old_value || '—'} → ${change.new_value || '—'}`;
-                li.appendChild(document.createTextNode(text));
-                list.appendChild(li);
-            });
-            box.appendChild(list);
+            box.appendChild(makeEl('h3', 'aa-subtitle', 'Cambios recientes'));
+            if (d.recent_changes.length === 0) {
+                box.appendChild(makeEl('p', 'sd-muted', 'Sin cambios registrados.'));
+            } else {
+                const list = makeEl('ul', 'aa-changes');
+                d.recent_changes.forEach(change => {
+                    const li = makeEl('li');
+                    li.appendChild(makeEl('span', 'aa-change-date tabular', formatDateTime(change.created_at)));
+                    let text = ` ${CHANGE_ACTIONS[change.action] || change.action} · ${change.actor}`;
+                    if (change.old_value || change.new_value) text += ` · ${change.old_value || '—'} → ${change.new_value || '—'}`;
+                    li.appendChild(document.createTextNode(text));
+                    list.appendChild(li);
+                });
+                box.appendChild(list);
+            }
         }
         aaDetail.appendChild(box);
     }
@@ -6298,23 +6269,188 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = aaRows.find(r => accountKey(r) === key);
         if (!row) return;
         if (row.kind === 'invitation') {
+            aaCurrent = { ...row };
             renderInvitationPanel(row);
             return;
         }
         let detail;
         try {
-            detail = await apiFetch(`/admin/accounts/${row.id}`);
+            detail = await apiFetch(`/accounts/${row.id}`);
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
-        if (aaSelected === key) renderAccountPanel(detail);
+        if (aaSelected !== key) return;
+        aaCurrent = { kind: 'user', ...detail };
+        renderAccountPanel(detail);
     }
 
     async function refreshSelectedAccount() {
         await loadAdminAccounts();
         if (aaSelected && aaRows.some(r => accountKey(r) === aaSelected)) await selectAccount(aaSelected);
-        else aaDetail.replaceChildren(makeEl('p', 'sd-muted', 'Elija una cuenta para ver el detalle.'));
+        else aaPlaceholder();
     }
+
+    // ----- Menú "Acciones ▾": agrupado, con teclado; se cierra con Escape o con un clic fuera -----
+    function accountMenuItems() {
+        return [...accountMenu.querySelectorAll('.row-menu-item')];
+    }
+
+    function openAccountMenu(button) {
+        closeAccountMenu(false);
+        if (!aaCurrent) return;
+        const allowed = new Set(accountMenuActions(aaCurrent));
+        accountMenu.replaceChildren();
+        // runAccountAction y createAccountRequest leen la cuenta del contenedor con data-user-id: el menú mismo
+        accountMenu.dataset.userId = String(aaCurrent.id);
+        accountMenu.dataset.userName = aaCurrent.name;
+        accountMenu.dataset.userRole = aaCurrent.role;
+        ACCOUNT_MENU_GROUPS.forEach(group => {
+            const actions = group.actions.filter(action => allowed.has(action));
+            if (!actions.length) return;
+            if (accountMenu.children.length) {
+                const sep = makeEl('div', 'row-menu-sep');
+                sep.setAttribute('role', 'separator');
+                accountMenu.appendChild(sep);
+            }
+            if (group.title) {
+                const title = makeEl('div', 'account-menu-group', group.title);
+                title.setAttribute('role', 'presentation');
+                accountMenu.appendChild(title);
+            }
+            actions.forEach(action => {
+                const entry = makeEl('button', `row-menu-item account-action${group.danger ? ' is-danger' : ''}`,
+                    ACCOUNT_MENU_LABELS[action]);
+                entry.type = 'button';
+                entry.tabIndex = -1;
+                entry.setAttribute('role', 'menuitem');
+                entry.dataset.action = action;
+                accountMenu.appendChild(entry);
+            });
+        });
+        if (!accountMenu.children.length) return;
+        accountMenuOwner = button;
+        button.setAttribute('aria-expanded', 'true');
+        accountMenu.hidden = false;
+        const rect = button.getBoundingClientRect();
+        const width = accountMenu.offsetWidth;
+        const height = accountMenu.offsetHeight;
+        let top = rect.bottom + 4;
+        if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 4);
+        accountMenu.style.left = `${clamp(rect.right - width, 8, window.innerWidth - width - 8)}px`;
+        accountMenu.style.top = `${top}px`;
+        accountMenuItems()[0].focus();
+    }
+
+    function closeAccountMenu(returnFocus) {
+        if (accountMenu.hidden) return;
+        accountMenu.hidden = true;
+        if (accountMenuOwner) {
+            accountMenuOwner.setAttribute('aria-expanded', 'false');
+            if (returnFocus && accountMenuOwner.isConnected) accountMenuOwner.focus();
+        }
+        accountMenuOwner = null;
+    }
+
+    async function runAccountMenuAction(entry) {
+        const item = aaCurrent;
+        const action = entry.dataset.action;
+        closeAccountMenu(true);
+        if (!item) return;
+        let done = false;
+        if (action === 'view-tickets') {
+            setSideNavActive(null);
+            setQueueView('all', `Tickets de ${item.name}`, '', { id: item.id, name: item.name });
+            return;
+        }
+        if (action === 'review-reports') {
+            openReportsForAccount(item.id, item.name);
+            return;
+        }
+        if (action === 'full-data') {
+            // Directorio del administrador: teléfono y cédula con "Mostrar"
+            directoryRoleSelect.value = 'requester';
+            directorySearch.value = item.name;
+            setSideNavActive(null);
+            showView('directory');
+            return;
+        }
+        if (action === 'report') {
+            done = await openReportDialog(item.id, item.name);
+        } else if (action === 'change-role') {
+            done = await openRoleDialog({ id: item.id, name: item.name, role: item.role });
+        } else if (action === 'schedule') {
+            done = await openScheduleDialog(item.id, item.name, item.schedule || []);
+        } else if (action === 'availability') {
+            done = await openAvailabilityDialog(item.id, item.name,
+                { availability: item.availability || 'available', returnDate: item.return_date || '' });
+        } else if (action === 'request-name' || action === 'request-id_number') {
+            done = await createAccountRequest(entry);
+        } else if (action === 'resend-invitation') {
+            try {
+                await apiFetch(`/staff-invitations/${item.id}/resend`, { method: 'POST' });
+                showSuccess('Invitación reenviada');
+                done = true;
+            } catch (err) {
+                return; // apiFetch ya mostró el error
+            }
+        } else if (action === 'cancel-invitation') {
+            if (!confirm(`¿Cancelar la invitación de ${item.name}? El código dejará de servir.`)) return;
+            try {
+                await apiFetch(`/staff-invitations/${item.id}`, { method: 'DELETE' });
+            } catch (err) {
+                return; // apiFetch ya mostró el error
+            }
+            showSuccess('Invitación cancelada');
+            aaSelected = null;
+            adminAccountsView.classList.remove('show-detail');
+            done = true;
+        } else {
+            if (action === 'close-sessions'
+                && !confirm(`Se cerrarán todas las sesiones de ${item.name} en todos sus dispositivos. ¿Continuar?`)) {
+                return;
+            }
+            done = await runAccountAction(entry);
+        }
+        if (done) await refreshSelectedAccount();
+    }
+
+    accountMenu.addEventListener('click', (e) => {
+        const entry = e.target.closest('.row-menu-item');
+        if (entry) runAccountMenuAction(entry);
+    });
+
+    accountMenu.addEventListener('keydown', (e) => {
+        const items = accountMenuItems();
+        const index = items.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const step = e.key === 'ArrowDown' ? 1 : -1;
+            items[(index + step + items.length) % items.length].focus();
+        } else if (e.key === 'Home' || e.key === 'End') {
+            e.preventDefault();
+            items[e.key === 'Home' ? 0 : items.length - 1].focus();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeAccountMenu(true);
+        } else if (e.key === 'Tab') {
+            closeAccountMenu(false);
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!accountMenu.hidden && !accountMenu.contains(e.target)
+            && !(accountMenuOwner && accountMenuOwner.contains(e.target))) {
+            closeAccountMenu(false);
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !accountMenu.hidden) closeAccountMenu(true);
+    });
+    window.addEventListener('resize', () => closeAccountMenu(false));
+    document.addEventListener('scroll', (e) => {
+        if (!accountMenu.contains(e.target)) closeAccountMenu(false);
+    }, true);
 
     aaBody.addEventListener('click', (e) => {
         const row = e.target.closest('.queue-row');
@@ -6327,7 +6463,12 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         selectAccount(row.dataset.key);
     });
-    [aaRole, aaState, aaIdentity].forEach(select => select.addEventListener('change', loadAdminAccounts));
+    aaQuick.addEventListener('click', (e) => {
+        const button = e.target.closest('.aa-quick-btn');
+        if (!button || button.dataset.filter === aaFilter) return;
+        aaFilter = button.dataset.filter;
+        loadAdminAccounts();
+    });
     aaScheduleOn.addEventListener('change', () => {
         aaScheduleFields.hidden = !aaScheduleOn.checked;
         // Por defecto, el día de hoy (0 = lunes)
@@ -6342,16 +6483,22 @@ document.addEventListener('DOMContentLoaded', () => {
         aaSearchTimer = setTimeout(loadAdminAccounts, 300);
     });
     document.getElementById('aaInvite').addEventListener('click', () => navUsers.click());
-    document.getElementById('aaBack').addEventListener('click', () => adminAccountsView.classList.remove('show-detail'));
+    document.getElementById('aaBack').addEventListener('click', () => {
+        closeAccountMenu(false);
+        adminAccountsView.classList.remove('show-detail');
+    });
 
     aaDetail.addEventListener('click', async (e) => {
-        const action = e.target.closest('.account-action');
-        if (action) {
-            if (action.dataset.action === 'close-sessions'
-                && !confirm('Se cerrarán todas las sesiones de esta cuenta en todos sus dispositivos. ¿Continuar?')) {
-                return;
-            }
-            if (await runAccountAction(action)) await refreshSelectedAccount();
+        const more = e.target.closest('.aa-actions-btn');
+        if (more) {
+            if (accountMenuOwner === more) closeAccountMenu(true);
+            else openAccountMenu(more);
+            return;
+        }
+        const ticket = e.target.closest('.aa-ticket');
+        if (ticket) {
+            setSideNavActive(null);
+            openTicketById(parseInt(ticket.dataset.ticketId, 10));
             return;
         }
         const approve = e.target.closest('.aa-approve');
@@ -6380,45 +6527,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 return; // apiFetch ya mostró el error
             }
             showSuccess(approve ? 'Solicitud aprobada' : 'Solicitud rechazada');
-            await refreshSelectedAccount();
-            return;
-        }
-        if (e.target.closest('.aa-reports')) {
-            const box = aaDetail.querySelector('.aa-account');
-            openReportsForAccount(box.dataset.userId, box.dataset.userName);
-            return;
-        }
-        const roleApply = e.target.closest('.aa-role-apply');
-        if (roleApply) {
-            const box = aaDetail.querySelector('.aa-account');
-            const role = document.getElementById('aaRoleSelect').value;
-            if (role === box.dataset.userRole) return;
-            if (!confirm(`¿Cambiar el rol de ${box.dataset.userName} a ${ROLE_MAP[role] || role}?`)) return;
-            roleApply.disabled = true;
-            try {
-                await apiFetch(`/admin/users/${box.dataset.userId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ role })
-                });
-            } catch (err) {
-                roleApply.disabled = false;
-                return; // apiFetch ya mostró el error
-            }
-            showSuccess('Rol actualizado');
-            await refreshSelectedAccount();
-            return;
-        }
-        const resend = e.target.closest('.aa-resend');
-        if (resend) {
-            resend.disabled = true;
-            try {
-                await apiFetch(`/staff-invitations/${resend.dataset.invitationId}/resend`, { method: 'POST' });
-            } catch (err) {
-                resend.disabled = false;
-                return; // apiFetch ya mostró el error
-            }
-            showSuccess('Invitación reenviada');
             await refreshSelectedAccount();
         }
     });
@@ -6595,12 +6703,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===== Una sola sección por opción del menú =====
-    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y disponibilidad', clients: 'Clientes' };
+    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y disponibilidad' };
     const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
-    let accountsSection = 'team';
 
     function showAccountsSection(section) {
-        accountsSection = section;
         accountsView.querySelectorAll('[data-account-section]').forEach(el => {
             el.hidden = el.dataset.accountSection !== section;
         });

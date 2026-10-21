@@ -83,18 +83,24 @@ def list_invitations(current_user: models.User = Depends(get_current_user), db: 
     return [_invitation_read(i) for i in invitations]
 
 
-@router.post("/staff-invitations/{invitation_id}/resend", response_model=StaffInvitationRead)
-def resend_invitation(
-    invitation_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
+def _own_invitation(db: Session, current_user: models.User, invitation_id: int) -> models.StaffInvitation:
+    """El administrador gestiona todas; el coordinador, solo las suyas y nunca una de coordinador."""
     invitation = db.get(models.StaffInvitation, invitation_id)
     if invitation is None or (current_user.role != "admin" and invitation.created_by != current_user.id):
         raise HTTPException(status_code=404, detail="La invitación no existe")
     _check_can_invite(current_user, invitation.role)
     if invitation.used_by is not None:
         raise HTTPException(status_code=409, detail="Esta invitación ya se usó")
+    return invitation
+
+
+@router.post("/staff-invitations/{invitation_id}/resend", response_model=StaffInvitationRead)
+def resend_invitation(
+    invitation_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    invitation = _own_invitation(db, current_user, invitation_id)
     if not _can_resend(invitation.sent_at):
         raise HTTPException(status_code=429, detail="Espera un minuto antes de reenviarla.")
     sent = send_invitation(invitation)
@@ -102,3 +108,20 @@ def resend_invitation(
     db.commit()
     db.refresh(invitation)
     return _invitation_read(invitation, email_sent=sent)
+
+
+@router.delete("/staff-invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_invitation(
+    invitation_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """El código deja de servir: la invitación se borra (todavía no es una cuenta)."""
+    invitation = _own_invitation(db, current_user, invitation_id)
+    audit.record(
+        db, current_user.id, "invitation_cancelled",
+        target_label=mask_email(invitation.email), new=audit.role_name(invitation.role),
+    )
+    db.delete(invitation)
+    db.commit()
+    return None

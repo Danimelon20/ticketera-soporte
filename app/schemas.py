@@ -677,3 +677,61 @@ class TeamMember(BaseModel):
     schedule: Optional[list[ScheduleDay]] = None
     schedule_today: Optional[str] = None
     on_shift: Optional[bool] = None
+
+
+class AccountListRow(BaseModel):
+    """Fila de Cuentas (admin y coordinador): correo siempre enmascarado, nunca teléfono ni cédula."""
+    kind: Literal["user", "invitation"]
+    id: int
+    name: str
+    email: str
+    role: str
+    state: Literal["active", "locked", "inactive", "vacation", "away", "invited"]
+    # Solo clientes
+    identity: Optional[str] = None
+    reported: bool = False
+    # Clientes: tickets abiertos que crearon. Personal: tickets abiertos asignados
+    open_tickets: int = 0
+    invitation_hours_left: Optional[int] = None
+    # Solo con el filtro por horario: el turno de ese día ("08:00–17:00")
+    schedule_day: Optional[str] = None
+
+
+class AccountCounts(BaseModel):
+    all: int = 0
+    staff: int = 0
+    clients: int = 0
+    locked: int = 0
+    reported: int = 0
+    unverified: int = 0
+    invitations: int = 0
+
+
+class AccountListPage(BaseModel):
+    items: list[AccountListRow]
+    counts: AccountCounts
+
+
+class AccountRecentTicket(BaseModel):
+    id: int
+    title: str
+    status: str
+
+
+class AccountSummary(BaseModel):
+    """Panel de Cuentas. actions: solo lo que puede hacer quien mira (el servidor lo vuelve a revisar)."""
+    id: int
+    name: str
+    email: str
+    role: str
+    state: str
+    is_active: bool
+    identity: Optional[str] = None
+    reported: bool = False
+    availability: Optional[str] = None
+    return_date: Optional[date] = None
+    schedule: Optional[list[ScheduleDay]] = None
+    alerts: AdminAccountAlerts
+    recent_tickets: list[AccountRecentTicket] = []
+    recent_changes: list[AccountChangeRead] = []
+    actions: list[str] = []

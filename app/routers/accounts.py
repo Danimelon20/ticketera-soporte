@@ -181,8 +181,7 @@ def create_request(
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
 
     if data.kind == "role":
-        if user.role not in ("technician", "requester"):
-            raise HTTPException(status_code=403, detail=accounts.NO_PERMISSION)
+        accounts.check_can_manage(current_user, user, "role")
         if data.new_value not in REQUEST_ROLES:
             raise HTTPException(status_code=422, detail="Rol no válido")
         if data.new_value == user.role:
@@ -271,6 +270,8 @@ def _apply(db: Session, admin: models.User, row: models.AccountRequest) -> None:
     if user.id == admin.id:
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
     if row.kind == "role":
+        # La cuenta pudo cambiar de rol después de la solicitud (p. ej., ahora es administradora)
+        accounts.check_can_manage(admin, user, "role")
         accounts.change_role(db, admin, user, row.new_value)
         return
     if row.kind == "name":
