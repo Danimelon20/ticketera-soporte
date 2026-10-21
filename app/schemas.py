@@ -6,6 +6,8 @@ from .validators import normalize_phone, normalize_id_number, mask_id_number
 
 class CommentCreate(BaseModel):
     content: str
+    # Nota interna: solo el personal la ve y no se avisa a nadie por correo
+    internal: bool = False
 
     @field_validator("content")
     @classmethod
@@ -250,6 +252,7 @@ class TicketRead(BaseModel):
     updated_at: datetime
     # Nombre de quien lo atiende: el solicitante no tiene acceso a la lista de cuentas
     assigned_name: Optional[str] = None
+    source: str = "web"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -317,6 +320,9 @@ class TicketDetail(TicketRead):
     people: list[PersonRead] = []
     requester_flags: Optional[RequesterFlags] = None
     auto_assigned: bool = False
+    # Solo el personal: mismo cálculo de vencimiento que las alertas
+    due_state: Optional[str] = None
+    consumed_pct: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -571,3 +577,36 @@ class SystemStatus(BaseModel):
     auto_assign: bool
     auto_assign_mode: Optional[Literal["levels", "count"]] = None
     technicians_on_shift: int
+
+
+class QueueItem(BaseModel):
+    """Fila de la cola: sin descripción, teléfono, cédula ni correo."""
+    id: int
+    title: str
+    requester_name: str
+    level: Optional[int] = None
+    source: str
+    status: str
+    assigned_to: Optional[int] = None
+    assigned_name: Optional[str] = None
+    reported: bool = False
+    auto_assigned: bool = False
+    due_at: Optional[datetime] = None
+    due_state: Optional[str] = None
+    remaining_seconds: Optional[int] = None
+    consumed_pct: Optional[int] = None
+    assignee_note: Optional[Literal["vacation", "away", "after_shift"]] = None
+
+
+class QueuePage(BaseModel):
+    items: list[QueueItem]
+    total: int
+    page: int
+    pages: int
+
+
+class SuggestionRead(BaseModel):
+    """Candidato de la asignación automática: solo nombre y carga."""
+    user_id: int
+    name: str
+    load: int

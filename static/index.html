@@ -252,6 +252,67 @@
 
     <main style="display: none;">
         <div class="split">
+            <section id="queuePanel" class="queue-panel" aria-labelledby="queueTitle">
+                <header class="queue-head">
+                    <div class="queue-title-row">
+                        <h1 id="queueTitle" class="queue-title">Todos abiertos</h1>
+                        <span id="queueTotal" class="queue-total"></span>
+                        <span id="queueUpdated" class="queue-updated" aria-live="off"></span>
+                    </div>
+                    <div class="queue-filters">
+                        <label for="queueStatus" class="sr-only">Estado</label>
+                        <select id="queueStatus">
+                            <option value="">Estado: todos</option>
+                            <option value="new">Nuevo</option>
+                            <option value="in_progress">En proceso</option>
+                            <option value="resolved">Resuelto</option>
+                            <option value="closed">Cerrado</option>
+                        </select>
+                        <label for="queueLevel" class="sr-only">Nivel</label>
+                        <select id="queueLevel">
+                            <option value="">Nivel: todos</option>
+                            <option value="4">4 · Crítico</option>
+                            <option value="3">3 · Incidente</option>
+                            <option value="2">2 · Solicitud estándar</option>
+                            <option value="1">1 · Consulta</option>
+                            <option value="0">0 · No es soporte</option>
+                            <option value="none">Sin nivel</option>
+                        </select>
+                        <label for="queueAssignee" class="sr-only">Responsable</label>
+                        <select id="queueAssignee">
+                            <option value="">Responsable: todos</option>
+                            <option value="0">Sin asignar</option>
+                        </select>
+                        <label for="queueSource" class="sr-only">Canal</label>
+                        <select id="queueSource">
+                            <option value="">Canal: todos</option>
+                            <option value="web">Web</option>
+                            <option value="email">Correo</option>
+                        </select>
+                        <span class="queue-sort">Orden: vence primero</span>
+                    </div>
+                </header>
+                <div class="queue-table-wrap">
+                    <table class="queue-table">
+                        <thead>
+                            <tr>
+                                <th scope="col" class="col-num">N.º</th>
+                                <th scope="col">Asunto</th>
+                                <th scope="col" class="col-status">Estado</th>
+                                <th scope="col" class="col-owner">Responsable</th>
+                                <th scope="col" class="col-due">Vence en</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queueBody"></tbody>
+                    </table>
+                    <p id="queueEmpty" class="queue-empty" hidden>No hay tickets en esta vista.</p>
+                </div>
+                <div class="queue-pager">
+                    <button type="button" id="queuePrev" class="btn-secondary">Anterior</button>
+                    <span id="queuePage" class="queue-page"></span>
+                    <button type="button" id="queueNext" class="btn-secondary">Siguiente</button>
+                </div>
+            </section>
             <section id="listPanel" aria-label="Lista de tickets">
                 <div class="list-filters">
                     <div class="search-wrapper">

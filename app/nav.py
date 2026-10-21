@@ -7,12 +7,17 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import alerts, auto_assign, config, models, schedules
-from .daily_summary import OPEN_STATUSES, _local
-from .routers.drafts import DEFAULT_STATUSES as DRAFT_STATUSES
+from . import account_reports, alerts, auto_assign, availability, config, models, schedules
+from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
 RESOLVED_STATUSES = ("resolved", "closed")
+PAGE_SIZE = 25
+QUEUE_VIEWS = (
+    "all", "open", "unassigned", "due_soon", "overdue", "resolved_today",
+    "mine_open", "mine_due_soon", "following", "mine_resolved_today",
+)
+_OPEN_VIEWS = ("open", "unassigned", "due_soon", "overdue", "mine_open", "mine_due_soon", "following")
 
 
 def _now() -> datetime:
@@ -43,6 +48,11 @@ def _due_counts(tickets: list[models.Ticket], now: datetime) -> tuple[int, int]:
 
 
 def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None) -> int:
+    return len(_resolved_today_ids(db, now, assigned_to))
+
+
+def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = None) -> set[int]:
+    """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados."""
     query = (
         db.query(models.History.ticket_id)
         .join(models.Ticket, models.Ticket.id == models.History.ticket_id)
@@ -55,7 +65,7 @@ def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None) 
     )
     if assigned_to is not None:
         query = query.filter(models.Ticket.assigned_to == assigned_to)
-    return query.distinct().count()
+    return {row[0] for row in query.distinct().all()}
 
 
 def _unassigned(db: Session) -> int:
@@ -67,7 +77,8 @@ def _unassigned(db: Session) -> int:
 
 
 def _drafts_pending(db: Session) -> int:
-    # Los mismos estados que muestra la pantalla de borradores
+    # Los mismos estados que muestra la pantalla de borradores (aquí: drafts importa el router de tickets)
+    from .routers.drafts import DEFAULT_STATUSES as DRAFT_STATUSES
     return db.query(models.EmailDraft).filter(models.EmailDraft.status.in_(DRAFT_STATUSES)).count()
 
 
@@ -139,3 +150,137 @@ def system_status(db: Session, now: datetime | None = None) -> dict:
         # Disponibles y en turno: los mismos que puede elegir la asignación automática
         "technicians_on_shift": len(auto_assign.candidates(db, now)),
     }
+
+
+def _assignee_note(ticket: models.Ticket, statuses: dict, shifts: dict, now: datetime) -> str | None:
+    """Aviso sobre el responsable (técnico): de vacaciones o ausente, o el ticket vence después de su turno de hoy."""
+    user = ticket.assigned_user
+    if user is None or user.role != "technician" or ticket.status not in OPEN_STATUSES:
+        return None
+    status = statuses.get(user.id, ("available", None))[0]
+    if status != "available":
+        return status
+    due = _due_at(ticket)
+    today = schedules.today_range(shifts.get(user.id, []), now)
+    if due is None or today is None or due <= now:
+        return None
+    hour, minute = (int(part) for part in today[1].split(":"))
+    shift_end = _local(now).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return "after_shift" if _local(due) > shift_end else None
+
+
+def queue(
+    db: Session,
+    user: models.User,
+    *,
+    view: str = "open",
+    status: str | None = None,
+    level: str | None = None,
+    assigned_to: int | None = None,
+    source: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+    now: datetime | None = None,
+) -> dict:
+    """Cola de tickets por vista, ordenada por vencimiento (los que no tienen fecha al final), de 25 en 25.
+
+    Mismo alcance que GET /tickets para el personal. El técnico no filtra por responsable: assigned_to se ignora.
+    Solo datos para la lista: nunca descripción, teléfono, cédula ni correo.
+    """
+    now = now or _now()
+    query = db.query(models.Ticket).options(
+        joinedload(models.Ticket.ai_analysis), joinedload(models.Ticket.assigned_user)
+    )
+    if view in _OPEN_VIEWS:
+        query = query.filter(models.Ticket.status.in_(OPEN_STATUSES))
+    if view == "unassigned":
+        query = query.filter(models.Ticket.assigned_to.is_(None))
+    if view in ("mine_open", "mine_due_soon"):
+        query = query.filter(models.Ticket.assigned_to == user.id)
+    if view == "following":
+        query = query.join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id).filter(
+            models.TicketFollower.user_id == user.id
+        )
+    if view in ("resolved_today", "mine_resolved_today"):
+        ids = _resolved_today_ids(db, now, assigned_to=user.id if view == "mine_resolved_today" else None)
+        query = query.filter(models.Ticket.id.in_(ids))
+    if status:
+        query = query.filter(models.Ticket.status == status)
+    if source:
+        query = query.filter(models.Ticket.source == source)
+    if assigned_to is not None and user.role != "technician":
+        # 0: sin asignar
+        query = query.filter(
+            models.Ticket.assigned_to.is_(None) if assigned_to == 0 else models.Ticket.assigned_to == assigned_to
+        )
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(models.Ticket.title.ilike(term) | models.Ticket.description.ilike(term))
+
+    rows = []
+    for ticket in query.all():
+        state, percent = alerts.due_state(ticket, now)
+        if view in ("due_soon", "mine_due_soon") and state != alerts.DUE_SOON:
+            continue
+        if view == "overdue" and state != alerts.OVERDUE:
+            continue
+        ticket_level = _level(ticket)
+        if level == "none" and ticket_level is not None:
+            continue
+        if level not in (None, "none") and ticket_level != int(level):
+            continue
+        rows.append((ticket, state, percent, ticket_level))
+    rows.sort(key=lambda r: (_due_at(r[0]) is None, _due_at(r[0]) or datetime.max, r[0].id))
+
+    total = len(rows)
+    pages = max(1, -(-total // PAGE_SIZE))
+    page = min(max(1, page), pages)
+    page_rows = rows[(page - 1) * PAGE_SIZE:page * PAGE_SIZE]
+
+    tickets = [r[0] for r in page_rows]
+    creator_ids = list({t.created_by for t in tickets})
+    creators = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(creator_ids)).all()} if creator_ids else {}
+    reported = account_reports.reported_ids(db, creator_ids)
+    technician_ids = list({t.assigned_to for t in tickets if t.assigned_user and t.assigned_user.role == "technician"})
+    statuses = availability.statuses_for(db, technician_ids)
+    shifts = schedules.for_users(db, technician_ids)
+
+    items = []
+    for ticket, state, percent, ticket_level in page_rows:
+        due = _due_at(ticket)
+        creator = creators.get(ticket.created_by)
+        items.append({
+            "id": ticket.id,
+            "title": ticket.title,
+            "requester_name": (creator.name or "Sin nombre") if creator else "Sin nombre",
+            "level": ticket_level,
+            "source": ticket.source,
+            "status": ticket.status,
+            "assigned_to": ticket.assigned_to,
+            "assigned_name": (ticket.assigned_user.name or "Sin nombre") if ticket.assigned_user else None,
+            "reported": ticket.created_by in reported,
+            "auto_assigned": auto_assign.is_auto_assigned(db, ticket),
+            "due_at": due,
+            "due_state": state,
+            "remaining_seconds": int((due - now).total_seconds()) if due else None,
+            "consumed_pct": percent,
+            "assignee_note": _assignee_note(ticket, statuses, shifts, now),
+        })
+    return {"items": items, "total": total, "page": page, "pages": pages}
+
+
+def suggestion(db: Session, ticket: models.Ticket, now: datetime | None = None) -> dict | None:
+    """Mismo candidato que elegiría la asignación automática, sin asignar nada.
+
+    Solo para tickets abiertos sin responsable o con un responsable que no está Disponible.
+    """
+    if ticket.status not in OPEN_STATUSES:
+        return None
+    current = ticket.assigned_user
+    if current is not None and availability.is_available(db, current):
+        return None
+    now = now or _now()
+    user = auto_assign.choose(db, now)
+    if user is None or user.id == ticket.assigned_to:
+        return None
+    return {"user_id": user.id, "name": user.name or "Sin nombre", "load": auto_assign.loads(db, [user.id])[user.id]}

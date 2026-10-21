@@ -3,13 +3,13 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead
+from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import account_reports, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity
+from .. import account_reports, alerts, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -248,6 +248,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         flags = account_reports.staff_flags(db, db.get(models.User, db_ticket.created_by))
         if flags is not None:
             extra["requester_flags"] = flags
+        extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
     return TicketDetail(
         **ticket_read(db_ticket, current_user).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
@@ -276,6 +277,16 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
     db.commit()
     db.refresh(row)
     return ai_analysis_read(row, db_ticket)
+
+
+@router.get("/tickets/{ticket_id}/suggestion", response_model=Optional[SuggestionRead])
+def get_suggestion(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Sugerencia de responsable con la lógica de la asignación automática. No asigna nada."""
+    if current_user.role not in ("coordinator", "admin"):
+        raise HTTPException(status_code=403, detail="No tiene permiso para ver sugerencias de asignación")
+    db_ticket = get_visible_ticket(db, ticket_id, current_user)
+    found = nav.suggestion(db, db_ticket)
+    return SuggestionRead(**found) if found else None
 
 
 @router.post("/tickets/{ticket_id}/follow", status_code=204)
@@ -316,6 +327,14 @@ def add_comment(ticket_id: int, comment: CommentCreate, background_tasks: Backgr
     # Regla: el solicitante solo comenta en los tickets que él creó
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Solo puedes comentar en tus propios tickets")
+    if comment.internal:
+        if current_user.role not in nav.STAFF_ROLES:
+            raise HTTPException(status_code=403, detail="Solo el personal puede agregar notas internas")
+        # Nota interna: no se avisa a los seguidores ni al solicitante
+        db_comment = internal_comments.add_internal(db, ticket_id, current_user.id, comment.content)
+        db.commit()
+        db.refresh(db_comment)
+        return comment_read(db_comment, db_ticket, current_user, internal=True)
     db_comment = models.Comment(
         ticket_id=ticket_id,
         user_id=current_user.id,

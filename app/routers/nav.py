@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import nav
-from ..schemas import NavCounts, SystemStatus
+from ..schemas import NavCounts, QueuePage, SystemStatus
 from ..security import get_current_user
 
 router = APIRouter(prefix="/api", tags=["nav"])
@@ -24,3 +26,22 @@ def nav_counts(db: Session = Depends(get_db), current_user=Depends(require_staff
 @router.get("/system/status", response_model=SystemStatus)
 def system_status(db: Session = Depends(get_db), current_user=Depends(require_staff)):
     return SystemStatus(**nav.system_status(db))
+
+
+@router.get("/queue", response_model=QueuePage)
+def ticket_queue(
+    view: Literal[nav.QUEUE_VIEWS] = "open",
+    status: Optional[Literal["new", "in_progress", "resolved", "closed"]] = None,
+    level: Optional[Literal["0", "1", "2", "3", "4", "none"]] = None,
+    # 0: sin asignar. El técnico no filtra por responsable: se ignora
+    assigned_to: Optional[int] = Query(default=None, ge=0),
+    source: Optional[Literal["web", "email"]] = None,
+    search: Optional[str] = Query(default=None, max_length=150),
+    page: int = Query(default=1, ge=1),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_staff),
+):
+    return QueuePage(**nav.queue(
+        db, current_user, view=view, status=status, level=level, assigned_to=assigned_to,
+        source=source, search=search, page=page,
+    ))
