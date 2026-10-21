@@ -2559,48 +2559,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return box;
     }
 
-    document.querySelectorAll('.modal').forEach(modal => {
-        const closeBtn = modal.querySelector('.modal-close-btn');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                modal.style.display = 'none';
-                if (modal.id === 'usersModal') {
-                    closeUsersModal();
-                }
-                if (modal.id === 'newTicketModal') {
-                    resetRequesterField();
-                }
-            });
-        }
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-                if (modal.id === 'usersModal') {
-                    closeUsersModal();
-                }
-                if (modal.id === 'newTicketModal') {
-                    resetRequesterField();
-                }
-            }
-        });
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            document.querySelectorAll('.modal').forEach(modal => {
-                if (modal.style.display === 'flex') {
-                    modal.style.display = 'none';
-                    if (modal.id === 'usersModal') {
-                        closeUsersModal();
-                    }
-                    if (modal.id === 'newTicketModal') {
-                        resetRequesterField();
-                    }
-                }
-            });
-        }
-    });
-
     // Create ticket submit
     const ticketForm = document.getElementById('ticketForm');
     if (ticketForm) {
@@ -2631,27 +2589,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            await apiFetch('/tickets', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    title,
-                    description,
-                    category_id: parseInt(categoryId),
-                    priority_id: parseInt(priorityId),
-                    contact_phone: contactPhone,
-                    ...(selectedRequesterId !== null ? { requester_id: selectedRequesterId } : {})
-                })
-            });
+            const submit = document.getElementById('newTicketSubmit');
+            submit.disabled = true;
+            let created;
+            try {
+                created = await apiFetch('/tickets', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        title,
+                        description,
+                        category_id: parseInt(categoryId),
+                        priority_id: parseInt(priorityId),
+                        contact_phone: contactPhone,
+                        ...(selectedRequesterId !== null ? { requester_id: selectedRequesterId } : {})
+                    })
+                });
+            } catch (err) {
+                return; // apiFetch ya mostró el error; el formulario conserva lo escrito
+            } finally {
+                submit.disabled = false;
+            }
 
-            document.getElementById('newTicketModal').style.display = 'none';
             ticketForm.reset();
             resetRequesterField();
             await loadTickets(getFilters());
-
-            showSuccess('Ticket creado');
+            if (isStaffShell()) {
+                // El personal sigue en el ticket que acaba de crear
+                openTicketById(created.id);
+                showSuccess(`Ticket #${created.id} creado`);
+            } else {
+                showView('tickets');
+                if (isRequesterPortal()) loadPortalList();
+                showSuccess('Solicitud enviada');
+            }
         });
     }
 
@@ -2703,9 +2676,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (navUsers) {
+        // Invitaciones: pantalla propia (antes era un modal)
         navUsers.addEventListener('click', () => {
-            const usersModal = document.getElementById('usersModal');
-            if (usersModal) usersModal.style.display = 'flex';
+            setSideNavActive('invites');
+            showView('invites');
             setActiveTab(navUsers);
             renderInvitesSection();
         });
@@ -2727,11 +2701,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const reportsView = document.getElementById('reportsView');
     const adminAccountsView = document.getElementById('adminAccountsView');
     const homeView = document.getElementById('homeView');
+    const newTicketView = document.getElementById('newTicketView');
 
     // Título de cada pantalla en la pestaña del navegador
     const SCREEN_TITLES = {
         home: 'Inicio', directory: 'Directorio', drafts: 'Borradores de correo', profile: 'Mi cuenta',
         reports: 'Reportes de cuentas', adminAccounts: 'Cuentas', accounts: 'Cuentas', admin: 'Administración',
+        newTicket: 'Nuevo ticket', invites: 'Invitaciones',
     };
 
     function setDocumentTitle(text) {
@@ -2767,6 +2743,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (name !== 'tickets') exitTicketPage();
         if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
         homeView.hidden = name !== 'home';
+        document.getElementById('invitesView').hidden = name !== 'invites';
+        newTicketView.hidden = name !== 'newTicket';
+        // Nuevo ticket, como el detalle, es una página sin barra lateral
+        document.body.classList.toggle('newticket-open', name === 'newTicket');
         directoryView.hidden = name !== 'directory';
         accountsView.hidden = name !== 'accounts';
         adminView.hidden = name !== 'admin';
@@ -2792,7 +2772,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (name === 'accounts') loadAccountsView();
         if (name === 'admin') loadAdminPanel();
         if (name === 'drafts') loadDrafts();
-        if (name === 'reports') loadReports();
+        if (name === 'reports') {
+            showReportsList();
+            loadReports();
+        }
         if (name === 'adminAccounts') loadAdminAccounts();
     }
 
@@ -2824,13 +2807,30 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.toggle('profile-required', required);
         document.getElementById('profileTitle').textContent = required ? 'Complete su perfil' : 'Mi cuenta';
         document.getElementById('profileIntro').hidden = !required;
-        // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario
-        document.getElementById('accountPersonal').hidden = !isRequester;
-        accountPhoneSection.hidden = isRequester || required;
-        accountAvailabilitySection.hidden = currentUser.role !== 'technician';
-        accountScheduleSection.hidden = currentUser.role !== 'technician';
-        accountEmailSection.hidden = required;
-        accountPasswordSection.hidden = required;
+        // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario.
+        // Qué secciones existen para este rol; applyProfileTab muestra solo las de la pestaña elegida.
+        const technician = currentUser.role === 'technician';
+        const allowed = {
+            accountPersonal: isRequester,
+            accountStaffProfile: !isRequester,
+            accountPhone: !isRequester && !required,
+            accountAvailability: technician,
+            accountSchedule: technician,
+            accountEmail: !required,
+            accountPassword: !required,
+        };
+        Object.entries(allowed).forEach(([id, ok]) => { document.getElementById(id).dataset.allowed = ok ? '1' : ''; });
+        // La disponibilidad y el horario propios solo los tiene el técnico (el servidor no los da a otros roles)
+        document.getElementById('accountTabTurno').hidden = !technician;
+        document.getElementById('accountTabs').hidden = required;
+        document.getElementById('accountHome').hidden = required;
+        document.getElementById('accountAvatar').textContent = getInitials(currentUser.name);
+        document.getElementById('accountWhoName').textContent = currentUser.name || currentUser.email;
+        document.getElementById('accountWhoRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
+        document.getElementById('accountStaffName').textContent = currentUser.name || '—';
+        document.getElementById('accountStaffRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
+        if (required || (profileTab === 'turno' && !technician)) profileTab = 'perfil';
+        applyProfileTab();
         fillAccountSections();
         profileCancel.hidden = required;
         profileName.value = currentUser.name || '';
@@ -2842,8 +2842,42 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('profileLockedNote').hidden = !locked;
         showView('profile');
         if (required) setDocumentTitle('Complete su perfil');
+        else setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
         if (isRequester) (locked ? profilePhone : profileName).focus();
     }
+
+    // ----- Pestañas de Mi cuenta: Perfil, Correo, Seguridad y (técnico) Disponibilidad y horario -----
+    let profileTab = 'perfil';
+    const PROFILE_TAB_TITLES = { perfil: 'Perfil', correo: 'Correo', seguridad: 'Seguridad', turno: 'Disponibilidad y horario' };
+
+    function applyProfileTab() {
+        profileView.querySelectorAll('.account-section[data-account-tab]').forEach(section => {
+            section.hidden = section.dataset.allowed !== '1' || section.dataset.accountTab !== profileTab;
+        });
+        document.querySelectorAll('#accountTabs .account-tab').forEach(tab => {
+            if (tab.dataset.accountTab === profileTab) tab.setAttribute('aria-current', 'page');
+            else tab.removeAttribute('aria-current');
+        });
+        if (!profileRequired()) setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
+    }
+
+    document.getElementById('accountTabs').addEventListener('click', (e) => {
+        const tab = e.target.closest('.account-tab');
+        if (!tab) return;
+        profileTab = tab.dataset.accountTab;
+        applyProfileTab();
+    });
+
+    document.getElementById('accountHome').addEventListener('click', () => {
+        if (isStaffShell()) {
+            setSideNavActive('home');
+            showView('home');
+        } else {
+            showView('tickets');
+        }
+    });
+
+    document.getElementById('accountLogout').addEventListener('click', () => switchAccountBtn.click());
 
     profileForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -3196,11 +3230,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadDrafts() {
+        if (!drafts.length) showSkeleton(draftsList, { rows: 4 });
         try {
-            drafts = await apiFetch('/drafts');
+            drafts = await apiFetch('/drafts', { silent: true });
         } catch (err) {
+            draftsList.removeAttribute('aria-busy');
+            draftsList.replaceChildren();
+            draftContent.hidden = true;
+            draftPlaceholder.hidden = false;
+            draftPlaceholder.replaceChildren(errorState(err, loadDrafts));
             return;
         }
+        draftsList.removeAttribute('aria-busy');
         updateDraftsBadge(drafts.length);
         renderDraftList();
         const current = drafts.find(d => d.id === selectedDraftId);
@@ -3210,40 +3251,38 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedDraftId = null;
             draftContent.hidden = true;
             draftPlaceholder.hidden = false;
-            draftPlaceholder.textContent = drafts.length ? 'Seleccione un borrador.' : 'No hay borradores pendientes.';
+            draftPlaceholder.replaceChildren(drafts.length
+                ? emptyState({ title: 'Elija un correo de la lista', text: 'Verá el correo original y lo que propone la IA.' })
+                : emptyState({ title: 'No hay borradores pendientes', text: 'Cuando llegue un correo que la IA no pueda convertir sola, aparecerá aquí.' }));
         }
+    }
+
+    // Etiqueta de cada borrador: [texto, tono de ui-tag]
+    function draftTag(draft) {
+        if (draft.status === 'error') return [DRAFT_STATUS_LABELS.error, 'is-danger'];
+        if (draft.status === 'unclear') return ['Poco claro', 'is-warn'];
+        if (draft.status === 'waiting_contact') return ['Esperando datos', 'is-info'];
+        if (draft.needs_review) return ['Revisar', 'is-warn'];
+        if (draft.status === 'pending_review') return ['Listo para crear', 'is-ok'];
+        return [DRAFT_STATUS_LABELS[draft.status] || draft.status, ''];
     }
 
     function renderDraftList() {
         draftsList.replaceChildren();
         drafts.forEach(draft => {
             const li = document.createElement('li');
-            const btn = document.createElement('button');
+            const btn = makeEl('button', 'draft-item');
             btn.type = 'button';
-            btn.className = 'draft-item';
             btn.dataset.draftId = String(draft.id);
             if (draft.id === selectedDraftId) btn.setAttribute('aria-current', 'true');
-
-            // Mismo formato que el resumen diario
-            const number = document.createElement('span');
-            number.className = 'draft-item-meta';
-            number.textContent = `Borrador #${draft.id}`;
-            const subject = document.createElement('span');
-            subject.className = 'draft-item-subject';
-            subject.textContent = draft.subject || '(Sin asunto)';
-            const meta = document.createElement('span');
-            meta.className = 'draft-item-meta';
-            meta.textContent = `${draft.requester_name} · ${formatDateTime(draft.created_at)}`;
-            const state = document.createElement('span');
-            state.className = 'draft-item-meta';
-            state.textContent = DRAFT_STATUS_LABELS[draft.status] || draft.status;
-            btn.append(number, subject, meta, state);
-            if (draft.needs_review) {
-                const review = document.createElement('span');
-                review.className = 'ai-review';
-                review.textContent = 'Revisar';
-                btn.appendChild(review);
-            }
+            const top = makeEl('span', 'draft-item-top');
+            top.appendChild(makeEl('span', 'draft-item-from', draft.requester_name));
+            top.appendChild(timeTag(draft.created_at, 'draft-item-time'));
+            btn.appendChild(top);
+            btn.appendChild(makeEl('span', 'draft-item-subject', draft.subject || '(Sin asunto)'));
+            btn.appendChild(makeEl('span', 'draft-item-snippet', (draft.body || '').replace(/\s+/g, ' ').trim()));
+            const [tag, tone] = draftTag(draft);
+            btn.appendChild(makeEl('span', `ui-tag ${tone}`, tag));
             li.appendChild(btn);
             draftsList.appendChild(li);
         });
@@ -3273,11 +3312,17 @@ document.addEventListener('DOMContentLoaded', () => {
             else btn.removeAttribute('aria-current');
         });
 
-        document.getElementById('draftNumber').textContent = `Borrador #${draft.id}`;
+        document.getElementById('draftNumber').textContent = `BORRADOR #${draft.id}`;
         draftDetailsBtn.hidden = !['pending_review', 'waiting_contact'].includes(draft.status);
+        document.getElementById('draftDetailsHint').hidden = draftDetailsBtn.hidden;
         document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
-        document.getElementById('draftMeta').textContent =
-            `${draft.requester_name} · ${formatDateTime(draft.created_at)} · ${DRAFT_STATUS_LABELS[draft.status] || draft.status}`;
+        const draftMeta = document.getElementById('draftMeta');
+        draftMeta.replaceChildren(document.createTextNode('De '), makeEl('b', '', draft.requester_name),
+            document.createTextNode(` · ${DRAFT_STATUS_LABELS[draft.status] || draft.status} · recibido `), timeTag(draft.created_at));
+        const [tag, tone] = draftTag(draft);
+        const draftTagEl = document.getElementById('draftTag');
+        draftTagEl.textContent = tag;
+        draftTagEl.className = `ui-tag ${tone}`;
         shownDraft = draft;
         renderDraftFlags(draft);
         const draftReason = document.getElementById('draftReason');
@@ -3287,23 +3332,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const ai = document.getElementById('draftAi');
         ai.replaceChildren();
-        const head = document.createElement('div');
-        head.className = 'ai-head';
-        const badge = document.createElement('span');
         const level = draft.ai_level;
-        badge.className = `ai-level ai-level-${level === null ? 'none' : level}`;
-        badge.textContent = level === null ? 'Sin nivel' : `Nivel ${level} · ${AI_LEVEL_NAMES[level]}`;
-        head.appendChild(badge);
-        if (draft.needs_review) {
-            const review = document.createElement('span');
-            review.className = 'ai-review';
-            review.textContent = 'Revisar';
-            head.appendChild(review);
-        }
-        ai.appendChild(head);
-        const summary = document.createElement('p');
-        summary.textContent = draft.summary || 'La IA no dejó un resumen.';
-        if (!draft.summary) summary.className = 'ai-muted';
+        const facts = makeEl('dl', 'draft-ai-facts');
+        [['Título del ticket', draft.title || '—'],
+         ['Nivel', level === null || level === undefined ? 'Sin estimar' : `${level} · ${AI_LEVEL_NAMES[level]}`],
+         ['Cliente', draft.requester_name]].forEach(([label, value]) => {
+            const box = makeEl('div');
+            box.append(makeEl('dt', '', label), makeEl('dd', '', value));
+            facts.appendChild(box);
+        });
+        ai.appendChild(facts);
+        const summary = makeEl('p', draft.summary ? 'draft-ai-note' : 'draft-ai-note ai-muted', draft.summary || 'La IA no dejó un resumen.');
         ai.appendChild(summary);
         if (draft.status === 'waiting_contact') {
             const waiting = document.createElement('p');
@@ -4149,69 +4188,236 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderReportItem(item) {
-        const li = document.createElement('li');
-        li.className = 'change-item';
-        const head = document.createElement('div');
-        head.className = 'change-head';
-        const title = document.createElement('strong');
-        title.textContent = `${item.target_name} (${item.target_email})`;
-        const time = document.createElement('span');
-        time.className = 'change-time';
-        time.textContent = formatDateTime(item.created_at);
-        head.append(title, time);
+        const li = makeEl('li', 'ui-card report-item');
+        const head = makeEl('div', 'report-item-head');
+        const titles = makeEl('div', 'report-item-titles');
+        titles.appendChild(makeEl('strong', 'report-item-name', `${item.target_name} · ${item.reason_label}`));
+        const meta = makeEl('p', 'report-item-meta', `${item.target_email} · reportado por ${item.reporter} · `);
+        meta.appendChild(timeTag(item.created_at));
+        titles.appendChild(meta);
+        head.appendChild(titles);
+        const tone = { open: 'is-danger', confirmed: 'is-warn', dismissed: '' }[item.status] || '';
+        head.appendChild(makeEl('span', `ui-tag ${tone}`, REPORT_STATUS[item.status] || item.status));
         li.appendChild(head);
         if (needsMyReview(item)) li.appendChild(makeTag('Requiere su revisión', 'tag-review'));
-        li.appendChild(requestLine('Motivo', item.reason_label));
-        if (item.comment) li.appendChild(requestLine('Comentario', item.comment));
-        li.appendChild(requestLine('Reportado por', item.reporter));
-        let state = REPORT_STATUS[item.status] || item.status;
-        if (item.resolver) state += ` por ${item.resolver} (${formatDateTime(item.resolved_at)})`;
-        li.appendChild(requestLine('Estado', state));
-        if (item.resolution_note) li.appendChild(requestLine('Nota', item.resolution_note));
+        if (item.comment) li.appendChild(makeEl('p', 'report-item-comment', item.comment));
+        if (item.status !== 'open') {
+            let state = REPORT_STATUS[item.status] || item.status;
+            if (item.resolver) state += ` por ${item.resolver} (${formatDateTime(item.resolved_at)})`;
+            li.appendChild(requestLine('Decisión', state));
+            if (item.resolution_note) li.appendChild(requestLine('Nota', item.resolution_note));
+        }
+        const actions = makeEl('div', 'report-item-actions');
         if (item.other_open > 0) {
-            const others = document.createElement('p');
-            others.className = 'report-others';
-            others.textContent = item.other_open === 1
+            const others = makeEl('span', 'report-others', item.other_open === 1
                 ? 'Esta cuenta tiene otro reporte abierto'
-                : `Esta cuenta tiene otros ${item.other_open} reportes abiertos`;
+                : `Esta cuenta tiene otros ${item.other_open} reportes abiertos`);
+            actions.appendChild(others);
             if (!reportsAccount) {
-                const filterBtn = document.createElement('button');
+                const filterBtn = makeEl('button', 'ticket-bar-link', 'Ver solo esta cuenta');
                 filterBtn.type = 'button';
-                filterBtn.className = 'link-btn';
                 filterBtn.dataset.filterTarget = item.target_user_id;
                 filterBtn.dataset.filterName = item.target_name;
-                filterBtn.textContent = 'Ver solo esta cuenta';
-                others.append(' · ', filterBtn);
+                actions.appendChild(filterBtn);
             }
-            li.appendChild(others);
         }
         if (item.status === 'open') {
-            const actions = document.createElement('div');
-            actions.className = 'account-actions';
             // Quien reportó puede retirarlo, pero la confirmación la da otra persona
             const own = item.reporter_id === currentUser.id;
-            const options = own
-                ? [['dismiss', 'Retirar reporte']]
-                : [['confirm', 'Confirmar'], ['dismiss', 'Descartar']];
-            options.forEach(([decision, label]) => {
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = decision === 'confirm' ? 'btn-action btn-small' : 'btn-secondary btn-small';
-                button.dataset.reportId = item.id;
-                button.dataset.decision = decision;
-                button.textContent = label;
-                actions.appendChild(button);
-            });
-            li.appendChild(actions);
-            if (own) {
-                const waiting = document.createElement('p');
-                waiting.className = 'report-waiting';
-                waiting.textContent = 'Esperando revisión de otro coordinador o un administrador.';
-                li.appendChild(waiting);
-            }
+            const review = makeEl('button', `ui-btn ui-btn-sm ${own ? 'ui-btn-secondary' : 'ui-btn-primary'} report-review-btn`,
+                own ? 'Retirar reporte' : 'Revisar');
+            review.type = 'button';
+            review.dataset.reviewId = String(item.id);
+            actions.appendChild(review);
+            if (own) actions.appendChild(makeEl('span', 'report-waiting', 'Esperando revisión de otro coordinador o un administrador.'));
         }
+        if (actions.children.length) li.appendChild(actions);
         return li;
     }
+
+    // ----- Revisión de un reporte (P-Reporte) -----
+    let reviewReport = null;
+    let reviewAccount = null;
+    let reviewDecision = 'confirm';
+    let reportItems = [];
+    const reportReview = document.getElementById('reportReview');
+    const reportsListPane = document.getElementById('reportsListPane');
+
+    function showReportsList() {
+        reviewReport = null;
+        reviewAccount = null;
+        reportReview.hidden = true;
+        reportsListPane.hidden = false;
+        setDocumentTitle('Reportes de cuentas');
+    }
+
+    function setReviewDecision(decision) {
+        reviewDecision = decision;
+        document.querySelectorAll('#reportDecisionChoices .report-choice').forEach(choice => {
+            const checked = choice.dataset.decision === decision;
+            choice.setAttribute('aria-checked', checked ? 'true' : 'false');
+            choice.tabIndex = checked ? 0 : -1;
+        });
+        const confirming = decision === 'confirm';
+        const submit = document.getElementById('reportDecisionSubmit');
+        submit.textContent = confirming ? 'Confirmar reporte' : (reviewReport && reviewReport.reporter_id === currentUser.id ? 'Retirar reporte' : 'Descartar reporte');
+        submit.className = `ui-btn ${confirming ? 'ui-btn-danger' : 'ui-btn-primary'}`;
+        // Desactivar solo al confirmar y si quien decide puede desactivar esa cuenta (lo dice el servidor)
+        const canDeactivate = Boolean(reviewAccount && reviewAccount.is_active && reviewAccount.actions.includes('deactivate'));
+        document.getElementById('reportDeactivateRow').hidden = !(confirming && canDeactivate);
+        if (!confirming) document.getElementById('reportDeactivate').checked = false;
+    }
+
+    function reviewFact(list, label, value, tone) {
+        const box = makeEl('div');
+        box.append(makeEl('dt', '', label), makeEl('dd', tone || '', value));
+        list.appendChild(box);
+    }
+
+    async function openReportReview(reportId) {
+        const item = reportItems.find(r => r.id === reportId);
+        if (!item) return;
+        reviewReport = item;
+        reviewAccount = null;
+        reportsListPane.hidden = true;
+        reportReview.hidden = false;
+        window.scrollTo(0, 0);
+        const own = item.reporter_id === currentUser.id;
+        document.getElementById('reportReviewCrumb').textContent = item.target_name;
+        document.getElementById('reportReviewKicker').textContent = `REPORTE ABIERTO · ${relativeTime(item.created_at).toUpperCase()}`;
+        document.getElementById('reportReviewKicker').title = exactDateTime(item.created_at);
+        document.getElementById('reportReviewTitle').textContent = `${item.target_name} · ${item.reason_label}`;
+        const by = document.getElementById('reportReviewBy');
+        by.replaceChildren(document.createTextNode('Reportado por '), makeEl('b', '', item.reporter),
+            document.createTextNode(` (${ROLE_MAP[item.reporter_role] || item.reporter_role})`));
+        document.getElementById('reportReviewComment').textContent = item.comment || 'Quien reportó no dejó comentario.';
+        setDocumentTitle(`Reporte de ${item.target_name}`);
+        // Al reportante solo le queda retirar su reporte
+        document.querySelector('#reportDecisionChoices [data-decision="confirm"]').hidden = own;
+        document.getElementById('reportDecisionOwn').hidden = !own;
+        document.getElementById('reportDecisionNote').value = '';
+        document.getElementById('reportDeactivate').checked = false;
+        setReviewDecision(own ? 'dismiss' : 'confirm');
+
+        const facts = document.getElementById('reportReviewFacts');
+        const history = document.getElementById('reportReviewHistory');
+        facts.replaceChildren();
+        showSkeleton(history, { rows: 2 });
+        let account;
+        let reports;
+        try {
+            [account, reports] = await Promise.all([
+                apiFetch(`/accounts/${item.target_user_id}`, { silent: true }),
+                apiFetch(`/account-reports?target_user_id=${item.target_user_id}`, { silent: true }),
+            ]);
+        } catch (err) {
+            if (reviewReport !== item) return;
+            history.removeAttribute('aria-busy');
+            history.replaceChildren(errorState(err, () => openReportReview(reportId)));
+            return;
+        }
+        if (reviewReport !== item) return;
+        reviewAccount = account;
+        setReviewDecision(reviewDecision);
+        const identityTone = { match: 'is-ok', mismatch: 'is-danger', not_found: 'is-danger' }[account.identity] || '';
+        reviewFact(facts, 'Identidad', IDENTITY_LABELS[account.identity] || '—', `report-fact ${identityTone}`);
+        reviewFact(facts, 'Estado de la cuenta', ACCOUNT_STATE_LABELS[account.state] || account.state);
+        const others = reports.filter(r => r.id !== item.id && r.status === 'open').length;
+        reviewFact(facts, 'Otros reportes', others ? `${others} ${others === 1 ? 'abierto' : 'abiertos'}` : 'Ninguno abierto',
+            others ? 'report-fact is-danger' : '');
+
+        history.removeAttribute('aria-busy');
+        history.replaceChildren();
+        account.recent_tickets.forEach(ticket => {
+            const li = makeEl('li');
+            const row = makeEl('button', 'home-row');
+            row.type = 'button';
+            row.dataset.ticketId = String(ticket.id);
+            row.append(makeEl('span', 'home-row-id ui-num', `#${ticket.id}`), makeEl('span', 'home-row-title home-row-text', ticket.title),
+                makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
+            li.appendChild(row);
+            history.appendChild(li);
+        });
+        reports.filter(r => r.id !== item.id).forEach(other => {
+            const li = makeEl('li', 'home-row report-history-row');
+            li.append(makeEl('span', 'home-row-id ui-num is-report', 'RPT'),
+                makeEl('span', 'home-row-title home-row-text', `Reporte de ${other.reporter} · ${other.reason_label}`),
+                makeEl('span', 'home-row-sub', `${REPORT_STATUS[other.status] || other.status} · ${formatPlainDate(other.created_at.slice(0, 10))}`));
+            history.appendChild(li);
+        });
+        if (!history.children.length) {
+            const li = makeEl('li');
+            li.appendChild(emptyState({ title: 'Sin historial', text: 'La cuenta no tiene tickets ni otros reportes.' }));
+            history.appendChild(li);
+        }
+    }
+
+    document.getElementById('reportReviewBack').addEventListener('click', showReportsList);
+    document.getElementById('reportReviewHistory').addEventListener('click', (e) => {
+        const row = e.target.closest('[data-ticket-id]');
+        if (row) {
+            setSideNavActive(null);
+            openTicketById(Number(row.dataset.ticketId));
+        }
+    });
+    document.getElementById('reportDecisionChoices').addEventListener('click', (e) => {
+        const choice = e.target.closest('.report-choice');
+        if (choice) setReviewDecision(choice.dataset.decision);
+    });
+    document.getElementById('reportDecisionChoices').addEventListener('keydown', (e) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+        const choices = [...document.querySelectorAll('#reportDecisionChoices .report-choice')].filter(c => !c.hidden);
+        if (choices.length < 2) return;
+        e.preventDefault();
+        const next = choices.find(c => c.dataset.decision !== reviewDecision);
+        setReviewDecision(next.dataset.decision);
+        next.focus();
+    });
+
+    // Confirmar o descartar. Con "Desactivar también la cuenta": primero se confirma y luego se desactiva;
+    // si la desactivación falla, se avisa que solo se confirmó el reporte.
+    document.getElementById('reportDecisionForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!reviewReport) return;
+        const item = reviewReport;
+        const note = document.getElementById('reportDecisionNote').value.trim();
+        if (!note) {
+            showError('Escriba una nota');
+            return;
+        }
+        const confirming = reviewDecision === 'confirm';
+        const deactivate = confirming && document.getElementById('reportDeactivate').checked;
+        const submit = document.getElementById('reportDecisionSubmit');
+        submit.disabled = true;
+        try {
+            await apiFetch(`/account-reports/${item.id}/${reviewDecision}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ note })
+            });
+        } catch (err) {
+            submit.disabled = false;
+            return; // apiFetch ya mostró el error; nada cambió
+        }
+        let deactivateError = null;
+        if (deactivate) {
+            try {
+                await apiFetch(`/accounts/${item.target_user_id}/deactivate`, { method: 'POST', silent: true });
+            } catch (err) {
+                deactivateError = err.message || 'No se pudo completar la acción';
+            }
+        }
+        submit.disabled = false;
+        showReportsList();
+        await loadReports();
+        if (deactivateError) {
+            showError(`El reporte se confirmó, pero la cuenta no se pudo desactivar: ${deactivateError}`);
+        } else if (deactivate) {
+            showSuccess('Reporte confirmado y cuenta desactivada');
+        } else {
+            showSuccess(confirming ? 'Reporte confirmado' : 'Reporte descartado');
+        }
+    });
 
     // Reporte abierto de un coordinador: solo lo confirma otra persona, así que va primero para ella
     function needsMyReview(item) {
@@ -4224,17 +4430,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (reportsAccount) params.set('target_user_id', String(reportsAccount.id));
         const query = params.toString();
         let items;
+        reportsEmpty.hidden = true;
+        if (!reportItems.length) showSkeleton(reportsList, { rows: 3 });
         try {
-            items = await apiFetch(`/account-reports${query ? `?${query}` : ''}`);
+            items = await apiFetch(`/account-reports${query ? `?${query}` : ''}`, { silent: true });
         } catch (err) {
-            return; // apiFetch ya mostró el error
+            reportsList.removeAttribute('aria-busy');
+            reportsList.replaceChildren();
+            reportsEmpty.replaceChildren(errorState(err, loadReports));
+            reportsEmpty.hidden = false;
+            return;
         }
         // sort es estable: dentro de cada grupo se mantiene el orden del servidor (más recientes primero)
         items.sort((a, b) => Number(needsMyReview(b)) - Number(needsMyReview(a)));
+        reportItems = items;
+        reportsList.removeAttribute('aria-busy');
         reportsList.replaceChildren(...items.map(renderReportItem));
-        reportsEmpty.textContent = reportsAccount
-            ? 'Esta cuenta no tiene reportes con ese estado.'
-            : 'No hay reportes con ese estado.';
+        reportsEmpty.replaceChildren(emptyState(reportsAccount
+            ? { title: 'Esta cuenta no tiene reportes con ese estado', text: 'Elija otro estado o quite el filtro de cuenta.' }
+            : { title: 'No hay reportes con ese estado', text: 'Cuando el personal reporte una cuenta, aparecerá aquí.' }));
         reportsEmpty.hidden = items.length > 0;
         refreshReportsBadge();
     }
@@ -4251,27 +4465,11 @@ document.addEventListener('DOMContentLoaded', () => {
             loadReports();
             return;
         }
-        const button = e.target.closest('button[data-decision]');
-        if (!button) return;
-        const confirming = button.dataset.decision === 'confirm';
-        const note = prompt(confirming ? 'Nota para confirmar el reporte (obligatoria):' : 'Nota para descartar el reporte (obligatoria):');
-        if (note === null) return;
-        if (!note.trim()) {
-            showError('Escriba una nota');
+        const review = e.target.closest('button[data-review-id]');
+        if (review) {
+            openReportReview(Number(review.dataset.reviewId));
             return;
         }
-        button.disabled = true;
-        try {
-            await apiFetch(`/account-reports/${button.dataset.reportId}/${button.dataset.decision}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ note: note.trim() })
-            });
-            showSuccess(confirming ? 'Reporte confirmado' : 'Reporte descartado');
-        } catch (err) {
-            // apiFetch ya mostró el error
-        }
-        loadReports();
     });
 
     // ----- Solicitudes con doble aprobación -----
@@ -4389,20 +4587,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // Personal (técnicos, coordinadores y administradores), con acciones en "Horario" y en el menú "⋯".
     // El servidor ya manda el correo enmascarado y nunca teléfono ni cédula.
     async function loadTeam() {
+        const grid = document.getElementById('teamWeekGrid');
+        if (!teamUsers.size) showSkeleton(grid, { rows: 4 });
         let users;
         try {
-            users = await apiFetch('/team');
+            users = await apiFetch('/team', { silent: true });
         } catch (err) {
-            return; // apiFetch ya mostró el error
+            grid.removeAttribute('aria-busy');
+            grid.replaceChildren(errorState(err, loadTeam));
+            return;
         }
         closeRowMenu(false);
         teamUsers.clear();
-        teamBody.replaceChildren();
         teamEmpty.hidden = users.length > 0;
-        users.forEach(user => {
-            teamUsers.set(user.id, user);
-            teamBody.appendChild(teamRow(user));
-        });
+        users.forEach(user => teamUsers.set(user.id, user));
+        if (!teamUsers.has(teamSelectedId)) teamSelectedId = null;
+        renderTeamWeek();
+        renderTeamSelected();
     }
 
     async function loadMyRequests() {
@@ -4796,6 +4997,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function clearRequesterSelection() {
         const hadRequester = selectedRequesterId !== null;
         selectedRequesterId = null;
+        newTicketClient = null;
+        document.getElementById('newTicketAside').hidden = true;
         if (hadRequester && currentUser) {
             fillContactFields(currentUser);
         }
@@ -4809,6 +5012,74 @@ document.addEventListener('DOMContentLoaded', () => {
         if (requesterOptions) requesterOptions.replaceChildren();
         clearRequesterSelection();
     }
+
+    // ----- Nuevo ticket: tickets abiertos del cliente elegido, para no duplicar casos -----
+    let newTicketClient = null;
+    let newTicketOpenSeq = 0;
+
+    async function loadNewTicketOpen(client) {
+        newTicketClient = client;
+        const seq = ++newTicketOpenSeq;
+        const aside = document.getElementById('newTicketAside');
+        const list = document.getElementById('newTicketOpenList');
+        document.getElementById('newTicketOpenTitle').textContent = `Tickets abiertos de ${client.name}`;
+        aside.hidden = false;
+        showSkeleton(list, { rows: 2 });
+        let data;
+        try {
+            data = await apiFetch(`/queue?view=open&requester_id=${client.id}`, { silent: true });
+        } catch (err) {
+            if (seq !== newTicketOpenSeq) return;
+            list.removeAttribute('aria-busy');
+            list.replaceChildren(errorState(err, () => loadNewTicketOpen(client)));
+            return;
+        }
+        if (seq !== newTicketOpenSeq) return;
+        list.removeAttribute('aria-busy');
+        list.replaceChildren();
+        if (!data.items.length) {
+            const li = makeEl('li');
+            li.appendChild(emptyState({ title: 'No tiene tickets abiertos', text: 'Puede crear el ticket sin riesgo de duplicarlo.' }));
+            list.appendChild(li);
+            return;
+        }
+        data.items.slice(0, 6).forEach(item => {
+            const li = makeEl('li');
+            const button = makeEl('button', 'home-row new-ticket-open-row');
+            button.type = 'button';
+            button.dataset.ticketId = String(item.id);
+            button.appendChild(makeEl('span', 'home-row-id ui-num', `#${item.id}`));
+            button.appendChild(makeEl('span', 'home-row-title', item.title));
+            li.appendChild(button);
+            list.appendChild(li);
+        });
+    }
+
+    document.getElementById('newTicketOpenList').addEventListener('click', (e) => {
+        const row = e.target.closest('[data-ticket-id]');
+        if (row) openTicketById(Number(row.dataset.ticketId));
+    });
+
+    document.getElementById('newTicketClientLink').addEventListener('click', () => {
+        if (!newTicketClient) return;
+        setSideNavActive('accounts');
+        openAccounts('clients', newTicketClient.name);
+    });
+
+    // Volver o cancelar: a la cola (personal) o a Mis solicitudes (solicitante)
+    function leaveNewTicket() {
+        ticketForm.reset();
+        resetRequesterField();
+        if (isStaffShell()) {
+            setSideNavActive(queueView);
+            setQueueView(queueView, queueTitle.textContent || defaultQueueLabel());
+        } else {
+            showView('tickets');
+        }
+    }
+
+    document.getElementById('newTicketBack').addEventListener('click', leaveNewTicket);
+    document.getElementById('newTicketCancel').addEventListener('click', leaveNewTicket);
 
     async function searchRequesters(q) {
         const seq = ++requesterSearchSeq;
@@ -4836,6 +5107,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearTimeout(requesterSearchTimer);
                 selectedRequesterId = match.id;
                 fillContactFields(match);
+                loadNewTicketOpen(match);
                 return;
             }
             // El texto no coincide con ninguna opción: no se manda requester_id
@@ -4863,10 +5135,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (openNewTicket) {
         openNewTicket.addEventListener('click', async () => {
-            document.getElementById('newTicketModal').style.display = 'flex';
+            hideError();
+            exitTicketPage();
+            setSideNavActive(null);
+            showView('newTicket');
+            ticketForm.reset();
             resetRequesterField();
             const canChooseRequester = currentUser && ['coordinator', 'admin'].includes(currentUser.role);
-            requesterGroup.style.display = canChooseRequester ? 'block' : 'none';
+            requesterGroup.hidden = !canChooseRequester;
+            const portal = isRequesterPortal();
+            document.getElementById('newTicketTitle').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
+            document.getElementById('newTicketCrumb').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
+            document.getElementById('newTicketCrumbBase').textContent = portal ? 'Mis solicitudes' : 'Tickets';
+            document.getElementById('newTicketBack').textContent = portal ? '← Volver a mis solicitudes' : '← Volver a Tickets';
+            document.getElementById('newTicketSubmit').textContent = portal ? 'Enviar solicitud' : 'Crear ticket';
+            document.getElementById('newTicketIntro').textContent = portal
+                ? 'Cuéntenos qué pasa. Le avisaremos por correo cada vez que haya novedades.'
+                : 'Para registrar un caso que llegó por teléfono o en persona.';
+            setDocumentTitle(portal ? 'Nueva solicitud' : 'Nuevo ticket');
             if (currentUser) {
                 document.getElementById('contactName').value = currentUser.name;
                 document.getElementById('contactEmail').value = currentUser.email;
@@ -4895,10 +5181,7 @@ document.addEventListener('DOMContentLoaded', () => {
         users.forEach(user => {
             if (usersList && showList) {
                 const li = document.createElement('li');
-                li.style.padding = '8px 12px';
-                li.style.background = '#f8f9fa';
-                li.style.borderRadius = '6px';
-                li.style.border = '1px solid var(--line)';
+                li.className = 'users-list-item';
                 li.textContent = `${user.name} (${user.email}) — ${ROLE_MAP[user.role] || user.role}`;
                 usersList.appendChild(li);
             }
@@ -5112,13 +5395,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const old = document.getElementById('invitesSection');
         if (old) old.remove();
         if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) return;
-        const modalBody = document.querySelector('#usersModal .modal-body');
+        const modalBody = document.getElementById('invitesHost');
         if (!modalBody) return;
 
         const section = document.createElement('section');
         section.id = 'invitesSection';
         section.className = 'invites-section';
-        const title = document.createElement('h3');
+        section.classList.add('ui-card');
+        const title = document.createElement('h2');
+        title.className = 'ui-card-title';
         title.textContent = 'Invitar personal';
         const help = document.createElement('p');
         help.className = 'help-text';
@@ -5147,7 +5432,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const submit = document.createElement('button');
         submit.type = 'submit';
-        submit.className = 'btn-action';
+        submit.className = 'ui-btn ui-btn-primary';
         submit.textContent = 'Enviar invitación';
         form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role), submit);
 
@@ -5175,10 +5460,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        const tableTitle = document.createElement('h4');
-        tableTitle.textContent = 'Invitaciones';
+        const tableTitle = document.createElement('h3');
+        tableTitle.className = 'invites-table-title';
+        tableTitle.textContent = 'Invitaciones enviadas';
         const table = document.createElement('table');
-        table.className = 'invites-table';
+        table.className = 'invites-table ui-table';
         const head = document.createElement('thead');
         const headRow = document.createElement('tr');
         ['Correo', 'Nombre', 'Rol', 'Vence', 'Estado', ''].forEach(text => {
@@ -5235,7 +5521,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (invite.status !== 'used') {
                 const resend = document.createElement('button');
                 resend.type = 'button';
-                resend.className = 'btn-secondary btn-small';
+                resend.className = 'ui-btn ui-btn-secondary ui-btn-sm';
                 resend.dataset.inviteId = invite.id;
                 resend.textContent = 'Reenviar';
                 actions.appendChild(resend);
@@ -5468,6 +5754,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('navUser').addEventListener('click', () => {
         hideError();
+        profileTab = 'perfil';
         setSideNavActive('profile');
         showProfile();
         closeSideNav();
@@ -7053,7 +7340,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function aaPlaceholder() {
         aaCurrent = null;
-        aaDetail.replaceChildren(makeEl('p', 'sd-muted', 'Elija una cuenta para ver el detalle.'));
+        aaDetail.replaceChildren(emptyState({
+            title: 'Elija una cuenta',
+            text: 'Aquí verá su estado, sus tickets y las acciones que puede hacer.',
+        }));
     }
 
     // Abre Cuentas con un filtro rápido y una búsqueda (desde el menú o desde la búsqueda global)
@@ -7085,11 +7375,17 @@ document.addEventListener('DOMContentLoaded', () => {
             params.set('schedule_match', aaMatch.value);
         }
         const seq = ++aaSeq;
+        if (!aaRows.length) showSkeleton(aaBody, { rows: 6 });
         let data;
         try {
-            data = await apiFetch(`/accounts?${params}`);
+            data = await apiFetch(`/accounts?${params}`, { silent: true });
         } catch (err) {
-            return; // apiFetch ya mostró el error
+            if (seq !== aaSeq) return;
+            aaBody.removeAttribute('aria-busy');
+            aaBody.replaceChildren();
+            aaEmpty.replaceChildren(errorState(err, loadAdminAccounts));
+            aaEmpty.hidden = false;
+            return;
         }
         if (seq !== aaSeq) return;
         aaRows = data.items;
@@ -7113,50 +7409,65 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${row.kind}:${row.id}`;
     }
 
+    // Etiqueta corta junto al nombre en la lista: lo más urgente de la cuenta
+    function accountFlag(row) {
+        if (row.reported) return ['Reportada', 'is-danger'];
+        if (row.state === 'locked') return ['Bloqueada', 'is-danger'];
+        if (row.state === 'inactive') return ['Desactivada', ''];
+        if (row.state === 'vacation' || row.state === 'away') return [ACCOUNT_STATE_LABELS[row.state], 'is-warn'];
+        if (row.kind === 'invitation') return [`Invitación · ${row.invitation_hours_left} h`, 'is-info'];
+        return null;
+    }
+
     function renderAdminAccounts() {
+        aaBody.removeAttribute('aria-busy');
         aaBody.replaceChildren();
         aaEmpty.hidden = aaRows.length > 0;
+        if (!aaRows.length) {
+            aaEmpty.replaceChildren(aaSearch.value.trim()
+                ? emptyState({ title: `No hay cuentas que coincidan con «${aaSearch.value.trim()}»`, text: 'Revise el nombre o el correo.' })
+                : emptyState({ title: 'No hay cuentas con este filtro', text: 'Elija otro filtro para ver más cuentas.' }));
+        }
         aaRows.forEach(row => {
-            const tr = makeEl('tr', 'queue-row');
-            tr.dataset.key = accountKey(row);
-            tr.tabIndex = 0;
-            if (tr.dataset.key === aaSelected) tr.classList.add('selected');
-
+            const li = makeEl('li');
+            const button = makeEl('button', 'queue-row aa-row');
+            button.type = 'button';
+            button.dataset.key = accountKey(row);
+            const selected = button.dataset.key === aaSelected;
+            button.classList.toggle('selected', selected);
+            if (selected) button.setAttribute('aria-current', 'true');
+            const avatar = makeEl('span', `aa-avatar${row.role === 'requester' ? ' is-client' : ''}`, getInitials(row.name));
+            avatar.setAttribute('aria-hidden', 'true');
+            const text = makeEl('span', 'aa-row-text');
             // El nombre completo siempre se ve (puede ocupar dos líneas); el correo ya viene enmascarado
-            const name = queueCell('Nombre', 'col-subject aa-cell-name');
-            name.appendChild(makeEl('div', 'queue-subject', row.name));
-            name.appendChild(makeEl('div', 'queue-meta', row.email));
-            const type = queueCell('Tipo');
-            type.textContent = ACCOUNT_TYPE_LABELS[row.role] || row.role;
-            const state = queueCell('Estado');
-            state.appendChild(makeEl('span', `state-tag acc-${row.state}`, ACCOUNT_STATE_LABELS[row.state] || row.state));
-            if (row.kind === 'invitation') state.appendChild(makeEl('div', 'queue-meta', `Vence en ${row.invitation_hours_left} h`));
-            if (row.schedule_day) state.appendChild(makeEl('div', 'queue-meta', `Turno: ${row.schedule_day}`));
-            const identity = queueCell('Identidad');
-            if (row.kind === 'user' && row.role === 'requester') {
-                requesterTags({ identity: row.identity, reported: row.reported }).forEach(tag => identity.appendChild(tag));
-            } else {
-                identity.textContent = '—';
-            }
-            const open = queueCell('Abiertos', 'num tabular');
-            open.textContent = row.kind === 'invitation' ? '—' : String(row.open_tickets);
-            tr.append(name, type, state, identity, open);
-            aaBody.appendChild(tr);
+            text.appendChild(makeEl('span', 'aa-row-name', row.name));
+            let sub = `${ACCOUNT_TYPE_LABELS[row.role] || row.role} · ${row.email}`;
+            if (row.kind === 'user' && row.open_tickets) sub += ` · ${row.open_tickets} abiertos`;
+            if (row.schedule_day) sub += ` · Turno: ${row.schedule_day}`;
+            text.appendChild(makeEl('span', 'aa-row-sub', sub));
+            button.append(avatar, text);
+            const flag = accountFlag(row);
+            if (flag) button.appendChild(makeEl('span', `ui-tag ${flag[1]}`, flag[0]));
+            li.appendChild(button);
+            aaBody.appendChild(li);
         });
     }
 
     // Encabezado del panel: nombre, tipo · correo, etiqueta de estado y "Acciones ▾" (si hay alguna)
     function accountPanelHead(item, actions) {
         const head = makeEl('div', 'aa-panel-head');
+        const avatar = makeEl('span', `aa-avatar aa-avatar-lg${item.role === 'requester' ? ' is-client' : ''}`, getInitials(item.name));
+        avatar.setAttribute('aria-hidden', 'true');
+        head.appendChild(avatar);
         const titles = makeEl('div', 'aa-panel-titles');
         titles.appendChild(makeEl('h2', 'aa-name', item.name));
-        titles.appendChild(makeEl('p', 'sd-meta', `${ACCOUNT_TYPE_LABELS[item.role] || item.role} · ${item.email}`));
-        const tags = makeEl('div', 'sd-client');
+        const tags = makeEl('p', 'aa-panel-meta');
+        tags.appendChild(makeEl('span', '', `${ACCOUNT_TYPE_LABELS[item.role] || item.role} · ${item.email}`));
         tags.appendChild(makeEl('span', `state-tag acc-${item.state}`, ACCOUNT_STATE_LABELS[item.state] || item.state));
         titles.appendChild(tags);
         head.appendChild(titles);
         if (actions.length) {
-            const button = makeEl('button', 'btn-secondary btn-small aa-actions-btn', 'Acciones ▾');
+            const button = makeEl('button', 'ui-btn ui-btn-primary aa-actions-btn', 'Acciones ▾');
             button.type = 'button';
             button.setAttribute('aria-haspopup', 'menu');
             button.setAttribute('aria-expanded', 'false');
@@ -7164,6 +7475,31 @@ document.addEventListener('DOMContentLoaded', () => {
             head.appendChild(button);
         }
         return { head, tags };
+    }
+
+    // Tarjetas de datos del panel: solo lo que da el servidor
+    function accountStats(d, row) {
+        const stats = makeEl('div', 'aa-stats');
+        const add = (label, value) => {
+            const card = makeEl('div', 'ui-card ui-stat aa-stat');
+            card.append(makeEl('span', 'ui-stat-label', label), makeEl('span', 'aa-stat-value', value));
+            stats.appendChild(card);
+        };
+        const open = row && row.kind === 'user' ? String(row.open_tickets) : '—';
+        if (d.role === 'requester') {
+            add('Abiertos', open);
+            add('Identidad', IDENTITY_LABELS[d.identity] || '—');
+            add('Reportes abiertos', String(d.alerts.open_reports || 0));
+        } else {
+            add('Asignados abiertos', open);
+            const today = (new Date().getDay() + 6) % 7;
+            const shift = (d.schedule || []).find(day => day.weekday === today);
+            add('Turno hoy', shift ? `${shift.start}–${shift.end}` : '—');
+            const availability = d.availability ? (AVAILABILITY_LABELS[d.availability] || d.availability) : '—';
+            add('Disponibilidad', d.return_date && d.availability !== 'available'
+                ? `${availability} hasta ${formatPlainDate(d.return_date)}` : availability);
+        }
+        return stats;
     }
 
     function accountMenuActions(item) {
@@ -7194,8 +7530,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const alerts = makeEl('ul', 'aa-alerts');
         if (d.alerts.open_reports > 0) {
-            alerts.appendChild(makeEl('li', 'aa-alert',
-                `${d.alerts.open_reports} ${d.alerts.open_reports === 1 ? 'reporte abierto' : 'reportes abiertos'}`));
+            const li = makeEl('li', 'aa-alert');
+            li.appendChild(makeEl('span', '', `${d.alerts.open_reports} ${d.alerts.open_reports === 1 ? 'reporte abierto' : 'reportes abiertos'}. Revíselos antes de atender sus tickets nuevos.`));
+            const review = makeEl('button', 'ticket-bar-link aa-review-reports', 'Revisar reportes →');
+            review.type = 'button';
+            li.appendChild(review);
+            alerts.appendChild(li);
         }
         if (d.alerts.locked_until) {
             alerts.appendChild(makeEl('li', 'aa-alert', `Bloqueada por intentos hasta ${formatDateTime(d.alerts.locked_until)}`));
@@ -7216,46 +7556,65 @@ document.addEventListener('DOMContentLoaded', () => {
             alerts.appendChild(li);
         }
         if (alerts.children.length) box.appendChild(alerts);
+        box.appendChild(accountStats(d, aaRows.find(r => r.kind === 'user' && r.id === d.id)));
 
+        const section = makeEl('section', 'ui-card aa-section');
+        const sectionHead = makeEl('div', 'ui-card-head');
         if (d.role === 'requester') {
-            box.appendChild(makeEl('h3', 'aa-subtitle', 'Tickets recientes'));
+            sectionHead.appendChild(makeEl('h3', 'ui-card-title', 'Tickets del cliente'));
+            if (d.actions.includes('view-tickets')) {
+                const all = makeEl('button', 'ticket-bar-link aa-view-queue', 'Ver en la cola →');
+                all.type = 'button';
+                sectionHead.appendChild(all);
+            }
+            section.appendChild(sectionHead);
             if (d.recent_tickets.length === 0) {
-                box.appendChild(makeEl('p', 'sd-muted', 'Todavía no tiene tickets.'));
+                section.appendChild(emptyState({ title: 'Todavía no tiene tickets' }));
             } else {
-                const list = makeEl('ul', 'aa-changes');
+                const list = makeEl('ul', 'home-list');
                 d.recent_tickets.forEach(ticket => {
                     const li = makeEl('li');
-                    const link = makeEl('button', 'link-btn aa-ticket', `#${ticket.id} ${ticket.title}`);
+                    const link = makeEl('button', 'home-row aa-ticket');
                     link.type = 'button';
                     link.dataset.ticketId = String(ticket.id);
-                    li.append(link, makeEl('span', 'aa-change-date', ` · ${STATE_MAP[ticket.status] || ticket.status}`));
+                    link.append(makeEl('span', 'home-row-id ui-num', `#${ticket.id}`),
+                        makeEl('span', 'home-row-title home-row-text', ticket.title),
+                        makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
+                    li.appendChild(link);
                     list.appendChild(li);
                 });
-                box.appendChild(list);
+                section.appendChild(list);
             }
         } else {
-            box.appendChild(makeEl('h3', 'aa-subtitle', 'Cambios recientes'));
+            sectionHead.appendChild(makeEl('h3', 'ui-card-title', 'Cambios recientes'));
+            section.appendChild(sectionHead);
             if (d.recent_changes.length === 0) {
-                box.appendChild(makeEl('p', 'sd-muted', 'Sin cambios registrados.'));
+                section.appendChild(emptyState({ title: 'Sin cambios registrados' }));
             } else {
                 const list = makeEl('ul', 'aa-changes');
                 d.recent_changes.forEach(change => {
                     const li = makeEl('li');
-                    li.appendChild(makeEl('span', 'aa-change-date tabular', formatDateTime(change.created_at)));
-                    let text = ` ${CHANGE_ACTIONS[change.action] || change.action} · ${change.actor}`;
+                    li.appendChild(timeTag(change.created_at, 'aa-change-date'));
+                    let text = ` · ${CHANGE_ACTIONS[change.action] || change.action} · ${change.actor}`;
                     if (change.old_value || change.new_value) text += ` · ${change.old_value || '—'} → ${change.new_value || '—'}`;
                     li.appendChild(document.createTextNode(text));
                     list.appendChild(li);
                 });
-                box.appendChild(list);
+                section.appendChild(list);
             }
         }
+        box.appendChild(section);
         aaDetail.appendChild(box);
     }
 
     async function selectAccount(key) {
         aaSelected = key;
-        aaBody.querySelectorAll('.queue-row').forEach(tr => tr.classList.toggle('selected', tr.dataset.key === key));
+        aaBody.querySelectorAll('.queue-row').forEach(row => {
+            const selected = row.dataset.key === key;
+            row.classList.toggle('selected', selected);
+            if (selected) row.setAttribute('aria-current', 'true');
+            else row.removeAttribute('aria-current');
+        });
         adminAccountsView.classList.add('show-detail');
         const row = aaRows.find(r => accountKey(r) === key);
         if (!row) return;
@@ -7447,13 +7806,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = e.target.closest('.queue-row');
         if (row) selectAccount(row.dataset.key);
     });
-    aaBody.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        const row = e.target.closest('.queue-row');
-        if (!row) return;
-        e.preventDefault();
-        selectAccount(row.dataset.key);
-    });
     aaQuick.addEventListener('click', (e) => {
         const button = e.target.closest('.aa-quick-btn');
         if (!button || button.dataset.filter === aaFilter) return;
@@ -7484,6 +7836,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (more) {
             if (accountMenuOwner === more) closeAccountMenu(true);
             else openAccountMenu(more);
+            return;
+        }
+        if (e.target.closest('.aa-review-reports') && aaCurrent) {
+            setSideNavActive('reports');
+            openReportsForAccount(aaCurrent.id, aaCurrent.name);
+            return;
+        }
+        if (e.target.closest('.aa-view-queue') && aaCurrent) {
+            setQueueView('all', `Tickets de ${aaCurrent.name}`, '', { id: aaCurrent.id, name: aaCurrent.name });
             return;
         }
         const ticket = e.target.closest('.aa-ticket');
@@ -7539,14 +7900,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadPortalList() {
         let tickets;
+        if (!portalList.children.length) showSkeleton(portalList, { rows: 3 });
         try {
-            tickets = await apiFetch('/tickets');
+            tickets = await apiFetch('/tickets', { silent: true });
         } catch (err) {
-            return; // apiFetch ya mostró el error
+            portalList.removeAttribute('aria-busy');
+            portalList.replaceChildren(errorState(err, loadPortalList));
+            return;
         }
+        portalList.removeAttribute('aria-busy');
         tickets.sort((a, b) => parseServerDate(b.last_activity_at) - parseServerDate(a.last_activity_at));
         portalList.replaceChildren();
         portalEmpty.hidden = tickets.length > 0;
+        portalEmpty.replaceChildren(emptyState({
+            title: 'Todavía no tiene solicitudes',
+            text: 'Cuéntenos qué pasa y el equipo de soporte le responderá por correo.',
+            action: 'Nueva solicitud',
+            onAction: () => openNewTicket.click(),
+        }));
         portalTotal.textContent = `${tickets.length} ${tickets.length === 1 ? 'solicitud' : 'solicitudes'}`;
         tickets.forEach(ticket => {
             const li = makeEl('li');
@@ -7556,10 +7927,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (ticket.id === selectedTicketId) button.classList.add('selected');
             button.appendChild(makeEl('span', 'portal-item-title', ticket.title));
             const meta = makeEl('span', 'portal-item-meta');
-            meta.appendChild(makeEl('span', 'tabular', `#${ticket.id}`));
+            meta.appendChild(makeEl('span', 'ui-num', `#${ticket.id}`));
             meta.appendChild(makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
-            meta.appendChild(makeEl('span', 'tabular', `Actualizada ${formatDateTime(ticket.last_activity_at)}`));
+            const updated = makeEl('span', '', 'Actualizada ');
+            updated.appendChild(timeTag(ticket.last_activity_at));
+            meta.appendChild(updated);
             button.appendChild(meta);
+            // Avance en una línea: "Paso 2 de 4 · Asignada"
+            const step = ticket.progress_step || 1;
+            const progress = makeEl('span', 'portal-item-progress');
+            const bar = makeEl('span', 'ui-bar');
+            bar.setAttribute('aria-hidden', 'true');
+            const fill = makeEl('span');
+            fill.style.width = `${(step / PORTAL_STEPS.length) * 100}%`;
+            bar.appendChild(fill);
+            progress.append(bar, makeEl('span', 'portal-item-step', `Paso ${step} de ${PORTAL_STEPS.length} · ${PORTAL_STEPS[step - 1]}`));
+            button.appendChild(progress);
             li.appendChild(button);
             portalList.appendChild(li);
         });
@@ -7602,26 +7985,33 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderPortalDetail(ticket) {
         detailContent.replaceChildren();
         detailPanel.scrollTop = 0;
-        detailContent.appendChild(makeEl('p', 'sd-meta tabular', `#${ticket.id} · Creada ${formatDateTime(ticket.created_at)}`));
+        const created = makeEl('p', 'sd-meta portal-detail-meta', `SOLICITUD #${ticket.id} · creada `);
+        created.appendChild(timeTag(ticket.created_at));
+        detailContent.appendChild(created);
         detailContent.appendChild(makeEl('h1', 'portal-detail-title', ticket.title));
         detailContent.appendChild(renderPortalSteps(ticket.progress_step || 1));
         if (ticket.assigned_name) {
-            detailContent.appendChild(makeEl('p', 'sd-muted', `Le atiende: ${ticket.assigned_name}`));
+            detailContent.appendChild(makeEl('p', 'sd-muted portal-owner', `Le atiende: ${ticket.assigned_name}`));
         }
-        detailContent.appendChild(makeEl('p', 'sd-description', ticket.description));
+        const original = makeEl('div', 'portal-original');
+        original.appendChild(makeEl('p', 'portal-message-meta', 'Su solicitud'));
+        original.appendChild(makeEl('p', 'portal-message-text', ticket.description));
+        detailContent.appendChild(original);
 
         detailContent.appendChild(makeEl('h2', 'portal-subtitle', 'Conversación'));
         // El servidor nunca envía notas internas al solicitante; el filtro es solo por si acaso
         const messages = (ticket.comments || []).filter(c => !c.internal);
         if (messages.length === 0) {
-            detailContent.appendChild(makeEl('p', 'sd-muted', 'Todavía no hay mensajes.'));
+            detailContent.appendChild(emptyState({ title: 'Todavía no hay mensajes', text: 'Cuando el equipo le responda, lo verá aquí y le llegará un correo.' }));
         } else {
             const list = makeEl('ol', 'portal-messages');
             messages.forEach(comment => {
                 const own = comment.user_id === currentUser.id;
                 const li = makeEl('li', `portal-message${own ? ' is-own' : ''}`);
                 const author = own ? 'Usted' : (userMap[comment.user_id] || 'Equipo de soporte');
-                li.appendChild(makeEl('p', 'portal-message-meta', `${author} · ${formatDateTime(comment.created_at)}`));
+                const meta = makeEl('p', 'portal-message-meta', `${author} · `);
+                meta.appendChild(timeTag(comment.created_at));
+                li.appendChild(meta);
                 li.appendChild(makeEl('p', 'portal-message-text', comment.content));
                 list.appendChild(li);
             });
@@ -7633,7 +8023,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         // Sin adjuntos: el sistema no los admite
-        const composer = makeEl('div', 'sd-composer');
+        const composer = makeEl('div', 'ui-card sd-composer portal-composer');
         const label = makeEl('label', 'sr-only', 'Su respuesta');
         label.htmlFor = 'portalReply';
         const textarea = makeEl('textarea', 'sd-reply');
@@ -7642,7 +8032,7 @@ document.addEventListener('DOMContentLoaded', () => {
         textarea.maxLength = 5000;
         textarea.placeholder = 'Escriba su respuesta';
         const actions = makeEl('div', 'sd-composer-actions');
-        const send = makeEl('button', 'btn-primary btn-small portal-send', 'Enviar respuesta');
+        const send = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm portal-send', 'Enviar respuesta');
         send.type = 'button';
         actions.appendChild(send);
         composer.append(label, textarea, actions);
@@ -7789,59 +8179,206 @@ document.addEventListener('DOMContentLoaded', () => {
         return items;
     }
 
-    function teamRow(user) {
-        const name = user.name || 'Sin nombre';
-        const row = makeEl('tr', 'team-row');
-        row.dataset.userId = String(user.id);
-        row.dataset.userName = name;
-        row.dataset.userRole = user.role;
+    // ----- Equipo y turnos: cuadrícula semanal (P-Equipo) -----
+    // El horario es semanal y se repite: cambiar de semana solo cambia las fechas y las vacaciones
+    let teamWeekOffset = 0;
+    let teamSelectedId = null;
+    const WEEKDAY_SHORT = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
 
-        const nameTd = makeEl('td', 'team-name');
-        nameTd.dataset.label = 'Nombre';
-        // El nombre completo se ve siempre (puede ocupar dos líneas); el correo enmascarado se corta con "…"
-        nameTd.append(makeEl('div', 'team-name-main', name), truncated('div', 'team-email', user.email));
-        const roleTd = makeEl('td');
-        roleTd.dataset.label = 'Rol';
-        roleTd.appendChild(truncated('span', '', ROLE_MAP[user.role] || user.role));
-        const openTd = makeEl('td', 'num tabular', String(user.tickets_assigned_open));
-        openTd.dataset.label = 'Abiertos';
-        const stateTd = makeEl('td');
-        stateTd.dataset.label = 'Estado';
-        stateTd.appendChild(truncated('span', user.is_active && !user.login_locked ? '' : 'team-state-alert', teamStateText(user)));
-        const todayTd = makeEl('td', 'tabular');
-        todayTd.dataset.label = 'Horario de hoy';
-        // Técnicos y coordinadores tienen horario (el del coordinador es informativo); el administrador no
-        if (user.role === 'admin') {
-            todayTd.appendChild(truncated('span', '', 'No aplica'));
-        } else {
-            const shiftLabel = user.schedule && user.schedule.length ? (user.on_shift ? 'En turno' : 'Fuera de turno') : '';
-            const text = `${user.schedule_today || 'Sin turno'}${shiftLabel ? ` · ${shiftLabel}` : ''}`;
-            todayTd.appendChild(truncated('span', user.on_shift ? 'team-on-shift' : '', text));
+    function teamWeekDays() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - ((today.getDay() + 6) % 7) + teamWeekOffset * 7);
+        return Array.from({ length: 7 }, (_, i) => {
+            const date = new Date(monday);
+            date.setDate(monday.getDate() + i);
+            return { date, weekday: i, isToday: date.getTime() === today.getTime(), isPast: date < today };
+        });
+    }
+
+    // Vacaciones o ausencia: de hoy en adelante, hasta el día anterior a la fecha de regreso (si la hay)
+    function teamAwayOn(user, date, isPast) {
+        if (!user.availability || user.availability === 'available' || isPast) return false;
+        if (!user.return_date) return true;
+        const [y, m, d] = user.return_date.split('-').map(Number);
+        return date < new Date(y, m - 1, d);
+    }
+
+    function teamStatus(user) {
+        if (!user.is_active) return ['Desactivada', 'is-muted'];
+        if (user.login_locked) return ['Bloqueada', 'is-alert'];
+        if (user.availability && user.availability !== 'available') {
+            const label = AVAILABILITY_LABELS[user.availability] || user.availability;
+            return [user.return_date ? `${label} hasta ${formatPlainDate(user.return_date)}` : label, 'is-warn'];
         }
+        if (user.role === 'admin') return ['Administrador', 'is-muted'];
+        if (user.on_shift) return [user.schedule_today ? `En turno · sale ${user.schedule_today.split('–').pop()}` : 'En turno', 'is-ok'];
+        return [user.schedule_today ? `Hoy ${user.schedule_today}` : 'Sin turno hoy', 'is-muted'];
+    }
 
-        const actionsTd = makeEl('td');
-        actionsTd.dataset.label = 'Acciones';
-        const actions = makeEl('div', 'team-actions');
+    function renderTeamWeek() {
+        const grid = document.getElementById('teamWeekGrid');
+        grid.removeAttribute('aria-busy');
+        grid.replaceChildren();
+        const days = teamWeekDays();
+        const first = days[0].date;
+        const last = days[6].date;
+        const fmt = (date, opts) => date.toLocaleDateString('es-CR', opts);
+        const todayName = fmt(new Date(), { weekday: 'long' });
+        document.getElementById('teamWeekLabel').textContent = teamWeekOffset === 0
+            ? `Semana del ${first.getDate()} al ${fmt(last, { day: 'numeric', month: 'long' })} · hoy es ${todayName}`
+            : `Semana del ${first.getDate()} al ${fmt(last, { day: 'numeric', month: 'long' })}`;
+
+        const header = makeEl('div', 'team-week-row team-week-header');
+        header.setAttribute('role', 'row');
+        const personHead = makeEl('span', 'team-week-person-head', 'PERSONA');
+        personHead.setAttribute('role', 'columnheader');
+        header.appendChild(personHead);
+        days.forEach(day => {
+            const cell = makeEl('span', `team-week-day${day.isToday ? ' is-today' : ''}`,
+                `${WEEKDAY_SHORT[day.weekday]} ${day.date.getDate()}`);
+            cell.setAttribute('role', 'columnheader');
+            if (day.isToday) cell.setAttribute('aria-current', 'date');
+            header.appendChild(cell);
+        });
+        grid.appendChild(header);
+
+        [...teamUsers.values()].forEach(user => {
+            const row = makeEl('div', 'team-week-row');
+            row.setAttribute('role', 'row');
+            const personCell = makeEl('span', 'team-week-person');
+            personCell.setAttribute('role', 'rowheader');
+            const person = makeEl('button', 'team-person');
+            person.type = 'button';
+            person.dataset.teamUser = String(user.id);
+            person.setAttribute('aria-pressed', user.id === teamSelectedId ? 'true' : 'false');
+            const avatar = makeEl('span', 'aa-avatar', getInitials(user.name || ''));
+            avatar.setAttribute('aria-hidden', 'true');
+            const text = makeEl('span', 'aa-row-text');
+            text.appendChild(makeEl('span', 'aa-row-name', user.name || 'Sin nombre'));
+            const [status, tone] = teamStatus(user);
+            text.appendChild(makeEl('span', `team-person-status ${tone}`, `${ROLE_MAP[user.role] || user.role} · ${status}`));
+            person.append(avatar, text);
+            personCell.appendChild(person);
+            row.appendChild(personCell);
+
+            days.forEach(day => {
+                const cell = makeEl('span', `team-week-cell${day.isToday ? ' is-today' : ''}`);
+                cell.setAttribute('role', 'cell');
+                const shift = (user.schedule || []).find(item => item.weekday === day.weekday);
+                let chip;
+                if (user.role === 'admin') {
+                    chip = makeEl('span', 'team-shift is-empty', '—');
+                } else if (teamAwayOn(user, day.date, day.isPast)) {
+                    chip = makeEl('span', 'team-shift is-away', AVAILABILITY_LABELS[user.availability]);
+                } else if (shift) {
+                    chip = makeEl('span', `team-shift${user.role === 'coordinator' ? ' is-coordinator' : ''}`,
+                        `${shift.start}–${shift.end}`);
+                } else {
+                    chip = makeEl('span', 'team-shift is-empty', '—');
+                    chip.title = 'No trabaja este día';
+                }
+                cell.appendChild(chip);
+                row.appendChild(cell);
+            });
+            grid.appendChild(row);
+        });
+    }
+
+    // Resumen de la persona elegida: datos, "Ver sus tickets" y las acciones que ya existían
+    function renderTeamSelected() {
+        const box = document.getElementById('teamSelected');
+        const user = teamUsers.get(teamSelectedId);
+        box.hidden = !user;
+        box.replaceChildren();
+        if (!user) return;
+        const name = user.name || 'Sin nombre';
+        // runAccountAction y el menú leen la cuenta del contenedor con data-user-id
+        box.dataset.userId = String(user.id);
+        box.dataset.userName = name;
+        box.dataset.userRole = user.role;
+        const info = makeEl('div', 'team-selected-info');
+        info.appendChild(makeEl('h2', 'team-selected-name', name));
+        info.appendChild(makeEl('p', 'team-selected-detail', `${ROLE_MAP[user.role] || user.role} · ${teamStateText(user)} · ${user.email}`));
+        const numbers = makeEl('p', 'team-selected-numbers');
+        numbers.appendChild(makeEl('b', '', String(user.tickets_assigned_open)));
+        numbers.appendChild(document.createTextNode(' tickets abiertos asignados'));
+        info.appendChild(numbers);
+        box.appendChild(info);
+
+        const actions = makeEl('div', 'team-selected-actions');
+        if (user.role !== 'admin') {
+            const tickets = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm team-view-tickets', 'Ver sus tickets');
+            tickets.type = 'button';
+            actions.appendChild(tickets);
+        }
+        const menu = teamMenuItems(user);
+        const availability = menu.find(item => item.action === 'availability');
+        if (availability) {
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm account-action', 'Cambiar disponibilidad');
+            button.type = 'button';
+            button.dataset.action = 'availability';
+            Object.entries(availability.data).forEach(([key, value]) => { button.dataset[key] = value; });
+            actions.appendChild(button);
+        }
         // Horario: el coordinador edita el de técnicos; el admin, el de técnicos y coordinadores. Nunca el propio
         if (user.role !== 'admin' && user.id !== currentUser.id && canManage(user, 'schedule')) {
-            const schedule = makeActionButton('schedule', 'Horario');
+            const schedule = makeEl('button', 'ui-btn ui-btn-navy ui-btn-sm account-action', 'Editar horario');
+            schedule.type = 'button';
+            schedule.dataset.action = 'schedule';
             schedule.dataset.schedule = JSON.stringify(user.schedule || []);
             actions.appendChild(schedule);
         }
-        if (teamMenuItems(user).length) {
-            const more = makeEl('button', 'row-menu-btn', '⋯');
+        if (menu.some(item => item.action !== 'availability')) {
+            const more = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm row-menu-btn', 'Más acciones ▾');
             more.type = 'button';
-            more.setAttribute('aria-label', 'Más acciones');
             more.title = `Más acciones para ${name}`;
             more.setAttribute('aria-haspopup', 'menu');
             more.setAttribute('aria-expanded', 'false');
             more.setAttribute('aria-controls', 'rowMenu');
             actions.appendChild(more);
         }
-        actionsTd.appendChild(actions);
-        row.append(nameTd, roleTd, openTd, stateTd, todayTd, actionsTd);
-        return row;
+        box.appendChild(actions);
     }
+
+    document.getElementById('teamWeekGrid').addEventListener('click', (e) => {
+        const person = e.target.closest('[data-team-user]');
+        if (!person) return;
+        const id = Number(person.dataset.teamUser);
+        teamSelectedId = teamSelectedId === id ? null : id;
+        document.querySelectorAll('#teamWeekGrid [data-team-user]').forEach(button => {
+            button.setAttribute('aria-pressed', Number(button.dataset.teamUser) === teamSelectedId ? 'true' : 'false');
+        });
+        renderTeamSelected();
+    });
+
+    document.getElementById('teamSelected').addEventListener('click', (e) => {
+        if (!e.target.closest('.team-view-tickets')) return;
+        const user = teamUsers.get(teamSelectedId);
+        if (!user) return;
+        // Sus tickets abiertos: la cola filtrada por responsable
+        queueAssignee.value = String(user.id);
+        if (queueAssignee.value !== String(user.id)) {
+            const option = document.createElement('option');
+            option.value = String(user.id);
+            option.textContent = user.name;
+            queueAssignee.appendChild(option);
+            queueAssignee.value = String(user.id);
+        }
+        setSideNavActive('open');
+        setQueueView('open', `Tickets de ${user.name}`);
+    });
+
+    document.getElementById('teamPrevWeek').addEventListener('click', () => {
+        teamWeekOffset -= 1;
+        renderTeamWeek();
+    });
+    document.getElementById('teamNextWeek').addEventListener('click', () => {
+        teamWeekOffset += 1;
+        renderTeamWeek();
+    });
+    document.getElementById('teamInvite').addEventListener('click', () => navUsers.click());
 
     function menuItems() {
         return [...rowMenu.querySelectorAll('.row-menu-item')];

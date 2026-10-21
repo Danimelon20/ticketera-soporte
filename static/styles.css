@@ -3505,3 +3505,499 @@ body.staff-shell.ticket-open #detailContent { max-width: none; padding: 0; font-
 @media (max-width: 960px) {
   .home-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* =====================================================================
+   Fase 5 · Nuevo ticket (P-Nuevo): página completa sin barra lateral
+   ===================================================================== */
+body.staff-shell.newticket-open { --nav-w: 0px; }
+body.staff-shell.newticket-open .side-nav { display: none; }
+@media (max-width: 767px) {
+  body.staff-shell.newticket-open { --top-h: 0px; }
+  body.staff-shell.newticket-open .topbar { display: none !important; }
+}
+.new-ticket-view { padding: 0; background: var(--bg-side); min-height: calc(100vh - var(--top-h, 0px)); }
+.new-ticket-view[hidden] { display: none; }
+.new-ticket-bar { position: static; }
+.new-ticket-bar b { color: var(--ink); font-weight: 500; }
+/* El portal del solicitante tiene su propia barra superior */
+body:not(.staff-shell) .new-ticket-bar .ticket-bar-mark { display: none; }
+.new-ticket-layout {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  padding: 26px 16px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+body:not(.staff-shell) .new-ticket-layout { grid-template-columns: minmax(0, 720px); justify-content: center; }
+.new-ticket-form { padding: 22px 24px; display: flex; flex-direction: column; gap: 16px; border-radius: var(--r-xl); }
+.new-ticket-head { display: flex; flex-direction: column; gap: 4px; }
+.new-ticket-title { margin: 0; font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -0.02em; }
+.new-ticket-intro { margin: 0; color: var(--muted); }
+.new-ticket-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.new-ticket-form .requester-group[hidden] { display: none; }
+.new-ticket-form .requester-row { display: flex; gap: 8px; }
+.new-ticket-form .requester-row .ui-input { flex: 1; }
+.new-ticket-form .ui-input[readonly] { background: var(--bg-side); color: var(--muted); }
+.new-ticket-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+.new-ticket-aside { display: flex; flex-direction: column; gap: 12px; }
+.new-ticket-aside[hidden] { display: none; }
+.new-ticket-open { overflow: hidden; }
+.new-ticket-open-title { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+.new-ticket-open-row { padding: 11px 16px; }
+.new-ticket-advice { margin: 0; padding: 0 4px; font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+.new-ticket-client-link { align-self: flex-start; margin: 0; padding: 0 4px; font-size: var(--fs-sm); }
+@media (max-width: 900px) {
+  .new-ticket-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .new-ticket-row { grid-template-columns: minmax(0, 1fr); }
+  .new-ticket-form { padding: 18px 16px; }
+  .new-ticket-actions { flex-direction: column-reverse; }
+  .new-ticket-actions .ui-btn { width: 100%; min-height: 44px; }
+}
+
+/* =====================================================================
+   Fase 5 · Cuentas (P-Cliente): lista a la izquierda y ficha a la derecha
+   ===================================================================== */
+.admin-accounts-view { grid-template-columns: 340px minmax(0, 1fr); background: var(--bg-side); }
+.aa-main { padding: 22px 0 0; background: var(--surface); border-right: 1px solid var(--line); gap: 12px; }
+.aa-main > .aa-head, .aa-main > .aa-quick, .aa-main > .aa-filters, .aa-main > .aa-schedule-fields { margin: 0; padding: 0 18px; }
+.aa-head .view-title { font-size: var(--fs-xl); letter-spacing: -0.02em; }
+.aa-head #aaInvite { margin-left: auto; }
+.aa-search { order: 3; flex-basis: 100%; max-width: none; height: 34px; min-height: 34px; background: var(--bg-side); border-color: var(--line); }
+.aa-quick-btn {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--neutral-ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.aa-quick-btn[aria-pressed="true"] { border-color: var(--blue); background: var(--nav-active); color: var(--link); font-weight: 600; }
+.aa-quick-count { font-family: var(--mono); font-size: var(--fs-xs); margin-left: 2px; }
+.aa-main > .aa-filters { padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
+.aa-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+.aa-list > .ui-skeleton-line { padding: 14px 18px; }
+.aa-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface);
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.aa-row:hover { background: var(--bg-side); }
+.aa-row.selected { background: var(--selected); box-shadow: inset 3px 0 0 var(--blue); }
+.aa-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.aa-avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-pill);
+  background: var(--nav-active);
+  color: var(--link);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.aa-avatar.is-client { background: var(--neutral-soft); color: var(--neutral-ink); }
+.aa-avatar-lg { width: 52px; height: 52px; font-size: 17px; background: var(--nav-active); color: var(--link); }
+.aa-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.aa-row-name { font-weight: 500; overflow-wrap: anywhere; }
+.aa-row-sub { font-size: var(--fs-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aa-row .ui-tag { font-size: 10px; }
+.aa-empty[hidden] { display: none; }
+
+.aa-panel { border-left: none; background: var(--bg-side); padding: 24px 30px; font-size: var(--fs-base); }
+.aa-account { display: flex; flex-direction: column; gap: 18px; }
+.aa-panel-head { align-items: center; justify-content: flex-start; gap: 14px; margin: 0; }
+.aa-panel-titles { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.aa-name { font-size: var(--fs-2xl); letter-spacing: -0.02em; margin: 0; }
+.aa-panel-meta { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); }
+.aa-actions-btn { min-height: 36px; border-radius: var(--r-md); }
+.aa-alerts { display: flex; flex-direction: column; gap: 8px; }
+.aa-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 11px 14px; border: 1px solid var(--note-line); border-radius: 10px; background: var(--note-bg); color: var(--ink); line-height: 1.45; font-size: var(--fs-base); }
+.aa-alert > span { flex: 1 1 240px; }
+.aa-alert .ticket-bar-link { margin: 0; white-space: nowrap; }
+.aa-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.aa-stat { padding: 14px 16px; gap: 4px; }
+.aa-stat-value { font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.aa-section { overflow: hidden; }
+.aa-section .ui-card-head { padding: 13px 16px; }
+.aa-section .home-row { padding: 12px 16px; }
+.aa-section .aa-changes { padding: 4px 16px 8px; }
+.aa-section .aa-changes li { padding: 8px 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.aa-section .ui-empty { padding: 24px 16px; }
+
+@media (max-width: 1100px) {
+  .admin-accounts-view { grid-template-columns: 300px minmax(0, 1fr); }
+  .aa-stats { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .admin-accounts-view { grid-template-columns: 1fr; }
+  .aa-main { padding-top: 16px; border-right: none; }
+  .aa-main > .aa-head, .aa-main > .aa-quick, .aa-main > .aa-filters, .aa-main > .aa-schedule-fields { padding: 0 16px; }
+  .aa-panel { padding: 16px; }
+  .admin-accounts-view.show-detail .aa-panel { inset: var(--top-h, 52px) 0 0 0; overflow-y: auto; }
+  .aa-panel-head { flex-wrap: wrap; }
+  .aa-actions-btn { width: 100%; }
+}
+
+/* =====================================================================
+   Fase 5 · Equipo y turnos (P-Equipo)
+   ===================================================================== */
+#accountsView { background: var(--bg-side); }
+#accountsView .view-title { margin: 0 0 4px; font-size: var(--fs-2xl); letter-spacing: -0.02em; }
+.team-week-section { display: flex; flex-direction: column; gap: 16px; border: none; padding: 0; background: none; }
+.team-week-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.team-week-label { margin: 0; color: var(--muted); }
+.team-week-nav { display: flex; gap: 8px; flex-wrap: wrap; }
+.team-body { display: flex; flex-direction: column; gap: 16px; }
+.team-week { overflow-x: auto; }
+.team-week-grid { min-width: 820px; }
+.team-week-grid > .ui-skeleton-line { padding: 18px; }
+.team-week-row { display: grid; grid-template-columns: 220px repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--line-soft); min-height: 64px; }
+.team-week-row:last-child { border-bottom: none; }
+.team-week-header { min-height: 0; border-bottom-color: var(--line-soft); }
+.team-week-person-head, .team-week-day { padding: 10px 8px; font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.05em; color: var(--muted); }
+.team-week-person-head { padding-left: 16px; }
+.team-week-day { font-family: var(--mono); text-align: center; border-left: 1px solid var(--line-soft); }
+.team-week-day.is-today { color: var(--link); font-weight: 600; background: var(--info-soft); }
+.team-week-person { display: flex; }
+.team-person {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.team-person:hover { background: var(--bg-side); }
+.team-person[aria-pressed="true"] { background: var(--selected); box-shadow: inset 3px 0 0 var(--blue); }
+.team-person:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.team-person-status { font-size: var(--fs-sm); color: var(--muted); }
+.team-person-status.is-ok { color: var(--ok); }
+.team-person-status.is-warn { color: var(--due-soon); }
+.team-person-status.is-alert { color: var(--overdue); }
+.team-week-cell { display: flex; align-items: center; justify-content: center; padding: 8px 6px; border-left: 1px solid var(--line-soft); }
+.team-week-cell.is-today { background: #F7F9FF; }
+.team-shift {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 4px;
+  border-radius: 7px;
+  background: var(--nav-active);
+  color: var(--link);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+.team-shift.is-coordinator { background: var(--line-soft); color: var(--neutral-ink); border: 1px dashed #C9CEDB; }
+.team-shift.is-away { background: var(--warn-soft); color: var(--due-soon); font-family: var(--font); }
+.team-shift.is-empty { background: none; color: #A3A8B8; }
+.team-selected { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; padding: 16px 18px; }
+.team-selected[hidden] { display: none; }
+.team-selected-info { flex: 1 1 280px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.team-selected-name { margin: 0; font-size: 15px; font-weight: 600; }
+.team-selected-detail { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.team-selected-numbers { margin: 0; color: var(--muted); }
+.team-selected-numbers b { color: var(--ink); font-weight: 600; }
+.team-selected-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.team-week-note { margin: 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.5; }
+.aa-alert { margin: 0; }
+@media (max-width: 767px) {
+  .team-selected-actions { width: 100%; }
+  .team-selected-actions .ui-btn { flex: 1 1 auto; min-height: 40px; }
+}
+
+/* =====================================================================
+   Fase 5 · Borradores de correo (P-Borradores)
+   ===================================================================== */
+.drafts-view { padding: 0; background: var(--bg-side); }
+.drafts-view .drafts-layout { grid-template-columns: 380px minmax(0, 1fr); gap: 0; align-items: stretch; min-height: calc(100vh - var(--top-h, 0px)); }
+.drafts-side { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+.drafts-side-head { padding: 22px 18px 14px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 4px; }
+.drafts-title { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; }
+.drafts-intro { margin: 0; color: var(--muted); }
+.drafts-view .drafts-list { list-style: none; margin: 0; padding: 0; display: block; }
+.drafts-view .draft-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 18px;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: var(--surface);
+}
+.drafts-view .draft-item:hover { background: var(--bg-side); border-color: var(--line-soft); }
+.drafts-view .draft-item[aria-current="true"] { background: var(--selected); box-shadow: inset 3px 0 0 var(--blue); }
+.draft-item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.draft-item-top { display: flex; justify-content: space-between; gap: 8px; }
+.draft-item-from { font-weight: 600; color: var(--ink); }
+.draft-item-time { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+.drafts-view .draft-item-subject { font-weight: 500; }
+.draft-item-snippet { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.draft-item .ui-tag { align-self: flex-start; }
+.drafts-view .draft-detail { background: none; border: none; border-radius: 0; padding: 24px 32px; }
+.draft-content { display: flex; flex-direction: column; gap: 16px; }
+.draft-content[hidden] { display: none; }
+.draft-head { display: flex; align-items: flex-start; gap: 14px; }
+.draft-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.draft-number { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+.drafts-view .draft-subject { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; }
+.drafts-view .draft-meta { margin: 0; }
+.drafts-view .draft-meta b { font-weight: 500; color: var(--ink); }
+.draft-flags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.draft-flags[hidden] { display: none; }
+.draft-flags .ticket-bar-link { margin: 0; }
+.drafts-view .draft-reason { margin: 0; }
+.drafts-view .draft-body { margin: 0; max-height: 320px; padding: 18px 20px; background: var(--surface); line-height: 1.6; color: var(--ink-2); font-size: var(--fs-base); }
+.draft-ai-box { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border: 1px solid var(--info-line); border-radius: var(--r-lg); background: var(--info-soft); }
+.draft-ai-title { margin: 0; font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0.05em; color: var(--navy); }
+.drafts-view .draft-ai { margin: 0; gap: 10px; }
+.draft-ai-facts { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.draft-ai-facts div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.draft-ai-facts dt { font-size: var(--fs-sm); color: var(--muted); }
+.draft-ai-facts dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.draft-ai-note { margin: 0; line-height: 1.5; }
+.drafts-view .draft-form { border-top: none; padding: 18px 20px; gap: 14px; }
+.draft-form-title { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.drafts-view .draft-actions { align-items: center; }
+.draft-actions-hint { flex: 1 1 260px; text-align: right; font-size: var(--fs-sm); color: var(--muted); }
+.draft-actions-hint[hidden] { display: none; }
+.draft-placeholder[hidden] { display: none; }
+@media (max-width: 900px) {
+  .drafts-view .drafts-layout { grid-template-columns: minmax(0, 1fr); }
+  .drafts-side { border-right: none; border-bottom: 1px solid var(--line); }
+  .drafts-view .draft-detail { padding: 16px; }
+  .draft-ai-facts { grid-template-columns: minmax(0, 1fr); }
+  .draft-actions-hint { text-align: left; }
+}
+
+/* =====================================================================
+   Fase 5 · Reportes de cuentas y Revisión (P-Reporte)
+   ===================================================================== */
+.reports-view { background: var(--bg-side); }
+.reports-view .view-title { margin: 0 0 4px; font-size: var(--fs-2xl); letter-spacing: -0.02em; }
+.reports-intro { margin: 0 0 16px; }
+.reports-filters .ui-input { width: auto; min-width: 180px; }
+.reports-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; max-width: 900px; }
+.reports-list > .ui-skeleton-line { background: var(--surface); border-radius: var(--r-lg); }
+.report-item { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.report-item-head { display: flex; align-items: flex-start; gap: 12px; }
+.report-item-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.report-item-name { font-weight: 600; overflow-wrap: anywhere; }
+.report-item-meta { margin: 0; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+.report-item-comment { margin: 0; line-height: 1.5; color: var(--ink-2); }
+.report-item-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.report-item-actions .ticket-bar-link { margin: 0; }
+.report-item-actions .report-review-btn { margin-left: auto; }
+.report-others { font-size: var(--fs-sm); color: var(--overdue); }
+.report-waiting { flex-basis: 100%; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+.reports-empty[hidden], .report-review[hidden], .reports-pane[hidden] { display: none; }
+.reports-empty .ui-empty { max-width: 900px; }
+
+.reports-view:has(.report-review:not([hidden])) { padding: 0; }
+.report-review-bar { position: static; }
+.report-review-bar b { color: var(--ink); font-weight: 500; }
+.report-review-layout {
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 22px;
+  align-items: start;
+}
+.report-review-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.report-review-head { display: flex; flex-direction: column; gap: 6px; }
+.report-review-kicker { margin: 0; font-family: var(--mono); font-size: var(--fs-sm); color: var(--overdue); }
+.report-review-title { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.report-review-by { margin: 0; color: var(--muted); }
+.report-review-by b { color: var(--ink); font-weight: 500; }
+.report-review-text { margin: 0; line-height: 1.55; }
+.report-fact.is-danger { color: var(--overdue); font-weight: 600; }
+.report-fact.is-ok { color: var(--ok); font-weight: 600; }
+.report-review-history { overflow: hidden; }
+.report-review-history-title { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+.report-history-row { cursor: default; }
+.report-history-row:hover { background: none; }
+.report-decision { padding: 18px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 16px; }
+.report-decision-title { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.report-decision-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.report-choice {
+  min-height: 40px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.report-choice[hidden] { display: none; }
+.report-choice[data-decision="confirm"][aria-checked="true"] { border-color: var(--overdue); background: var(--danger-soft); color: var(--overdue); }
+.report-choice[data-decision="dismiss"][aria-checked="true"] { border-color: var(--blue); background: var(--nav-active); color: var(--link); }
+.report-choice:only-of-type, .report-decision-choices:has(.report-choice[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.report-deactivate { display: flex; gap: 8px; align-items: flex-start; line-height: 1.4; cursor: pointer; }
+.report-deactivate[hidden] { display: none; }
+.report-deactivate input { margin-top: 3px; accent-color: var(--overdue); width: 16px; height: 16px; }
+.report-deactivate small { color: var(--muted); font-size: var(--fs-sm); }
+.report-decision-foot { margin: 0; font-size: var(--fs-sm); line-height: 1.45; color: var(--muted); }
+@media (max-width: 900px) {
+  .report-review-layout { grid-template-columns: minmax(0, 1fr); }
+  .report-decision { position: static; }
+}
+
+/* =====================================================================
+   Fase 5 · Mi cuenta (P-Cuenta)
+   ===================================================================== */
+.account-view { background: var(--bg-side); display: flex; justify-content: center; padding: 30px 32px; }
+.account-view[hidden] { display: none; }
+.account-layout { width: min(900px, 100%); display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 28px; align-items: start; }
+.account-aside { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 24px; }
+.account-who { display: flex; align-items: center; gap: 10px; padding-bottom: 16px; }
+.account-avatar { width: 40px; height: 40px; font-size: var(--fs-sm); }
+.account-who-text { display: flex; flex-direction: column; min-width: 0; }
+.account-who-name { font-weight: 600; overflow-wrap: anywhere; }
+.account-who-role { font-size: var(--fs-sm); color: var(--muted); }
+.account-tabs { display: flex; flex-direction: column; gap: 2px; }
+.account-tabs[hidden] { display: none; }
+.account-tab {
+  min-height: 36px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.account-tab[hidden] { display: none; }
+.account-tab:hover { background: var(--line-soft); }
+.account-tab[aria-current="page"] { background: var(--nav-active); color: var(--link); font-weight: 600; }
+.account-home { margin: 16px 0 0; padding: 0 10px; text-align: left; font-size: var(--fs-sm); }
+.account-home[hidden] { display: none; }
+.account-logout { margin-top: 18px; color: var(--overdue); border-color: var(--line); }
+.account-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.account-main .view-title { margin: 0; font-size: var(--fs-xl); }
+.account-main #profileIntro { margin: 0; }
+.account-view .account-section {
+  margin: 0;
+  padding: 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+}
+.account-view .account-section[hidden] { display: none; }
+.account-view .account-title { margin: 0 0 4px; font-size: var(--fs-xl); font-weight: 600; border: none; padding: 0; }
+.account-view .account-current { margin: 0 0 14px; color: var(--muted); }
+.account-facts { max-width: 420px; }
+.account-view .form-group label { font-weight: 500; }
+.account-view .form-group input, .account-view .form-group select {
+  min-height: 38px;
+  border-color: var(--field-line);
+  border-radius: var(--r-md);
+}
+.account-view .profile-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.account-view .btn-submit { width: auto; min-height: 36px; padding: 0 16px; }
+@media (max-width: 767px) {
+  .account-view { padding: 16px; }
+  .account-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .account-aside { position: static; }
+  .account-tabs { flex-direction: row; flex-wrap: wrap; }
+  .account-who { padding-bottom: 6px; }
+  .account-logout { margin-top: 6px; }
+  .account-view .account-section { padding: 18px 16px; }
+}
+
+/* =====================================================================
+   Fase 5 · Invitaciones, Administración y Directorio
+   ===================================================================== */
+.invites-view, #adminView, #directoryView { background: var(--bg-side); }
+.invites-view .view-title, #adminView .view-title, #directoryView .view-title { margin: 0 0 4px; font-size: var(--fs-2xl); letter-spacing: -0.02em; }
+.invites-intro { margin: 0 0 18px; }
+.invites-host { max-width: 960px; }
+.invites-view .invites-section { margin: 0 0 16px; padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.invites-view .invites-section .help-text { margin: 4px 0 14px; font-size: var(--fs-base); }
+.invites-view .invite-form { align-items: end; }
+.invites-view .invite-form input, .invites-view .invite-form select { min-height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); padding: 0 10px; font: inherit; }
+.invites-table-title { margin: 20px 0 8px; font-size: var(--fs-md); font-weight: 600; }
+.invites-view .invites-table th { font-size: var(--fs-xs); }
+.users-details { max-width: 960px; padding: 0; overflow: hidden; }
+.users-summary { padding: 14px 18px; font-weight: 600; cursor: pointer; }
+.users-summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.users-list { list-style: none; margin: 0; padding: 0 18px 14px; display: flex; flex-direction: column; gap: 6px; }
+.users-list-item { padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--bg-side); overflow-wrap: anywhere; }
+
+#adminView .admin-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: none; padding: 16px 18px; }
+#adminView .admin-card h2 { font-size: var(--fs-md); font-weight: 600; }
+#adminView .admin-logs { border-radius: var(--r-md); }
+#adminView .changes-list > li, .reports-view .changes-list > li { border-color: var(--line-soft); }
+#directoryView .table-scroll { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow-x: auto; }
+#directoryView .directory-table th { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--surface); }
+#directoryView .directory-table td { border-color: var(--line-soft); }
+#directoryView .directory-filters input, #directoryView .directory-filters select,
+#adminView .directory-filters input, #adminView .directory-filters select { min-height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); background: var(--surface); }
+@media (max-width: 767px) {
+  .invites-view .invites-section { padding: 16px; }
+}
+
+/* =====================================================================
+   Fase 5 · Portal del solicitante (una columna en el celular)
+   ===================================================================== */
+body.requester-portal { background: var(--bg-side); }
+body.requester-portal .topbar { border-bottom: none; }
+body.requester-portal .portal-panel { background: var(--surface); }
+body.requester-portal .portal-head { padding: 20px 18px 14px; border-bottom-color: var(--line-soft); }
+body.requester-portal .portal-title { font-size: var(--fs-xl); letter-spacing: -0.02em; }
+body.requester-portal .portal-item { gap: 6px; padding: 14px 18px; border-bottom: 1px solid var(--line-soft); }
+.portal-item-title { overflow-wrap: anywhere; }
+.portal-item-progress { display: flex; align-items: center; gap: 10px; }
+.portal-item-progress .ui-bar { width: 80px; flex: 0 0 auto; }
+.portal-item-step { font-size: var(--fs-sm); color: var(--muted); }
+.portal-empty .ui-empty { padding: 32px 18px; }
+body.requester-portal #detailPanel { background: var(--bg-side); padding: 24px 28px; }
+body.requester-portal #detailContent { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.portal-detail-meta { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+body.requester-portal .portal-detail-title { margin: 0; font-size: var(--fs-2xl); letter-spacing: -0.02em; overflow-wrap: anywhere; }
+body.requester-portal .portal-steps { margin: 4px 0; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.portal-owner { margin: 0; }
+.portal-original { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+body.requester-portal .portal-subtitle { margin: 6px 0 0; font-size: var(--fs-md); }
+body.requester-portal .portal-message { padding: 12px 14px; border-radius: 10px; background: var(--surface); }
+body.requester-portal .portal-message.is-own { background: var(--selected); border-color: var(--info-line); }
+body.requester-portal .portal-message-meta { font-size: var(--fs-sm); }
+body.requester-portal .portal-message-text { line-height: 1.55; }
+.portal-composer { overflow: hidden; }
+.portal-composer .sd-reply { width: 100%; min-height: 92px; box-sizing: border-box; padding: 12px 14px; border: none; resize: vertical; font: inherit; }
+.portal-composer .sd-reply:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.portal-composer .sd-composer-actions { display: flex; justify-content: flex-end; padding: 8px 10px; border-top: 1px solid var(--line-soft); }
+body.requester-portal .portal-footer { background: var(--surface); border-top: 1px solid var(--line); }
+@media (max-width: 860px) {
+  body.requester-portal #detailPanel { padding: 16px; }
+  body.requester-portal .portal-detail-title { font-size: var(--fs-xl); }
+  .portal-step-label { font-size: var(--fs-xs); text-align: center; }
+}

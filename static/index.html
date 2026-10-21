@@ -381,7 +381,7 @@
                     <span id="portalTotal" class="portal-total"></span>
                 </header>
                 <ul id="portalList" class="portal-list"></ul>
-                <p id="portalEmpty" class="portal-empty" hidden>Todavía no tiene solicitudes. Use "Nueva solicitud" para crear la primera.</p>
+                <div id="portalEmpty" class="portal-empty" hidden></div>
             </section>
             <section id="listPanel" aria-label="Lista de tickets">
                 <div class="list-filters">
@@ -431,6 +431,87 @@
             </section>
         </div>
 
+        <!-- Nuevo ticket / Nueva solicitud: página completa, sin barra lateral -->
+        <section id="newTicketView" class="page-view new-ticket-view" hidden aria-labelledby="newTicketTitle">
+            <nav class="ticket-bar new-ticket-bar" aria-label="Navegación">
+                <span class="ticket-bar-mark" aria-hidden="true">T</span>
+                <button type="button" id="newTicketBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Tickets</button>
+                <span class="ticket-bar-crumb"><span id="newTicketCrumbBase">Tickets</span> / <b id="newTicketCrumb">Nuevo ticket</b></span>
+            </nav>
+            <div class="new-ticket-layout">
+                <form id="ticketForm" class="ui-card new-ticket-form">
+                    <div class="new-ticket-head">
+                        <h1 id="newTicketTitle" class="new-ticket-title">Nuevo ticket</h1>
+                        <p id="newTicketIntro" class="new-ticket-intro">Para registrar un caso que llegó por teléfono o en persona.</p>
+                    </div>
+                    <div id="requesterGroup" class="ui-field requester-group" hidden>
+                        <label for="requesterSearch">Cliente</label>
+                        <div class="requester-row">
+                            <input type="text" id="requesterSearch" class="ui-input" list="requesterOptions" autocomplete="off" placeholder="Buscar por nombre o correo" aria-describedby="requesterHint">
+                            <button type="button" id="forMeBtn" class="ui-btn ui-btn-secondary">Para mí</button>
+                        </div>
+                        <span id="requesterHint" class="ui-help">Escriba al menos 2 letras y elija de la lista. Sin cliente, el ticket queda a su nombre.</span>
+                        <datalist id="requesterOptions"></datalist>
+                    </div>
+                    <div class="new-ticket-row">
+                        <div class="ui-field">
+                            <label for="contactName">Nombre</label>
+                            <input type="text" id="contactName" name="contactName" class="ui-input" autocomplete="name" readonly>
+                        </div>
+                        <div class="ui-field">
+                            <label for="contactEmail">Correo</label>
+                            <input type="email" id="contactEmail" name="contactEmail" class="ui-input" autocomplete="email" readonly>
+                        </div>
+                    </div>
+                    <div class="ui-field">
+                        <label for="contactPhone">Teléfono de contacto</label>
+                        <input type="tel" id="contactPhone" name="contactPhone" class="ui-input" autocomplete="tel" placeholder="8888-1234" maxlength="16" inputmode="numeric" required aria-describedby="contactPhoneHint">
+                        <span id="contactPhoneHint" class="ui-help">El ticket queda a nombre del perfil; la cédula sale del perfil.</span>
+                    </div>
+                    <div class="ui-field">
+                        <label for="title">Asunto</label>
+                        <input type="text" id="title" name="title" class="ui-input" placeholder="Resuma el problema en una línea" required>
+                    </div>
+                    <div class="ui-field">
+                        <label for="description">Descripción</label>
+                        <textarea id="description" name="description" class="ui-input" rows="5" placeholder="Qué pasa, desde cuándo y qué ya se intentó" required></textarea>
+                    </div>
+                    <div class="new-ticket-row">
+                        <div class="ui-field">
+                            <label for="category">Categoría</label>
+                            <select id="category" name="category" class="ui-input"></select>
+                        </div>
+                        <div class="ui-field">
+                            <label for="priority">Prioridad</label>
+                            <select id="priority" name="priority" class="ui-input"></select>
+                        </div>
+                    </div>
+                    <div class="new-ticket-actions">
+                        <button type="button" id="newTicketCancel" class="ui-btn ui-btn-secondary">Cancelar</button>
+                        <button type="submit" id="newTicketSubmit" class="ui-btn ui-btn-primary">Crear ticket</button>
+                    </div>
+                </form>
+                <aside id="newTicketAside" class="new-ticket-aside" hidden>
+                    <section class="ui-card new-ticket-open" aria-labelledby="newTicketOpenTitle">
+                        <h2 id="newTicketOpenTitle" class="ui-kicker new-ticket-open-title">Tickets abiertos</h2>
+                        <ul id="newTicketOpenList" class="home-list"></ul>
+                    </section>
+                    <p class="new-ticket-advice">Revise que el caso no esté ya abierto. Si lo está, mejor agregue un comentario a ese ticket en vez de crear otro.</p>
+                    <button type="button" id="newTicketClientLink" class="ticket-bar-link new-ticket-client-link">Ver ficha del cliente →</button>
+                </aside>
+            </div>
+        </section>
+
+        <section id="invitesView" class="page-view invites-view" hidden aria-labelledby="invitesTitle">
+            <h1 id="invitesTitle" class="view-title">Invitaciones</h1>
+            <p class="view-note invites-intro">Invite personal nuevo y revise las invitaciones que ya envió. Las cuentas se gestionan en Cuentas.</p>
+            <div id="invitesHost" class="invites-host"></div>
+            <details class="ui-card users-details">
+                <summary class="users-summary">Usuarios existentes</summary>
+                <ul id="usersList" class="users-list"></ul>
+            </details>
+        </section>
+
         <section id="homeView" class="page-view home-view" hidden aria-labelledby="homeTitle">
             <div class="home-head">
                 <div class="home-heading">
@@ -459,10 +540,37 @@
             </div>
         </section>
 
-        <section id="profileView" class="page-view" hidden aria-labelledby="profileTitle">
+        <section id="profileView" class="page-view account-view" hidden aria-labelledby="profileTitle">
+          <div class="account-layout">
+            <aside id="accountAside" class="account-aside" aria-label="Secciones de Mi cuenta">
+                <div class="account-who">
+                    <span id="accountAvatar" class="aa-avatar account-avatar" aria-hidden="true"></span>
+                    <span class="account-who-text">
+                        <span id="accountWhoName" class="account-who-name"></span>
+                        <span id="accountWhoRole" class="account-who-role"></span>
+                    </span>
+                </div>
+                <nav id="accountTabs" class="account-tabs" aria-label="Mi cuenta">
+                    <button type="button" class="account-tab" data-account-tab="perfil">Perfil</button>
+                    <button type="button" class="account-tab" data-account-tab="correo">Correo</button>
+                    <button type="button" class="account-tab" data-account-tab="seguridad">Seguridad</button>
+                    <button type="button" class="account-tab" data-account-tab="turno" id="accountTabTurno">Disponibilidad y horario</button>
+                </nav>
+                <button type="button" id="accountHome" class="ticket-bar-link account-home">← Volver al inicio</button>
+                <button type="button" id="accountLogout" class="ui-btn ui-btn-secondary account-logout">Cerrar sesión</button>
+            </aside>
+            <div class="account-main">
             <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
             <p id="profileIntro" class="view-note">Antes de crear tickets necesitamos su nombre completo, cédula y teléfono.</p>
-            <section id="accountPersonal" class="account-section" aria-labelledby="accountPersonalTitle">
+            <section id="accountStaffProfile" class="account-section" data-account-tab="perfil" aria-labelledby="accountStaffProfileTitle" hidden>
+                <h2 id="accountStaffProfileTitle" class="account-title">Perfil</h2>
+                <p class="account-current">Así lo ve el resto del equipo.</p>
+                <dl class="td-props account-facts">
+                    <dt>Nombre</dt><dd id="accountStaffName"></dd>
+                    <dt>Rol</dt><dd id="accountStaffRole"></dd>
+                </dl>
+            </section>
+            <section id="accountPersonal" class="account-section" data-account-tab="perfil" aria-labelledby="accountPersonalTitle">
             <h2 id="accountPersonalTitle" class="account-title">Datos personales</h2>
             <form id="profileForm" class="profile-form">
                 <div class="form-group">
@@ -486,7 +594,7 @@
             </form>
             </section>
 
-            <section id="accountPhone" class="account-section" aria-labelledby="accountPhoneTitle" hidden>
+            <section id="accountPhone" class="account-section" data-account-tab="perfil" aria-labelledby="accountPhoneTitle" hidden>
                 <h2 id="accountPhoneTitle" class="account-title">Teléfono</h2>
                 <form id="accountPhoneForm" class="profile-form">
                     <div class="form-group">
@@ -499,7 +607,7 @@
                 </form>
             </section>
 
-            <section id="accountAvailability" class="account-section" aria-labelledby="accountAvailabilityTitle" hidden>
+            <section id="accountAvailability" class="account-section" data-account-tab="turno" aria-labelledby="accountAvailabilityTitle" hidden>
                 <h2 id="accountAvailabilityTitle" class="account-title">Disponibilidad</h2>
                 <form id="accountAvailabilityForm" class="profile-form">
                     <div class="form-group">
@@ -521,14 +629,14 @@
                 </form>
             </section>
 
-            <section id="accountSchedule" class="account-section" aria-labelledby="accountScheduleTitle" hidden>
+            <section id="accountSchedule" class="account-section" data-account-tab="turno" aria-labelledby="accountScheduleTitle" hidden>
                 <h2 id="accountScheduleTitle" class="account-title">Horario</h2>
                 <p id="accountScheduleSummary" class="account-current"></p>
                 <ul id="accountScheduleDays" class="schedule-view"></ul>
                 <small class="help-text">Lo definen el coordinador o el administrador. Fuera de su horario no recibe tickets automáticamente.</small>
             </section>
 
-            <section id="accountEmail" class="account-section" aria-labelledby="accountEmailTitle">
+            <section id="accountEmail" class="account-section" data-account-tab="correo" aria-labelledby="accountEmailTitle">
                 <h2 id="accountEmailTitle" class="account-title">Correo</h2>
                 <p class="account-current">Correo actual: <strong id="accountCurrentEmail"></strong></p>
                 <form id="emailChangeForm" class="profile-form">
@@ -560,7 +668,7 @@
                 </form>
             </section>
 
-            <section id="accountPassword" class="account-section" aria-labelledby="accountPasswordTitle">
+            <section id="accountPassword" class="account-section" data-account-tab="seguridad" aria-labelledby="accountPasswordTitle">
                 <h2 id="accountPasswordTitle" class="account-title">Contraseña</h2>
                 <form id="passwordForm" class="profile-form">
                     <div class="form-group">
@@ -582,6 +690,8 @@
                     </div>
                 </form>
             </section>
+            </div>
+          </div>
         </section>
 
         <section id="directoryView" class="page-view" hidden aria-labelledby="directoryTitle">
@@ -627,30 +737,23 @@
 
         <section id="accountsView" class="page-view" hidden aria-labelledby="accountsTitle">
             <h1 id="accountsTitle" class="view-title">Cuentas</h1>
-            <section id="accountsTeam" class="account-section" data-account-section="team" aria-labelledby="teamTitle">
-                <h2 id="teamTitle" class="account-title">Equipo</h2>
-                <p class="help-text">Todo el personal. Al desactivar un técnico, sus tickets abiertos quedan sin asignar. Su propia cuenta se gestiona en Mi cuenta.</p>
-                <table class="team-table">
-                    <colgroup>
-                        <col class="team-col-name">
-                        <col class="team-col-role">
-                        <col class="team-col-open">
-                        <col class="team-col-state">
-                        <col class="team-col-today">
-                        <col class="team-col-actions">
-                    </colgroup>
-                    <thead>
-                        <tr>
-                            <th scope="col">Nombre</th>
-                            <th scope="col">Rol</th>
-                            <th scope="col" class="num">Abiertos</th>
-                            <th scope="col">Estado</th>
-                            <th scope="col">Horario de hoy</th>
-                            <th scope="col">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="teamBody"></tbody>
-                </table>
+            <section id="accountsTeam" class="account-section team-week-section" data-account-section="team" aria-labelledby="accountsTitle">
+                <div class="team-week-head">
+                    <p id="teamWeekLabel" class="team-week-label"></p>
+                    <div class="team-week-nav">
+                        <button type="button" id="teamPrevWeek" class="ui-btn ui-btn-secondary ui-btn-sm">← Semana anterior</button>
+                        <button type="button" id="teamNextWeek" class="ui-btn ui-btn-secondary ui-btn-sm">Semana siguiente →</button>
+                        <button type="button" id="teamInvite" class="ui-btn ui-btn-primary ui-btn-sm">Invitar personal</button>
+                    </div>
+                </div>
+                <!-- Contenedor de la cuadrícula y del resumen: los botones de acciones se manejan aquí -->
+                <div id="teamBody" class="team-body">
+                    <section class="ui-card team-week" aria-label="Horario semanal">
+                        <div id="teamWeekGrid" class="team-week-grid" role="table" aria-label="Horario de la semana"></div>
+                    </section>
+                    <section id="teamSelected" class="ui-card team-selected" aria-live="polite" hidden></section>
+                </div>
+                <p class="team-week-note">Haga clic en una persona para ver su resumen. Los turnos de coordinadores son informativos y no reciben asignación automática. Al desactivar un técnico, sus tickets abiertos quedan sin asignar.</p>
                 <p id="teamEmpty" class="view-note" hidden>No hay personal.</p>
             </section>
             <!-- Solicitudes de cambio del coordinador: hoy no se muestran en ninguna opción del menú -->
@@ -661,79 +764,140 @@
             </section>
         </section>
 
-        <section id="reportsView" class="page-view" hidden aria-labelledby="reportsTitle">
-            <h1 id="reportsTitle" class="view-title">Reportes de cuentas</h1>
-            <p class="view-note">Cuentas de solicitante reportadas por el personal. El reporte solo marca la cuenta; para bloquearla use Desactivar.</p>
-            <div class="directory-filters">
-                <label for="reportsStatus" class="sr-only">Filtrar por estado</label>
-                <select id="reportsStatus">
-                    <option value="open">Abiertos</option>
-                    <option value="confirmed">Confirmados</option>
-                    <option value="dismissed">Descartados</option>
-                    <option value="">Todos</option>
-                </select>
-                <div id="reportsAccountFilter" class="reports-account-filter" hidden>
-                    <span id="reportsAccountName"></span>
-                    <button type="button" id="reportsAccountClear" class="link-btn">Quitar filtro</button>
+        <section id="reportsView" class="page-view reports-view" hidden aria-labelledby="reportsTitle">
+            <div id="reportsListPane" class="reports-pane">
+                <h1 id="reportsTitle" class="view-title">Reportes de cuentas</h1>
+                <p class="view-note reports-intro">Cuentas de solicitante reportadas por el personal. El reporte solo marca la cuenta; para bloquearla use Desactivar.</p>
+                <div class="directory-filters reports-filters">
+                    <label for="reportsStatus" class="sr-only">Filtrar por estado</label>
+                    <select id="reportsStatus" class="ui-input">
+                        <option value="open">Abiertos</option>
+                        <option value="confirmed">Confirmados</option>
+                        <option value="dismissed">Descartados</option>
+                        <option value="">Todos</option>
+                    </select>
+                    <div id="reportsAccountFilter" class="reports-account-filter" hidden>
+                        <span id="reportsAccountName"></span>
+                        <button type="button" id="reportsAccountClear" class="link-btn">Quitar filtro</button>
+                    </div>
+                </div>
+                <ul id="reportsList" class="reports-list"></ul>
+                <div id="reportsEmpty" class="reports-empty" hidden></div>
+            </div>
+            <!-- Revisión de un reporte (P-Reporte) -->
+            <div id="reportReview" class="report-review" hidden>
+                <nav class="ticket-bar report-review-bar" aria-label="Navegación">
+                    <button type="button" id="reportReviewBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Reportes de cuentas</button>
+                    <span class="ticket-bar-crumb">Reportes de cuentas / <b id="reportReviewCrumb"></b></span>
+                </nav>
+                <div class="report-review-layout">
+                    <div class="report-review-main">
+                        <div class="report-review-head">
+                            <p id="reportReviewKicker" class="report-review-kicker"></p>
+                            <h1 id="reportReviewTitle" class="report-review-title"></h1>
+                            <p id="reportReviewBy" class="report-review-by"></p>
+                        </div>
+                        <section class="ui-card td-card" aria-labelledby="reportReviewCommentTitle">
+                            <h2 id="reportReviewCommentTitle" class="ui-kicker">Comentario de quien reporta</h2>
+                            <p id="reportReviewComment" class="report-review-text"></p>
+                        </section>
+                        <section class="ui-card td-card" aria-labelledby="reportReviewFactsTitle">
+                            <h2 id="reportReviewFactsTitle" class="ui-kicker">Lo que sabe el sistema</h2>
+                            <dl id="reportReviewFacts" class="draft-ai-facts"></dl>
+                        </section>
+                        <section class="ui-card report-review-history" aria-labelledby="reportReviewHistoryTitle">
+                            <h2 id="reportReviewHistoryTitle" class="ui-kicker report-review-history-title">Historial de la cuenta</h2>
+                            <ul id="reportReviewHistory" class="home-list"></ul>
+                        </section>
+                    </div>
+                    <form id="reportDecisionForm" class="ui-card report-decision" aria-labelledby="reportDecisionTitle">
+                        <h2 id="reportDecisionTitle" class="report-decision-title">Su decisión</h2>
+                        <div id="reportDecisionChoices" class="report-decision-choices" role="radiogroup" aria-label="Decisión">
+                            <button type="button" class="report-choice" role="radio" data-decision="confirm" aria-checked="true">Confirmar</button>
+                            <button type="button" class="report-choice" role="radio" data-decision="dismiss" aria-checked="false" tabindex="-1">Descartar</button>
+                        </div>
+                        <p id="reportDecisionOwn" class="ui-notice is-warn" hidden>Usted hizo este reporte: puede retirarlo, pero la confirmación la da otra persona.</p>
+                        <div class="ui-field">
+                            <label for="reportDecisionNote">Nota (obligatoria)</label>
+                            <textarea id="reportDecisionNote" class="ui-input" rows="3" maxlength="500" placeholder="Por qué tomó esta decisión…" required></textarea>
+                        </div>
+                        <label id="reportDeactivateRow" class="report-deactivate" hidden>
+                            <input type="checkbox" id="reportDeactivate">
+                            <span>Desactivar también la cuenta<br><small>Cierra sus sesiones. Se puede reactivar.</small></span>
+                        </label>
+                        <button type="submit" id="reportDecisionSubmit" class="ui-btn ui-btn-danger">Confirmar reporte</button>
+                        <p class="report-decision-foot">El cliente no recibe ningún aviso. La decisión queda en el registro de cambios.</p>
+                    </form>
                 </div>
             </div>
-            <ul id="reportsList" class="changes-list"></ul>
-            <p id="reportsEmpty" class="view-note" hidden>No hay reportes con ese estado.</p>
         </section>
 
-        <section id="draftsView" class="page-view" hidden aria-labelledby="draftsTitle">
-            <h1 id="draftsTitle" class="view-title">Borradores de correo</h1>
-            <p class="view-note drafts-intro">Correos escritos sin la plantilla que la IA preparó como ticket. Revíselos y confírmelos o descártelos.</p>
+        <section id="draftsView" class="page-view drafts-view" hidden aria-labelledby="draftsTitle">
             <div class="drafts-layout">
-                <ul id="draftsList" class="drafts-list" aria-label="Borradores"></ul>
+                <section class="drafts-side" aria-labelledby="draftsTitle">
+                    <div class="drafts-side-head">
+                        <h1 id="draftsTitle" class="drafts-title">Borradores de correo</h1>
+                        <p class="drafts-intro">La IA leyó estos correos. Usted decide si se vuelven ticket.</p>
+                    </div>
+                    <ul id="draftsList" class="drafts-list" aria-label="Borradores"></ul>
+                </section>
                 <div id="draftDetail" class="draft-detail">
-                    <p id="draftPlaceholder" class="view-note">Seleccione un borrador.</p>
-                    <div id="draftContent" hidden>
-                        <p id="draftNumber" class="draft-meta"></p>
-                        <h2 id="draftSubject" class="draft-subject"></h2>
-                        <p id="draftMeta" class="draft-meta"></p>
-                        <div id="draftFlags" class="requester-tags" hidden>
-                            <span id="draftFlagTags" class="requester-tag-list"></span>
-                            <button type="button" id="draftReportBtn" class="btn-secondary btn-small">Reportar cuenta</button>
+                    <div id="draftPlaceholder" class="draft-placeholder"></div>
+                    <div id="draftContent" class="draft-content" hidden>
+                        <div class="draft-head">
+                            <div class="draft-head-text">
+                                <p id="draftNumber" class="draft-number"></p>
+                                <h2 id="draftSubject" class="draft-subject"></h2>
+                                <p id="draftMeta" class="draft-meta"></p>
+                            </div>
+                            <span id="draftTag" class="ui-tag"></span>
                         </div>
-                        <p id="draftReason" class="draft-reason" hidden></p>
-                        <h3 class="draft-section">Correo original</h3>
-                        <pre id="draftBody" class="draft-body" tabindex="0"></pre>
-                        <h3 class="draft-section">Análisis de la IA</h3>
-                        <div id="draftAi" class="draft-ai"></div>
-                        <form id="draftForm" class="draft-form">
-                            <div class="form-group">
+                        <div id="draftFlags" class="requester-tags draft-flags" hidden>
+                            <span id="draftFlagTags" class="requester-tag-list"></span>
+                            <button type="button" id="draftReportBtn" class="ticket-bar-link">Reportar cuenta</button>
+                        </div>
+                        <p id="draftReason" class="ui-notice is-warn draft-reason" hidden></p>
+                        <h3 class="sr-only">Correo original</h3>
+                        <pre id="draftBody" class="ui-card draft-body" tabindex="0"></pre>
+                        <section class="draft-ai-box" aria-labelledby="draftAiTitle">
+                            <h3 id="draftAiTitle" class="draft-ai-title">LO QUE PROPONE LA IA</h3>
+                            <div id="draftAi" class="draft-ai"></div>
+                        </section>
+                        <form id="draftForm" class="ui-card draft-form">
+                            <h3 class="draft-form-title">Datos del ticket</h3>
+                            <div class="ui-field">
                                 <label for="draftTitle">Título</label>
-                                <input type="text" id="draftTitle" maxlength="200" required>
+                                <input type="text" id="draftTitle" class="ui-input" maxlength="200" required>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
+                            <div class="new-ticket-row">
+                                <div class="ui-field">
                                     <label for="draftCategory">Categoría</label>
-                                    <select id="draftCategory" required></select>
+                                    <select id="draftCategory" class="ui-input" required></select>
                                 </div>
-                                <div class="form-group">
+                                <div class="ui-field">
                                     <label for="draftPriority">Prioridad</label>
-                                    <select id="draftPriority" required></select>
+                                    <select id="draftPriority" class="ui-input" required></select>
                                 </div>
                             </div>
-                            <div class="form-group">
+                            <div class="ui-field">
                                 <label for="draftDescription">Descripción</label>
-                                <textarea id="draftDescription" rows="6" required></textarea>
+                                <textarea id="draftDescription" class="ui-input" rows="5" required></textarea>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
+                            <div class="new-ticket-row">
+                                <div class="ui-field">
                                     <label for="draftPhone">Teléfono</label>
-                                    <input type="tel" id="draftPhone" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
+                                    <input type="tel" id="draftPhone" class="ui-input" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
                                 </div>
-                                <div class="form-group">
+                                <div class="ui-field">
                                     <label for="draftIdNumber">Cédula</label>
-                                    <input type="text" id="draftIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
+                                    <input type="text" id="draftIdNumber" class="ui-input" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
                                 </div>
                             </div>
                             <div class="draft-actions">
-                                <button type="submit" id="draftConfirmBtn" class="btn-submit">Confirmar y crear ticket</button>
-                                <button type="button" id="draftDetailsBtn" class="btn-secondary">Pedir más detalles</button>
-                                <button type="button" id="draftDiscardBtn" class="btn-secondary">Descartar</button>
+                                <button type="submit" id="draftConfirmBtn" class="ui-btn ui-btn-primary">Crear ticket</button>
+                                <button type="button" id="draftDetailsBtn" class="ui-btn ui-btn-secondary">Pedir más detalles</button>
+                                <button type="button" id="draftDiscardBtn" class="ui-btn ui-btn-quiet-danger">Descartar</button>
+                                <span id="draftDetailsHint" class="draft-actions-hint">"Pedir más detalles" le escribe al remitente y deja el correo aquí hasta que responda.</span>
                             </div>
                         </form>
                     </div>
@@ -746,8 +910,8 @@
                 <div class="aa-head">
                     <h1 id="adminAccountsTitle" class="view-title">Cuentas</h1>
                     <label for="aaSearch" class="sr-only">Nombre o correo</label>
-                    <input type="search" id="aaSearch" class="aa-search" placeholder="Nombre o correo" maxlength="150">
-                    <button type="button" id="aaInvite" class="btn-primary btn-small">Invitar personal</button>
+                    <input type="search" id="aaSearch" class="ui-input aa-search" placeholder="Nombre o correo" maxlength="150">
+                    <button type="button" id="aaInvite" class="ui-btn ui-btn-primary ui-btn-sm">Invitar personal</button>
                 </div>
                 <div id="aaQuick" class="aa-quick" role="group" aria-label="Filtros rápidos">
                     <button type="button" class="aa-quick-btn" data-filter="all" aria-pressed="true">Todas <span class="aa-quick-count" data-count="all"></span></button>
@@ -785,28 +949,8 @@
                     </select>
                     <p class="aa-schedule-note">Solo técnicos y coordinadores con horario ese día.</p>
                 </div>
-                <div class="queue-table-wrap">
-                    <table class="queue-table aa-table">
-                        <colgroup>
-                            <col class="aa-col-name">
-                            <col class="aa-col-type">
-                            <col class="aa-col-state">
-                            <col class="aa-col-identity">
-                            <col class="aa-col-open">
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th scope="col">Nombre</th>
-                                <th scope="col">Tipo</th>
-                                <th scope="col">Estado</th>
-                                <th scope="col">Identidad</th>
-                                <th scope="col" id="aaOpenHead" class="num">Abiertos</th>
-                            </tr>
-                        </thead>
-                        <tbody id="aaBody"></tbody>
-                    </table>
-                    <p id="aaEmpty" class="queue-empty" hidden>No hay cuentas con esos filtros.</p>
-                </div>
+                <ul id="aaBody" class="aa-list" aria-label="Cuentas"></ul>
+                <div id="aaEmpty" class="aa-empty" hidden></div>
             </div>
             <aside id="aaPanel" class="aa-panel" aria-label="Detalle de la cuenta">
                 <button type="button" id="aaBack" class="link-btn aa-back">← Volver a la lista</button>
@@ -903,79 +1047,6 @@
     <div id="successMessage" class="success"></div>
     <!-- Avisos breves abajo (toast); cada aviso puede llevar un botón, por ejemplo "Deshacer" -->
     <div id="toastRegion" class="ui-toast-region" aria-live="polite"></div>
-
-    <div id="usersModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>
-            <div class="modal-header">
-                <h2 class="modal-title">Usuarios</h2>
-            </div>
-            <div class="modal-body">
-                <div>
-                    <h3 style="margin-top: 0;">Usuarios existentes</h3>
-                    <ul id="usersList" style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; margin-top: 10px;"></ul>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="newTicketModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <button type="button" class="modal-close-btn" aria-label="Cerrar">✕</button>
-            <div class="modal-header">
-                <h2 class="modal-title">Nuevo ticket</h2>
-            </div>
-            <div class="modal-body">
-                <form id="ticketForm">
-                    <div id="requesterGroup" class="form-group requester-group" style="display: none;">
-                        <label for="requesterSearch">Solicitante</label>
-                        <div class="requester-row">
-                            <input type="text" id="requesterSearch" list="requesterOptions" autocomplete="off" placeholder="Buscar por nombre o correo">
-                            <button type="button" id="forMeBtn" class="btn-secondary btn-small">Para mí</button>
-                        </div>
-                        <datalist id="requesterOptions"></datalist>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <h3 style="margin-top: 0; margin-bottom: 8px; font-size: 14px; color: var(--muted);">Datos de contacto</h3>
-                        <div class="form-row" style="margin-bottom: 15px;">
-                            <div class="form-group">
-                                <label for="contactName">Nombre</label>
-                                <input type="text" id="contactName" name="contactName" autocomplete="name" readonly style="background: #F6F7F9;">
-                            </div>
-                            <div class="form-group">
-                                <label for="contactEmail">Correo</label>
-                                <input type="email" id="contactEmail" name="contactEmail" autocomplete="email" readonly style="background: #F6F7F9;">
-                            </div>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 15px;">
-                            <label for="contactPhone">Teléfono de contacto</label>
-                            <input type="tel" id="contactPhone" name="contactPhone" autocomplete="tel" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
-                            <small class="help-text">El ticket queda a nombre del perfil; la cédula sale del perfil.</small>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 15px;">
-                            <label for="title">Título</label>
-                            <input type="text" id="title" name="title" required>
-                        </div>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <label for="description">Descripción</label>
-                        <textarea id="description" name="description" required></textarea>
-                    </div>
-                    <div class="form-row" style="margin-bottom: 20px;">
-                        <div class="form-group">
-                            <label for="category">Categoría</label>
-                            <select id="category" name="category"></select>
-                        </div>
-                        <div class="form-group">
-                            <label for="priority">Prioridad</label>
-                            <select id="priority" name="priority"></select>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn-submit">Crear ticket</button>
-                </form>
-            </div>
-        </div>
-    </div>
 
     <dialog id="reportDialog" class="app-dialog" aria-labelledby="reportDialogTitle">
         <form id="reportForm" class="profile-form">
