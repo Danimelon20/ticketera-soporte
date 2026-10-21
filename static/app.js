@@ -1408,6 +1408,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Switch account / logout
     if (switchAccountBtn) {
         switchAccountBtn.addEventListener('click', async () => {
+            // Una reasignación que espera su plazo para deshacer se envía antes de salir
+            await commitPendingAssign();
             try {
                 await apiFetch('/auth/logout', { method: 'POST' });
             } catch (e) {
@@ -2739,6 +2741,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showView(name) {
+        commitPendingAssign();
         // Cualquier otra pantalla cierra la página del ticket
         if (name !== 'tickets') exitTicketPage();
         if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
@@ -5539,9 +5542,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const navToggle = document.getElementById('navToggle');
     const statusBar = document.getElementById('statusBar');
     const statusLogo = document.getElementById('statusLogo');
-    const globalSearchForm = document.getElementById('globalSearchForm');
-    const globalSearch = document.getElementById('globalSearch');
-    const globalSearchResults = document.getElementById('globalSearchResults');
     const topbarAvailability = document.getElementById('topbarAvailability');
     const shiftBox = document.getElementById('shiftBox');
     const shiftAvailability = document.getElementById('shiftAvailability');
@@ -5550,7 +5550,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let navPollTimer = null;
     let navCounts = {};
     let activeNavId = null;
-    let globalSearchSeq = 0;
 
     // tone: 'alert' (rojo) o 'warn' (ámbar) cuando el contador es mayor que cero
     function ticketItem(id, label, count, tone) {
@@ -5794,23 +5793,9 @@ document.addEventListener('DOMContentLoaded', () => {
         setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
     });
 
-    // Buscar: con el menú contraído, el ícono abre el menú y enfoca el buscador
-    function focusGlobalSearch() {
-        if (document.body.classList.contains('nav-collapsed')) setNavCollapsed(false);
-        if (window.innerWidth < 768 && !document.body.classList.contains('nav-open')) navToggle.click();
-        globalSearch.focus();
-        globalSearch.select();
-    }
-
-    document.getElementById('navSearchIcon').addEventListener('click', focusGlobalSearch);
-
-    // Ctrl K (o Cmd K) enfoca el buscador. En la Fase 6 abrirá la paleta de comandos.
-    document.addEventListener('keydown', (e) => {
-        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'k') return;
-        if (!isStaffShell() || document.body.classList.contains('ticket-open')) return;
-        e.preventDefault();
-        focusGlobalSearch();
-    });
+    // "Buscar… Ctrl K" (y el ícono con el menú contraído) abre la paleta de comandos
+    document.getElementById('navSearch').addEventListener('click', () => openPalette());
+    document.getElementById('navSearchIcon').addEventListener('click', () => openPalette());
 
     navToggle.addEventListener('click', () => {
         const open = !document.body.classList.contains('nav-open');
@@ -5960,71 +5945,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function hideGlobalResults() {
-        globalSearchResults.hidden = true;
-        globalSearchResults.replaceChildren();
-    }
-
-    async function searchClients(text) {
-        if (!currentUser || !REPORT_REVIEW_ROLES.includes(currentUser.role)) return;
-        const seq = ++globalSearchSeq;
-        let clients;
-        try {
-            clients = await apiFetch(`/requesters?q=${encodeURIComponent(text)}`, { silent: true });
-        } catch (err) {
-            return;
-        }
-        if (seq !== globalSearchSeq) return;
-        globalSearchResults.replaceChildren();
-        clients.slice(0, 5).forEach(client => {
-            const li = document.createElement('li');
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'global-result';
-            // Solo el nombre: el correo no se muestra en el buscador
-            button.textContent = `Cliente: ${client.name || 'Sin nombre'}`;
-            button.dataset.name = client.name || '';
-            li.appendChild(button);
-            globalSearchResults.appendChild(li);
-        });
-        globalSearchResults.hidden = clients.length === 0;
-    }
-
-    globalSearchForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        hideError();
-        const text = globalSearch.value.trim();
-        hideGlobalResults();
-        const number = text.match(/^#\s*(\d+)$/);
-        if (number) {
-            openTicketById(parseInt(number[1], 10));
-            return;
-        }
-        setSideNavActive(null);
-        setQueueView('all', text ? `Búsqueda: ${text}` : 'Todos los tickets', text);
-        if (text) searchClients(text);
-    });
-
-    globalSearchResults.addEventListener('click', (e) => {
-        const button = e.target.closest('.global-result');
-        if (!button) return;
-        const name = button.dataset.name;
-        hideGlobalResults();
-        setSideNavActive('accounts');
-        openAccounts('clients', name);
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!globalSearchForm.contains(e.target)) hideGlobalResults();
-    });
-
     function setupStaffShell() {
         const staff = Boolean(currentUser && STAFF_SHELL_ROLES.includes(currentUser.role));
         document.body.classList.toggle('staff-shell', staff);
         sideNav.hidden = !staff;
         statusBar.hidden = !staff;
         document.getElementById('staffFooter').hidden = !staff;
-        globalSearchForm.hidden = !staff;
         navToggle.hidden = !staff;
         closeSideNav();
         if (!staff) {
@@ -6048,15 +5974,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function teardownStaffShell() {
         stopNavPolling();
-        document.body.classList.remove('staff-shell', 'nav-open', 'nav-collapsed', 'ticket-open');
+        document.body.classList.remove('staff-shell', 'nav-open', 'nav-collapsed', 'ticket-open', 'newticket-open');
+        cancelPendingAssignSilently();
         ticketBar.hidden = true;
         sideNav.hidden = true;
         statusBar.hidden = true;
         document.getElementById('staffFooter').hidden = true;
-        globalSearchForm.hidden = true;
         sideNavBackdrop.hidden = true;
-        globalSearch.value = '';
-        hideGlobalResults();
     }
 
     // ===== Cola de tickets y panel de detalle del personal =====
@@ -6475,6 +6399,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function enterTicketPage(ticketId) {
+        commitPendingAssign();
         document.querySelector('.split').classList.add('show-detail');
         if (!isStaffShell()) return;
         document.body.classList.add('ticket-open');
@@ -6490,6 +6415,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Vuelve a la lista. Sin ticket abierto no hace nada.
     function exitTicketPage() {
+        commitPendingAssign();
         if (!document.body.classList.contains('ticket-open')) return;
         const closedId = selectedTicketId;
         document.body.classList.remove('ticket-open');
@@ -7251,9 +7177,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const apply = e.target.closest('.sd-apply-suggestion');
         if (apply) {
-            if (!(await assignTicket(Number(apply.dataset.userId)))) return;
-            await reloadSelectedTicketAndList();
-            showSuccess('Ticket asignado');
+            const userId = Number(apply.dataset.userId);
+            if (!scheduleReassign(userId)) return;
+            // Se ve el cambio de inmediato; el servidor lo recibe al terminar el plazo para deshacer
+            const select = detailPanel.querySelector('.sd-assign-select');
+            if (select) select.value = String(userId);
+            apply.closest('.td-suggestion').remove();
         }
     });
 
@@ -7282,12 +7211,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const assignSelect = e.target.closest('.sd-assign-select');
         if (assignSelect && assignSelect.value) {
-            if (!(await assignTicket(Number(assignSelect.value)))) {
+            if (Number(assignSelect.value) === currentTicket.assigned_to) return;
+            if (!scheduleReassign(Number(assignSelect.value))) {
                 assignSelect.value = currentTicket.assigned_to === null ? '' : String(currentTicket.assigned_to);
-                return;
             }
-            await reloadSelectedTicketAndList();
-            showSuccess('Ticket asignado');
         }
     });
 
@@ -8569,6 +8496,424 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         showSuccess(isCoordinator ? 'Solicitud enviada al administrador' : 'Rol actualizado');
         closeRoleDialog(true);
+    });
+
+
+    // ===== Fase 6 · Paleta de comandos, atajos de teclado y deshacer la reasignación =====
+
+    // ----- Paleta (Ctrl K): pantallas del rol, #número, búsqueda de tickets y clientes, crear ticket -----
+    const paletteDialog = document.getElementById('paletteDialog');
+    const paletteInput = document.getElementById('paletteInput');
+    const paletteList = document.getElementById('paletteList');
+    let paletteItems = [];
+    let paletteActive = 0;
+    let paletteClients = [];
+    let paletteClientSeq = 0;
+    let paletteClientTimer = null;
+    let paletteReturnFocus = null;
+
+    function canCreateTicket() {
+        return Boolean(currentUser && ['coordinator', 'admin'].includes(currentUser.role));
+    }
+
+    function canAssign() {
+        return Boolean(currentUser && ['coordinator', 'admin'].includes(currentUser.role));
+    }
+
+    // Sin tildes ni mayúsculas, para que "creditos" encuentre "Créditos"
+    function plain(text) {
+        return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    }
+
+    function paletteCommands(query) {
+        const q = plain(query.trim());
+        const groups = [];
+        const number = query.trim().match(/^#?\s*(\d+)$/);
+        if (number) {
+            groups.push({ title: 'Ticket', items: [{
+                label: `Abrir ticket #${number[1]}`, hint: 'Ticket',
+                run: () => openTicketById(parseInt(number[1], 10)),
+            }] });
+        }
+        // Las mismas pantallas del menú de este rol
+        const screens = [];
+        navGroupsFor(currentUser.role).forEach(group => group.items.forEach(item => {
+            screens.push({ label: item.label, hint: group.title || 'Ir a', run: () => {
+                setSideNavActive(item.id);
+                item.open();
+            } });
+        }));
+        screens.push({ label: 'Mi cuenta', hint: 'Ir a', run: () => {
+            profileTab = 'perfil';
+            setSideNavActive('profile');
+            showProfile();
+        } });
+        const go = screens.filter(item => !q || plain(item.label).includes(q));
+        if (go.length) groups.push({ title: 'Ir a', items: go });
+
+        const actions = [];
+        if (canCreateTicket()) actions.push({ label: 'Crear ticket nuevo', key: 'C', run: () => openNewTicket.click() });
+        actions.push({ label: 'Ver atajos de teclado', key: '?', run: () => openShortcuts() });
+        const shownActions = actions.filter(item => !q || plain(item.label).includes(q));
+        if (shownActions.length) groups.push({ title: 'Acciones', items: shownActions });
+
+        if (q.length >= 2 && !number) {
+            const text = query.trim();
+            const search = [{ label: `Buscar «${text}» en los tickets`, hint: 'Búsqueda', run: () => {
+                setSideNavActive(null);
+                setQueueView('all', `Búsqueda: ${text}`, text);
+            } }];
+            // Clientes: solo nombre, sin correo (lo pueden ver coordinador y admin)
+            paletteClients.forEach(client => search.push({
+                label: client.name || 'Sin nombre', hint: 'Cliente', run: () => {
+                    setSideNavActive('accounts');
+                    openAccounts('clients', client.name || '');
+                },
+            }));
+            groups.push({ title: 'Buscar', items: search });
+        }
+        return groups;
+    }
+
+    function renderPalette() {
+        const groups = paletteCommands(paletteInput.value);
+        paletteItems = [];
+        paletteList.replaceChildren();
+        groups.forEach((group, groupIndex) => {
+            const heading = makeEl('div', 'palette-group', group.title.toUpperCase());
+            heading.id = `paletteGroup${groupIndex}`;
+            heading.setAttribute('role', 'presentation');
+            paletteList.appendChild(heading);
+            group.items.forEach(item => {
+                const index = paletteItems.length;
+                const option = makeEl('div', 'palette-item');
+                option.id = `paletteOption${index}`;
+                option.setAttribute('role', 'option');
+                option.dataset.index = String(index);
+                option.appendChild(makeEl('span', 'palette-item-label', item.label));
+                if (item.key) option.appendChild(makeEl('kbd', 'palette-kbd', item.key));
+                else if (item.hint) option.appendChild(makeEl('span', 'palette-item-hint', item.hint));
+                paletteList.appendChild(option);
+                paletteItems.push(item);
+            });
+        });
+        if (!paletteItems.length) {
+            paletteList.appendChild(emptyState({ title: 'Sin resultados', text: 'Pruebe con otra palabra o con #número.' }));
+        }
+        paletteActive = Math.min(paletteActive, Math.max(0, paletteItems.length - 1));
+        markPaletteActive();
+    }
+
+    function markPaletteActive() {
+        paletteList.querySelectorAll('.palette-item').forEach(option => {
+            const active = Number(option.dataset.index) === paletteActive;
+            option.setAttribute('aria-selected', active ? 'true' : 'false');
+            if (active) {
+                paletteInput.setAttribute('aria-activedescendant', option.id);
+                option.scrollIntoView({ block: 'nearest' });
+            }
+        });
+        if (!paletteItems.length) paletteInput.removeAttribute('aria-activedescendant');
+    }
+
+    async function searchPaletteClients(text) {
+        const seq = ++paletteClientSeq;
+        let clients = [];
+        try {
+            clients = await apiFetch(`/requesters?q=${encodeURIComponent(text)}`, { silent: true });
+        } catch (err) {
+            return;
+        }
+        if (seq !== paletteClientSeq || !paletteDialog.open) return;
+        paletteClients = clients.slice(0, 5);
+        renderPalette();
+    }
+
+    function openPalette() {
+        if (!isStaffShell() || paletteDialog.open) return;
+        closeSideNav();
+        paletteReturnFocus = document.activeElement;
+        paletteInput.value = '';
+        paletteClients = [];
+        paletteActive = 0;
+        renderPalette();
+        paletteDialog.showModal();
+        paletteInput.focus();
+    }
+
+    function closePalette() {
+        if (paletteDialog.open) paletteDialog.close();
+    }
+
+    function runPaletteItem(index) {
+        const item = paletteItems[index];
+        if (!item) return;
+        paletteReturnFocus = null;
+        closePalette();
+        hideError();
+        item.run();
+        checkSingleSection();
+    }
+
+    paletteInput.addEventListener('input', () => {
+        paletteActive = 0;
+        paletteClients = [];
+        renderPalette();
+        clearTimeout(paletteClientTimer);
+        const text = paletteInput.value.trim();
+        if (REPORT_REVIEW_ROLES.includes(currentUser.role) && text.length >= 2 && !/^#?\s*\d+$/.test(text)) {
+            paletteClientTimer = setTimeout(() => searchPaletteClients(text), 300);
+        }
+    });
+
+    paletteInput.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!paletteItems.length) return;
+            const step = e.key === 'ArrowDown' ? 1 : -1;
+            paletteActive = (paletteActive + step + paletteItems.length) % paletteItems.length;
+            markPaletteActive();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            runPaletteItem(paletteActive);
+        }
+    });
+
+    paletteList.addEventListener('click', (e) => {
+        const option = e.target.closest('.palette-item');
+        if (option) runPaletteItem(Number(option.dataset.index));
+    });
+
+    document.getElementById('paletteClose').addEventListener('click', closePalette);
+    // Clic fuera de la caja (en el fondo) también la cierra
+    paletteDialog.addEventListener('click', (e) => {
+        if (e.target === paletteDialog) closePalette();
+    });
+    paletteDialog.addEventListener('close', () => {
+        clearTimeout(paletteClientTimer);
+        paletteClientSeq++;
+        if (paletteReturnFocus && document.contains(paletteReturnFocus)) paletteReturnFocus.focus();
+        paletteReturnFocus = null;
+    });
+
+    // ----- Hoja de ayuda (?) -----
+    const shortcutsDialog = document.getElementById('shortcutsDialog');
+
+    function shortcutList() {
+        const list = [
+            ['Buscar o ir a una pantalla', '/'], ['Paleta de comandos', 'Ctrl K'],
+            ['Ticket siguiente', 'J'], ['Ticket anterior', 'K'],
+            ['Abrir el ticket elegido', 'Enter'], ['Responder al cliente', 'R'],
+            ['Nota interna', 'N'],
+        ];
+        if (canAssign()) list.push(['Reasignar', 'A']);
+        if (canCreateTicket()) list.push(['Crear ticket', 'C']);
+        list.push(['Ver esta ayuda', '?']);
+        return list;
+    }
+
+    function openShortcuts() {
+        if (!isStaffShell() || shortcutsDialog.open) return;
+        const list = document.getElementById('shortcutsList');
+        list.replaceChildren();
+        shortcutList().forEach(([label, key]) => {
+            const row = makeEl('div', 'shortcuts-row');
+            const dd = makeEl('dd');
+            dd.appendChild(makeEl('kbd', 'palette-kbd', key));
+            row.append(makeEl('dt', '', label), dd);
+            list.appendChild(row);
+        });
+        shortcutsDialog.showModal();
+        document.getElementById('shortcutsClose').focus();
+    }
+
+    document.getElementById('shortcutsClose').addEventListener('click', () => shortcutsDialog.close());
+    shortcutsDialog.addEventListener('click', (e) => {
+        if (e.target === shortcutsDialog) shortcutsDialog.close();
+    });
+    document.getElementById('queueHelp').addEventListener('click', openShortcuts);
+
+    // ----- Atajos: no actúan mientras se escribe ni con un diálogo o menú abierto -----
+    function typingIn(target) {
+        if (!target || !target.closest) return false;
+        return Boolean(target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'));
+    }
+
+    function overlayOpen() {
+        return Boolean(document.querySelector('dialog[open]')) || !accountMenu.hidden || !rowMenu.hidden
+            || document.body.classList.contains('nav-open') || (chatPanel && !chatPanel.hidden && chatPanel.contains(document.activeElement));
+    }
+
+    // J / K: en la cola mueven el foco entre filas; en un ticket pasan al siguiente o al anterior
+    function moveInQueue(step) {
+        if (document.body.classList.contains('ticket-open')) {
+            (step > 0 ? ticketNext : ticketPrev).click();
+            return;
+        }
+        if (splitView.style.display === 'none') return;
+        const rows = [...queueBody.querySelectorAll('.queue-row')];
+        if (!rows.length) return;
+        const index = rows.indexOf(document.activeElement);
+        const next = index === -1 ? (step > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, index + step));
+        rows[next].focus();
+    }
+
+    function focusComposer(mode) {
+        if (!document.body.classList.contains('ticket-open')) return;
+        const tab = document.getElementById(`composerTab-${mode}`);
+        if (!tab) return; // ticket cerrado
+        if (composerMode !== mode) tab.click();
+        const textarea = document.getElementById('staffReply');
+        if (textarea) textarea.focus();
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (!isStaffShell() || !currentUser) return;
+        // Ctrl K abre la paleta desde cualquier lugar, salvo con otro diálogo abierto
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+            if (document.querySelector('dialog[open]') && !paletteDialog.open) return;
+            e.preventDefault();
+            if (paletteDialog.open) closePalette();
+            else openPalette();
+            return;
+        }
+        if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+        if (typingIn(e.target) || overlayOpen()) return;
+        const key = e.key;
+        if (key === '/') {
+            e.preventDefault();
+            openPalette();
+        } else if (key === '?') {
+            e.preventDefault();
+            openShortcuts();
+        } else if (key === 'j' || key === 'J') {
+            e.preventDefault();
+            moveInQueue(1);
+        } else if (key === 'k' || key === 'K') {
+            e.preventDefault();
+            moveInQueue(-1);
+        } else if (key === 'r' || key === 'R') {
+            if (!document.body.classList.contains('ticket-open')) return;
+            e.preventDefault();
+            focusComposer('reply');
+        } else if (key === 'n' || key === 'N') {
+            if (!document.body.classList.contains('ticket-open')) return;
+            e.preventDefault();
+            focusComposer('note');
+        } else if ((key === 'a' || key === 'A') && canAssign()) {
+            const select = detailPanel.querySelector('.sd-assign-select');
+            if (!document.body.classList.contains('ticket-open') || !select) return;
+            e.preventDefault();
+            select.scrollIntoView({ block: 'center' });
+            select.focus();
+        } else if ((key === 'c' || key === 'C') && canCreateTicket()) {
+            if (!newTicketView.hidden) return;
+            e.preventDefault();
+            openNewTicket.click();
+        }
+    });
+
+    // ----- Deshacer al reasignar -----
+    // La reasignación se envía al servidor (y sale el correo de aviso) solo cuando terminan los 5 s,
+    // o antes si la persona sale del ticket o cambia de pantalla. "Deshacer" cancela el envío.
+    const UNDO_SECONDS = 5;
+    let pendingAssign = null;
+
+    function assignBody(pending) {
+        return JSON.stringify(pending.confirmUnavailable
+            ? { assigned_to: pending.userId, confirm_unavailable: true }
+            : { assigned_to: pending.userId });
+    }
+
+    // Confirmación de "no disponible" primero (con lo que se sabe en el navegador); luego el aviso con Deshacer
+    function scheduleReassign(userId) {
+        commitPendingAssign();
+        const name = userMap[userId] || 'esa persona';
+        const availability = userAvailabilityMap[userId];
+        let confirmUnavailable = false;
+        if (availability && availability !== 'available') {
+            const label = { vacation: 'de vacaciones', away: 'ausente' }[availability] || 'no disponible';
+            if (!confirm(`${name} está ${label}. Las alertas de este ticket irán a los coordinadores. ¿Asignarle el ticket de todos modos?`)) return false;
+            confirmUnavailable = true;
+        }
+        const pending = { ticketId: selectedTicketId, userId, confirmUnavailable, done: false };
+        pendingAssign = pending;
+        pending.toast = toast(`Ticket #${pending.ticketId} reasignado a ${name}. Se le avisará por correo en ${UNDO_SECONDS} s.`, {
+            action: 'Deshacer',
+            duration: UNDO_SECONDS * 1000,
+            onClose: (reason) => {
+                if (reason === 'action') undoPendingAssign(pending);
+                else commitPendingAssign();
+            },
+        });
+        return true;
+    }
+
+    async function commitPendingAssign() {
+        const pending = pendingAssign;
+        if (!pending || pending.done) return;
+        pending.done = true;
+        pendingAssign = null;
+        pending.toast.close();
+        const send = () => apiFetch(`/tickets/${pending.ticketId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: assignBody(pending),
+            silent: true,
+        });
+        try {
+            await send();
+        } catch (err) {
+            // El servidor pide confirmar (por ejemplo, fuera de turno): se pregunta ahora
+            if (err.status === 409 && !pending.confirmUnavailable && confirm(err.message)) {
+                pending.confirmUnavailable = true;
+                try {
+                    await send();
+                } catch (retryErr) {
+                    showError(`No se reasignó el ticket #${pending.ticketId}: ${retryErr.message}`);
+                    if (selectedTicketId === pending.ticketId) reloadSelectedTicketAndList();
+                    return;
+                }
+            } else {
+                if (err.status !== undefined) showError(`No se reasignó el ticket #${pending.ticketId}: ${err.message}`);
+                if (selectedTicketId === pending.ticketId) reloadSelectedTicketAndList();
+                return;
+            }
+        }
+        if (selectedTicketId === pending.ticketId) reloadSelectedTicketAndList();
+        else loadQueue({ quiet: true });
+        pollNavCounts(false);
+    }
+
+    function undoPendingAssign(pending) {
+        if (pending.done) return;
+        pending.done = true;
+        if (pendingAssign === pending) pendingAssign = null;
+        // El ticket vuelve a mostrar el responsable de antes
+        if (selectedTicketId === pending.ticketId && currentTicket) renderStaffDetail(currentTicket);
+        toast('Reasignación cancelada. No se envió ningún correo.');
+    }
+
+    // Al cerrar sesión no se envía nada pendiente
+    function cancelPendingAssignSilently() {
+        if (!pendingAssign) return;
+        pendingAssign.done = true;
+        pendingAssign.toast.close();
+        pendingAssign = null;
+    }
+
+    // Al cerrar o recargar la pestaña: se envía con keepalive para que no se pierda
+    window.addEventListener('pagehide', () => {
+        const pending = pendingAssign;
+        if (!pending || pending.done || !authToken) return;
+        pending.done = true;
+        pendingAssign = null;
+        fetch(`${API_BASE}/tickets/${pending.ticketId}`, {
+            method: 'PATCH',
+            keepalive: true,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: assignBody(pending),
+        }).catch(() => {});
     });
 
     initApp();
