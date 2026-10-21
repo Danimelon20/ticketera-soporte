@@ -2363,13 +2363,142 @@ document.addEventListener('DOMContentLoaded', () => {
         successMessage.style.display = 'none';
     }
 
+    // Los avisos de éxito salen como toast abajo; los de error siguen arriba (showError)
     function showSuccess(message) {
-        successMessage.textContent = message;
-        successMessage.style.display = 'block';
-        clearTimeout(showSuccess.timer);
-        showSuccess.timer = setTimeout(() => {
-            successMessage.style.display = 'none';
-        }, 3000);
+        toast(message);
+    }
+
+    // ===== Utilidades del sistema de diseño =====
+    const toastRegion = document.getElementById('toastRegion');
+
+    // Aviso breve abajo. Opciones: action (texto del botón, p. ej. "Deshacer"), duration (ms),
+    // tone ('error'), onClose(reason) con reason 'action' | 'timeout' | 'dismiss'.
+    // Devuelve { close } para cerrarlo antes de tiempo (reason 'dismiss').
+    function toast(message, { action = null, duration = 4000, tone = null, onClose = null } = {}) {
+        const box = makeEl('div', `ui-toast${tone === 'error' ? ' is-error' : ''}`);
+        box.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+        box.appendChild(makeEl('span', 'ui-toast-text', message));
+        let closed = false;
+        let timer = null;
+        const close = (reason) => {
+            if (closed) return;
+            closed = true;
+            clearTimeout(timer);
+            box.remove();
+            if (onClose) onClose(reason);
+        };
+        if (action) {
+            const button = makeEl('button', 'ui-toast-action', action);
+            button.type = 'button';
+            button.addEventListener('click', () => close('action'));
+            box.appendChild(button);
+        }
+        const dismiss = makeEl('button', 'ui-toast-close', '✕');
+        dismiss.type = 'button';
+        dismiss.setAttribute('aria-label', 'Cerrar aviso');
+        dismiss.addEventListener('click', () => close('dismiss'));
+        box.appendChild(dismiss);
+        toastRegion.appendChild(box);
+        timer = setTimeout(() => close('timeout'), duration);
+        return { close: () => close('dismiss') };
+    }
+
+    function exactDateTime(dateString) {
+        if (!dateString) return '';
+        const date = parseServerDate(dateString);
+        const day = date.toLocaleDateString('es-CR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const time = date.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${day} a las ${time}`;
+    }
+
+    // "ahora", "hace 5 min", "hace 2 h", "ayer", "hace 3 días" o la fecha
+    function relativeTime(dateString) {
+        if (!dateString) return '';
+        const date = parseServerDate(dateString);
+        const now = new Date();
+        const minutes = Math.floor((now - date) / 60000);
+        if (minutes < 1) return 'ahora';
+        if (minutes < 60) return `hace ${minutes} min`;
+        const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const days = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+        if (days === 0) return `hace ${Math.floor(minutes / 60)} h`;
+        if (days === 1) return 'ayer';
+        if (days < 7) return `hace ${days} días`;
+        return date.toLocaleDateString('es-CR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+
+    // <time> con el texto relativo y la fecha y hora exactas en title
+    function timeTag(dateString, className = '') {
+        const node = makeEl('time', className, relativeTime(dateString));
+        if (dateString) {
+            node.dateTime = parseServerDate(dateString).toISOString();
+            node.title = exactDateTime(dateString);
+        }
+        return node;
+    }
+
+    // Filas grises mientras carga. En un <tbody> pone `columns` celdas por fila;
+    // en otro contenedor, bloques de dos líneas.
+    function showSkeleton(container, { rows = 6, columns = 4 } = {}) {
+        const widths = [62, 48, 70, 55, 66, 44];
+        container.replaceChildren();
+        container.setAttribute('aria-busy', 'true');
+        for (let i = 0; i < rows; i++) {
+            if (container.tagName === 'TBODY') {
+                const tr = makeEl('tr', 'ui-skeleton-row');
+                tr.setAttribute('aria-hidden', 'true');
+                for (let c = 0; c < columns; c++) {
+                    const td = makeEl('td');
+                    const bar = makeEl('span', 'ui-skeleton');
+                    bar.style.width = `${c === 1 ? widths[i % widths.length] : 60}%`;
+                    td.appendChild(bar);
+                    tr.appendChild(td);
+                }
+                container.appendChild(tr);
+            } else {
+                const block = makeEl('div', 'ui-skeleton-line');
+                block.setAttribute('aria-hidden', 'true');
+                const first = makeEl('span', 'ui-skeleton');
+                first.style.width = `${widths[i % widths.length]}%`;
+                const second = makeEl('span', 'ui-skeleton is-soft');
+                second.style.width = '34%';
+                block.append(first, second);
+                container.appendChild(block);
+            }
+        }
+    }
+
+    function clearSkeleton(container) {
+        container.removeAttribute('aria-busy');
+        container.querySelectorAll('.ui-skeleton-row, .ui-skeleton-line').forEach(node => node.remove());
+    }
+
+    // Estado vacío: qué pasó (title), qué puede hacer (text) y un botón opcional
+    function emptyState({ title, text = '', action = null, onAction = null }) {
+        const box = makeEl('div', 'ui-empty');
+        box.appendChild(makeEl('p', 'ui-empty-title', title));
+        if (text) box.appendChild(makeEl('p', 'ui-empty-text', text));
+        if (action && onAction) {
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', action);
+            button.type = 'button';
+            button.addEventListener('click', onAction);
+            box.appendChild(button);
+        }
+        return box;
+    }
+
+    // Error al cargar: el motivo del servidor y "Reintentar". err es el Error de apiFetch
+    // (su mensaje ya viene de getErrorMessage o del detail) o el cuerpo de la respuesta.
+    function errorState(err, onRetry) {
+        const box = emptyState({
+            title: 'No se pudo cargar',
+            text: err instanceof Error ? err.message : getErrorMessage(err),
+            action: onRetry ? 'Reintentar' : null,
+            onAction: onRetry,
+        });
+        box.classList.add('is-error');
+        box.setAttribute('role', 'alert');
+        return box;
     }
 
     document.querySelectorAll('.modal').forEach(modal => {
