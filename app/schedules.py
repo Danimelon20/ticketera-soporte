@@ -15,7 +15,9 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BAD_TIME = "Escriba las horas con el formato HH:MM"
 START_AFTER_END = "La hora de inicio debe ser anterior a la de fin"
 BAD_DAY = "Cada día de la semana puede aparecer una sola vez"
-ONLY_TECHNICIANS = "El horario solo aplica a técnicos"
+ONLY_TECHNICIANS = "El horario solo aplica a técnicos y coordinadores"
+# El del coordinador es informativo: auto_assign.candidates solo toma técnicos
+SCHEDULE_ROLES = ("technician", "coordinator")
 
 
 def get(db: Session, user_id: int) -> list[models.TechnicianSchedule]:
@@ -87,6 +89,34 @@ def today_range(rows: list[models.TechnicianSchedule], now: datetime) -> tuple[s
     return None
 
 
+MATCH_MODES = ("covers", "overlaps")
+
+
+def check_range(start: str, end: str) -> None:
+    """Rango "HH:MM"–"HH:MM" de un filtro: mismo formato y regla que un horario (422 si no cumple)."""
+    if not _TIME_RE.match(start) or not _TIME_RE.match(end):
+        raise HTTPException(status_code=422, detail=BAD_TIME)
+    if start >= end:
+        raise HTTPException(status_code=422, detail=START_AFTER_END)
+
+
+def day_range(rows: list[models.TechnicianSchedule], weekday: int) -> tuple[str, str] | None:
+    """Rango de un día de la semana (0 = lunes); None si ese día no trabaja."""
+    for r in rows:
+        if r.weekday == weekday:
+            return r.start_time, r.end_time
+    return None
+
+
+def range_matches(shift: tuple[str, str], start: str, end: str, mode: str) -> bool:
+    """covers: el turno empieza a la entrada o antes y termina a la salida o después.
+    overlaps: el turno y el rango se cruzan al menos un minuto. Comparar "HH:MM" es comparar la hora."""
+    shift_start, shift_end = shift
+    if mode == "covers":
+        return shift_start <= start and shift_end >= end
+    return shift_start < end and start < shift_end
+
+
 def _validate(days: list[dict]) -> list[dict]:
     seen = set()
     clean = []
@@ -106,7 +136,7 @@ def _validate(days: list[dict]) -> list[dict]:
 
 def set_schedule(db: Session, actor: models.User, user: models.User, days: list[dict]) -> None:
     """Reemplaza el horario completo y lo anota en el registro de cambios. No hace commit."""
-    if user.role != "technician":
+    if user.role not in SCHEDULE_ROLES:
         raise HTTPException(status_code=400, detail=ONLY_TECHNICIANS)
     clean = _validate(days)
     old = summary(as_dicts(get(db, user.id)))

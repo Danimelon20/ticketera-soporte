@@ -3386,7 +3386,7 @@ document.addEventListener('DOMContentLoaded', () => {
             reset: ['coordinator', 'technician'],
             unlock: ['admin', 'coordinator', 'technician', 'requester'],
             availability: ['technician'],
-            schedule: ['technician'],
+            schedule: ['technician', 'coordinator'],
             sessions: ['coordinator', 'technician', 'requester']
         },
         coordinator: {
@@ -4173,9 +4173,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let clientsSeq = 0;
 
     function loadAccountsView() {
-        loadTeam();
-        loadClients();
-        loadMyRequests();
+        // Solo la sección visible; "Mis solicitudes" no se muestra en ninguna opción del menú
+        if (accountsSection === 'clients') loadClients();
+        else loadTeam();
     }
 
     function accountRow(user) {
@@ -4204,34 +4204,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return td;
     }
 
+    // Personal (técnicos, coordinadores y administradores), con acciones en "Horario" y en el menú "⋯".
+    // El servidor ya manda el correo enmascarado y nunca teléfono ni cédula.
     async function loadTeam() {
         let users;
         try {
-            users = await apiFetch('/directory?role=technician');
+            users = await apiFetch('/team');
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
+        closeRowMenu(false);
+        teamUsers.clear();
         teamBody.replaceChildren();
         teamEmpty.hidden = users.length > 0;
         users.forEach(user => {
-            const row = accountRow(user);
-            row.appendChild(makeCell(String(user.tickets_assigned_open), 'num'));
-            row.appendChild(stateCell(user));
-            const actionsTd = document.createElement('td');
-            const buttons = accountActionButtons(user);
-            const select = document.createElement('select');
-            select.className = 'team-role-select';
-            select.setAttribute('aria-label', `Rol nuevo para ${row.dataset.userName}`);
-            [['', 'Cambiar rol a…'], ['coordinator', 'Coordinador'], ['requester', 'Solicitante']].forEach(([value, label]) => {
-                const option = document.createElement('option');
-                option.value = value;
-                option.textContent = label;
-                select.appendChild(option);
-            });
-            buttons.push(select, makeActionButton('request-role', 'Solicitar cambio de rol'));
-            actionsTd.appendChild(accountActionsWrap(buttons));
-            row.appendChild(actionsTd);
-            teamBody.appendChild(row);
+            teamUsers.set(user.id, user);
+            teamBody.appendChild(teamRow(user));
         });
     }
 
@@ -5137,12 +5125,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return { id, label, count, tone, open: () => setQueueView(id, label) };
     }
 
-    function scrollToSection(view, elementId) {
-        showView(view);
-        const target = document.getElementById(elementId);
-        if (target) target.scrollIntoView({ block: 'start' });
-    }
-
     function openDirectory(role) {
         directoryRoleSelect.value = role;
         showView('directory');
@@ -5182,12 +5164,11 @@ document.addEventListener('DOMContentLoaded', () => {
             ] },
             { title: 'Gestión', items: [
                 // El administrador gestiona el equipo y los clientes desde el directorio
-                { id: 'team', label: 'Equipo y disponibilidad',
-                  open: () => (isAdmin ? openDirectory('technician') : scrollToSection('accounts', 'teamTitle')) },
-                { id: 'schedules', label: 'Horarios',
-                  open: () => (isAdmin ? openDirectory('technician') : scrollToSection('accounts', 'teamTitle')) },
+                // El horario se edita con el botón "Horario" de cada fila del equipo
+                { id: 'team', label: 'Equipo y disponibilidad', open: () => showAccountsSection('team') },
+                // El administrador busca clientes en el directorio (con todas sus columnas)
                 { id: 'clients', label: 'Clientes',
-                  open: () => (isAdmin ? openDirectory('requester') : scrollToSection('accounts', 'clientsTitle')) },
+                  open: () => (isAdmin ? openDirectory('requester') : showAccountsSection('clients')) },
                 { id: 'invites', label: 'Invitaciones', count: 'invitations_pending', open: () => navUsers.click() },
             ] },
         ];
@@ -5195,9 +5176,9 @@ document.addEventListener('DOMContentLoaded', () => {
             groups.push({ title: 'Administración', items: [
                 { id: 'accounts', label: 'Cuentas', open: () => showView('adminAccounts') },
                 { id: 'approvals', label: 'Aprobaciones', count: 'approvals_pending',
-                  open: () => scrollToSection('admin', 'pendingRequestsList') },
-                { id: 'changes', label: 'Registro de cambios', open: () => scrollToSection('admin', 'changesList') },
-                { id: 'health', label: 'Estado del sistema', open: () => scrollToSection('admin', 'adminTitle') },
+                  open: () => showAdminSection('approvals') },
+                { id: 'changes', label: 'Registro de cambios', open: () => showAdminSection('changes') },
+                { id: 'health', label: 'Estado del sistema', open: () => showAdminSection('health') },
             ] });
         }
         groups.push({ title: 'Cuenta', items: [{ id: 'profile', label: 'Mi cuenta', open: () => showProfile() }] });
@@ -5290,6 +5271,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hideError();
         setSideNavActive(item.id);
         item.open();
+        checkSingleSection();
         closeSideNav();
     });
 
@@ -5498,7 +5480,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showView('directory');
         } else {
             setSideNavActive('clients');
-            scrollToSection('accounts', 'clientsTitle');
+            showAccountsSection('clients');
             clientsSearch.value = name;
             clientsSearch.dispatchEvent(new Event('input'));
         }
@@ -6100,7 +6082,14 @@ document.addEventListener('DOMContentLoaded', () => {
         active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada',
         vacation: 'Vacaciones', away: 'Ausente', invited: 'Invitación pendiente'
     };
+    const aaScheduleOn = document.getElementById('aaScheduleOn');
+    const aaScheduleFields = document.getElementById('aaScheduleFields');
+    const aaDay = document.getElementById('aaDay');
+    const aaStart = document.getElementById('aaStart');
+    const aaEnd = document.getElementById('aaEnd');
+    const aaMatch = document.getElementById('aaMatch');
     let aaRows = [];
+    let aaByScheduleShown = false;
     let aaSelected = null;
     let aaSeq = 0;
     let aaSearchTimer = null;
@@ -6111,6 +6100,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (aaState.value) params.set('state', aaState.value);
         if (aaIdentity.value) params.set('identity_code', aaIdentity.value);
         if (aaSearch.value.trim()) params.set('q', aaSearch.value.trim());
+        // Filtro por horario: lo resuelve el servidor (solo técnicos y coordinadores con turno ese día)
+        const bySchedule = aaScheduleOn.checked;
+        if (bySchedule) {
+            if (!aaStart.value || !aaEnd.value) {
+                showError('Indique la hora de entrada y la de salida');
+                return;
+            }
+            if (aaStart.value >= aaEnd.value) {
+                showError('La hora de entrada debe ser anterior a la de salida');
+                return;
+            }
+            params.set('schedule_day', aaDay.value);
+            params.set('schedule_start', aaStart.value.slice(0, 5));
+            params.set('schedule_end', aaEnd.value.slice(0, 5));
+            params.set('schedule_match', aaMatch.value);
+        }
         const seq = ++aaSeq;
         let rows;
         try {
@@ -6120,6 +6125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (seq !== aaSeq) return;
         aaRows = rows;
+        aaByScheduleShown = bySchedule;
         renderAdminAccounts();
     }
 
@@ -6130,6 +6136,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderAdminAccounts() {
         aaBody.replaceChildren();
         aaEmpty.hidden = aaRows.length > 0;
+        // Con el filtro por horario, "Último acceso" se reemplaza por el horario de ese día
+        document.getElementById('aaLastHead').textContent = aaByScheduleShown ? 'Horario de ese día' : 'Último acceso';
         aaRows.forEach(row => {
             const tr = makeEl('tr', 'queue-row');
             tr.dataset.key = accountKey(row);
@@ -6143,8 +6151,9 @@ document.addEventListener('DOMContentLoaded', () => {
             role.textContent = ROLE_MAP[row.role] || row.role;
             const state = queueCell('Estado');
             state.appendChild(makeEl('span', `state-tag acc-${row.state}`, ACCOUNT_STATE_LABELS[row.state] || row.state));
-            const last = queueCell('Último acceso', 'tabular');
-            if (row.kind === 'invitation') last.textContent = `Vence en ${row.invitation_hours_left} h`;
+            const last = queueCell(aaByScheduleShown ? 'Horario de ese día' : 'Último acceso', 'tabular');
+            if (aaByScheduleShown) last.textContent = row.schedule_day || '';
+            else if (row.kind === 'invitation') last.textContent = `Vence en ${row.invitation_hours_left} h`;
             else last.textContent = row.last_activity ? formatDateTime(row.last_activity) : 'Sin sesión activa';
             const identity = queueCell('Identidad');
             if (row.identity) {
@@ -6319,6 +6328,15 @@ document.addEventListener('DOMContentLoaded', () => {
         selectAccount(row.dataset.key);
     });
     [aaRole, aaState, aaIdentity].forEach(select => select.addEventListener('change', loadAdminAccounts));
+    aaScheduleOn.addEventListener('change', () => {
+        aaScheduleFields.hidden = !aaScheduleOn.checked;
+        // Por defecto, el día de hoy (0 = lunes)
+        if (aaScheduleOn.checked) aaDay.value = String((new Date().getDay() + 6) % 7);
+        loadAdminAccounts();
+    });
+    [aaDay, aaStart, aaEnd, aaMatch].forEach(field => field.addEventListener('change', () => {
+        if (aaScheduleOn.checked) loadAdminAccounts();
+    }));
     aaSearch.addEventListener('input', () => {
         clearTimeout(aaSearchTimer);
         aaSearchTimer = setTimeout(loadAdminAccounts, 300);
@@ -6575,6 +6593,347 @@ document.addEventListener('DOMContentLoaded', () => {
         portalFooter.hidden = true;
         brandName.textContent = 'Mesa de Servicio';
     }
+
+    // ===== Una sola sección por opción del menú =====
+    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y disponibilidad', clients: 'Clientes' };
+    const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
+    let accountsSection = 'team';
+
+    function showAccountsSection(section) {
+        accountsSection = section;
+        accountsView.querySelectorAll('[data-account-section]').forEach(el => {
+            el.hidden = el.dataset.accountSection !== section;
+        });
+        document.getElementById('accountsTitle').textContent = ACCOUNT_SECTION_TITLES[section];
+        showView('accounts');
+    }
+
+    function showAdminSection(section) {
+        adminView.querySelectorAll('[data-admin-section]').forEach(el => {
+            el.hidden = el.dataset.adminSection !== section;
+        });
+        document.getElementById('adminTitle').textContent = ADMIN_SECTION_TITLES[section];
+        showView('admin');
+    }
+
+    // Verificación en el navegador: después de elegir una opción del menú debe verse una sola vista
+    // y, dentro de Cuentas o Administración, una sola sección. Si no, queda el error en la consola.
+    function visibleViews() {
+        return [...document.querySelectorAll('main > .split, main > .page-view')]
+            .filter(el => !el.hidden && el.style.display !== 'none');
+    }
+
+    function checkSingleSection() {
+        const views = visibleViews();
+        const problems = [];
+        if (views.length !== 1) problems.push(`${views.length} vistas visibles`);
+        if (!accountsView.hidden) {
+            const shown = [...accountsView.querySelectorAll('[data-account-section]')].filter(el => !el.hidden);
+            if (shown.length !== 1) problems.push(`${shown.length} secciones visibles en Cuentas`);
+            if (shown.some(el => el.dataset.accountSection === 'requests')) problems.push('Mis solicitudes visible para el personal');
+        }
+        if (!adminView.hidden) {
+            const kinds = new Set([...adminView.querySelectorAll('[data-admin-section]')]
+                .filter(el => !el.hidden).map(el => el.dataset.adminSection));
+            if (kinds.size !== 1) problems.push(`${kinds.size} secciones visibles en Administración`);
+        }
+        if (problems.length) console.error(`Vista del menú con más de una sección: ${problems.join('; ')}`);
+        return problems.length === 0;
+    }
+
+    // ===== Tabla de personal (Equipo y Horarios) =====
+    const teamUsers = new Map();
+    const rowMenu = document.getElementById('rowMenu');
+    let rowMenuOwner = null;
+
+    function truncated(tag, className, text) {
+        const node = makeEl(tag, `${className} team-trunc`, text);
+        node.title = text;
+        return node;
+    }
+
+    function teamStateText(user) {
+        let text = !user.is_active ? 'Desactivada' : user.login_locked ? 'Bloqueada' : 'Activa';
+        if (user.availability && user.availability !== 'available') {
+            text += ` · ${AVAILABILITY_LABELS[user.availability] || user.availability}`;
+            if (user.return_date) text += ` (regresa ${formatPlainDate(user.return_date)})`;
+        }
+        return text;
+    }
+
+    function canChangeRole(user) {
+        if (!currentUser || user.id === currentUser.id) return false;
+        // Admin: directo. Coordinador: solicitud con doble aprobación, solo para técnicos (como hasta ahora)
+        return currentUser.role === 'admin' || (currentUser.role === 'coordinator' && user.role === 'technician');
+    }
+
+    // Las mismas reglas de hoy (MANAGE_RULES); el servidor también las revisa. En esta tabla nadie ve
+    // acciones sobre su propia cuenta (eso va en Mi cuenta), el admin no las ve sobre otro admin y el
+    // coordinador solo las ve sobre técnicos.
+    function teamMenuItems(user) {
+        const items = [];
+        if (!currentUser || user.id === currentUser.id) return items;
+        if (currentUser.role === 'admin' && user.role === 'admin') return items;
+        if (currentUser.role === 'coordinator' && user.role !== 'technician') return items;
+        if (canManage(user, 'availability')) {
+            items.push({ action: 'availability', label: 'Cambiar disponibilidad',
+                data: { availability: user.availability || 'available', returnDate: user.return_date || '' } });
+        }
+        if (canChangeRole(user)) items.push({ action: 'change-role', label: 'Cambiar rol…' });
+        if (user.is_active && canManage(user, 'reset')) items.push({ action: 'reset-access', label: 'Forzar restablecimiento' });
+        if (user.login_locked && canManage(user, 'unlock')) items.push({ action: 'unlock', label: 'Desbloquear' });
+        if (canManage(user, 'sessions')) items.push({ action: 'close-sessions', label: 'Cerrar sesiones' });
+        if (canManage(user, 'active')) {
+            items.push({ action: user.is_active ? 'deactivate' : 'reactivate',
+                label: user.is_active ? 'Desactivar' : 'Reactivar', danger: true });
+        }
+        return items;
+    }
+
+    function teamRow(user) {
+        const name = user.name || 'Sin nombre';
+        const row = makeEl('tr', 'team-row');
+        row.dataset.userId = String(user.id);
+        row.dataset.userName = name;
+        row.dataset.userRole = user.role;
+
+        const nameTd = makeEl('td', 'team-name');
+        nameTd.dataset.label = 'Nombre';
+        // El nombre completo se ve siempre (puede ocupar dos líneas); el correo enmascarado se corta con "…"
+        nameTd.append(makeEl('div', 'team-name-main', name), truncated('div', 'team-email', user.email));
+        const roleTd = makeEl('td');
+        roleTd.dataset.label = 'Rol';
+        roleTd.appendChild(truncated('span', '', ROLE_MAP[user.role] || user.role));
+        const openTd = makeEl('td', 'num tabular', String(user.tickets_assigned_open));
+        openTd.dataset.label = 'Abiertos';
+        const stateTd = makeEl('td');
+        stateTd.dataset.label = 'Estado';
+        stateTd.appendChild(truncated('span', user.is_active && !user.login_locked ? '' : 'team-state-alert', teamStateText(user)));
+        const todayTd = makeEl('td', 'tabular');
+        todayTd.dataset.label = 'Horario de hoy';
+        // Técnicos y coordinadores tienen horario (el del coordinador es informativo); el administrador no
+        if (user.role === 'admin') {
+            todayTd.appendChild(truncated('span', '', 'No aplica'));
+        } else {
+            const shiftLabel = user.schedule && user.schedule.length ? (user.on_shift ? 'En turno' : 'Fuera de turno') : '';
+            const text = `${user.schedule_today || 'Sin turno'}${shiftLabel ? ` · ${shiftLabel}` : ''}`;
+            todayTd.appendChild(truncated('span', user.on_shift ? 'team-on-shift' : '', text));
+        }
+
+        const actionsTd = makeEl('td');
+        actionsTd.dataset.label = 'Acciones';
+        const actions = makeEl('div', 'team-actions');
+        // Horario: el coordinador edita el de técnicos; el admin, el de técnicos y coordinadores. Nunca el propio
+        if (user.role !== 'admin' && user.id !== currentUser.id && canManage(user, 'schedule')) {
+            const schedule = makeActionButton('schedule', 'Horario');
+            schedule.dataset.schedule = JSON.stringify(user.schedule || []);
+            actions.appendChild(schedule);
+        }
+        if (teamMenuItems(user).length) {
+            const more = makeEl('button', 'row-menu-btn', '⋯');
+            more.type = 'button';
+            more.setAttribute('aria-label', 'Más acciones');
+            more.title = `Más acciones para ${name}`;
+            more.setAttribute('aria-haspopup', 'menu');
+            more.setAttribute('aria-expanded', 'false');
+            more.setAttribute('aria-controls', 'rowMenu');
+            actions.appendChild(more);
+        }
+        actionsTd.appendChild(actions);
+        row.append(nameTd, roleTd, openTd, stateTd, todayTd, actionsTd);
+        return row;
+    }
+
+    function menuItems() {
+        return [...rowMenu.querySelectorAll('.row-menu-item')];
+    }
+
+    function openRowMenu(button) {
+        closeRowMenu(false);
+        const row = button.closest('[data-user-id]');
+        const user = teamUsers.get(Number(row.dataset.userId));
+        if (!user) return;
+        rowMenu.replaceChildren();
+        // runAccountAction lee la cuenta del contenedor más cercano con data-user-id: el menú mismo
+        rowMenu.dataset.userId = row.dataset.userId;
+        rowMenu.dataset.userName = row.dataset.userName;
+        rowMenu.dataset.userRole = row.dataset.userRole;
+        teamMenuItems(user).forEach(item => {
+            if (item.danger && rowMenu.children.length) {
+                const sep = makeEl('div', 'row-menu-sep');
+                sep.setAttribute('role', 'separator');
+                rowMenu.appendChild(sep);
+            }
+            const entry = makeEl('button', `row-menu-item account-action${item.danger ? ' is-danger' : ''}`, item.label);
+            entry.type = 'button';
+            entry.tabIndex = -1;
+            entry.setAttribute('role', 'menuitem');
+            entry.dataset.action = item.action;
+            Object.entries(item.data || {}).forEach(([key, value]) => { entry.dataset[key] = value; });
+            rowMenu.appendChild(entry);
+        });
+        rowMenuOwner = button;
+        button.setAttribute('aria-expanded', 'true');
+        rowMenu.hidden = false;
+        const rect = button.getBoundingClientRect();
+        const width = rowMenu.offsetWidth;
+        const height = rowMenu.offsetHeight;
+        let top = rect.bottom + 4;
+        if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 4);
+        rowMenu.style.left = `${clamp(rect.right - width, 8, window.innerWidth - width - 8)}px`;
+        rowMenu.style.top = `${top}px`;
+        menuItems()[0].focus();
+    }
+
+    function closeRowMenu(returnFocus) {
+        if (rowMenu.hidden) return;
+        rowMenu.hidden = true;
+        if (rowMenuOwner) {
+            rowMenuOwner.setAttribute('aria-expanded', 'false');
+            if (returnFocus) rowMenuOwner.focus();
+        }
+        rowMenuOwner = null;
+    }
+
+    async function runTeamMenuAction(entry) {
+        const user = teamUsers.get(Number(rowMenu.dataset.userId));
+        closeRowMenu(true);
+        if (!user) return;
+        if (entry.dataset.action === 'change-role') {
+            if (await openRoleDialog(user)) loadTeam();
+            return;
+        }
+        if (entry.dataset.action === 'close-sessions'
+            && !confirm(`Se cerrarán todas las sesiones de ${user.name || 'esta cuenta'} en todos sus dispositivos. ¿Continuar?`)) {
+            return;
+        }
+        if (await runAccountAction(entry)) loadTeam();
+    }
+
+    teamBody.addEventListener('click', (e) => {
+        const more = e.target.closest('.row-menu-btn');
+        if (!more) return;
+        if (rowMenuOwner === more) closeRowMenu(true);
+        else openRowMenu(more);
+    });
+
+    rowMenu.addEventListener('click', (e) => {
+        const entry = e.target.closest('.row-menu-item');
+        if (entry) runTeamMenuAction(entry);
+    });
+
+    rowMenu.addEventListener('keydown', (e) => {
+        const items = menuItems();
+        const index = items.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const step = e.key === 'ArrowDown' ? 1 : -1;
+            items[(index + step + items.length) % items.length].focus();
+        } else if (e.key === 'Home' || e.key === 'End') {
+            e.preventDefault();
+            items[e.key === 'Home' ? 0 : items.length - 1].focus();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeRowMenu(true);
+        } else if (e.key === 'Tab') {
+            closeRowMenu(false);
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!rowMenu.hidden && !rowMenu.contains(e.target) && !(rowMenuOwner && rowMenuOwner.contains(e.target))) {
+            closeRowMenu(false);
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !rowMenu.hidden) closeRowMenu(true);
+    });
+    window.addEventListener('resize', () => closeRowMenu(false));
+    document.addEventListener('scroll', () => closeRowMenu(false), true);
+
+    // ----- Cambiar rol… (admin: directo; coordinador: solicitud con doble aprobación) -----
+    const roleDialog = document.getElementById('roleDialog');
+    const roleSelect = document.getElementById('roleSelect');
+    const roleReason = document.getElementById('roleReason');
+    const roleError = document.getElementById('roleError');
+    let roleUser = null;
+    let roleDone = null;
+
+    function openRoleDialog(user) {
+        return new Promise(resolve => {
+            roleUser = user;
+            roleDone = resolve;
+            const isCoordinator = currentUser.role === 'coordinator';
+            document.getElementById('roleTarget').textContent = `${user.name || 'Sin nombre'} · ${ROLE_MAP[user.role] || user.role}`;
+            roleSelect.replaceChildren();
+            const options = isCoordinator
+                ? [['coordinator', 'Coordinador'], ['requester', 'Solicitante']]
+                : ROLE_OPTIONS.filter(([value]) => value !== user.role);
+            options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, false)));
+            document.getElementById('roleReasonGroup').hidden = !isCoordinator;
+            roleReason.value = '';
+            document.getElementById('roleSubmit').textContent = isCoordinator ? 'Enviar solicitud' : 'Cambiar rol';
+            roleError.hidden = true;
+            roleDialog.showModal();
+            roleSelect.focus();
+        });
+    }
+
+    function closeRoleDialog(done) {
+        if (roleDialog.open) roleDialog.close();
+        const resolve = roleDone;
+        roleDone = null;
+        roleUser = null;
+        if (resolve) resolve(done);
+    }
+
+    function showRoleError(message) {
+        roleError.textContent = message;
+        roleError.hidden = false;
+    }
+
+    document.getElementById('roleCancel').addEventListener('click', () => closeRoleDialog(false));
+    roleDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeRoleDialog(false);
+    });
+    document.getElementById('roleForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!roleUser) return;
+        roleError.hidden = true;
+        const isCoordinator = currentUser.role === 'coordinator';
+        const reason = roleReason.value.trim();
+        if (isCoordinator && !reason) {
+            showRoleError('Escriba el motivo de la solicitud');
+            return;
+        }
+        const submit = document.getElementById('roleSubmit');
+        submit.disabled = true;
+        try {
+            if (isCoordinator) {
+                await apiFetch('/account-requests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ kind: 'role', target_user_id: roleUser.id, new_value: roleSelect.value, reason }),
+                    silent: true
+                });
+            } else {
+                await apiFetch(`/admin/users/${roleUser.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: roleSelect.value }),
+                    silent: true
+                });
+            }
+        } catch (err) {
+            showRoleError(err.message || 'No se pudo cambiar el rol');
+            return;
+        } finally {
+            submit.disabled = false;
+        }
+        showSuccess(isCoordinator ? 'Solicitud enviada al administrador' : 'Rol actualizado');
+        closeRoleDialog(true);
+    });
 
     initApp();
 });

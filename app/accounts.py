@@ -19,7 +19,8 @@ PERMISSIONS = {
         "reset": ("coordinator", "technician"),
         "unlock": ("admin", "coordinator", "technician", "requester"),
         "availability": ("technician",),
-        "schedule": ("technician",),
+        # Horario del coordinador: informativo (la asignación automática solo usa técnicos)
+        "schedule": ("technician", "coordinator"),
         "sessions": ("coordinator", "technician", "requester"),
     },
     "coordinator": {

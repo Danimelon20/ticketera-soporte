@@ -379,6 +379,8 @@ class DirectoryUser(BaseModel):
     schedule: Optional[list[ScheduleDay]] = None
     schedule_summary: Optional[str] = None
     on_shift: Optional[bool] = None
+    # Turno de hoy en hora de la oficina ("08:00–17:00"); None si hoy no trabaja
+    schedule_today: Optional[str] = None
 
 
 class PasswordResetRequest(BaseModel):
@@ -628,6 +630,8 @@ class AdminAccountRow(BaseModel):
     last_activity: Optional[datetime] = None
     identity: Optional[str] = None
     invitation_hours_left: Optional[int] = None
+    # Solo con el filtro por horario: el turno de ese día ("08:00–17:00")
+    schedule_day: Optional[str] = None
 
 
 class AdminAccountAlerts(BaseModel):
@@ -657,3 +661,19 @@ class AdminAccountDetail(BaseModel):
     schedule_summary: Optional[str] = None
     alerts: AdminAccountAlerts
     recent_changes: list[AccountChangeRead] = []
+
+
+class TeamMember(BaseModel):
+    """Fila de Equipo / Horarios: correo enmascarado, nunca teléfono ni cédula."""
+    id: int
+    name: str
+    email: str
+    role: str
+    is_active: bool
+    tickets_assigned_open: int = 0
+    login_locked: bool = False
+    availability: Optional[str] = None
+    return_date: Optional[date] = None
+    schedule: Optional[list[ScheduleDay]] = None
+    schedule_today: Optional[str] = None
+    on_shift: Optional[bool] = None

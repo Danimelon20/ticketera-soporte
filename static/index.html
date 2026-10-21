@@ -527,26 +527,33 @@
 
         <section id="accountsView" class="page-view" hidden aria-labelledby="accountsTitle">
             <h1 id="accountsTitle" class="view-title">Cuentas</h1>
-            <section class="account-section" aria-labelledby="teamTitle">
+            <section id="accountsTeam" class="account-section" data-account-section="team" aria-labelledby="teamTitle">
                 <h2 id="teamTitle" class="account-title">Equipo</h2>
-                <p class="help-text">Técnicos. Al desactivar uno, sus tickets abiertos quedan sin asignar.</p>
-                <div class="table-scroll">
-                    <table class="directory-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Nombre</th>
-                                <th scope="col">Correo</th>
-                                <th scope="col">Abiertos asignados</th>
-                                <th scope="col">Estado</th>
-                                <th scope="col">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody id="teamBody"></tbody>
-                    </table>
-                </div>
-                <p id="teamEmpty" class="view-note" hidden>No hay técnicos.</p>
+                <p class="help-text">Todo el personal. Al desactivar un técnico, sus tickets abiertos quedan sin asignar. Su propia cuenta se gestiona en Mi cuenta.</p>
+                <table class="team-table">
+                    <colgroup>
+                        <col class="team-col-name">
+                        <col class="team-col-role">
+                        <col class="team-col-open">
+                        <col class="team-col-state">
+                        <col class="team-col-today">
+                        <col class="team-col-actions">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th scope="col">Nombre</th>
+                            <th scope="col">Rol</th>
+                            <th scope="col" class="num">Abiertos</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Horario de hoy</th>
+                            <th scope="col">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="teamBody"></tbody>
+                </table>
+                <p id="teamEmpty" class="view-note" hidden>No hay personal.</p>
             </section>
-            <section class="account-section" aria-labelledby="clientsTitle">
+            <section id="accountsClients" class="account-section" data-account-section="clients" aria-labelledby="clientsTitle">
                 <h2 id="clientsTitle" class="account-title">Clientes</h2>
                 <div class="directory-filters">
                     <label for="clientsSearch" class="sr-only">Buscar solicitantes por nombre o correo</label>
@@ -567,7 +574,8 @@
                 </div>
                 <p id="clientsEmpty" class="view-note">Escriba un nombre o correo para buscar.</p>
             </section>
-            <section class="account-section" aria-labelledby="myRequestsTitle">
+            <!-- Solicitudes de cambio del coordinador: hoy no se muestran en ninguna opción del menú -->
+            <section id="accountsMyRequests" class="account-section" data-account-section="requests" aria-labelledby="myRequestsTitle" hidden>
                 <h2 id="myRequestsTitle" class="account-title">Mis solicitudes</h2>
                 <ul id="myRequestsList" class="changes-list"></ul>
                 <p id="myRequestsEmpty" class="view-note" hidden>Todavía no ha creado solicitudes.</p>
@@ -689,6 +697,31 @@
                         <option value="not_found">No encontrado</option>
                         <option value="unverified">Sin verificar</option>
                     </select>
+                    <label class="aa-schedule-toggle">
+                        <input type="checkbox" id="aaScheduleOn"> Filtrar por horario
+                    </label>
+                </div>
+                <div id="aaScheduleFields" class="aa-schedule-fields" hidden>
+                    <label for="aaDay">Día</label>
+                    <select id="aaDay">
+                        <option value="0">Lunes</option>
+                        <option value="1">Martes</option>
+                        <option value="2">Miércoles</option>
+                        <option value="3">Jueves</option>
+                        <option value="4">Viernes</option>
+                        <option value="5">Sábado</option>
+                        <option value="6">Domingo</option>
+                    </select>
+                    <label for="aaStart">Entrada</label>
+                    <input type="time" id="aaStart" value="08:00" step="60" required>
+                    <label for="aaEnd">Salida</label>
+                    <input type="time" id="aaEnd" value="17:00" step="60" required>
+                    <label for="aaMatch">Coincidencia</label>
+                    <select id="aaMatch">
+                        <option value="covers">Cubre todo el rango</option>
+                        <option value="overlaps">Coincide en parte</option>
+                    </select>
+                    <p class="aa-schedule-note">Solo técnicos y coordinadores con horario ese día.</p>
                 </div>
                 <div class="queue-table-wrap">
                     <table class="queue-table aa-table">
@@ -697,7 +730,7 @@
                                 <th scope="col">Nombre</th>
                                 <th scope="col">Rol</th>
                                 <th scope="col">Estado</th>
-                                <th scope="col">Último acceso</th>
+                                <th scope="col" id="aaLastHead">Último acceso</th>
                                 <th scope="col">Identidad</th>
                             </tr>
                         </thead>
@@ -717,46 +750,46 @@
         <section id="adminView" class="page-view" hidden aria-labelledby="adminTitle">
             <h1 id="adminTitle" class="view-title">Administración</h1>
             <div class="admin-grid">
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>Estado del sistema</h2>
                     <dl id="adminStatus" class="admin-status"></dl>
                 </article>
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>Usuarios por rol</h2>
                     <ul id="adminUsersByRole" class="count-list"></ul>
                 </article>
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>Tickets por estado</h2>
                     <ul id="adminTicketsByStatus" class="count-list"></ul>
                 </article>
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>IA de correos</h2>
                     <ul id="adminAiAnalysis" class="count-list"></ul>
                     <p id="adminAiAccuracy" class="admin-ai-accuracy"></p>
                     <button type="button" id="analyzeMissing" class="btn-secondary">Analizar tickets sin nivel</button>
                 </article>
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>Copia de seguridad</h2>
                     <p class="admin-text">Descarga una copia completa de la base de datos. Guárdala en un lugar seguro: contiene datos personales.</p>
                     <button type="button" id="downloadBackup" class="btn-secondary">Descargar copia</button>
                 </article>
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>Resumen diario</h2>
                     <p id="summaryStatus" class="admin-text"></p>
                     <button type="button" id="sendSummaryNow" class="btn-secondary">Enviar resumen ahora</button>
                 </article>
-                <article class="admin-card">
+                <article class="admin-card" data-admin-section="health">
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
                 </article>
-                <article class="admin-card admin-card-wide">
+                <article class="admin-card admin-card-wide" data-admin-section="approvals">
                     <div class="admin-card-head">
                         <h2>Solicitudes pendientes</h2>
                     </div>
                     <ul id="pendingRequestsList" class="changes-list"></ul>
                     <p id="pendingRequestsEmpty" class="admin-text" hidden>No hay solicitudes pendientes.</p>
                 </article>
-                <article class="admin-card admin-card-wide">
+                <article class="admin-card admin-card-wide" data-admin-section="changes">
                     <div class="admin-card-head">
                         <h2>Registro de cambios</h2>
                     </div>
@@ -776,7 +809,7 @@
                         <button type="button" id="changesNext" class="btn-secondary">Siguiente</button>
                     </div>
                 </article>
-                <article class="admin-card admin-card-wide">
+                <article class="admin-card admin-card-wide" data-admin-section="health">
                     <div class="admin-card-head">
                         <h2>Registros del servidor</h2>
                         <button type="button" id="refreshLogs" class="btn-secondary">Actualizar</button>
@@ -784,7 +817,7 @@
                     <pre id="adminLogs" class="admin-logs" tabindex="0"></pre>
                 </article>
             </div>
-            <p class="view-note">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
+            <p class="view-note" data-admin-section="health">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
         </section>
     </main>
 
@@ -942,6 +975,30 @@
             <div class="dialog-actions">
                 <button type="button" id="availabilityCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Menú "Más acciones" de la tabla de personal: uno solo, se ubica junto al botón que lo abre -->
+    <div id="rowMenu" class="row-menu" role="menu" aria-label="Más acciones" hidden></div>
+
+    <dialog id="roleDialog" class="app-dialog" aria-labelledby="roleDialogTitle">
+        <form id="roleForm" class="profile-form">
+            <h2 id="roleDialogTitle" class="modal-title">Cambiar rol</h2>
+            <p id="roleTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="roleSelect">Rol nuevo</label>
+                <select id="roleSelect"></select>
+            </div>
+            <div id="roleReasonGroup" class="form-group" hidden>
+                <label for="roleReason">Motivo (obligatorio)</label>
+                <textarea id="roleReason" rows="3" maxlength="500"></textarea>
+                <small class="help-text">El administrador debe aprobar el cambio.</small>
+            </div>
+            <p id="roleError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="roleCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" id="roleSubmit" class="btn-submit">Guardar</button>
             </div>
         </form>
     </dialog>

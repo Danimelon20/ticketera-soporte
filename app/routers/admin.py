@@ -6,7 +6,7 @@ from collections import deque
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ from .. import (
 )
 from ..schemas import (
     AccountChangePage, AccountChangeRead, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate,
-    DirectoryUser,
+    DirectoryUser, TeamMember,
 )
 from ..security import get_current_user, mask_email, session_expired
 from ..validators import mask_id_number, mask_last4
@@ -54,7 +54,7 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
     )
     technician_ids = [u.id for u in users if u.role == "technician"]
     statuses = availability.statuses_for(db, technician_ids)
-    shifts = schedules.for_users(db, technician_ids)
+    shifts = schedules.for_users(db, [u.id for u in users if u.role in schedules.SCHEDULE_ROLES])
     now = auto_assign._now()
     requester_ids = [u.id for u in users if u.role == "requester"]
     identities = identity.hacienda_codes(db, requester_ids)
@@ -89,7 +89,11 @@ def _schedule_fields(rows: list[models.TechnicianSchedule] | None, now: datetime
     if rows is None:
         return {}
     days = schedules.as_dicts(rows)
-    return {"schedule": days, "schedule_summary": schedules.summary(days), "on_shift": schedules.on_shift(rows, now)}
+    today = schedules.today_range(rows, now)
+    return {
+        "schedule": days, "schedule_summary": schedules.summary(days), "on_shift": schedules.on_shift(rows, now),
+        "schedule_today": f"{today[0]}–{today[1]}" if today else None,
+    }
 
 
 @router.get("/directory", response_model=list[DirectoryUser])
@@ -113,6 +117,28 @@ def get_directory(
         query = query.filter(func.lower(models.User.name).like(term) | func.lower(models.User.email).like(term))
     users = query.order_by(models.User.role, models.User.name).all()
     return _directory_rows(db, users)
+
+
+TEAM_ROLES = ("technician", "coordinator", "admin")
+
+
+@router.get("/team", response_model=list[TeamMember])
+def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Personal (sin solicitantes) para Equipo / Horarios: correo enmascarado y sin teléfono ni cédula."""
+    if current_user.role not in ("coordinator", "admin"):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
+    order = {role: i for i, role in enumerate(TEAM_ROLES)}
+    users = db.query(models.User).filter(models.User.role.in_(TEAM_ROLES)).order_by(models.User.name).all()
+    users.sort(key=lambda u: order[u.role])
+    return [
+        TeamMember(
+            id=row.id, name=row.name or "Sin nombre", email=mask_email(row.email), role=row.role,
+            is_active=row.is_active, tickets_assigned_open=row.tickets_assigned_open, login_locked=row.login_locked,
+            availability=row.availability, return_date=row.return_date, schedule=row.schedule,
+            schedule_today=row.schedule_today, on_shift=row.on_shift,
+        )
+        for row in _directory_rows(db, users)
+    ]
 
 
 @router.patch("/admin/users/{user_id}", response_model=DirectoryUser)
@@ -235,11 +261,23 @@ def admin_accounts(
     state: Optional[Literal[ACCOUNT_STATES]] = None,
     identity_code: Optional[Literal["match", "mismatch", "not_found", "unverified"]] = None,
     q: Optional[str] = None,
+    # Filtro por horario: solo el equipo de soporte con turno ese día (0 = lunes … 6 = domingo)
+    schedule_day: Optional[int] = Query(default=None, ge=0, le=6),
+    schedule_start: Optional[str] = Query(default=None, max_length=5),
+    schedule_end: Optional[str] = Query(default=None, max_length=5),
+    schedule_match: Literal[schedules.MATCH_MODES] = "covers",
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
     now = auto_assign._now()
+    by_schedule = schedule_day is not None
+    if by_schedule:
+        if schedule_start is None or schedule_end is None:
+            raise HTTPException(status_code=422, detail="Indique la hora de entrada y la de salida")
+        schedules.check_range(schedule_start, schedule_end)
     query = db.query(models.User).filter(models.User.role != "agent")
+    if by_schedule:
+        query = query.filter(models.User.role.in_(schedules.SCHEDULE_ROLES))
     if role:
         query = query.filter(models.User.role == role)
     if q and q.strip():
@@ -250,14 +288,22 @@ def admin_accounts(
     statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
     identities = identity.hacienda_codes(db, [u.id for u in users if u.role == "requester"])
     sessions = _open_sessions(db, ids, now)
+    shifts = schedules.for_users(db, ids) if by_schedule else {}
 
     rows = []
     for u in users:
+        shift = None
+        if by_schedule:
+            # Sin turno ese día no aparece; de vacaciones o ausente sí (con su estado visible)
+            shift = schedules.day_range(shifts[u.id], schedule_day)
+            if shift is None or not schedules.range_matches(shift, schedule_start, schedule_end, schedule_match):
+                continue
         row = AdminAccountRow(
             kind="user", id=u.id, name=u.name or "Sin nombre", email=mask_email(u.email), role=u.role,
             state=_account_state(db, u, statuses),
             last_activity=max(sessions[u.id]) if sessions[u.id] else None,
             identity=identities.get(u.id),
+            schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
         )
         if state and row.state != state:
             continue
@@ -265,8 +311,9 @@ def admin_accounts(
             continue
         rows.append(row)
 
-    # Invitaciones del personal pendientes: todavía no son cuentas
-    if (state in (None, "invited")) and identity_code is None and role in (None, "technician", "coordinator"):
+    # Invitaciones del personal pendientes: todavía no son cuentas (ni tienen horario)
+    if (not by_schedule and state in (None, "invited") and identity_code is None
+            and role in (None, "technician", "coordinator")):
         invitations = db.query(models.StaffInvitation).filter(
             models.StaffInvitation.used_by.is_(None), models.StaffInvitation.expires_at > now
         )
@@ -317,7 +364,7 @@ def admin_account_detail(user_id: int, db: Session = Depends(get_db), admin=Depe
         .limit(RECENT_CHANGES)
         .all()
     )
-    schedule_rows = schedules.get(db, user.id) if user.role == "technician" else None
+    schedule_rows = schedules.get(db, user.id) if user.role in schedules.SCHEDULE_ROLES else None
     status = statuses.get(user.id)
     return AdminAccountDetail(
         id=user.id,

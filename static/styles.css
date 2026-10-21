@@ -2130,3 +2130,144 @@ body.requester-portal .chat-panel { bottom: calc(var(--bar-h) + 82px); }
   }
   body.requester-portal #detailPanel { padding: 16px; }
 }
+
+/* ===== Una sola sección por opción del menú ===== */
+[data-account-section][hidden], [data-admin-section][hidden] { display: none !important; }
+/* El título de la vista ya nombra la sección: el h2 queda solo para lectores de pantalla */
+#accountsView > .account-section > .account-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* ===== Tabla de personal (Equipo y Horarios): anchos fijos, sin barra horizontal ===== */
+.team-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; background: var(--surface); }
+.team-col-role { width: 110px; }
+.team-col-open { width: 96px; }
+.team-col-state { width: 170px; }
+.team-col-today { width: 190px; }
+.team-col-actions { width: 124px; }
+.team-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 12px;
+  background: var(--bg-side);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.team-table td {
+  min-height: 44px;
+  height: 44px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+  overflow: hidden;
+}
+/* Abiertos a la derecha, con un margen claro antes de Estado */
+.team-table .num { text-align: right; padding-right: 28px; }
+.team-on-shift { color: var(--on-shift); }
+.team-trunc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-name-main { font-weight: 500; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+/* Ancho completo: las secciones de Mi cuenta son angostas, esta tabla no */
+#accountsView > .account-section { max-width: none; }
+.team-email { font-size: 11px; color: var(--muted); }
+.team-state-alert { color: var(--overdue); }
+.team-actions { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.team-actions .btn-small { min-height: 28px; padding: 2px 10px; font-size: 12px; border-radius: 4px; }
+.row-menu-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--selected); }
+.row-menu-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.row-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 210px;
+  padding: 4px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(16, 19, 46, 0.12);
+}
+.row-menu[hidden] { display: none; }
+.row-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.row-menu-item:hover, .row-menu-item:focus { background: var(--selected); outline: none; }
+.row-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--blue); }
+.row-menu-item.is-danger { color: var(--overdue); }
+.row-menu-sep { height: 1px; margin: 4px 0; background: var(--line); }
+
+@media (max-width: 767px) {
+  /* Cada persona es una tarjeta con las mismas acciones */
+  .team-table, .team-table tbody, .team-table tr, .team-table td { display: block; width: auto; }
+  .team-table thead, .team-table colgroup { display: none; }
+  .team-row { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .team-table td { height: auto; padding: 2px 0; border: none; }
+  .team-table td.num { text-align: left; }
+  .team-table td[data-label]:not(.team-name)::before {
+    content: attr(data-label) ": ";
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .team-table td[data-label] > .team-trunc { display: inline; }
+  .team-table td[data-label="Acciones"]::before { content: none; }
+  .team-actions { margin-top: 6px; }
+}
+
+/* ===== Admin › Cuentas: filtro por horario ===== */
+.aa-schedule-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); cursor: pointer; }
+.aa-schedule-toggle input { accent-color: var(--blue); width: 15px; height: 15px; margin: 0; }
+.aa-schedule-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-side);
+  font-size: 12px;
+}
+.aa-schedule-fields[hidden] { display: none; }
+.aa-schedule-fields label { color: var(--muted); }
+.aa-schedule-fields select, .aa-schedule-fields input {
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.aa-schedule-fields input:focus-visible, .aa-schedule-fields select:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.aa-schedule-note { flex-basis: 100%; margin: 2px 0 0; color: var(--muted); font-size: 11px; }
