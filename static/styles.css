@@ -15,6 +15,8 @@
     --due-soon: #9A4A06;
     --due-soon-bar: #F59E0B;
     --on-shift: #16A34A;
+    /* Barra de estado del personal y pie del portal (con el logo de 28 px) */
+    --bar-h: 38px;
     /* Nombres anteriores: apuntan a los nuevos para no romper los estilos existentes */
     --bg: var(--bg-side);
     --accent: var(--blue);
@@ -1218,6 +1220,27 @@ section {
 .chat-fab:hover { background: #1F3F99; }
 .chat-fab:focus-visible { outline: 3px solid #5EE2F0; outline-offset: 2px; }
 .chat-fab[hidden], .chat-panel[hidden], .chat-suggestions[hidden] { display: none; }
+/* El ícono se arrastra con el puntero (mouse o táctil); al soltarlo se acomoda al borde más cercano */
+.chat-fab { touch-action: none; user-select: none; -webkit-user-select: none; }
+.chat-fab.is-dragging { cursor: grabbing; }
+.chat-fab.is-settling { transition: left 0.18s ease, top 0.18s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-fab.is-settling { transition: none; }
+}
+.chat-reset {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #FFFFFF;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  opacity: 0.9;
+}
+.chat-reset:hover { opacity: 1; }
+.chat-reset:focus-visible { outline: 2px solid #FFFFFF; outline-offset: 2px; }
 .chat-panel {
   position: fixed;
   right: 24px;
@@ -1318,12 +1341,13 @@ section {
   cursor: pointer;
 }
 .chat-send:disabled { opacity: 0.6; cursor: default; }
-@media (max-width: 600px) {
+@media (max-width: 767px) {
+  /* En celular el chat ocupa toda la pantalla */
   .chat-panel {
-    inset: 0;
+    inset: 0 !important;
     width: 100%;
     height: 100%;
-    max-height: none;
+    max-height: none !important;
     border-radius: 0;
     z-index: 950;
   }
@@ -1617,13 +1641,13 @@ section {
 /* El personal usa el menú lateral en lugar de las pestañas */
 body.staff-shell .topbar-nav { display: none; }
 body.staff-shell .topbar { height: 52px; flex-wrap: nowrap; }
-body.staff-shell .chat-fab { bottom: 44px; }
-body.staff-shell .chat-panel { bottom: 112px; }
+body.staff-shell .chat-fab { bottom: calc(var(--bar-h) + 14px); }
+body.staff-shell .chat-panel { bottom: calc(var(--bar-h) + 82px); }
 
 .side-nav {
   position: fixed;
   top: 52px;
-  bottom: 30px;
+  bottom: var(--bar-h);
   left: 0;
   width: 220px;
   background: var(--bg-side);
@@ -1697,7 +1721,7 @@ body.staff-shell .chat-panel { bottom: 112px; }
   left: 0;
   right: 0;
   bottom: 0;
-  height: 30px;
+  height: var(--bar-h);
   display: flex;
   align-items: center;
   gap: 16px;
@@ -1715,11 +1739,11 @@ body.staff-shell .chat-panel { bottom: 112px; }
 .status-item { display: inline-flex; align-items: center; gap: 6px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #A0A4B8; }
 .status-item.is-on .status-dot { background: var(--on-shift); }
-.status-logo { height: 20px; width: auto; margin-left: auto; }
+.status-logo { height: 28px; width: auto; margin-left: auto; flex: 0 0 auto; }
 .status-logo[hidden] { display: none; }
 
-body.staff-shell main { margin-left: 220px; padding-bottom: 30px; }
-body.staff-shell .split { min-height: calc(100vh - 82px); }
+body.staff-shell main { margin-left: 220px; padding-bottom: var(--bar-h); }
+body.staff-shell .split { min-height: calc(100vh - 52px - var(--bar-h)); }
 
 @media (max-width: 767px) {
   .nav-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
@@ -1938,7 +1962,7 @@ body.staff-shell #detailPanel { padding: 16px; font-size: 13px; }
   /* El detalle se abre en pantalla completa con el botón para volver */
   body.staff-shell .split.show-detail #detailPanel {
     position: fixed;
-    inset: 52px 0 30px 0;
+    inset: 52px 0 var(--bar-h) 0;
     z-index: 45;
     overflow-y: auto;
   }
@@ -1946,7 +1970,7 @@ body.staff-shell #detailPanel { padding: 16px; font-size: 13px; }
 }
 
 /* ===== Admin › Cuentas ===== */
-.admin-accounts-view { display: grid; grid-template-columns: minmax(0, 1fr) 380px; padding: 0; min-height: calc(100vh - 82px); }
+.admin-accounts-view { display: grid; grid-template-columns: minmax(0, 1fr) 380px; padding: 0; min-height: calc(100vh - 52px - var(--bar-h)); }
 .aa-main { padding: 16px; min-width: 0; display: flex; flex-direction: column; }
 .aa-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
 .aa-head .view-title { margin: 0; font-size: 16px; }
@@ -2004,11 +2028,11 @@ body.requester-portal .portal-panel {
   background: var(--surface);
   border-right: 1px solid var(--line);
 }
-body.requester-portal .split { grid-template-columns: 440px minmax(0, 1fr); min-height: calc(100vh - 52px - 32px); }
-body.requester-portal main { padding-bottom: 32px; }
+body.requester-portal .split { grid-template-columns: 440px minmax(0, 1fr); min-height: calc(100vh - 52px - var(--bar-h)); }
+body.requester-portal main { padding-bottom: var(--bar-h); }
 body.requester-portal #detailPanel { padding: 20px 24px; font-size: 13px; }
-body.requester-portal .chat-fab { bottom: 44px; }
-body.requester-portal .chat-panel { bottom: 112px; }
+body.requester-portal .chat-fab { bottom: calc(var(--bar-h) + 14px); }
+body.requester-portal .chat-panel { bottom: calc(var(--bar-h) + 82px); }
 .portal-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
 .portal-title { font-size: 16px; font-weight: 600; margin: 0; }
 .portal-total { font-size: 12px; color: var(--muted); }
@@ -2077,7 +2101,7 @@ body.requester-portal .chat-panel { bottom: 112px; }
   left: 0;
   right: 0;
   bottom: 0;
-  height: 32px;
+  height: var(--bar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2099,7 +2123,7 @@ body.requester-portal .chat-panel { bottom: 112px; }
   /* Detalle en pantalla completa; se vuelve con "Volver a la lista" */
   body.requester-portal .split.show-detail #detailPanel {
     position: fixed;
-    inset: 0 0 32px 0;
+    inset: 0 0 var(--bar-h) 0;
     z-index: 55;
     overflow-y: auto;
     background: var(--surface);

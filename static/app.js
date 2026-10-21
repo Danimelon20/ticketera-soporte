@@ -1048,6 +1048,134 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Asistente =====
     const chatToggle = document.getElementById('chatToggle');
     const chatPanel = document.getElementById('chatPanel');
+    // ----- Ícono del asistente que se arrastra: posición recordada solo en este navegador -----
+    const CHAT_POS_KEY = 'ticketeraChatFabPosition';
+    const FAB_MARGIN = 12;
+    const PANEL_GAP = 12;
+    // Menos de esta distancia entre presionar y soltar es un clic, no un arrastre
+    const DRAG_THRESHOLD = 6;
+    let fabPos = null; // { side: 'left' | 'right', top } o null: abajo a la derecha
+    let fabDrag = null;
+    let suppressFabClick = false;
+
+    function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), Math.max(min, max));
+    }
+
+    // Espacio libre entre la barra superior y la barra de estado (o el pie del portal)
+    function chatBounds() {
+        let top = 0;
+        let bottom = window.innerHeight;
+        const bar = document.querySelector('.topbar');
+        if (bar && bar.getClientRects().length) top = Math.max(0, bar.getBoundingClientRect().bottom);
+        ['statusBar', 'portalFooter'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && !el.hidden && el.getClientRects().length) bottom = Math.min(bottom, el.getBoundingClientRect().top);
+        });
+        const size = chatToggle.offsetHeight || 56;
+        return {
+            top, bottom, size,
+            minTop: top + FAB_MARGIN,
+            maxTop: bottom - size - FAB_MARGIN,
+        };
+    }
+
+    function readFabPos() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(CHAT_POS_KEY) || 'null');
+            if (saved && (saved.side === 'left' || saved.side === 'right') && Number.isFinite(saved.top)) return saved;
+        } catch (err) {
+            // Sin almacenamiento o dato dañado: posición de siempre
+        }
+        return null;
+    }
+
+    function saveFabPos(pos) {
+        try {
+            if (pos) localStorage.setItem(CHAT_POS_KEY, JSON.stringify(pos));
+            else localStorage.removeItem(CHAT_POS_KEY);
+        } catch (err) {
+            // No se pudo guardar: dura hasta recargar la página
+        }
+    }
+
+    function applyFabPos(animate) {
+        if (chatToggle.hidden) return;
+        const bounds = chatBounds();
+        const pos = fabPos || { side: 'right', top: bounds.maxTop };
+        chatToggle.classList.toggle('is-settling', Boolean(animate));
+        chatToggle.style.right = 'auto';
+        chatToggle.style.bottom = 'auto';
+        chatToggle.style.left = `${pos.side === 'left' ? FAB_MARGIN : window.innerWidth - bounds.size - FAB_MARGIN}px`;
+        chatToggle.style.top = `${clamp(pos.top, bounds.minTop, bounds.maxTop)}px`;
+        positionChatPanel();
+    }
+
+    // El panel se abre junto al ícono, hacia el centro de la ventana; en celular lo maneja el CSS (pantalla completa)
+    function positionChatPanel() {
+        if (chatPanel.hidden) return;
+        if (window.innerWidth < 768) {
+            ['left', 'top', 'right', 'bottom', 'maxHeight'].forEach(prop => { chatPanel.style[prop] = ''; });
+            return;
+        }
+        const bounds = chatBounds();
+        chatPanel.style.maxHeight = `${Math.max(240, bounds.bottom - bounds.top - 2 * FAB_MARGIN)}px`;
+        const fab = chatToggle.getBoundingClientRect();
+        const width = chatPanel.offsetWidth;
+        const height = chatPanel.offsetHeight;
+        const onLeft = fab.left + fab.width / 2 < window.innerWidth / 2;
+        const left = onLeft ? fab.right + PANEL_GAP : fab.left - PANEL_GAP - width;
+        // Alineado con la parte de abajo del ícono, sin salir del espacio libre
+        const top = fab.bottom - height;
+        chatPanel.style.right = 'auto';
+        chatPanel.style.bottom = 'auto';
+        chatPanel.style.left = `${clamp(left, FAB_MARGIN, window.innerWidth - width - FAB_MARGIN)}px`;
+        chatPanel.style.top = `${clamp(top, bounds.top + FAB_MARGIN, bounds.bottom - height - FAB_MARGIN)}px`;
+    }
+
+    function endFabDrag(e) {
+        if (!fabDrag || e.pointerId !== fabDrag.id) return;
+        const moved = fabDrag.moved;
+        fabDrag = null;
+        if (chatToggle.hasPointerCapture(e.pointerId)) chatToggle.releasePointerCapture(e.pointerId);
+        chatToggle.classList.remove('is-dragging');
+        if (!moved) return;
+        // Fue arrastre: el clic que sigue no abre el chat
+        suppressFabClick = true;
+        setTimeout(() => { suppressFabClick = false; }, 0);
+        const rect = chatToggle.getBoundingClientRect();
+        fabPos = { side: rect.left + rect.width / 2 < window.innerWidth / 2 ? 'left' : 'right', top: rect.top };
+        const bounds = chatBounds();
+        fabPos.top = clamp(fabPos.top, bounds.minTop, bounds.maxTop);
+        saveFabPos(fabPos);
+        applyFabPos(true);
+    }
+
+    chatToggle.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        const rect = chatToggle.getBoundingClientRect();
+        fabDrag = {
+            id: e.pointerId, startX: e.clientX, startY: e.clientY,
+            offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top, moved: false,
+        };
+        chatToggle.setPointerCapture(e.pointerId);
+    });
+
+    chatToggle.addEventListener('pointermove', (e) => {
+        if (!fabDrag || e.pointerId !== fabDrag.id) return;
+        if (!fabDrag.moved && Math.hypot(e.clientX - fabDrag.startX, e.clientY - fabDrag.startY) < DRAG_THRESHOLD) return;
+        fabDrag.moved = true;
+        chatToggle.classList.remove('is-settling');
+        chatToggle.classList.add('is-dragging');
+        const bounds = chatBounds();
+        chatToggle.style.left = `${clamp(e.clientX - fabDrag.offsetX, 0, window.innerWidth - bounds.size)}px`;
+        chatToggle.style.top = `${clamp(e.clientY - fabDrag.offsetY, bounds.minTop, bounds.maxTop)}px`;
+        positionChatPanel();
+    });
+
+    chatToggle.addEventListener('pointerup', endFabDrag);
+    chatToggle.addEventListener('pointercancel', endFabDrag);
+    window.addEventListener('resize', () => applyFabPos(false));
     const chatClose = document.getElementById('chatClose');
     const chatRole = document.getElementById('chatRole');
     const chatMessages = document.getElementById('chatMessages');
@@ -1106,6 +1234,8 @@ document.addEventListener('DOMContentLoaded', () => {
         chatRole.textContent = `Te ayuda según tu rol: ${ROLE_MAP[currentUser.role] || currentUser.role}`;
         if (chatHistory.length === 0) renderChatStart();
         chatToggle.hidden = false;
+        fabPos = readFabPos();
+        applyFabPos(false);
     }
 
     function resetChat() {
@@ -1129,6 +1259,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openChat() {
         chatPanel.hidden = false;
+        positionChatPanel();
         chatToggle.setAttribute('aria-expanded', 'true');
         chatMessages.scrollTop = chatMessages.scrollHeight;
         chatInput.focus();
@@ -1186,12 +1317,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Enter y Espacio también llegan como clic (es un <button>); tras un arrastre no se abre
     chatToggle.addEventListener('click', () => {
+        if (suppressFabClick) return;
         if (chatPanel.hidden) openChat();
         else closeChat();
     });
 
     chatClose.addEventListener('click', closeChat);
+
+    // Mover el ícono no toca la conversación
+    document.getElementById('chatResetPosition').addEventListener('click', () => {
+        fabPos = null;
+        saveFabPos(null);
+        applyFabPos(true);
+    });
 
     chatPanel.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeChat();
@@ -6417,7 +6557,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     navAssistant.addEventListener('click', () => {
-        if (chatPanel.hidden) chatToggle.click();
+        if (chatPanel.hidden) openChat();
     });
     portalLogo.addEventListener('error', () => { portalLogo.hidden = true; });
 
