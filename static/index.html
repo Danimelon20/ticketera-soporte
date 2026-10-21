@@ -200,7 +200,7 @@
   <button type="button" id="navToggle" class="nav-toggle" aria-label="Abrir menú" aria-controls="sideNav" aria-expanded="false">☰</button>
   <div class="topbar-brand">
     <span class="brand-mark" aria-hidden="true">T</span>
-    <span class="brand-name">Mesa de Servicio</span>
+    <span class="brand-name" id="brandName">Mesa de Servicio</span>
   </div>
   <form id="globalSearchForm" class="global-search" role="search" hidden>
     <label for="globalSearch" class="sr-only">Buscar tickets, clientes o #número</label>
@@ -209,6 +209,7 @@
   </form>
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
+    <button type="button" id="navAssistant" class="topbar-tab" hidden>Asistente</button>
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
@@ -312,6 +313,14 @@
                     <span id="queuePage" class="queue-page"></span>
                     <button type="button" id="queueNext" class="btn-secondary">Siguiente</button>
                 </div>
+            </section>
+            <section id="portalPanel" class="portal-panel" aria-labelledby="portalTitle">
+                <header class="portal-head">
+                    <h1 id="portalTitle" class="portal-title">Mis solicitudes</h1>
+                    <span id="portalTotal" class="portal-total"></span>
+                </header>
+                <ul id="portalList" class="portal-list"></ul>
+                <p id="portalEmpty" class="portal-empty" hidden>Todavía no tiene solicitudes. Use "Nueva solicitud" para crear la primera.</p>
             </section>
             <section id="listPanel" aria-label="Lista de tickets">
                 <div class="list-filters">
@@ -645,6 +654,66 @@
             </div>
         </section>
 
+        <section id="adminAccountsView" class="page-view admin-accounts-view" hidden aria-labelledby="adminAccountsTitle">
+            <div class="aa-main">
+                <div class="aa-head">
+                    <h1 id="adminAccountsTitle" class="view-title">Cuentas</h1>
+                    <button type="button" id="aaInvite" class="btn-primary btn-small">Invitar personal</button>
+                </div>
+                <div class="queue-filters aa-filters">
+                    <label for="aaSearch" class="sr-only">Buscar por nombre o correo</label>
+                    <input type="search" id="aaSearch" placeholder="Buscar por nombre o correo" maxlength="150">
+                    <label for="aaRole" class="sr-only">Rol</label>
+                    <select id="aaRole">
+                        <option value="">Rol: todos</option>
+                        <option value="requester">Solicitantes</option>
+                        <option value="technician">Técnicos</option>
+                        <option value="coordinator">Coordinadores</option>
+                        <option value="admin">Administradores</option>
+                    </select>
+                    <label for="aaState" class="sr-only">Estado</label>
+                    <select id="aaState">
+                        <option value="">Estado: todos</option>
+                        <option value="active">Activa</option>
+                        <option value="locked">Bloqueada</option>
+                        <option value="invited">Invitación pendiente</option>
+                        <option value="vacation">Vacaciones</option>
+                        <option value="away">Ausente</option>
+                        <option value="inactive">Desactivada</option>
+                    </select>
+                    <label for="aaIdentity" class="sr-only">Identidad</label>
+                    <select id="aaIdentity">
+                        <option value="">Identidad: todas</option>
+                        <option value="match">Verificado</option>
+                        <option value="mismatch">No coincide</option>
+                        <option value="not_found">No encontrado</option>
+                        <option value="unverified">Sin verificar</option>
+                    </select>
+                </div>
+                <div class="queue-table-wrap">
+                    <table class="queue-table aa-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Nombre</th>
+                                <th scope="col">Rol</th>
+                                <th scope="col">Estado</th>
+                                <th scope="col">Último acceso</th>
+                                <th scope="col">Identidad</th>
+                            </tr>
+                        </thead>
+                        <tbody id="aaBody"></tbody>
+                    </table>
+                    <p id="aaEmpty" class="queue-empty" hidden>No hay cuentas con esos filtros.</p>
+                </div>
+            </div>
+            <aside id="aaPanel" class="aa-panel" aria-label="Detalle de la cuenta">
+                <button type="button" id="aaBack" class="link-btn aa-back">← Volver a la lista</button>
+                <div id="aaDetail">
+                    <p class="sd-muted">Elija una cuenta para ver el detalle.</p>
+                </div>
+            </aside>
+        </section>
+
         <section id="adminView" class="page-view" hidden aria-labelledby="adminTitle">
             <h1 id="adminTitle" class="view-title">Administración</h1>
             <div class="admin-grid">
@@ -718,6 +787,11 @@
             <p class="view-note">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
         </section>
     </main>
+
+    <footer id="portalFooter" class="portal-footer" hidden>
+        <span>Centro de Soporte</span>
+        <img id="portalLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
+    </footer>
 
     <footer id="statusBar" class="status-bar" hidden>
         <span class="status-item" id="statusEmail"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Correo</span></span>

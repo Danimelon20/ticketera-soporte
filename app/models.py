@@ -392,7 +392,7 @@ ACCOUNT_CHANGE_ACTIONS = (
     "login_locked", "password_reset", "access_reset_sent", "access_reset_forced", "login_unlocked", "tickets_released",
     "request_created", "request_approved", "request_rejected",
     "availability_changed", "report_created", "report_confirmed", "report_dismissed",
-    "schedule_changed",
+    "schedule_changed", "sessions_closed",
 )
 
 

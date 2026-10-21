@@ -109,6 +109,17 @@ def unlock(user_id: int, db: Session = Depends(get_db), current_user: models.Use
     return None
 
 
+@router.post("/accounts/{user_id}/close-sessions", status_code=status.HTTP_204_NO_CONTENT)
+def close_sessions(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Cierra todas las sesiones de la cuenta en todos sus dispositivos."""
+    user = _target(db, user_id)
+    accounts.check_can_manage(current_user, user, "sessions")
+    accounts.close_sessions(db, user.id)
+    audit.record(db, current_user.id, "sessions_closed", target=user)
+    db.commit()
+    return None
+
+
 # ----- Solicitudes con doble aprobación -----
 
 def _shown_value(row: models.AccountRequest, viewer: models.User) -> str:

@@ -223,6 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshReportsBadge();
         // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
         setupStaffShell();
+        setupPortal();
         setupChat();
     }
 
@@ -234,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotMode = false;
         stopDraftsPolling();
         teardownStaffShell();
+        teardownPortal();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
@@ -1284,6 +1286,10 @@ document.addEventListener('DOMContentLoaded', () => {
             pollNavCounts(false);
             return;
         }
+        if (isRequesterPortal()) {
+            await loadPortalList();
+            return;
+        }
         
         const params = new URLSearchParams();
         if (filters.status) params.append('status', filters.status);
@@ -1463,6 +1469,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (isStaffShell()) {
             renderStaffDetail(ticket);
+            return;
+        }
+        if (isRequesterPortal()) {
+            renderPortalDetail(ticket);
             return;
         }
         detailContent.replaceChildren();
@@ -2388,6 +2398,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const profileView = document.getElementById('profileView');
     const navReports = document.getElementById('navReports');
     const reportsView = document.getElementById('reportsView');
+    const adminAccountsView = document.getElementById('adminAccountsView');
 
     function setActiveTab(activeTab) {
         document.querySelectorAll('.topbar-tab').forEach(tab => {
@@ -2409,6 +2420,8 @@ document.addEventListener('DOMContentLoaded', () => {
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
+        // Portal del solicitante: el asistente también como pestaña
+        document.getElementById('navAssistant').hidden = role !== 'requester';
     }
 
     function showView(name) {
@@ -2419,6 +2432,7 @@ document.addEventListener('DOMContentLoaded', () => {
         draftsView.hidden = name !== 'drafts';
         profileView.hidden = name !== 'profile';
         reportsView.hidden = name !== 'reports';
+        adminAccountsView.hidden = name !== 'adminAccounts';
         const tabs = {
             tickets: navTickets, directory: navDirectory, accounts: navAccounts,
             admin: navAdmin, drafts: navDrafts, profile: navProfile, reports: navReports
@@ -2429,6 +2443,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (name === 'admin') loadAdminPanel();
         if (name === 'drafts') loadDrafts();
         if (name === 'reports') loadReports();
+        if (name === 'adminAccounts') loadAdminAccounts();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
@@ -3221,7 +3236,8 @@ document.addEventListener('DOMContentLoaded', () => {
         deactivate: 'Desactivar',
         reactivate: 'Reactivar',
         'reset-access': 'Forzar restablecimiento',
-        unlock: 'Desbloquear'
+        unlock: 'Desbloquear',
+        'close-sessions': 'Cerrar sesiones'
     };
     // Mismas reglas que app/accounts.py (solo comodidad: el servidor también las revisa)
     const MANAGE_RULES = {
@@ -3230,14 +3246,16 @@ document.addEventListener('DOMContentLoaded', () => {
             reset: ['coordinator', 'technician'],
             unlock: ['admin', 'coordinator', 'technician', 'requester'],
             availability: ['technician'],
-            schedule: ['technician']
+            schedule: ['technician'],
+            sessions: ['coordinator', 'technician', 'requester']
         },
         coordinator: {
             active: ['technician', 'requester'],
             reset: ['technician'],
             unlock: ['technician', 'requester'],
             availability: ['technician'],
-            schedule: ['technician']
+            schedule: ['technician'],
+            sessions: ['technician', 'requester']
         }
     };
 
@@ -3285,7 +3303,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Devuelve true si la acción se hizo (para volver a cargar la tabla)
     async function runAccountAction(button) {
-        const row = button.closest('tr');
+        // Fila del directorio o panel de Admin › Cuentas: los dos traen data-user-id
+        const row = button.closest('[data-user-id]');
         const name = row.dataset.userName;
         const action = button.dataset.action;
         if (action === 'availability') return openAvailabilityDialog(row.dataset.userId, name, button.dataset);
@@ -3310,7 +3329,8 @@ document.addEventListener('DOMContentLoaded', () => {
             deactivate: 'Cuenta desactivada',
             reactivate: 'Cuenta reactivada',
             'reset-access': 'Restablecimiento forzado. Le enviamos el código a su correo',
-            unlock: 'Correo desbloqueado'
+            unlock: 'Correo desbloqueado',
+            'close-sessions': 'Sesiones cerradas'
         };
         showSuccess(messages[action]);
         return true;
@@ -4336,7 +4356,8 @@ document.addEventListener('DOMContentLoaded', () => {
         tickets_released: 'Tickets liberados',
         request_created: 'Solicitud creada',
         request_approved: 'Solicitud aprobada',
-        request_rejected: 'Solicitud rechazada'
+        request_rejected: 'Solicitud rechazada',
+        sessions_closed: 'Sesiones cerradas'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -5032,7 +5053,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
         if (isAdmin) {
             groups.push({ title: 'Administración', items: [
-                { id: 'accounts', label: 'Cuentas', open: () => openDirectory('') },
+                { id: 'accounts', label: 'Cuentas', open: () => showView('adminAccounts') },
                 { id: 'approvals', label: 'Aprobaciones', count: 'approvals_pending',
                   open: () => scrollToSection('admin', 'pendingRequestsList') },
                 { id: 'changes', label: 'Registro de cambios', open: () => scrollToSection('admin', 'changesList') },
@@ -5926,6 +5947,494 @@ document.addEventListener('DOMContentLoaded', () => {
             showSuccess('Ticket asignado');
         }
     });
+
+    // ===== Admin › Cuentas =====
+    const aaBody = document.getElementById('aaBody');
+    const aaEmpty = document.getElementById('aaEmpty');
+    const aaSearch = document.getElementById('aaSearch');
+    const aaRole = document.getElementById('aaRole');
+    const aaState = document.getElementById('aaState');
+    const aaIdentity = document.getElementById('aaIdentity');
+    const aaDetail = document.getElementById('aaDetail');
+    const ACCOUNT_STATE_LABELS = {
+        active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada',
+        vacation: 'Vacaciones', away: 'Ausente', invited: 'Invitación pendiente'
+    };
+    let aaRows = [];
+    let aaSelected = null;
+    let aaSeq = 0;
+    let aaSearchTimer = null;
+
+    async function loadAdminAccounts() {
+        const params = new URLSearchParams();
+        if (aaRole.value) params.set('role', aaRole.value);
+        if (aaState.value) params.set('state', aaState.value);
+        if (aaIdentity.value) params.set('identity_code', aaIdentity.value);
+        if (aaSearch.value.trim()) params.set('q', aaSearch.value.trim());
+        const seq = ++aaSeq;
+        let rows;
+        try {
+            rows = await apiFetch(`/admin/accounts?${params}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        if (seq !== aaSeq) return;
+        aaRows = rows;
+        renderAdminAccounts();
+    }
+
+    function accountKey(row) {
+        return `${row.kind}:${row.id}`;
+    }
+
+    function renderAdminAccounts() {
+        aaBody.replaceChildren();
+        aaEmpty.hidden = aaRows.length > 0;
+        aaRows.forEach(row => {
+            const tr = makeEl('tr', 'queue-row');
+            tr.dataset.key = accountKey(row);
+            tr.tabIndex = 0;
+            if (tr.dataset.key === aaSelected) tr.classList.add('selected');
+
+            const name = queueCell('Nombre', 'col-subject');
+            name.appendChild(makeEl('div', 'queue-subject', row.name));
+            name.appendChild(makeEl('div', 'queue-meta', row.email));
+            const role = queueCell('Rol');
+            role.textContent = ROLE_MAP[row.role] || row.role;
+            const state = queueCell('Estado');
+            state.appendChild(makeEl('span', `state-tag acc-${row.state}`, ACCOUNT_STATE_LABELS[row.state] || row.state));
+            const last = queueCell('Último acceso', 'tabular');
+            if (row.kind === 'invitation') last.textContent = `Vence en ${row.invitation_hours_left} h`;
+            else last.textContent = row.last_activity ? formatDateTime(row.last_activity) : 'Sin sesión activa';
+            const identity = queueCell('Identidad');
+            if (row.identity) {
+                identity.appendChild(makeTag(IDENTITY_LABELS[row.identity] || row.identity, `tag-identity-${row.identity}`));
+            } else {
+                identity.textContent = '—';
+            }
+            tr.append(name, role, state, last, identity);
+            aaBody.appendChild(tr);
+        });
+    }
+
+    function aaDataRow(list, label, value) {
+        if (value === null || value === undefined || value === '') return;
+        const box = makeEl('div', 'sd-field');
+        box.append(makeEl('dt', '', label), makeEl('dd', '', value));
+        list.appendChild(box);
+    }
+
+    function renderInvitationPanel(row) {
+        aaDetail.replaceChildren();
+        aaDetail.appendChild(makeEl('h2', 'aa-name', row.name));
+        aaDetail.appendChild(makeEl('p', 'sd-meta', row.email));
+        const data = makeEl('dl', 'sd-fields');
+        aaDataRow(data, 'Rol', ROLE_MAP[row.role] || row.role);
+        aaDataRow(data, 'Estado', ACCOUNT_STATE_LABELS.invited);
+        aaDataRow(data, 'Vence en', `${row.invitation_hours_left} h`);
+        aaDetail.appendChild(data);
+        const resend = makeEl('button', 'btn-secondary btn-small aa-resend', 'Reenviar invitación');
+        resend.type = 'button';
+        resend.dataset.invitationId = String(row.id);
+        aaDetail.appendChild(resend);
+    }
+
+    function renderAccountPanel(d) {
+        aaDetail.replaceChildren();
+        // runAccountAction lee estos datos del contenedor (igual que de una fila del directorio)
+        const box = makeEl('div', 'aa-account');
+        box.dataset.userId = String(d.id);
+        box.dataset.userName = d.name;
+        box.dataset.userRole = d.role;
+
+        box.appendChild(makeEl('h2', 'aa-name', d.name));
+        box.appendChild(makeEl('p', 'sd-meta', d.email));
+        const tags = makeEl('div', 'sd-client');
+        tags.appendChild(makeEl('span', `state-tag acc-${d.state}`, ACCOUNT_STATE_LABELS[d.state] || d.state));
+        if (d.identity) requesterTags({ identity: d.identity, reported: d.reported }).forEach(t => tags.appendChild(t));
+        box.appendChild(tags);
+
+        const data = makeEl('dl', 'sd-fields');
+        aaDataRow(data, 'Rol', ROLE_MAP[d.role] || d.role);
+        aaDataRow(data, 'Creada', formatDateTime(d.created_at));
+        aaDataRow(data, 'Último acceso', d.last_activity ? formatDateTime(d.last_activity) : 'Sin sesión activa');
+        aaDataRow(data, 'Sesiones activas', String(d.active_sessions));
+        aaDataRow(data, 'Teléfono', d.phone);
+        aaDataRow(data, 'Cédula', d.id_number);
+        if (d.availability) {
+            const back = d.return_date ? ` · regresa ${formatPlainDate(d.return_date)}` : '';
+            aaDataRow(data, 'Disponibilidad', `${AVAILABILITY_LABELS[d.availability] || d.availability}${back}`);
+        }
+        aaDataRow(data, 'Horario', d.schedule_summary);
+        box.appendChild(data);
+
+        const alerts = makeEl('ul', 'aa-alerts');
+        if (d.alerts.pending_role) {
+            const li = makeEl('li', 'aa-alert');
+            const by = d.alerts.pending_role_by ? ` (lo pidió ${d.alerts.pending_role_by})` : '';
+            li.appendChild(makeEl('span', '', `Cambio de rol pendiente a ${ROLE_MAP[d.alerts.pending_role] || d.alerts.pending_role}${by}`));
+            const approve = makeEl('button', 'btn-secondary btn-small aa-approve', 'Aprobar');
+            approve.type = 'button';
+            approve.dataset.requestId = String(d.alerts.pending_role_request_id);
+            const reject = makeEl('button', 'btn-secondary btn-small aa-reject', 'Rechazar');
+            reject.type = 'button';
+            reject.dataset.requestId = String(d.alerts.pending_role_request_id);
+            li.append(approve, reject);
+            alerts.appendChild(li);
+        }
+        if (d.alerts.locked_until) {
+            alerts.appendChild(makeEl('li', 'aa-alert', `Bloqueada por intentos hasta ${formatDateTime(d.alerts.locked_until)}`));
+        }
+        if (d.alerts.open_reports > 0) {
+            const li = makeEl('li', 'aa-alert', `${d.alerts.open_reports} ${d.alerts.open_reports === 1 ? 'reporte abierto' : 'reportes abiertos'} `);
+            const view = makeEl('button', 'link-btn aa-reports', 'Ver reportes');
+            view.type = 'button';
+            li.appendChild(view);
+            alerts.appendChild(li);
+        }
+        if (alerts.children.length) {
+            box.appendChild(makeEl('h3', 'aa-subtitle', 'Avisos'));
+            box.appendChild(alerts);
+        }
+
+        const buttons = [];
+        if (d.is_active && canManage(d, 'reset')) buttons.push(makeActionButton('reset-access'));
+        if (d.state === 'locked' && canManage(d, 'unlock')) buttons.push(makeActionButton('unlock'));
+        if (d.active_sessions > 0 && canManage(d, 'sessions')) buttons.push(makeActionButton('close-sessions'));
+        if (canManage(d, 'active')) buttons.push(makeActionButton(d.is_active ? 'deactivate' : 'reactivate'));
+        if (buttons.length) {
+            box.appendChild(makeEl('h3', 'aa-subtitle', 'Acciones'));
+            box.appendChild(accountActionsWrap(buttons));
+        }
+
+        // Cambio de rol directo del administrador (el del coordinador llega como solicitud pendiente)
+        if (d.id !== currentUser.id) {
+            const roleRow = makeEl('div', 'aa-role');
+            const label = makeEl('label', 'sr-only', 'Nuevo rol');
+            label.htmlFor = 'aaRoleSelect';
+            const select = makeEl('select');
+            select.id = 'aaRoleSelect';
+            ['requester', 'technician', 'coordinator', 'admin'].forEach(role => {
+                select.appendChild(staffOption(role, ROLE_MAP[role] || role, role === d.role));
+            });
+            const apply = makeEl('button', 'btn-secondary btn-small aa-role-apply', 'Cambiar rol');
+            apply.type = 'button';
+            roleRow.append(label, select, apply);
+            box.appendChild(makeEl('h3', 'aa-subtitle', 'Rol'));
+            box.appendChild(roleRow);
+        }
+
+        box.appendChild(makeEl('h3', 'aa-subtitle', 'Últimos cambios'));
+        if (d.recent_changes.length === 0) {
+            box.appendChild(makeEl('p', 'sd-muted', 'Sin cambios registrados.'));
+        } else {
+            const list = makeEl('ul', 'aa-changes');
+            d.recent_changes.forEach(change => {
+                const li = makeEl('li');
+                li.appendChild(makeEl('span', 'aa-change-date tabular', formatDateTime(change.created_at)));
+                let text = ` ${CHANGE_ACTIONS[change.action] || change.action} · ${change.actor}`;
+                if (change.old_value || change.new_value) text += ` · ${change.old_value || '—'} → ${change.new_value || '—'}`;
+                li.appendChild(document.createTextNode(text));
+                list.appendChild(li);
+            });
+            box.appendChild(list);
+        }
+        aaDetail.appendChild(box);
+    }
+
+    async function selectAccount(key) {
+        aaSelected = key;
+        aaBody.querySelectorAll('.queue-row').forEach(tr => tr.classList.toggle('selected', tr.dataset.key === key));
+        adminAccountsView.classList.add('show-detail');
+        const row = aaRows.find(r => accountKey(r) === key);
+        if (!row) return;
+        if (row.kind === 'invitation') {
+            renderInvitationPanel(row);
+            return;
+        }
+        let detail;
+        try {
+            detail = await apiFetch(`/admin/accounts/${row.id}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        if (aaSelected === key) renderAccountPanel(detail);
+    }
+
+    async function refreshSelectedAccount() {
+        await loadAdminAccounts();
+        if (aaSelected && aaRows.some(r => accountKey(r) === aaSelected)) await selectAccount(aaSelected);
+        else aaDetail.replaceChildren(makeEl('p', 'sd-muted', 'Elija una cuenta para ver el detalle.'));
+    }
+
+    aaBody.addEventListener('click', (e) => {
+        const row = e.target.closest('.queue-row');
+        if (row) selectAccount(row.dataset.key);
+    });
+    aaBody.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const row = e.target.closest('.queue-row');
+        if (!row) return;
+        e.preventDefault();
+        selectAccount(row.dataset.key);
+    });
+    [aaRole, aaState, aaIdentity].forEach(select => select.addEventListener('change', loadAdminAccounts));
+    aaSearch.addEventListener('input', () => {
+        clearTimeout(aaSearchTimer);
+        aaSearchTimer = setTimeout(loadAdminAccounts, 300);
+    });
+    document.getElementById('aaInvite').addEventListener('click', () => navUsers.click());
+    document.getElementById('aaBack').addEventListener('click', () => adminAccountsView.classList.remove('show-detail'));
+
+    aaDetail.addEventListener('click', async (e) => {
+        const action = e.target.closest('.account-action');
+        if (action) {
+            if (action.dataset.action === 'close-sessions'
+                && !confirm('Se cerrarán todas las sesiones de esta cuenta en todos sus dispositivos. ¿Continuar?')) {
+                return;
+            }
+            if (await runAccountAction(action)) await refreshSelectedAccount();
+            return;
+        }
+        const approve = e.target.closest('.aa-approve');
+        const reject = e.target.closest('.aa-reject');
+        if (approve || reject) {
+            const button = approve || reject;
+            let body;
+            if (reject) {
+                const reason = prompt('Motivo del rechazo:');
+                if (reason === null) return;
+                if (!reason.trim()) {
+                    showError('Escriba el motivo del rechazo');
+                    return;
+                }
+                body = JSON.stringify({ reason: reason.trim() });
+            }
+            button.disabled = true;
+            try {
+                await apiFetch(`/account-requests/${button.dataset.requestId}/${approve ? 'approve' : 'reject'}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body
+                });
+            } catch (err) {
+                button.disabled = false;
+                return; // apiFetch ya mostró el error
+            }
+            showSuccess(approve ? 'Solicitud aprobada' : 'Solicitud rechazada');
+            await refreshSelectedAccount();
+            return;
+        }
+        if (e.target.closest('.aa-reports')) {
+            const box = aaDetail.querySelector('.aa-account');
+            openReportsForAccount(box.dataset.userId, box.dataset.userName);
+            return;
+        }
+        const roleApply = e.target.closest('.aa-role-apply');
+        if (roleApply) {
+            const box = aaDetail.querySelector('.aa-account');
+            const role = document.getElementById('aaRoleSelect').value;
+            if (role === box.dataset.userRole) return;
+            if (!confirm(`¿Cambiar el rol de ${box.dataset.userName} a ${ROLE_MAP[role] || role}?`)) return;
+            roleApply.disabled = true;
+            try {
+                await apiFetch(`/admin/users/${box.dataset.userId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role })
+                });
+            } catch (err) {
+                roleApply.disabled = false;
+                return; // apiFetch ya mostró el error
+            }
+            showSuccess('Rol actualizado');
+            await refreshSelectedAccount();
+            return;
+        }
+        const resend = e.target.closest('.aa-resend');
+        if (resend) {
+            resend.disabled = true;
+            try {
+                await apiFetch(`/staff-invitations/${resend.dataset.invitationId}/resend`, { method: 'POST' });
+            } catch (err) {
+                resend.disabled = false;
+                return; // apiFetch ya mostró el error
+            }
+            showSuccess('Invitación reenviada');
+            await refreshSelectedAccount();
+        }
+    });
+
+    // ===== Portal del solicitante: Centro de Soporte =====
+    const portalList = document.getElementById('portalList');
+    const portalEmpty = document.getElementById('portalEmpty');
+    const portalTotal = document.getElementById('portalTotal');
+    const portalFooter = document.getElementById('portalFooter');
+    const portalLogo = document.getElementById('portalLogo');
+    const navAssistant = document.getElementById('navAssistant');
+    const brandName = document.getElementById('brandName');
+    // Pasos derivados de los estados reales (app/portal.py)
+    const PORTAL_STEPS = ['Recibida', 'Asignada', 'En atención', 'Resuelta'];
+
+    function isRequesterPortal() {
+        return Boolean(currentUser && currentUser.role === 'requester');
+    }
+
+    async function loadPortalList() {
+        let tickets;
+        try {
+            tickets = await apiFetch('/tickets');
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        tickets.sort((a, b) => parseServerDate(b.last_activity_at) - parseServerDate(a.last_activity_at));
+        portalList.replaceChildren();
+        portalEmpty.hidden = tickets.length > 0;
+        portalTotal.textContent = `${tickets.length} ${tickets.length === 1 ? 'solicitud' : 'solicitudes'}`;
+        tickets.forEach(ticket => {
+            const li = makeEl('li');
+            const button = makeEl('button', 'portal-item');
+            button.type = 'button';
+            button.dataset.id = String(ticket.id);
+            if (ticket.id === selectedTicketId) button.classList.add('selected');
+            button.appendChild(makeEl('span', 'portal-item-title', ticket.title));
+            const meta = makeEl('span', 'portal-item-meta');
+            meta.appendChild(makeEl('span', 'tabular', `#${ticket.id}`));
+            meta.appendChild(makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
+            meta.appendChild(makeEl('span', 'tabular', `Actualizada ${formatDateTime(ticket.last_activity_at)}`));
+            button.appendChild(meta);
+            li.appendChild(button);
+            portalList.appendChild(li);
+        });
+    }
+
+    async function openPortalTicket(ticketId) {
+        portalList.querySelectorAll('.portal-item').forEach(b => b.classList.toggle('selected', Number(b.dataset.id) === ticketId));
+        selectedTicketId = ticketId;
+        document.querySelector('.split').classList.add('show-detail');
+        try {
+            const ticket = await apiFetch(`/tickets/${ticketId}`);
+            showTicketDetail(ticket);
+        } catch (err) {
+            selectedTicketId = null;
+            document.querySelector('.split').classList.remove('show-detail');
+            renderDetailPlaceholder();
+        }
+    }
+
+    portalList.addEventListener('click', (e) => {
+        const item = e.target.closest('.portal-item');
+        if (item) openPortalTicket(Number(item.dataset.id));
+    });
+
+    function renderPortalSteps(step) {
+        const list = makeEl('ol', 'portal-steps');
+        list.setAttribute('aria-label', 'Avance de la solicitud');
+        PORTAL_STEPS.forEach((label, index) => {
+            const number = index + 1;
+            const state = number < step ? 'done' : number === step ? 'current' : 'todo';
+            const li = makeEl('li', `portal-step is-${state}`);
+            if (state === 'current') li.setAttribute('aria-current', 'step');
+            li.appendChild(makeEl('span', 'portal-step-dot', String(number)));
+            li.appendChild(makeEl('span', 'portal-step-label', label));
+            list.appendChild(li);
+        });
+        return list;
+    }
+
+    function renderPortalDetail(ticket) {
+        detailContent.replaceChildren();
+        detailPanel.scrollTop = 0;
+        detailContent.appendChild(makeEl('p', 'sd-meta tabular', `#${ticket.id} · Creada ${formatDateTime(ticket.created_at)}`));
+        detailContent.appendChild(makeEl('h1', 'portal-detail-title', ticket.title));
+        detailContent.appendChild(renderPortalSteps(ticket.progress_step || 1));
+        if (ticket.assigned_name) {
+            detailContent.appendChild(makeEl('p', 'sd-muted', `Le atiende: ${ticket.assigned_name}`));
+        }
+        detailContent.appendChild(makeEl('p', 'sd-description', ticket.description));
+
+        detailContent.appendChild(makeEl('h2', 'portal-subtitle', 'Conversación'));
+        // El servidor nunca envía notas internas al solicitante; el filtro es solo por si acaso
+        const messages = (ticket.comments || []).filter(c => !c.internal);
+        if (messages.length === 0) {
+            detailContent.appendChild(makeEl('p', 'sd-muted', 'Todavía no hay mensajes.'));
+        } else {
+            const list = makeEl('ol', 'portal-messages');
+            messages.forEach(comment => {
+                const own = comment.user_id === currentUser.id;
+                const li = makeEl('li', `portal-message${own ? ' is-own' : ''}`);
+                const author = own ? 'Usted' : (userMap[comment.user_id] || 'Equipo de soporte');
+                li.appendChild(makeEl('p', 'portal-message-meta', `${author} · ${formatDateTime(comment.created_at)}`));
+                li.appendChild(makeEl('p', 'portal-message-text', comment.content));
+                list.appendChild(li);
+            });
+            detailContent.appendChild(list);
+        }
+
+        if (ticket.status === 'closed') {
+            detailContent.appendChild(makeEl('p', 'sd-muted', 'Esta solicitud está cerrada y ya no admite respuestas.'));
+            return;
+        }
+        // Sin adjuntos: el sistema no los admite
+        const composer = makeEl('div', 'sd-composer');
+        const label = makeEl('label', 'sr-only', 'Su respuesta');
+        label.htmlFor = 'portalReply';
+        const textarea = makeEl('textarea', 'sd-reply');
+        textarea.id = 'portalReply';
+        textarea.rows = 3;
+        textarea.maxLength = 5000;
+        textarea.placeholder = 'Escriba su respuesta';
+        const actions = makeEl('div', 'sd-composer-actions');
+        const send = makeEl('button', 'btn-primary btn-small portal-send', 'Enviar respuesta');
+        send.type = 'button';
+        actions.appendChild(send);
+        composer.append(label, textarea, actions);
+        detailContent.appendChild(composer);
+    }
+
+    detailPanel.addEventListener('click', async (e) => {
+        const send = e.target.closest('.portal-send');
+        if (!send || !selectedTicketId || !isRequesterPortal()) return;
+        const textarea = document.getElementById('portalReply');
+        const content = textarea.value.trim();
+        if (!content) {
+            showError('Escriba su respuesta antes de enviarla');
+            return;
+        }
+        send.disabled = true;
+        try {
+            await apiFetch(`/tickets/${selectedTicketId}/comments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content })
+            });
+        } catch (err) {
+            send.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        await reloadSelectedTicketAndList();
+        showSuccess('Respuesta enviada');
+    });
+
+    navAssistant.addEventListener('click', () => {
+        if (chatPanel.hidden) chatToggle.click();
+    });
+    portalLogo.addEventListener('error', () => { portalLogo.hidden = true; });
+
+    function setupPortal() {
+        const portal = isRequesterPortal();
+        document.body.classList.toggle('requester-portal', portal);
+        portalFooter.hidden = !portal;
+        brandName.textContent = portal ? 'Centro de Soporte' : 'Mesa de Servicio';
+        navTickets.textContent = portal ? 'Mis solicitudes' : 'Tickets';
+        openNewTicket.textContent = portal ? '+ Nueva solicitud' : '+ Nuevo ticket';
+    }
+
+    function teardownPortal() {
+        document.body.classList.remove('requester-portal');
+        portalFooter.hidden = true;
+        brandName.textContent = 'Mesa de Servicio';
+    }
 
     initApp();
 });

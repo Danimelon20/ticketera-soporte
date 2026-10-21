@@ -17,8 +17,12 @@ from .. import (
     account_reports, accounts, alerts, auto_assign, availability, config, daily_summary, email_analysis, email_poller,
     identity, models, schedules, throttle,
 )
-from ..schemas import AccountChangePage, AccountChangeRead, AdminUserUpdate, DirectoryUser
-from ..security import get_current_user, mask_email
+from ..schemas import (
+    AccountChangePage, AccountChangeRead, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate,
+    DirectoryUser,
+)
+from ..security import get_current_user, mask_email, session_expired
+from ..validators import mask_id_number, mask_last4
 
 router = APIRouter(prefix="/api", tags=["admin"])
 
@@ -142,6 +146,23 @@ def update_user(
 ACCOUNT_CHANGES_PAGE = 20
 
 
+def _change_read(row: models.AccountChange) -> AccountChangeRead:
+    if row.target is not None:
+        label = mask_email(row.target.email)
+        account = f"{row.target.name} ({label})" if row.target.name else label
+    else:
+        account = row.target_label or "—"
+    return AccountChangeRead(
+        id=row.id,
+        created_at=row.created_at,
+        action=row.action,
+        actor=(row.actor.name or mask_email(row.actor.email)) if row.actor is not None else "Sistema",
+        account=account,
+        old_value=row.old_value,
+        new_value=row.new_value,
+    )
+
+
 @router.get("/admin/account-changes", response_model=AccountChangePage)
 def account_changes(
     account: Optional[str] = None,
@@ -172,25 +193,153 @@ def account_changes(
         .all()
     )
 
-    def _account(row: models.AccountChange) -> str:
-        if row.target is not None:
-            label = mask_email(row.target.email)
-            return f"{row.target.name} ({label})" if row.target.name else label
-        return row.target_label or "—"
-
-    items = [
-        AccountChangeRead(
-            id=row.id,
-            created_at=row.created_at,
-            action=row.action,
-            actor=(row.actor.name or mask_email(row.actor.email)) if row.actor is not None else "Sistema",
-            account=_account(row),
-            old_value=row.old_value,
-            new_value=row.new_value,
-        )
-        for row in rows
-    ]
+    items = [_change_read(row) for row in rows]
     return AccountChangePage(items=items, total=total, page=page, pages=pages)
+
+
+# ----- Admin › Cuentas -----
+ACCOUNT_STATES = ("active", "locked", "inactive", "vacation", "away", "invited")
+RECENT_CHANGES = 10
+
+
+def _open_sessions(db: Session, user_ids: list[int], now: datetime) -> dict[int, list[datetime]]:
+    """Último uso de cada sesión abierta (no vencida), por cuenta. Sin tokens."""
+    found: dict[int, list[datetime]] = {uid: [] for uid in user_ids}
+    if not user_ids:
+        return found
+    rows = (
+        db.query(models.Session.user_id, models.Session.created_at, models.SessionActivity.last_used_at)
+        .outerjoin(models.SessionActivity, models.SessionActivity.session_id == models.Session.id)
+        .filter(models.Session.user_id.in_(user_ids))
+        .all()
+    )
+    for user_id, created_at, last_used in rows:
+        last = last_used or created_at
+        if not session_expired(created_at, last, now):
+            found[user_id].append(last.replace(tzinfo=None) if last.tzinfo else last)
+    return found
+
+
+def _account_state(db: Session, user: models.User, statuses: dict) -> str:
+    if not user.is_active:
+        return "inactive"
+    if throttle.is_locked(db, user.email.strip().lower()):
+        return "locked"
+    status = statuses.get(user.id, ("available", None))[0]
+    return status if status in ("vacation", "away") else "active"
+
+
+@router.get("/admin/accounts", response_model=list[AdminAccountRow])
+def admin_accounts(
+    role: Optional[Literal["requester", "technician", "coordinator", "admin"]] = None,
+    state: Optional[Literal[ACCOUNT_STATES]] = None,
+    identity_code: Optional[Literal["match", "mismatch", "not_found", "unverified"]] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    now = auto_assign._now()
+    query = db.query(models.User).filter(models.User.role != "agent")
+    if role:
+        query = query.filter(models.User.role == role)
+    if q and q.strip():
+        term = f"%{q.strip().lower()}%"
+        query = query.filter(func.lower(models.User.name).like(term) | func.lower(models.User.email).like(term))
+    users = query.order_by(models.User.role, models.User.name).all()
+    ids = [u.id for u in users]
+    statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    identities = identity.hacienda_codes(db, [u.id for u in users if u.role == "requester"])
+    sessions = _open_sessions(db, ids, now)
+
+    rows = []
+    for u in users:
+        row = AdminAccountRow(
+            kind="user", id=u.id, name=u.name or "Sin nombre", email=mask_email(u.email), role=u.role,
+            state=_account_state(db, u, statuses),
+            last_activity=max(sessions[u.id]) if sessions[u.id] else None,
+            identity=identities.get(u.id),
+        )
+        if state and row.state != state:
+            continue
+        if identity_code and row.identity != identity_code:
+            continue
+        rows.append(row)
+
+    # Invitaciones del personal pendientes: todavía no son cuentas
+    if (state in (None, "invited")) and identity_code is None and role in (None, "technician", "coordinator"):
+        invitations = db.query(models.StaffInvitation).filter(
+            models.StaffInvitation.used_by.is_(None), models.StaffInvitation.expires_at > now
+        )
+        if role:
+            invitations = invitations.filter(models.StaffInvitation.role == role)
+        if q and q.strip():
+            term = f"%{q.strip().lower()}%"
+            invitations = invitations.filter(
+                func.lower(models.StaffInvitation.name).like(term) | func.lower(models.StaffInvitation.email).like(term)
+            )
+        for inv in invitations.order_by(models.StaffInvitation.created_at.desc()).all():
+            rows.append(AdminAccountRow(
+                kind="invitation", id=inv.id, name=inv.name, email=mask_email(inv.email), role=inv.role,
+                state="invited", invitation_hours_left=max(0, int((inv.expires_at - now).total_seconds() // 3600)),
+            ))
+    return rows
+
+
+@router.get("/admin/accounts/{user_id}", response_model=AdminAccountDetail)
+def admin_account_detail(user_id: int, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    user = db.get(models.User, user_id)
+    if user is None or user.role == "agent":
+        raise HTTPException(status_code=404, detail="El usuario no existe")
+    now = auto_assign._now()
+    statuses = availability.statuses_for(db, [user.id]) if user.role == "technician" else {}
+    sessions = _open_sessions(db, [user.id], now)[user.id]
+
+    pending = (
+        db.query(models.AccountRequest)
+        .filter(models.AccountRequest.target_user_id == user.id, models.AccountRequest.kind == "role",
+                models.AccountRequest.status == "pending")
+        .first()
+    )
+    lock = db.query(models.LoginThrottle).filter(models.LoginThrottle.email == user.email.strip().lower()).first()
+    alerts = AdminAccountAlerts(
+        pending_role_request_id=pending.id if pending else None,
+        pending_role=pending.new_value if pending else None,
+        pending_role_by=(pending.creator.name if pending and pending.creator else None),
+        locked_until=lock.locked_until if lock and lock.locked_until and lock.locked_until > now else None,
+        open_reports=db.query(models.AccountReport).filter(
+            models.AccountReport.target_user_id == user.id, models.AccountReport.status == "open"
+        ).count(),
+    )
+    changes = (
+        db.query(models.AccountChange)
+        .filter(models.AccountChange.target_user_id == user.id)
+        .order_by(models.AccountChange.created_at.desc(), models.AccountChange.id.desc())
+        .limit(RECENT_CHANGES)
+        .all()
+    )
+    schedule_rows = schedules.get(db, user.id) if user.role == "technician" else None
+    status = statuses.get(user.id)
+    return AdminAccountDetail(
+        id=user.id,
+        name=user.name or "Sin nombre",
+        email=mask_email(user.email),
+        role=user.role,
+        state=_account_state(db, user, statuses),
+        is_active=user.is_active,
+        # Enmascarados: en este panel no hace falta verlos completos
+        phone=mask_last4(user.phone),
+        id_number=mask_id_number(user.id_number),
+        created_at=user.created_at,
+        last_activity=max(sessions) if sessions else None,
+        active_sessions=len(sessions),
+        identity=identity.hacienda_label_code(db, user) if user.role == "requester" else None,
+        reported=bool(account_reports.reported_ids(db, [user.id])) if user.role == "requester" else False,
+        availability=status[0] if status else None,
+        return_date=status[1] if status else None,
+        schedule_summary=schedules.summary(schedules.as_dicts(schedule_rows)) if schedule_rows is not None else None,
+        alerts=alerts,
+        recent_changes=[_change_read(row) for row in changes],
+    )
 
 
 @router.get("/admin/health")

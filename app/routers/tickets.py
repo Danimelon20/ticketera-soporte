@@ -9,7 +9,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import config, hacienda
 from ..notifications import STATUS_LABELS, notify_followers
-from .. import account_reports, alerts, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav
+from .. import account_reports, alerts, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav, portal
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -46,10 +46,12 @@ def hides_personal_data(ticket: models.Ticket, current_user) -> bool:
     return current_user.role == "technician" and ticket.assigned_to != current_user.id
 
 
-def ticket_read(ticket: models.Ticket, current_user) -> TicketRead:
+def ticket_read(ticket: models.Ticket, current_user, last_activity_at=None) -> TicketRead:
     # En la base queda el texto original; solo se enmascara la respuesta
     data = TicketRead.model_validate(ticket)
     data.assigned_name = person_name(ticket.assigned_user) if ticket.assigned_user else None
+    data.progress_step = portal.progress_step(ticket)
+    data.last_activity_at = last_activity_at or ticket.updated_at
     if hides_personal_data(ticket, current_user):
         data.description = _redact(data.description)
     return data
@@ -186,7 +188,9 @@ def list_tickets(
         )
 
     query = query.order_by(models.Ticket.created_at.desc())
-    return [ticket_read(t, current_user) for t in query.all()]
+    tickets = query.all()
+    activity = portal.last_activity(db, tickets)
+    return [ticket_read(t, current_user, activity[t.id]) for t in tickets]
 
 
 # exclude_unset: el solicitante no recibe la clave ai_analysis
@@ -250,7 +254,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
             extra["requester_flags"] = flags
         extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
     return TicketDetail(
-        **ticket_read(db_ticket, current_user).model_dump(),
+        **ticket_read(db_ticket, current_user, portal.last_activity(db, [db_ticket])[db_ticket.id]).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
         comments=[comment_read(c, db_ticket, current_user, c.id in internal) for c in comments],
         contact_phone=contact_phone,

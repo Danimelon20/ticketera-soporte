@@ -90,6 +90,15 @@ def _naive(value: datetime) -> datetime:
     return value.replace(tzinfo=None) if value.tzinfo else value
 
 
+def session_expired(created_at: datetime, last_used: datetime, now: datetime) -> bool:
+    """Sesión vencida por tiempo máximo o por inactividad (fechas en UTC sin zona)."""
+    created_at = _naive(created_at)
+    return (
+        now - created_at > timedelta(hours=config.SESSION_MAX_HOURS)
+        or now - _naive(last_used) > timedelta(minutes=config.SESSION_IDLE_MINUTES)
+    )
+
+
 def get_current_session(
     authorization: str | None = Header(default=None),
     db: DBSession = Depends(get_db)
@@ -104,10 +113,7 @@ def get_current_session(
     activity = db.query(models.SessionActivity).filter(models.SessionActivity.session_id == db_session.id).first()
     created_at = _naive(db_session.created_at)
     last_used = activity.last_used_at if activity else created_at
-    if (
-        now - created_at > timedelta(hours=config.SESSION_MAX_HOURS)
-        or now - last_used > timedelta(minutes=config.SESSION_IDLE_MINUTES)
-    ):
+    if session_expired(created_at, last_used, now):
         db.query(models.SessionActivity).filter(models.SessionActivity.session_id == db_session.id).delete()
         db.delete(db_session)
         db.commit()

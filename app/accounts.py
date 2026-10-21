@@ -20,6 +20,7 @@ PERMISSIONS = {
         "unlock": ("admin", "coordinator", "technician", "requester"),
         "availability": ("technician",),
         "schedule": ("technician",),
+        "sessions": ("coordinator", "technician", "requester"),
     },
     "coordinator": {
         "active": ("technician", "requester"),
@@ -27,6 +28,7 @@ PERMISSIONS = {
         "unlock": ("technician", "requester"),
         "availability": ("technician",),
         "schedule": ("technician",),
+        "sessions": ("technician", "requester"),
     },
 }
 

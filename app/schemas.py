@@ -253,6 +253,10 @@ class TicketRead(BaseModel):
     # Nombre de quien lo atiende: el solicitante no tiene acceso a la lista de cuentas
     assigned_name: Optional[str] = None
     source: str = "web"
+    # Avance para el portal: 1 Recibida, 2 Asignada, 3 En atención, 4 Resuelta
+    progress_step: int = 1
+    # Último cambio o comentario público
+    last_activity_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -610,3 +614,46 @@ class SuggestionRead(BaseModel):
     user_id: int
     name: str
     load: int
+
+
+class AdminAccountRow(BaseModel):
+    """Fila de Admin › Cuentas: correo siempre enmascarado, sin teléfono ni cédula."""
+    kind: Literal["user", "invitation"]
+    id: int
+    name: str
+    email: str
+    role: str
+    state: Literal["active", "locked", "inactive", "vacation", "away", "invited"]
+    # Última actividad en una sesión abierta (no es el último inicio de sesión)
+    last_activity: Optional[datetime] = None
+    identity: Optional[str] = None
+    invitation_hours_left: Optional[int] = None
+
+
+class AdminAccountAlerts(BaseModel):
+    pending_role_request_id: Optional[int] = None
+    pending_role: Optional[str] = None
+    pending_role_by: Optional[str] = None
+    locked_until: Optional[datetime] = None
+    open_reports: int = 0
+
+
+class AdminAccountDetail(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+    state: str
+    is_active: bool
+    phone: Optional[str] = None
+    id_number: Optional[str] = None
+    created_at: datetime
+    last_activity: Optional[datetime] = None
+    active_sessions: int = 0
+    identity: Optional[str] = None
+    reported: bool = False
+    availability: Optional[str] = None
+    return_date: Optional[date] = None
+    schedule_summary: Optional[str] = None
+    alerts: AdminAccountAlerts
+    recent_changes: list[AccountChangeRead] = []
