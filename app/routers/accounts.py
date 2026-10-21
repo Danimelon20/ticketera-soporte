@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import accounts, audit, availability, config, schedules, hacienda, identity, mailer, models, throttle
 from ..schemas import (
-    AccountRequestCreate, AccountRequestRead, AvailabilityUpdate, RejectRequest, ScheduleUpdate, SignupStarted,
+    AccountRequestCreate, AccountRequestRead, AvailabilityPeriodCreate, AvailabilityPeriodRead, RejectRequest,
+    ScheduleUpdate, SignupStarted,
 )
 from ..security import get_current_user, mask_email, unusable_password_hash
 from ..validators import mask_last4, normalize_id_number
@@ -73,14 +74,28 @@ def reset_access(user_id: int, db: Session = Depends(get_db), current_user: mode
     return SignupStarted(email_hint=mask_email(user.email))
 
 
-@router.put("/accounts/{user_id}/availability", status_code=status.HTTP_204_NO_CONTENT)
-def change_availability(
-    user_id: int, data: AvailabilityUpdate, db: Session = Depends(get_db),
+# Vacaciones e incapacidades de otra persona (la disponibilidad en sí es automática)
+@router.post("/accounts/{user_id}/availability-periods", response_model=AvailabilityPeriodRead,
+             status_code=status.HTTP_201_CREATED)
+def add_period(
+    user_id: int, data: AvailabilityPeriodCreate, db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     user = _target(db, user_id)
     accounts.check_can_manage(current_user, user, "availability")
-    availability.set_availability(db, current_user, user, data.status, data.return_date)
+    period = availability.add_period(db, current_user, user, data.kind, data.start_date, data.end_date)
+    db.commit()
+    return period
+
+
+@router.delete("/accounts/{user_id}/availability-periods/{period_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_period(
+    user_id: int, period_id: int, db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    user = _target(db, user_id)
+    accounts.check_can_manage(current_user, user, "availability")
+    availability.remove_period(db, current_user, user, period_id)
     db.commit()
     return None
 

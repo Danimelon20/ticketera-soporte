@@ -23,6 +23,7 @@ def _clean():
         db.query(models.TicketAutoAssignment).delete()
         db.query(models.TechnicianSchedule).delete()
         db.query(models.TechnicianAvailability).delete()
+        db.query(models.AvailabilityPeriod).delete()
         db.commit()
     finally:
         db.close()
@@ -49,8 +50,9 @@ def _tech(make_user, name="Técnico", days=WEEKDAYS, status=None, active=True):
             db.add(models.TechnicianSchedule(
                 user_id=user["id"], weekday=day["weekday"], start_time=day["start"], end_time=day["end"],
             ))
-        if status:
-            db.add(models.TechnicianAvailability(user_id=user["id"], status=status, updated_at=MONDAY_7AM))
+        if status in ("vacation", "incapacity"):
+            db.add(models.AvailabilityPeriod(user_id=user["id"], kind=status, start_date=date(2031, 3, 9),
+                                             end_date=date(2031, 3, 14), created_at=MONDAY_7AM))
         db.get(models.User, user["id"]).is_active = active
         db.commit()
     finally:
@@ -214,7 +216,7 @@ def test_tie_goes_to_oldest_automatic_assignment(make_user):
 def test_excluded_technicians(make_user):
     requester = make_user("requester")
     _tech(make_user, "Vacaciones", status="vacation")
-    _tech(make_user, "Ausente", status="away")
+    _tech(make_user, "Incapacidad", status="incapacity")
     _tech(make_user, "Sin horario", days=[])
     _tech(make_user, "Inactivo", active=False)
     _tech(make_user, "Solo fines de semana", days=[{"weekday": 5, "start": "08:00", "end": "17:00"}])

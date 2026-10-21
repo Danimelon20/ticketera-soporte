@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import audit, availability, mailer, models, throttle
-from ..schemas import AvailabilityUpdate, CodeRequest, EmailChangeRequest, MeRead, PasswordChange, PhoneUpdate, SignupStarted
+from ..schemas import AvailabilityPeriodCreate, CodeRequest, EmailChangeRequest, MeRead, PasswordChange, PhoneUpdate, SignupStarted
 from ..security import (
     generate_login_code, get_current_session, get_current_user, hash_code, hash_password,
     mask_email, password_min, verify_password,
@@ -57,13 +57,26 @@ def change_password(
     return None
 
 
-@router.put("/availability", response_model=MeRead)
-def change_own_availability(
-    data: AvailabilityUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+# La disponibilidad es automática: aquí solo se registran o quitan vacaciones e incapacidades propias
+@router.post("/availability-periods", response_model=MeRead, status_code=status.HTTP_201_CREATED)
+def add_own_period(
+    data: AvailabilityPeriodCreate, db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
-    if current_user.role != "technician":
-        raise HTTPException(status_code=403, detail=availability.ONLY_TECHNICIANS)
-    availability.set_availability(db, current_user, current_user, data.status, data.return_date)
+    if current_user.role not in availability.ROLES:
+        raise HTTPException(status_code=403, detail=availability.NOT_STAFF)
+    availability.add_period(db, current_user, current_user, data.kind, data.start_date, data.end_date)
+    db.commit()
+    return me_read(db, current_user)
+
+
+@router.delete("/availability-periods/{period_id}", response_model=MeRead)
+def remove_own_period(
+    period_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user),
+):
+    if current_user.role not in availability.ROLES:
+        raise HTTPException(status_code=403, detail=availability.NOT_STAFF)
+    availability.remove_period(db, current_user, current_user, period_id)
     db.commit()
     return me_read(db, current_user)
 

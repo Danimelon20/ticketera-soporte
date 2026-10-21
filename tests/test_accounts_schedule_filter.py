@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from app import models
+from app import availability, models
 from app.database import SessionLocal
 
 MONDAY = 0
@@ -74,8 +74,10 @@ def test_away_staff_still_listed_with_state(make_user, client):
     _schedule(technician["id"], "08:00", "17:00")
     db = SessionLocal()
     try:
-        db.add(models.TechnicianAvailability(user_id=technician["id"], status="vacation",
-                                             updated_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        today = availability._local_day(now)
+        db.add(models.AvailabilityPeriod(user_id=technician["id"], kind="vacation", start_date=today,
+                                         end_date=today + timedelta(days=5), created_at=now))
         db.commit()
     finally:
         db.close()

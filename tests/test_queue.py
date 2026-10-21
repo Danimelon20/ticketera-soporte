@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -122,7 +122,8 @@ def test_assignee_notes(make_user):
     db = SessionLocal()
     try:
         db.add(models.TechnicianSchedule(user_id=technician["id"], weekday=0, start_time="08:00", end_time="12:00"))
-        db.add(models.TechnicianAvailability(user_id=away["id"], status="vacation", updated_at=MONDAY_8AM))
+        db.add(models.AvailabilityPeriod(user_id=away["id"], kind="vacation", start_date=date(2031, 4, 10),
+                                         end_date=date(2031, 4, 18), created_at=MONDAY_8AM))
         db.commit()
     finally:
         db.close()

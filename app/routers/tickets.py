@@ -35,8 +35,12 @@ def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Tick
 
 
 def unavailable_message(user: models.User, status: str, return_date) -> str:
-    label = availability.LABELS.get(status, status).lower()
-    state = "está de vacaciones" if status == "vacation" else f"está {label}"
+    states = {
+        "vacation": "está de vacaciones",
+        "incapacity": "tiene una incapacidad",
+        "away": "está fuera de su horario",
+    }
+    state = states.get(status, f"está {availability.LABELS.get(status, status).lower()}")
     back = f" (regresa el {return_date.strftime('%d/%m/%Y')})" if return_date else ""
     return f"{person_name(user)} {state}{back}. ¿Asignar de todas formas?"
 

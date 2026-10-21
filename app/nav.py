@@ -153,9 +153,10 @@ def system_status(db: Session, now: datetime | None = None) -> dict:
 
 
 def _assignee_note(ticket: models.Ticket, statuses: dict, shifts: dict, now: datetime) -> str | None:
-    """Aviso sobre el responsable (técnico): de vacaciones o ausente, o el ticket vence después de su turno de hoy."""
+    """Aviso sobre el responsable: de vacaciones, con incapacidad o ausente (fuera de su horario),
+    o el ticket vence después de su turno de hoy."""
     user = ticket.assigned_user
-    if user is None or user.role != "technician" or ticket.status not in OPEN_STATUSES:
+    if user is None or user.role not in availability.ROLES or ticket.status not in OPEN_STATUSES:
         return None
     status = statuses.get(user.id, ("available", None))[0]
     if status != "available":
@@ -245,9 +246,9 @@ def queue(
     creator_ids = list({t.created_by for t in tickets})
     creators = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(creator_ids)).all()} if creator_ids else {}
     reported = account_reports.reported_ids(db, creator_ids)
-    technician_ids = list({t.assigned_to for t in tickets if t.assigned_user and t.assigned_user.role == "technician"})
-    statuses = availability.statuses_for(db, technician_ids)
-    shifts = schedules.for_users(db, technician_ids)
+    staff_ids = list({t.assigned_to for t in tickets if t.assigned_user and t.assigned_user.role in availability.ROLES})
+    statuses = availability.statuses_for(db, staff_ids, now)
+    shifts = schedules.for_users(db, staff_ids)
 
     items = []
     for ticket, state, percent, ticket_level in page_rows:
@@ -280,10 +281,10 @@ def suggestion(db: Session, ticket: models.Ticket, now: datetime | None = None) 
     """
     if ticket.status not in OPEN_STATUSES:
         return None
-    current = ticket.assigned_user
-    if current is not None and availability.is_available(db, current):
-        return None
     now = now or _now()
+    current = ticket.assigned_user
+    if current is not None and availability.is_available(db, current, now):
+        return None
     user = auto_assign.choose(db, now)
     if user is None or user.id == ticket.assigned_to:
         return None

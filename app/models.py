@@ -391,7 +391,7 @@ ACCOUNT_CHANGE_ACTIONS = (
     "role_changed", "account_activated", "account_deactivated", "invitation_sent", "invitation_used",
     "login_locked", "password_reset", "access_reset_sent", "access_reset_forced", "login_unlocked", "tickets_released",
     "request_created", "request_approved", "request_rejected",
-    "availability_changed", "report_created", "report_confirmed", "report_dismissed",
+    "availability_changed", "availability_period_added", "availability_period_removed", "report_created", "report_confirmed", "report_dismissed",
     "schedule_changed", "sessions_closed", "invitation_cancelled",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
@@ -473,11 +473,30 @@ class InternalComment(Base):
     comment_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), unique=True, nullable=False)
 
 
-AVAILABILITY_STATUSES = ("available", "vacation", "away")
+# Disponible y Ausente salen del horario; Vacaciones e Incapacidad, de un periodo registrado (AvailabilityPeriod)
+AVAILABILITY_STATUSES = ("available", "vacation", "incapacity", "away")
+AVAILABILITY_PERIOD_KINDS = ("vacation", "incapacity")
+
+
+class AvailabilityPeriod(Base):
+    """Vacaciones o incapacidad de un técnico o coordinador, del primer al último día (inclusive).
+
+    Mientras dure, la persona no está Disponible aunque esté dentro de su horario. Tipo validado en Python.
+    """
+    __tablename__ = "availability_periods"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind = Column(String(20), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False)
 
 
 class TechnicianAvailability(Base):
-    """Disponibilidad de un técnico. Sin fila: Disponible. Estado validado en Python."""
+    """Estado manual anterior (Disponible / Vacaciones / Ausente). Ya no se usa: el estado es automático
+    (availability.statuses_for). La tabla se conserva para no tener que borrar la base de datos."""
     __tablename__ = "technician_availability"
 
     id = Column(Integer, primary_key=True)

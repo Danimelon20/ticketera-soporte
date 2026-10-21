@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from app import models
+from app import availability, models
 from app.database import SessionLocal
 
 
@@ -51,7 +51,9 @@ def test_states_and_filters(make_user, client):
         db.add(models.LoginThrottle(email=email, failures=0, locked_until=_now() + timedelta(minutes=10),
                                     updated_at=_now()))
         db.get(models.User, inactive["id"]).is_active = False
-        db.add(models.TechnicianAvailability(user_id=away["id"], status="away", updated_at=_now()))
+        today = availability._local_day(_now())
+        db.add(models.AvailabilityPeriod(user_id=away["id"], kind="incapacity", start_date=today,
+                                         end_date=today + timedelta(days=2), created_at=_now()))
         db.add(models.StaffInvitation(email=invite_email, name="Persona invitada", role="technician",
                                       code_hash="x", expires_at=_now() + timedelta(hours=10), sent_at=_now(),
                                       created_by=admin["id"]))
@@ -62,7 +64,7 @@ def test_states_and_filters(make_user, client):
     rows = _rows(client, admin, role="technician").json()
     assert _by_id(rows, locked["id"])["state"] == "locked"
     assert _by_id(rows, inactive["id"])["state"] == "inactive"
-    assert _by_id(rows, away["id"])["state"] == "away"
+    assert _by_id(rows, away["id"])["state"] == "incapacity"
     assert _by_id(rows, active["id"])["state"] == "active"
     invited = [r for r in rows if r["kind"] == "invitation" and r["name"] == "Persona invitada"]
     assert len(invited) == 1

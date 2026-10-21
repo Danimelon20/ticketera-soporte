@@ -130,6 +130,22 @@ class ScheduleUpdate(BaseModel):
     days: list[ScheduleDay] = Field(default_factory=list, max_length=7)
 
 
+class AvailabilityPeriodRead(BaseModel):
+    """Vacaciones o incapacidad: del primer al último día (inclusive). Sin motivo: es un dato personal."""
+    id: int
+    kind: str
+    start_date: date
+    end_date: date
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AvailabilityPeriodCreate(BaseModel):
+    kind: Literal["vacation", "incapacity"]
+    start_date: date
+    end_date: date
+
+
 class MeRead(BaseModel):
     id: int
     name: str
@@ -139,11 +155,14 @@ class MeRead(BaseModel):
     id_number: Optional[str] = None
     profile_complete: bool = True
     identity_locked: bool = False
+    # Técnicos y coordinadores: disponibilidad automática (horario y periodos)
     availability: Optional[str] = None
     return_date: Optional[date] = None
-    # Solo técnicos: lo ven, pero lo definen coordinador y admin
+    # Lo ven, pero lo definen coordinador y admin
     schedule: Optional[list[ScheduleDay]] = None
     schedule_summary: Optional[str] = None
+    # Vacaciones e incapacidades vigentes y futuras (las registra la persona o quien gestiona su cuenta)
+    periods: list[AvailabilityPeriodRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -504,9 +523,6 @@ class DraftConfirm(BaseModel):
         return v.strip()
 
 
-class AvailabilityUpdate(BaseModel):
-    status: Literal["available", "vacation", "away"]
-    return_date: Optional[date] = None
 
 
 class AccountReportCreate(BaseModel):
@@ -601,7 +617,7 @@ class QueueItem(BaseModel):
     due_state: Optional[str] = None
     remaining_seconds: Optional[int] = None
     consumed_pct: Optional[int] = None
-    assignee_note: Optional[Literal["vacation", "away", "after_shift"]] = None
+    assignee_note: Optional[Literal["vacation", "incapacity", "away", "after_shift"]] = None
 
 
 class QueuePage(BaseModel):
@@ -625,7 +641,7 @@ class AdminAccountRow(BaseModel):
     name: str
     email: str
     role: str
-    state: Literal["active", "locked", "inactive", "vacation", "away", "invited"]
+    state: Literal["active", "locked", "inactive", "vacation", "incapacity", "away", "invited"]
     # Última actividad en una sesión abierta (no es el último inicio de sesión)
     last_activity: Optional[datetime] = None
     identity: Optional[str] = None
@@ -677,6 +693,7 @@ class TeamMember(BaseModel):
     schedule: Optional[list[ScheduleDay]] = None
     schedule_today: Optional[str] = None
     on_shift: Optional[bool] = None
+    periods: list[AvailabilityPeriodRead] = []
 
 
 class AccountListRow(BaseModel):
@@ -686,7 +703,7 @@ class AccountListRow(BaseModel):
     name: str
     email: str
     role: str
-    state: Literal["active", "locked", "inactive", "vacation", "away", "invited"]
+    state: Literal["active", "locked", "inactive", "vacation", "incapacity", "away", "invited"]
     # Solo clientes
     identity: Optional[str] = None
     reported: bool = False
@@ -734,4 +751,5 @@ class AccountSummary(BaseModel):
     alerts: AdminAccountAlerts
     recent_tickets: list[AccountRecentTicket] = []
     recent_changes: list[AccountChangeRead] = []
+    periods: list[AvailabilityPeriodRead] = []
     actions: list[str] = []

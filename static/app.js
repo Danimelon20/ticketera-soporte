@@ -2812,7 +2812,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('profileIntro').hidden = !required;
         // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario.
         // Qué secciones existen para este rol; applyProfileTab muestra solo las de la pestaña elegida.
-        const technician = currentUser.role === 'technician';
+        const technician = hasAvailability(currentUser);
         const allowed = {
             accountPersonal: isRequester,
             accountStaffProfile: !isRequester,
@@ -2823,7 +2823,7 @@ document.addEventListener('DOMContentLoaded', () => {
             accountPassword: !required,
         };
         Object.entries(allowed).forEach(([id, ok]) => { document.getElementById(id).dataset.allowed = ok ? '1' : ''; });
-        // La disponibilidad y el horario propios solo los tiene el técnico (el servidor no los da a otros roles)
+        // Disponibilidad y horario propios: técnicos y coordinadores (el servidor no los da a otros roles)
         document.getElementById('accountTabTurno').hidden = !technician;
         document.getElementById('accountTabs').hidden = required;
         document.getElementById('accountHome').hidden = required;
@@ -2920,9 +2920,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const accountPhoneSection = document.getElementById('accountPhone');
     const accountAvailabilitySection = document.getElementById('accountAvailability');
     const accountScheduleSection = document.getElementById('accountSchedule');
-    const ownAvailabilityStatus = document.getElementById('ownAvailabilityStatus');
-    const ownAvailabilityReturn = document.getElementById('ownAvailabilityReturn');
-    const ownAvailabilityReturnGroup = document.getElementById('ownAvailabilityReturnGroup');
     const accountEmailSection = document.getElementById('accountEmail');
     const accountPasswordSection = document.getElementById('accountPassword');
     const accountPhoneForm = document.getElementById('accountPhoneForm');
@@ -2954,10 +2951,9 @@ document.addEventListener('DOMContentLoaded', () => {
         accountCurrentEmail.textContent = currentUser.email;
         passwordHint.textContent = `Al menos ${passwordMinimum()} caracteres.`;
         passwordForm.reset();
-        if (currentUser.role === 'technician') {
+        if (hasAvailability(currentUser)) {
             renderOwnSchedule(currentUser.schedule || [], currentUser.schedule_summary);
-            fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
-                currentUser.availability, currentUser.return_date);
+            renderOwnAvailability();
         }
     }
 
@@ -3021,25 +3017,48 @@ document.addEventListener('DOMContentLoaded', () => {
         showSuccess('Teléfono guardado');
     });
 
-    ownAvailabilityStatus.addEventListener('change', () => {
-        syncReturnField(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup);
-    });
+    // ----- Disponibilidad propia: automática; aquí solo se registran vacaciones e incapacidades -----
+    const ownPeriodKind = document.getElementById('ownPeriodKind');
+    const ownPeriodStart = document.getElementById('ownPeriodStart');
+    const ownPeriodEnd = document.getElementById('ownPeriodEnd');
+    const ownPeriods = document.getElementById('ownPeriods');
+
+    function renderOwnAvailability() {
+        document.getElementById('ownAvailabilityNow').textContent =
+            availabilityNowText(currentUser.availability, currentUser.return_date);
+        renderPeriodList(ownPeriods, currentUser.periods || []);
+        preparePeriodDates(ownPeriodStart, ownPeriodEnd);
+    }
 
     document.getElementById('accountAvailabilityForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         hideError();
         try {
-            currentUser = await apiFetch('/account/availability', {
-                method: 'PUT',
+            currentUser = await apiFetch('/account/availability-periods', {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(availabilityPayload(ownAvailabilityStatus, ownAvailabilityReturn))
+                body: JSON.stringify(periodPayload(ownPeriodKind, ownPeriodStart, ownPeriodEnd))
             });
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
-        fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
-            currentUser.availability, currentUser.return_date);
-        showSuccess('Disponibilidad guardada');
+        document.getElementById('accountAvailabilityForm').reset();
+        renderOwnAvailability();
+        showSuccess('Periodo registrado');
+    });
+
+    ownPeriods.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-period-id]');
+        if (!button || !confirm('¿Quitar este periodo? Su disponibilidad volverá a depender de su horario.')) return;
+        button.disabled = true;
+        try {
+            currentUser = await apiFetch(`/account/availability-periods/${button.dataset.periodId}`, { method: 'DELETE' });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        renderOwnAvailability();
+        showSuccess('Periodo quitado');
     });
 
     emailChangeForm.addEventListener('submit', async (e) => {
@@ -3639,7 +3658,7 @@ document.addEventListener('DOMContentLoaded', () => {
             active: ['coordinator', 'technician', 'requester'],
             reset: ['coordinator', 'technician'],
             unlock: ['coordinator', 'technician', 'requester'],
-            availability: ['technician'],
+            availability: ['technician', 'coordinator'],
             schedule: ['technician', 'coordinator'],
             sessions: ['coordinator', 'technician', 'requester'],
             role: ['coordinator', 'technician', 'requester']
@@ -3680,10 +3699,7 @@ document.addEventListener('DOMContentLoaded', () => {
             buttons.push(button);
         }
         if (canManage(user, 'availability')) {
-            const button = makeActionButton('availability', 'Cambiar disponibilidad');
-            button.dataset.availability = user.availability || 'available';
-            button.dataset.returnDate = user.return_date || '';
-            buttons.push(button);
+            buttons.push(makeActionButton('availability', 'Vacaciones e incapacidad'));
         }
         // Solo cuentas de solicitante; el servidor también lo revisa
         if (user.role === 'requester') buttons.push(makeActionButton('report', 'Reportar cuenta'));
@@ -3703,7 +3719,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = button.closest('[data-user-id]');
         const name = row.dataset.userName;
         const action = button.dataset.action;
-        if (action === 'availability') return openAvailabilityDialog(row.dataset.userId, name, button.dataset);
+        if (action === 'availability') return openAvailabilityDialog(row.dataset.userId, name);
         if (action === 'schedule') return openScheduleDialog(row.dataset.userId, name, JSON.parse(button.dataset.schedule));
         if (action === 'report') return openReportDialog(row.dataset.userId, name);
         if (action === 'deactivate') {
@@ -3733,7 +3749,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----- Disponibilidad, identidad y reportes (solo personal) -----
-    const AVAILABILITY_LABELS = { available: 'Disponible', vacation: 'Vacaciones', away: 'Ausente' };
+    const AVAILABILITY_LABELS = { available: 'Disponible', vacation: 'Vacaciones', incapacity: 'Incapacidad', away: 'Ausente' };
     const IDENTITY_LABELS = {
         match: 'Verificado', mismatch: 'No coincide', not_found: 'No encontrado', unverified: 'Sin verificar'
     };
@@ -3787,22 +3803,55 @@ document.addEventListener('DOMContentLoaded', () => {
         return [];
     }
 
-    function syncReturnField(statusSelect, dateInput, group) {
-        const away = statusSelect.value !== 'available';
-        group.hidden = !away;
-        if (!away) dateInput.value = '';
-        dateInput.min = localToday();
+    // ----- Disponibilidad automática (técnicos y coordinadores) -----
+    const AVAILABILITY_ROLES = ['technician', 'coordinator'];
+    const PERIOD_KINDS = { vacation: 'Vacaciones', incapacity: 'Incapacidad' };
+
+    function hasAvailability(user) {
+        return Boolean(user && AVAILABILITY_ROLES.includes(user.role));
     }
 
-    function fillAvailabilityFields(statusSelect, dateInput, group, status, returnDate) {
-        statusSelect.value = status || 'available';
-        dateInput.value = returnDate || '';
-        syncReturnField(statusSelect, dateInput, group);
+    // "Disponible ahora", "Ausente ahora: fuera de su horario", "De vacaciones · regresa el 03/11/2026"
+    function availabilityNowText(status, returnDate) {
+        const back = returnDate ? ` · regresa el ${formatPlainDate(returnDate)}` : '';
+        if (status === 'vacation') return `De vacaciones${back}`;
+        if (status === 'incapacity') return `Con incapacidad${back}`;
+        if (status === 'away') return 'Ausente ahora: fuera de su horario';
+        return 'Disponible ahora';
     }
 
-    function availabilityPayload(statusSelect, dateInput) {
-        const status = statusSelect.value;
-        return { status, return_date: status !== 'available' && dateInput.value ? dateInput.value : null };
+    function periodText(period) {
+        return `${PERIOD_KINDS[period.kind] || period.kind} · del ${formatPlainDate(period.start_date)} al ${formatPlainDate(period.end_date)}`;
+    }
+
+    // Lista de periodos vigentes y futuros, cada uno con "Quitar" (data-period-id)
+    function renderPeriodList(list, periods) {
+        list.replaceChildren();
+        if (!periods.length) {
+            list.appendChild(makeEl('li', 'periods-empty', 'No hay vacaciones ni incapacidades registradas.'));
+            return;
+        }
+        const today = localToday();
+        periods.forEach(period => {
+            const li = makeEl('li', 'period-item');
+            li.appendChild(makeEl('span', 'period-text', periodText(period)));
+            if (period.start_date <= today) li.appendChild(makeEl('span', 'ui-tag is-warn', 'En curso'));
+            const remove = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Quitar');
+            remove.type = 'button';
+            remove.dataset.periodId = String(period.id);
+            remove.setAttribute('aria-label', `Quitar ${periodText(period)}`);
+            li.appendChild(remove);
+            list.appendChild(li);
+        });
+    }
+
+    function preparePeriodDates(startInput, endInput) {
+        startInput.min = localToday();
+        endInput.min = localToday();
+    }
+
+    function periodPayload(kindSelect, startInput, endInput) {
+        return { kind: kindSelect.value, start_date: startInput.value, end_date: endInput.value };
     }
 
     // Asignar: si el técnico no está disponible, el servidor responde 409 y se pide confirmación
@@ -3996,66 +4045,103 @@ document.addEventListener('DOMContentLoaded', () => {
         showSuccess('Horario guardado');
     });
 
-    // Diálogo de disponibilidad (coordinador y admin sobre técnicos)
+    // Diálogo de vacaciones e incapacidades de otra persona (coordinador sobre técnicos; admin también coordinadores)
     const availabilityDialog = document.getElementById('availabilityDialog');
     const availabilityForm = document.getElementById('availabilityForm');
-    const availabilityStatus = document.getElementById('availabilityStatus');
-    const availabilityReturn = document.getElementById('availabilityReturn');
-    const availabilityReturnGroup = document.getElementById('availabilityReturnGroup');
+    const availabilityKind = document.getElementById('availabilityKind');
+    const availabilityStart = document.getElementById('availabilityStart');
+    const availabilityEnd = document.getElementById('availabilityEnd');
+    const availabilityPeriods = document.getElementById('availabilityPeriods');
     const availabilityError = document.getElementById('availabilityError');
     let availabilityUserId = null;
     let availabilityDone = null;
+    let availabilityChanged = false;
 
-    function openAvailabilityDialog(userId, name, current) {
+    async function loadAvailabilityDialog() {
+        let account;
+        try {
+            account = await apiFetch(`/accounts/${availabilityUserId}`, { silent: true });
+        } catch (err) {
+            availabilityError.textContent = err.message;
+            availabilityError.hidden = false;
+            return;
+        }
+        document.getElementById('availabilityNow').textContent = availabilityNowText(account.availability, account.return_date);
+        renderPeriodList(availabilityPeriods, account.periods || []);
+    }
+
+    function openAvailabilityDialog(userId, name) {
         return new Promise(resolve => {
             availabilityUserId = userId;
             availabilityDone = resolve;
+            availabilityChanged = false;
             document.getElementById('availabilityTarget').textContent = name;
-            fillAvailabilityFields(availabilityStatus, availabilityReturn, availabilityReturnGroup,
-                current.availability, current.returnDate);
+            document.getElementById('availabilityNow').textContent = '';
+            availabilityPeriods.replaceChildren();
+            availabilityForm.reset();
+            preparePeriodDates(availabilityStart, availabilityEnd);
             availabilityError.hidden = true;
             availabilityDialog.showModal();
-            availabilityStatus.focus();
+            availabilityKind.focus();
+            loadAvailabilityDialog();
         });
     }
 
-    function closeAvailabilityDialog(done) {
+    function closeAvailabilityDialog() {
         if (availabilityDialog.open) availabilityDialog.close();
         const resolve = availabilityDone;
         availabilityDone = null;
-        if (resolve) resolve(done);
+        if (resolve) resolve(availabilityChanged);
     }
 
-    availabilityStatus.addEventListener('change', () => {
-        syncReturnField(availabilityStatus, availabilityReturn, availabilityReturnGroup);
-    });
-    document.getElementById('availabilityCancel').addEventListener('click', () => closeAvailabilityDialog(false));
+    document.getElementById('availabilityCancel').addEventListener('click', closeAvailabilityDialog);
     availabilityDialog.addEventListener('cancel', (e) => {
         e.preventDefault();
-        closeAvailabilityDialog(false);
+        closeAvailabilityDialog();
     });
     availabilityForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         availabilityError.hidden = true;
         try {
-            await apiFetch(`/accounts/${availabilityUserId}/availability`, {
-                method: 'PUT',
+            await apiFetch(`/accounts/${availabilityUserId}/availability-periods`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(availabilityPayload(availabilityStatus, availabilityReturn)),
+                body: JSON.stringify(periodPayload(availabilityKind, availabilityStart, availabilityEnd)),
                 silent: true
             });
         } catch (err) {
             if (err.status === undefined) {
-                closeAvailabilityDialog(false);
+                closeAvailabilityDialog();
                 return;
             }
             availabilityError.textContent = err.message;
             availabilityError.hidden = false;
             return;
         }
-        closeAvailabilityDialog(true);
-        showSuccess('Disponibilidad guardada');
+        availabilityChanged = true;
+        availabilityForm.reset();
+        showSuccess('Periodo registrado');
         loadUsers();
+        loadAvailabilityDialog();
+    });
+    availabilityPeriods.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-period-id]');
+        if (!button || !confirm('¿Quitar este periodo? Su disponibilidad volverá a depender de su horario.')) return;
+        button.disabled = true;
+        availabilityError.hidden = true;
+        try {
+            await apiFetch(`/accounts/${availabilityUserId}/availability-periods/${button.dataset.periodId}`,
+                { method: 'DELETE', silent: true });
+        } catch (err) {
+            button.disabled = false;
+            availabilityError.textContent = err.message;
+            availabilityError.hidden = false;
+            return;
+        }
+        availabilityChanged = true;
+        showSuccess('Periodo quitado');
+        loadUsers();
+        loadAvailabilityDialog();
     });
 
     // Diálogo para reportar una cuenta de solicitante
@@ -4833,6 +4919,9 @@ document.addEventListener('DOMContentLoaded', () => {
         request_rejected: 'Solicitud rechazada',
         sessions_closed: 'Sesiones cerradas',
         invitation_cancelled: 'Invitación cancelada',
+        availability_changed: 'Disponibilidad cambiada',
+        availability_period_added: 'Vacaciones o incapacidad registrada',
+        availability_period_removed: 'Vacaciones o incapacidad quitada',
         server_account_deactivated: 'Cuenta desactivada',
         server_account_activated: 'Cuenta activada',
         server_role_changed: 'Rol cambiado'
@@ -5542,9 +5631,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const navToggle = document.getElementById('navToggle');
     const statusBar = document.getElementById('statusBar');
     const statusLogo = document.getElementById('statusLogo');
-    const topbarAvailability = document.getElementById('topbarAvailability');
-    const shiftBox = document.getElementById('shiftBox');
-    const shiftAvailability = document.getElementById('shiftAvailability');
     const directoryRoleSelect = document.getElementById('directoryRole');
     const ASSIGN_MODE_LABELS = { levels: 'por niveles', count: 'por cantidad' };
     let navPollTimer = null;
@@ -5728,7 +5814,6 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-alert', el.dataset.tone === 'alert' && value > 0);
             el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
         });
-        renderShift();
         renderQueueViews();
         if (!homeView.hidden) renderHome();
     }
@@ -5809,56 +5894,6 @@ document.addEventListener('DOMContentLoaded', () => {
     statusLogo.addEventListener('error', () => { statusLogo.hidden = true; });
 
     // ----- Mi turno y disponibilidad (técnico) -----
-    function minutesUntil(hhmm) {
-        const [h, m] = hhmm.split(':').map(Number);
-        const now = new Date();
-        return h * 60 + m - (now.getHours() * 60 + now.getMinutes());
-    }
-
-    function formatMinutes(total) {
-        const h = Math.floor(total / 60);
-        const m = total % 60;
-        return h > 0 ? `${h} h ${m} min` : `${m} min`;
-    }
-
-    function renderShift() {
-        const isTechnician = currentUser && currentUser.role === 'technician';
-        shiftBox.hidden = !isTechnician;
-        topbarAvailability.hidden = !isTechnician;
-        if (!isTechnician) return;
-        const shift = navCounts.shift;
-        const availability = currentUser.availability || 'available';
-        let text = AVAILABILITY_LABELS[availability] || AVAILABILITY_LABELS.available;
-        if (shift) text += shift.on_shift ? ' · en turno' : ' · fuera de turno';
-        topbarAvailability.textContent = text;
-        topbarAvailability.classList.toggle('is-active', availability === 'available' && Boolean(shift && shift.on_shift));
-        shiftAvailability.value = availability;
-        document.getElementById('shiftToday').textContent = shift && shift.start ? `${shift.start}–${shift.end}` : 'Sin turno hoy';
-        // Hora del navegador: se asume la misma zona que la oficina
-        const left = shift && shift.on_shift && shift.end ? minutesUntil(shift.end) : null;
-        document.getElementById('shiftLeft').textContent = left !== null && left > 0 ? formatMinutes(left) : 'Fuera de turno';
-        document.getElementById('shiftLoad').textContent = shift ? String(shift.load) : '';
-    }
-
-    shiftAvailability.addEventListener('change', async () => {
-        hideError();
-        try {
-            // La fecha de regreso se indica en Mi cuenta; aquí solo el estado
-            currentUser = await apiFetch('/account/availability', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: shiftAvailability.value, return_date: null })
-            });
-        } catch (err) {
-            renderShift(); // apiFetch ya mostró el error; vuelve al valor guardado
-            return;
-        }
-        fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
-            currentUser.availability, currentUser.return_date);
-        renderShift();
-        showSuccess('Disponibilidad guardada');
-    });
-
     // ----- Contadores y barra de estado: cada minuto, solo con la pestaña visible -----
     // No usa apiFetch para no borrar un mensaje de error en pantalla.
     async function silentGet(endpoint) {
@@ -5998,7 +6033,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const queuePageLabel = document.getElementById('queuePage');
     const SOURCE_LABELS = { web: 'Web', email: 'Correo' };
     const ASSIGNEE_NOTES = {
-        vacation: 'De vacaciones', away: 'Ausente', after_shift: 'Vence después del fin de su turno de hoy'
+        vacation: 'De vacaciones', incapacity: 'Con incapacidad', away: 'Fuera de su horario',
+        after_shift: 'Vence después del fin de su turno de hoy'
     };
     // Las mismas transiciones que valida el servidor
     const STATUS_TRANSITIONS = { new: ['in_progress'], in_progress: ['resolved'], resolved: ['closed', 'in_progress'] };
@@ -6621,7 +6657,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const maxLoad = Math.max(1, ...technicians.map(member => member.tickets_assigned_open));
         technicians.forEach(member => {
             const li = makeEl('li', 'home-team-row');
-            const away = member.availability && member.availability !== 'available';
+            // Vacaciones o incapacidad: atenuado. Fuera de turno (Ausente automático) es lo normal fuera de horario
+            const away = member.availability === 'vacation' || member.availability === 'incapacity';
             const avatar = makeEl('span', `owner-avatar home-team-avatar${away ? ' is-away' : ''}`, getInitials(member.name));
             avatar.setAttribute('aria-hidden', 'true');
             const text = makeEl('span', 'home-row-text');
@@ -6629,7 +6666,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let sub;
             if (away) {
                 sub = AVAILABILITY_LABELS[member.availability]
-                    + (member.return_date ? ` hasta ${formatPlainDate(member.return_date)}` : '');
+                    + (member.return_date ? ` · regresa el ${formatPlainDate(member.return_date)}` : '');
             } else if (member.on_shift) {
                 sub = member.schedule_today ? `En turno · ${member.schedule_today}` : 'En turno';
             } else {
@@ -7228,7 +7265,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const accountMenu = document.getElementById('accountMenu');
     const ACCOUNT_STATE_LABELS = {
         active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada',
-        vacation: 'Vacaciones', away: 'Ausente', invited: 'Invitación pendiente'
+        vacation: 'Vacaciones', incapacity: 'Incapacidad', away: 'Ausente', invited: 'Invitación pendiente'
     };
     const ACCOUNT_TYPE_LABELS = {
         requester: 'Cliente', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
@@ -7245,7 +7282,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_MENU_LABELS = {
         'view-tickets': 'Ver sus tickets', report: 'Reportar cuenta', 'review-reports': 'Revisar reportes',
         'request-name': 'Corregir nombre', 'request-id_number': 'Corregir cédula', 'full-data': 'Ver datos completos',
-        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Cambiar disponibilidad',
+        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Vacaciones e incapacidad',
         unlock: 'Desbloquear', 'close-sessions': 'Cerrar sesiones', 'reset-access': 'Forzar restablecimiento',
         deactivate: 'Desactivar', reactivate: 'Reactivar',
         'resend-invitation': 'Reenviar invitación', 'cancel-invitation': 'Cancelar invitación'
@@ -7658,8 +7695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (action === 'schedule') {
             done = await openScheduleDialog(item.id, item.name, item.schedule || []);
         } else if (action === 'availability') {
-            done = await openAvailabilityDialog(item.id, item.name,
-                { availability: item.availability || 'available', returnDate: item.return_date || '' });
+            done = await openAvailabilityDialog(item.id, item.name);
         } else if (action === 'request-name' || action === 'request-id_number') {
             done = await createAccountRequest(entry);
         } else if (action === 'resend-invitation') {
@@ -8092,8 +8128,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentUser.role === 'admin' && user.role === 'admin') return items;
         if (currentUser.role === 'coordinator' && user.role !== 'technician') return items;
         if (canManage(user, 'availability')) {
-            items.push({ action: 'availability', label: 'Cambiar disponibilidad',
-                data: { availability: user.availability || 'available', returnDate: user.return_date || '' } });
+            items.push({ action: 'availability', label: 'Vacaciones e incapacidad' });
         }
         if (canChangeRole(user)) items.push({ action: 'change-role', label: 'Cambiar rol…' });
         if (user.is_active && canManage(user, 'reset')) items.push({ action: 'reset-access', label: 'Forzar restablecimiento' });
@@ -8125,21 +8160,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Vacaciones o ausencia: de hoy en adelante, hasta el día anterior a la fecha de regreso (si la hay)
-    function teamAwayOn(user, date, isPast) {
-        if (!user.availability || user.availability === 'available' || isPast) return false;
-        if (!user.return_date) return true;
-        const [y, m, d] = user.return_date.split('-').map(Number);
-        return date < new Date(y, m - 1, d);
+    // Vacaciones o incapacidad registradas que cubren ese día (los periodos vienen de /team)
+    function teamPeriodOn(user, date) {
+        const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        return (user.periods || []).find(period => period.start_date <= day && day <= period.end_date) || null;
     }
 
     function teamStatus(user) {
         if (!user.is_active) return ['Desactivada', 'is-muted'];
         if (user.login_locked) return ['Bloqueada', 'is-alert'];
-        if (user.availability && user.availability !== 'available') {
-            const label = AVAILABILITY_LABELS[user.availability] || user.availability;
-            return [user.return_date ? `${label} hasta ${formatPlainDate(user.return_date)}` : label, 'is-warn'];
+        if (user.availability === 'vacation' || user.availability === 'incapacity') {
+            const label = AVAILABILITY_LABELS[user.availability];
+            return [user.return_date ? `${label} · regresa el ${formatPlainDate(user.return_date)}` : label, 'is-warn'];
         }
         if (user.role === 'admin') return ['Administrador', 'is-muted'];
+        if (user.availability === 'away') {
+            return [user.schedule_today ? `Ausente · fuera de horario (hoy ${user.schedule_today})` : 'Ausente · sin turno hoy', 'is-muted'];
+        }
         if (user.on_shift) return [user.schedule_today ? `En turno · sale ${user.schedule_today.split('–').pop()}` : 'En turno', 'is-ok'];
         return [user.schedule_today ? `Hoy ${user.schedule_today}` : 'Sin turno hoy', 'is-muted'];
     }
@@ -8197,8 +8234,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 let chip;
                 if (user.role === 'admin') {
                     chip = makeEl('span', 'team-shift is-empty', '—');
-                } else if (teamAwayOn(user, day.date, day.isPast)) {
-                    chip = makeEl('span', 'team-shift is-away', AVAILABILITY_LABELS[user.availability]);
+                } else if (teamPeriodOn(user, day.date)) {
+                    chip = makeEl('span', 'team-shift is-away', PERIOD_KINDS[teamPeriodOn(user, day.date).kind]);
                 } else if (shift) {
                     chip = makeEl('span', `team-shift${user.role === 'coordinator' ? ' is-coordinator' : ''}`,
                         `${shift.start}–${shift.end}`);
@@ -8243,10 +8280,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const menu = teamMenuItems(user);
         const availability = menu.find(item => item.action === 'availability');
         if (availability) {
-            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm account-action', 'Cambiar disponibilidad');
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm account-action', 'Vacaciones e incapacidad');
             button.type = 'button';
             button.dataset.action = 'availability';
-            Object.entries(availability.data).forEach(([key, value]) => { button.dataset[key] = value; });
             actions.appendChild(button);
         }
         // Horario: el coordinador edita el de técnicos; el admin, el de técnicos y coordinadores. Nunca el propio
@@ -8832,7 +8868,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const availability = userAvailabilityMap[userId];
         let confirmUnavailable = false;
         if (availability && availability !== 'available') {
-            const label = { vacation: 'de vacaciones', away: 'ausente' }[availability] || 'no disponible';
+            const label = { vacation: 'de vacaciones', incapacity: 'con incapacidad', away: 'fuera de su horario' }[availability]
+                || 'no disponible';
             if (!confirm(`${name} está ${label}. Las alertas de este ticket irán a los coordinadores. ¿Asignarle el ticket de todos modos?`)) return false;
             confirmUnavailable = true;
         }

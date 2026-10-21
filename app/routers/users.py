@@ -14,7 +14,7 @@ STAFF_ROLES = ("technician", "coordinator", "admin")
 
 
 def _technician_statuses(db: Session, users: list[models.User]) -> dict[int, str]:
-    found = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    found = availability.statuses_for(db, availability.ids_with_status(users))
     return {uid: value[0] for uid, value in found.items()}
 
 

@@ -119,8 +119,10 @@ def test_schedule_is_shown_in_directory_and_me(client, make_user, monkeypatch):
     me = client.get("/api/auth/me", headers=technician["headers"]).json()
     assert me["schedule_summary"] == "Lun–Dom 00:00–23:59"
     assert me["schedule"][0] == {"weekday": 0, "start": "00:00", "end": "23:59"}
-    # Los demás roles no reciben estos campos con datos
-    assert client.get("/api/auth/me", headers=coordinator["headers"]).json()["schedule"] is None
+    # El coordinador también tiene disponibilidad (sin horario: lista vacía); el administrador no
+    assert client.get("/api/auth/me", headers=coordinator["headers"]).json()["schedule"] == []
+    admin = make_user("admin")
+    assert client.get("/api/auth/me", headers=admin["headers"]).json()["schedule"] is None
 
 
 def test_on_shift(monkeypatch):

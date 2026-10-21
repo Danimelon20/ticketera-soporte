@@ -52,10 +52,9 @@ def _directory_rows(db: Session, users: list[models.User]) -> list[DirectoryUser
         .group_by(models.Ticket.assigned_to)
         .all()
     )
-    technician_ids = [u.id for u in users if u.role == "technician"]
-    statuses = availability.statuses_for(db, technician_ids)
-    shifts = schedules.for_users(db, [u.id for u in users if u.role in schedules.SCHEDULE_ROLES])
     now = auto_assign._now()
+    statuses = availability.statuses_for(db, availability.ids_with_status(users), now)
+    shifts = schedules.for_users(db, [u.id for u in users if u.role in schedules.SCHEDULE_ROLES])
     requester_ids = [u.id for u in users if u.role == "requester"]
     identities = identity.hacienda_codes(db, requester_ids)
     reported = account_reports.reported_ids(db, requester_ids)
@@ -130,12 +129,13 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
     order = {role: i for i, role in enumerate(TEAM_ROLES)}
     users = db.query(models.User).filter(models.User.role.in_(TEAM_ROLES)).order_by(models.User.name).all()
     users.sort(key=lambda u: order[u.role])
+    periods = availability.periods_for(db, availability.ids_with_status(users))
     return [
         TeamMember(
             id=row.id, name=row.name or "Sin nombre", email=mask_email(row.email), role=row.role,
             is_active=row.is_active, tickets_assigned_open=row.tickets_assigned_open, login_locked=row.login_locked,
             availability=row.availability, return_date=row.return_date, schedule=row.schedule,
-            schedule_today=row.schedule_today, on_shift=row.on_shift,
+            schedule_today=row.schedule_today, on_shift=row.on_shift, periods=periods.get(row.id, []),
         )
         for row in _directory_rows(db, users)
     ]
@@ -229,7 +229,7 @@ def account_changes(
 
 
 # ----- Admin › Cuentas -----
-ACCOUNT_STATES = ("active", "locked", "inactive", "vacation", "away", "invited")
+ACCOUNT_STATES = ("active", "locked", "inactive", "vacation", "incapacity", "away", "invited")
 RECENT_CHANGES = 10
 
 
@@ -257,7 +257,7 @@ def _account_state(db: Session, user: models.User, statuses: dict) -> str:
     if throttle.is_locked(db, user.email.strip().lower()):
         return "locked"
     status = statuses.get(user.id, ("available", None))[0]
-    return status if status in ("vacation", "away") else "active"
+    return status if status in ("vacation", "incapacity", "away") else "active"
 
 
 @router.get("/admin/accounts", response_model=list[AdminAccountRow])
@@ -290,7 +290,7 @@ def admin_accounts(
         query = query.filter(func.lower(models.User.name).like(term) | func.lower(models.User.email).like(term))
     users = query.order_by(models.User.role, models.User.name).all()
     ids = [u.id for u in users]
-    statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    statuses = availability.statuses_for(db, availability.ids_with_status(users), now)
     identities = identity.hacienda_codes(db, [u.id for u in users if u.role == "requester"])
     sessions = _open_sessions(db, ids, now)
     shifts = schedules.for_users(db, ids) if by_schedule else {}
@@ -343,7 +343,7 @@ def admin_account_detail(user_id: int, db: Session = Depends(get_db), admin=Depe
     if user is None or user.role == "agent":
         raise HTTPException(status_code=404, detail="El usuario no existe")
     now = auto_assign._now()
-    statuses = availability.statuses_for(db, [user.id]) if user.role == "technician" else {}
+    statuses = availability.statuses_for(db, availability.ids_with_status([user]), now)
     sessions = _open_sessions(db, [user.id], now)[user.id]
 
     pending = (
@@ -499,7 +499,7 @@ def account_list(
     users = query.order_by(models.User.role, models.User.name).all()
     ids = [u.id for u in users]
     requester_ids = [u.id for u in users if u.role == "requester"]
-    statuses = availability.statuses_for(db, [u.id for u in users if u.role == "technician"])
+    statuses = availability.statuses_for(db, availability.ids_with_status(users))
     identities = identity.hacienda_codes(db, requester_ids)
     reported = account_reports.reported_ids(db, requester_ids)
     open_counts = _open_tickets(db, users)
@@ -561,7 +561,7 @@ def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.
     if user is None or user.role not in ACCOUNT_SCOPE[viewer.role]:
         raise HTTPException(status_code=404, detail="El usuario no existe")
     now = auto_assign._now()
-    statuses = availability.statuses_for(db, [user.id]) if user.role == "technician" else {}
+    statuses = availability.statuses_for(db, availability.ids_with_status([user]), now)
     state = _account_state(db, user, statuses)
 
     pending = (
@@ -617,6 +617,7 @@ def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.
         availability=status[0] if status else None,
         return_date=status[1] if status else None,
         schedule=schedules.as_dicts(schedule_rows) if schedule_rows is not None else None,
+        periods=availability.periods_for(db, [user.id])[user.id] if user.role in availability.ROLES else [],
         alerts=alerts,
         recent_tickets=recent_tickets,
         recent_changes=recent_changes,

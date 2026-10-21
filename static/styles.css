@@ -4077,3 +4077,13 @@ body.staff-shell.nav-collapsed .nav-search { display: none; }
   .palette { margin-top: 16px; }
   .shortcuts-list { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ----- Disponibilidad automática: periodos de vacaciones e incapacidad ----- */
+.availability-now { margin: 0 0 6px; font-weight: 600; color: var(--ink); }
+.availability-subtitle { margin: 16px 0 8px; font-size: var(--fs-md); font-weight: 600; }
+.periods-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.period-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--bg-side); }
+.period-text { flex: 1 1 200px; overflow-wrap: anywhere; }
+.periods-empty { color: var(--muted); }
+.period-form { margin-top: 4px; }
+#availabilityDialog .periods-list { margin-top: 6px; }

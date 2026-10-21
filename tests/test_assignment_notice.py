@@ -154,6 +154,7 @@ def auto(monkeypatch):
         db.query(models.TicketAutoAssignment).delete()
         db.query(models.TechnicianSchedule).delete()
         db.query(models.TechnicianAvailability).delete()
+        db.query(models.AvailabilityPeriod).delete()
         db.commit()
     finally:
         db.close()

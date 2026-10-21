@@ -48,7 +48,7 @@ def candidates(db: Session, now: datetime) -> list[models.User]:
     by_user = schedules.for_users(db, [u.id for u in technicians])
     return [
         u for u in technicians
-        if by_user[u.id] and availability.is_available(db, u) and schedules.on_shift(by_user[u.id], now)
+        if by_user[u.id] and availability.is_available(db, u, now) and schedules.on_shift(by_user[u.id], now)
     ]
 
 

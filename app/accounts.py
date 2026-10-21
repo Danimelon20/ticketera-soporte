@@ -19,7 +19,8 @@ PERMISSIONS = {
         "active": ("coordinator", "technician", "requester"),
         "reset": ("coordinator", "technician"),
         "unlock": ("coordinator", "technician", "requester"),
-        "availability": ("technician",),
+        # Vacaciones e incapacidades (la disponibilidad en sí es automática)
+        "availability": ("technician", "coordinator"),
         # Horario del coordinador: informativo (la asignación automática solo usa técnicos)
         "schedule": ("technician", "coordinator"),
         "sessions": ("coordinator", "technician", "requester"),

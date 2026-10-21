@@ -508,13 +508,14 @@ def me_read(db: Session, user: models.User) -> MeRead:
 
 
 def _availability_fields(db: Session, user: models.User) -> dict:
-    if user.role != "technician":
+    if user.role not in availability.ROLES:
         return {}
     status_, return_date = availability.get(db, user)
     days = schedules.as_dicts(schedules.get(db, user.id))
     return {
         "availability": status_, "return_date": return_date,
         "schedule": days, "schedule_summary": schedules.summary(days),
+        "periods": availability.periods_for(db, [user.id])[user.id],
     }
 
 
