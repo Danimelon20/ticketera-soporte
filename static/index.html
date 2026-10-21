@@ -7,7 +7,7 @@
     <title>Ticketera de Soporte</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -197,13 +197,16 @@
     </section>
 
 <header class="topbar">
-  <div class="topbar-section topbar-logo">
-    <img src="img/logo-adn.svg" alt="American Data Networks">
+  <button type="button" id="navToggle" class="nav-toggle" aria-label="Abrir menú" aria-controls="sideNav" aria-expanded="false">☰</button>
+  <div class="topbar-brand">
+    <span class="brand-mark" aria-hidden="true">T</span>
+    <span class="brand-name">Mesa de Servicio</span>
   </div>
-  <div class="topbar-section topbar-title">
-    <span class="topbar-app">Ticketera</span>
-    <span class="topbar-sub">Soporte técnico</span>
-  </div>
+  <form id="globalSearchForm" class="global-search" role="search" hidden>
+    <label for="globalSearch" class="sr-only">Buscar tickets, clientes o #número</label>
+    <input type="search" id="globalSearch" placeholder="Buscar tickets, clientes o #número" maxlength="150" autocomplete="off">
+    <ul id="globalSearchResults" class="global-search-results" hidden></ul>
+  </form>
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
@@ -222,10 +225,30 @@
     <span class="topbar-user-text">
       <span class="topbar-user-name" id="currentUserDisplay"></span>
       <span class="topbar-user-role"></span>
+      <span id="topbarAvailability" class="topbar-availability" hidden></span>
     </span>
     <button type="button" id="switchAccount" class="btn-secondary">Cambiar cuenta</button>
   </div>
 </header>
+
+    <aside id="sideNav" class="side-nav" hidden aria-label="Menú">
+        <nav id="sideNavGroups" class="side-nav-groups" aria-label="Vistas"></nav>
+        <section id="shiftBox" class="shift-box" hidden aria-labelledby="shiftTitle">
+            <h2 id="shiftTitle" class="shift-title">Mi turno</h2>
+            <dl class="shift-data">
+                <div><dt>Hoy</dt><dd id="shiftToday"></dd></div>
+                <div><dt>Termina en</dt><dd id="shiftLeft"></dd></div>
+                <div><dt>Carga</dt><dd id="shiftLoad"></dd></div>
+            </dl>
+            <label for="shiftAvailability" class="shift-label">Disponibilidad</label>
+            <select id="shiftAvailability">
+                <option value="available">Disponible</option>
+                <option value="vacation">Vacaciones</option>
+                <option value="away">Ausente</option>
+            </select>
+        </section>
+    </aside>
+    <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
 
     <main style="display: none;">
         <div class="split">
@@ -634,6 +657,14 @@
             <p class="view-note">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
         </section>
     </main>
+
+    <footer id="statusBar" class="status-bar" hidden>
+        <span class="status-item" id="statusEmail"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Correo</span></span>
+        <span class="status-item" id="statusAi"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Análisis IA</span></span>
+        <span class="status-item" id="statusAssign"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Asignación automática</span></span>
+        <span class="status-item" id="statusShift"></span>
+        <img id="statusLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
+    </footer>
 
     <div id="errorMessage" class="error"></div>
     <div id="successMessage" class="success"></div>

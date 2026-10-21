@@ -221,7 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         refreshDraftsBadge();
         refreshReportsBadge();
-        startDraftsPolling();
+        // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
+        setupStaffShell();
         setupChat();
     }
 
@@ -232,6 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loginPortal = null;
         forgotMode = false;
         stopDraftsPolling();
+        teardownStaffShell();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
@@ -4933,6 +4935,429 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(actions);
             tableBody.appendChild(row);
         });
+    }
+
+    // ===== Mesa de servicio: menú lateral, contadores, buscador global y barra de estado =====
+    const STAFF_SHELL_ROLES = ['technician', 'coordinator', 'admin'];
+    const sideNav = document.getElementById('sideNav');
+    const sideNavGroups = document.getElementById('sideNavGroups');
+    const sideNavBackdrop = document.getElementById('sideNavBackdrop');
+    const navToggle = document.getElementById('navToggle');
+    const statusBar = document.getElementById('statusBar');
+    const statusLogo = document.getElementById('statusLogo');
+    const globalSearchForm = document.getElementById('globalSearchForm');
+    const globalSearch = document.getElementById('globalSearch');
+    const globalSearchResults = document.getElementById('globalSearchResults');
+    const topbarAvailability = document.getElementById('topbarAvailability');
+    const shiftBox = document.getElementById('shiftBox');
+    const shiftAvailability = document.getElementById('shiftAvailability');
+    const directoryRoleSelect = document.getElementById('directoryRole');
+    const ASSIGN_MODE_LABELS = { levels: 'por niveles', count: 'por cantidad' };
+    let navPollTimer = null;
+    let navCounts = {};
+    let activeNavId = null;
+    let globalSearchSeq = 0;
+
+    // tone: 'alert' (rojo) o 'warn' (ámbar) cuando el contador es mayor que cero
+    function ticketItem(id, label, count, tone) {
+        return { id, label, count, tone, open: () => showView('tickets') };
+    }
+
+    function scrollToSection(view, elementId) {
+        showView(view);
+        const target = document.getElementById(elementId);
+        if (target) target.scrollIntoView({ block: 'start' });
+    }
+
+    function openDirectory(role) {
+        directoryRoleSelect.value = role;
+        showView('directory');
+    }
+
+    function navGroupsFor(role) {
+        if (role === 'technician') {
+            return [
+                { title: 'Mi trabajo', items: [
+                    ticketItem('mine_open', 'Mis abiertos', 'mine_open'),
+                    ticketItem('mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'),
+                    ticketItem('following', 'Siguiendo', 'following_open'),
+                    ticketItem('mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today'),
+                ] },
+                { title: 'Cola general', items: [
+                    ticketItem('unassigned', 'Sin asignar', 'unassigned', 'warn'),
+                    { id: 'drafts', label: 'Borradores de correo', count: 'drafts_pending', open: () => showView('drafts') },
+                ] },
+                { title: 'Cuenta', items: [{ id: 'profile', label: 'Mi cuenta', open: () => showProfile() }] },
+            ];
+        }
+        const isAdmin = role === 'admin';
+        const groups = [
+            { title: 'Colas', items: [
+                ticketItem('unassigned', 'Sin asignar', 'unassigned', 'warn'),
+                ticketItem('due_soon', 'Por vencer', 'due_soon', 'warn'),
+                ticketItem('overdue', 'Vencidos', 'overdue', 'alert'),
+                ticketItem('open', 'Todos abiertos', 'open'),
+                ticketItem('resolved_today', 'Resueltos hoy', 'resolved_today'),
+            ] },
+            { title: 'Revisión', items: [
+                { id: 'drafts', label: 'Borradores de correo', count: 'drafts_pending', open: () => showView('drafts') },
+                { id: 'reports', label: 'Reportes de cuentas', count: 'reports_open', tone: 'alert', open: () => {
+                    setReportsAccount(null);
+                    showView('reports');
+                } },
+            ] },
+            { title: 'Gestión', items: [
+                // El administrador gestiona el equipo y los clientes desde el directorio
+                { id: 'team', label: 'Equipo y disponibilidad',
+                  open: () => (isAdmin ? openDirectory('technician') : scrollToSection('accounts', 'teamTitle')) },
+                { id: 'schedules', label: 'Horarios',
+                  open: () => (isAdmin ? openDirectory('technician') : scrollToSection('accounts', 'teamTitle')) },
+                { id: 'clients', label: 'Clientes',
+                  open: () => (isAdmin ? openDirectory('requester') : scrollToSection('accounts', 'clientsTitle')) },
+                { id: 'invites', label: 'Invitaciones', count: 'invitations_pending', open: () => navUsers.click() },
+            ] },
+        ];
+        if (isAdmin) {
+            groups.push({ title: 'Administración', items: [
+                { id: 'accounts', label: 'Cuentas', open: () => openDirectory('') },
+                { id: 'approvals', label: 'Aprobaciones', count: 'approvals_pending',
+                  open: () => scrollToSection('admin', 'pendingRequestsList') },
+                { id: 'changes', label: 'Registro de cambios', open: () => scrollToSection('admin', 'changesList') },
+                { id: 'health', label: 'Estado del sistema', open: () => scrollToSection('admin', 'adminTitle') },
+            ] });
+        }
+        groups.push({ title: 'Cuenta', items: [{ id: 'profile', label: 'Mi cuenta', open: () => showProfile() }] });
+        return groups;
+    }
+
+    let navItems = {};
+
+    function renderSideNav() {
+        sideNavGroups.replaceChildren();
+        navItems = {};
+        navGroupsFor(currentUser.role).forEach((group, index) => {
+            const section = document.createElement('section');
+            section.className = 'nav-group';
+            const header = document.createElement('button');
+            header.type = 'button';
+            header.className = 'nav-group-toggle';
+            header.setAttribute('aria-expanded', 'true');
+            header.setAttribute('aria-controls', `navGroup${index}`);
+            header.textContent = group.title;
+            const list = document.createElement('ul');
+            list.id = `navGroup${index}`;
+            list.className = 'nav-group-items';
+            group.items.forEach(item => {
+                navItems[item.id] = item;
+                const li = document.createElement('li');
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'nav-item';
+                button.dataset.navId = item.id;
+                const label = document.createElement('span');
+                label.className = 'nav-item-label';
+                label.textContent = item.label;
+                button.appendChild(label);
+                if (item.count) {
+                    const count = document.createElement('span');
+                    count.className = 'nav-count';
+                    count.dataset.count = item.count;
+                    if (item.tone) count.dataset.tone = item.tone;
+                    button.appendChild(count);
+                }
+                li.appendChild(button);
+                list.appendChild(li);
+            });
+            section.append(header, list);
+            sideNavGroups.appendChild(section);
+        });
+        setSideNavActive(activeNavId);
+        renderNavCounts();
+    }
+
+    function setSideNavActive(id) {
+        activeNavId = id;
+        sideNavGroups.querySelectorAll('.nav-item').forEach(button => {
+            const active = button.dataset.navId === id;
+            button.classList.toggle('active', active);
+            if (active) button.setAttribute('aria-current', 'page');
+            else button.removeAttribute('aria-current');
+        });
+    }
+
+    function renderNavCounts() {
+        sideNavGroups.querySelectorAll('.nav-count').forEach(el => {
+            const value = navCounts[el.dataset.count];
+            el.textContent = typeof value === 'number' ? String(value) : '';
+            el.classList.toggle('is-alert', el.dataset.tone === 'alert' && value > 0);
+            el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
+        });
+        renderShift();
+    }
+
+    function closeSideNav() {
+        document.body.classList.remove('nav-open');
+        navToggle.setAttribute('aria-expanded', 'false');
+        sideNavBackdrop.hidden = true;
+    }
+
+    sideNavGroups.addEventListener('click', (e) => {
+        const toggle = e.target.closest('.nav-group-toggle');
+        if (toggle) {
+            const expanded = toggle.getAttribute('aria-expanded') === 'true';
+            toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+            document.getElementById(toggle.getAttribute('aria-controls')).hidden = expanded;
+            return;
+        }
+        const button = e.target.closest('.nav-item');
+        if (!button) return;
+        const item = navItems[button.dataset.navId];
+        if (!item) return;
+        hideError();
+        setSideNavActive(item.id);
+        item.open();
+        closeSideNav();
+    });
+
+    navToggle.addEventListener('click', () => {
+        const open = !document.body.classList.contains('nav-open');
+        document.body.classList.toggle('nav-open', open);
+        navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        sideNavBackdrop.hidden = !open;
+    });
+    sideNavBackdrop.addEventListener('click', closeSideNav);
+
+    // Sin el logo no se muestra nada (ni el texto alternativo)
+    statusLogo.addEventListener('error', () => { statusLogo.hidden = true; });
+
+    // ----- Mi turno y disponibilidad (técnico) -----
+    function minutesUntil(hhmm) {
+        const [h, m] = hhmm.split(':').map(Number);
+        const now = new Date();
+        return h * 60 + m - (now.getHours() * 60 + now.getMinutes());
+    }
+
+    function formatMinutes(total) {
+        const h = Math.floor(total / 60);
+        const m = total % 60;
+        return h > 0 ? `${h} h ${m} min` : `${m} min`;
+    }
+
+    function renderShift() {
+        const isTechnician = currentUser && currentUser.role === 'technician';
+        shiftBox.hidden = !isTechnician;
+        topbarAvailability.hidden = !isTechnician;
+        if (!isTechnician) return;
+        const shift = navCounts.shift;
+        const availability = currentUser.availability || 'available';
+        let text = AVAILABILITY_LABELS[availability] || AVAILABILITY_LABELS.available;
+        if (shift) text += shift.on_shift ? ' · en turno' : ' · fuera de turno';
+        topbarAvailability.textContent = text;
+        topbarAvailability.classList.toggle('is-active', availability === 'available' && Boolean(shift && shift.on_shift));
+        shiftAvailability.value = availability;
+        document.getElementById('shiftToday').textContent = shift && shift.start ? `${shift.start}–${shift.end}` : 'Sin turno hoy';
+        // Hora del navegador: se asume la misma zona que la oficina
+        const left = shift && shift.on_shift && shift.end ? minutesUntil(shift.end) : null;
+        document.getElementById('shiftLeft').textContent = left !== null && left > 0 ? formatMinutes(left) : 'Fuera de turno';
+        document.getElementById('shiftLoad').textContent = shift ? String(shift.load) : '';
+    }
+
+    shiftAvailability.addEventListener('change', async () => {
+        hideError();
+        try {
+            // La fecha de regreso se indica en Mi cuenta; aquí solo el estado
+            currentUser = await apiFetch('/account/availability', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: shiftAvailability.value, return_date: null })
+            });
+        } catch (err) {
+            renderShift(); // apiFetch ya mostró el error; vuelve al valor guardado
+            return;
+        }
+        fillAvailabilityFields(ownAvailabilityStatus, ownAvailabilityReturn, ownAvailabilityReturnGroup,
+            currentUser.availability, currentUser.return_date);
+        renderShift();
+        showSuccess('Disponibilidad guardada');
+    });
+
+    // ----- Contadores y barra de estado: cada minuto, solo con la pestaña visible -----
+    // No usa apiFetch para no borrar un mensaje de error en pantalla.
+    async function silentGet(endpoint) {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${authToken}` }
+        });
+        if (response.status === 401) {
+            const data = await response.json().catch(() => ({}));
+            handleUnauthorized(data.detail);
+            return null;
+        }
+        return response.ok ? response.json() : null;
+    }
+
+    function setStatusItem(id, active, extra) {
+        const item = document.getElementById(id);
+        item.classList.toggle('is-on', active);
+        item.querySelector('.status-dot').title = active ? 'Activo' : 'Inactivo';
+        const label = item.querySelector('.status-text');
+        const base = { statusEmail: 'Correo', statusAi: 'Análisis IA', statusAssign: 'Asignación automática' }[id];
+        label.textContent = `${base}${extra ? ` (${extra})` : ''}: ${active ? 'activo' : 'inactivo'}`;
+    }
+
+    function renderStatusBar(status) {
+        setStatusItem('statusEmail', status.email);
+        setStatusItem('statusAi', status.ai_analysis);
+        setStatusItem('statusAssign', status.auto_assign, ASSIGN_MODE_LABELS[status.auto_assign_mode]);
+        document.getElementById('statusShift').textContent = `Técnicos en turno: ${status.technicians_on_shift}`;
+    }
+
+    async function pollNavCounts() {
+        if (document.visibilityState !== 'visible' || !authToken || !currentUser) return;
+        if (!STAFF_SHELL_ROLES.includes(currentUser.role)) return;
+        try {
+            const [counts, status] = await Promise.all([silentGet('/nav/counts'), silentGet('/system/status')]);
+            if (counts) {
+                navCounts = counts;
+                renderNavCounts();
+            }
+            if (status) renderStatusBar(status);
+        } catch (err) {
+            // Se reintenta en el siguiente minuto
+        }
+    }
+
+    function stopNavPolling() {
+        if (navPollTimer !== null) {
+            clearInterval(navPollTimer);
+            navPollTimer = null;
+        }
+    }
+
+    function startNavPolling() {
+        stopNavPolling();
+        if (!currentUser || !STAFF_SHELL_ROLES.includes(currentUser.role)) return;
+        pollNavCounts();
+        navPollTimer = setInterval(pollNavCounts, 60000);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && navPollTimer !== null) pollNavCounts();
+    });
+
+    // ----- Buscador global: #número abre el ticket; el texto busca tickets y, con permiso, clientes -----
+    async function openTicketById(ticketId) {
+        showView('tickets');
+        setSideNavActive(null);
+        selectedTicketId = ticketId;
+        activityFilter = 'all';
+        document.querySelector('.split').classList.add('show-detail');
+        try {
+            const ticket = await apiFetch(`/tickets/${ticketId}`);
+            showTicketDetail(ticket);
+        } catch (err) {
+            // apiFetch ya mostró el error (por ejemplo, que no existe)
+            selectedTicketId = null;
+            document.querySelector('.split').classList.remove('show-detail');
+            renderDetailPlaceholder();
+        }
+    }
+
+    function hideGlobalResults() {
+        globalSearchResults.hidden = true;
+        globalSearchResults.replaceChildren();
+    }
+
+    async function searchClients(text) {
+        if (!currentUser || !REPORT_REVIEW_ROLES.includes(currentUser.role)) return;
+        const seq = ++globalSearchSeq;
+        let clients;
+        try {
+            clients = await apiFetch(`/requesters?q=${encodeURIComponent(text)}`, { silent: true });
+        } catch (err) {
+            return;
+        }
+        if (seq !== globalSearchSeq) return;
+        globalSearchResults.replaceChildren();
+        clients.slice(0, 5).forEach(client => {
+            const li = document.createElement('li');
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'global-result';
+            // Solo el nombre: el correo no se muestra en el buscador
+            button.textContent = `Cliente: ${client.name || 'Sin nombre'}`;
+            button.dataset.name = client.name || '';
+            li.appendChild(button);
+            globalSearchResults.appendChild(li);
+        });
+        globalSearchResults.hidden = clients.length === 0;
+    }
+
+    globalSearchForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        hideError();
+        const text = globalSearch.value.trim();
+        hideGlobalResults();
+        const number = text.match(/^#\s*(\d+)$/);
+        if (number) {
+            openTicketById(parseInt(number[1], 10));
+            return;
+        }
+        showView('tickets');
+        setSideNavActive(null);
+        searchInput.value = text;
+        loadTickets(getFilters());
+        if (text) searchClients(text);
+    });
+
+    globalSearchResults.addEventListener('click', (e) => {
+        const button = e.target.closest('.global-result');
+        if (!button) return;
+        const name = button.dataset.name;
+        hideGlobalResults();
+        if (currentUser.role === 'admin') {
+            directoryRoleSelect.value = 'requester';
+            directorySearch.value = name;
+            setSideNavActive('clients');
+            showView('directory');
+        } else {
+            setSideNavActive('clients');
+            scrollToSection('accounts', 'clientsTitle');
+            clientsSearch.value = name;
+            clientsSearch.dispatchEvent(new Event('input'));
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!globalSearchForm.contains(e.target)) hideGlobalResults();
+    });
+
+    function setupStaffShell() {
+        const staff = Boolean(currentUser && STAFF_SHELL_ROLES.includes(currentUser.role));
+        document.body.classList.toggle('staff-shell', staff);
+        sideNav.hidden = !staff;
+        statusBar.hidden = !staff;
+        globalSearchForm.hidden = !staff;
+        navToggle.hidden = !staff;
+        closeSideNav();
+        if (!staff) {
+            stopNavPolling();
+            return;
+        }
+        navCounts = {};
+        activeNavId = currentUser.role === 'technician' ? 'mine_open' : 'open';
+        renderSideNav();
+        startNavPolling();
+    }
+
+    function teardownStaffShell() {
+        stopNavPolling();
+        document.body.classList.remove('staff-shell', 'nav-open');
+        sideNav.hidden = true;
+        statusBar.hidden = true;
+        globalSearchForm.hidden = true;
+        sideNavBackdrop.hidden = true;
+        globalSearch.value = '';
+        hideGlobalResults();
     }
 
     initApp();

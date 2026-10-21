@@ -75,6 +75,18 @@ def on_shift(rows: list[models.TechnicianSchedule], now: datetime) -> bool:
     return any(r.weekday == local.weekday() and r.start_time <= current < r.end_time for r in rows)
 
 
+def today_range(rows: list[models.TechnicianSchedule], now: datetime) -> tuple[str, str] | None:
+    """now en UTC sin zona. Rango ("HH:MM", "HH:MM") del turno de hoy en hora local; None si hoy no trabaja."""
+    local = _local(now)
+    # Mismo criterio que on_shift: un feriado de la oficina es un día sin turno
+    if local.date() in _holidays():
+        return None
+    for r in rows:
+        if r.weekday == local.weekday():
+            return r.start_time, r.end_time
+    return None
+
+
 def _validate(days: list[dict]) -> list[dict]:
     seen = set()
     clean = []

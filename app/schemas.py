@@ -536,3 +536,38 @@ class AccountReportRead(BaseModel):
 
 class AccountReportCount(BaseModel):
     open: int
+
+
+class NavShift(BaseModel):
+    """Turno de hoy del técnico (hora local) y su carga actual."""
+    start: Optional[str] = None
+    end: Optional[str] = None
+    on_shift: bool = False
+    load: int = 0
+
+
+class NavCounts(BaseModel):
+    """Contadores del menú. Cada rol recibe solo sus claves (las demás no se envían)."""
+    unassigned: Optional[int] = None
+    due_soon: Optional[int] = None
+    overdue: Optional[int] = None
+    open: Optional[int] = None
+    resolved_today: Optional[int] = None
+    drafts_pending: Optional[int] = None
+    reports_open: Optional[int] = None
+    invitations_pending: Optional[int] = None
+    approvals_pending: Optional[int] = None
+    mine_open: Optional[int] = None
+    mine_due_soon: Optional[int] = None
+    following_open: Optional[int] = None
+    mine_resolved_today: Optional[int] = None
+    shift: Optional[NavShift] = None
+
+
+class SystemStatus(BaseModel):
+    """Solo activo/inactivo y conteos, nunca valores de configuración."""
+    email: bool
+    ai_analysis: bool
+    auto_assign: bool
+    auto_assign_mode: Optional[Literal["levels", "count"]] = None
+    technicians_on_shift: int

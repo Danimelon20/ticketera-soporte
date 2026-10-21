@@ -24,6 +24,7 @@ from .notifications import STATUS_LABELS, display_name
 CRITICAL = "critical"
 DUE_SOON = "due_soon"
 OVERDUE = "overdue"
+ON_TIME = "on_time"
 RETURN_DATE = "return_date"
 SUBJECT_LABELS = {CRITICAL: "CRÍTICO", DUE_SOON: "Por vencer", OVERDUE: "Vencido"}
 GROUP_LABELS = {CRITICAL: "CRÍTICO", DUE_SOON: "Por vencer", OVERDUE: "Vencidos"}
@@ -197,12 +198,31 @@ def _run_critical(db: Session, now: datetime, staff: list[str]) -> int:
     return silent + _dispatch(db, CRITICAL, alerts, now)
 
 
+def due_state(ticket: models.Ticket, now: datetime) -> tuple[str | None, int | None]:
+    """Estado del vencimiento (overdue, due_soon, on_time o None sin fecha) y % de horas hábiles consumidas.
+
+    Mismo cálculo que las alertas: vencido si la fecha límite ya pasó; por vencer si se consumió
+    ALERT_WARN_PERCENT de las horas hábiles entre la creación y la fecha límite.
+    """
+    due = _due_at(ticket)
+    if due is None:
+        return None, None
+    total = business_hours_between(ticket.created_at, due)
+    used = business_hours_between(ticket.created_at, now) if now > ticket.created_at else 0.0
+    percent = 100 if total <= 0 else min(100, round(used * 100 / total))
+    if due <= now:
+        # Exactamente en la fecha límite no es vencido ni por vencer (como antes)
+        return (OVERDUE if due < now else ON_TIME), 100
+    if total > 0 and used >= total * config.ALERT_WARN_PERCENT / 100:
+        return DUE_SOON, percent
+    return ON_TIME, percent
+
+
 def _run_overdue(db: Session, now: datetime, staff: list[str]) -> int:
     sent_tickets, _ = _sent_ids(db, OVERDUE)
     alerts = []
     for ticket in _open_tickets(db):
-        due = _due_at(ticket)
-        if due is None or due >= now or ticket.id in sent_tickets:
+        if due_state(ticket, now)[0] != OVERDUE or ticket.id in sent_tickets:
             continue
         assignee = _active_assignee(db, ticket)
         to = staff + ([assignee] if assignee and assignee not in staff else [])
@@ -214,12 +234,8 @@ def _run_due_soon(db: Session, now: datetime, staff: list[str]) -> int:
     sent_tickets, _ = _sent_ids(db, DUE_SOON)
     alerts = []
     for ticket in _open_tickets(db):
-        due = _due_at(ticket)
         # Uno ya vencido solo recibe la alerta de vencido
-        if due is None or due <= now or ticket.id in sent_tickets:
-            continue
-        total = business_hours_between(ticket.created_at, due)
-        if total <= 0 or business_hours_between(ticket.created_at, now) < total * config.ALERT_WARN_PERCENT / 100:
+        if due_state(ticket, now)[0] != DUE_SOON or ticket.id in sent_tickets:
             continue
         assignee = _active_assignee(db, ticket)
         alerts.append(_Alert(DUE_SOON, ticket=ticket, to=[assignee] if assignee else staff))
