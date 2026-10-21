@@ -17,7 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const authScreen = document.getElementById('authScreen');
     const topbar = document.querySelector('.topbar');
     const mainContent = document.querySelector('main');
-    const portalChooser = document.getElementById('portalChooser');
     const loginPanel = document.getElementById('loginPanel');
     const signupPanel = document.getElementById('signupPanel');
     const activatePanel = document.getElementById('activatePanel');
@@ -239,6 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
+        setDocumentTitle('Iniciar sesión');
         if (mainContent) mainContent.style.display = 'none';
 
         ticketList.replaceChildren();
@@ -253,13 +253,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Enlace del correo de restablecimiento: #restablecer?portal=staff&correo=...
     const RESET_ROUTE = '#restablecer';
 
-    // Cada opción de inicio de sesión solo deja entrar a sus roles (lo verifica el servidor)
+    // Cada opción de inicio de sesión solo deja entrar a sus roles (lo verifica el servidor).
+    // Son las pestañas Cliente / Personal / Administración de la tarjeta.
     const PORTALS = {
-        admin: { title: 'Administrador', link: null },
-        staff: { title: 'Coordinador / Técnico', link: { href: '#activar-cuenta', text: 'Activar cuenta (invitación)' } },
-        requester: { title: 'Solicitante', link: { href: '#crear-cuenta', text: 'Crear cuenta de cliente' } }
+        admin: { title: 'Administración', link: null },
+        staff: { title: 'Personal', link: { href: '#activar-cuenta', question: '¿Recibió una invitación?', text: 'Activar mi cuenta' } },
+        requester: { title: 'Cliente', link: { href: '#crear-cuenta', question: '¿No tiene cuenta?', text: 'Crear una cuenta' } }
     };
-    const loginTitle = document.getElementById('loginTitle');
+    const LOGIN_PORTAL_KEY = 'ticketeraLoginPortal';
+    const loginTabs = document.getElementById('loginTabs');
+    const loginExtra = document.getElementById('loginExtra');
     const loginExtraLink = document.getElementById('loginExtraLink');
     let loginPortal = null;
     // "Olvidé mi contraseña" de la opción elegida (loginPortal)
@@ -271,8 +274,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const route = AUTH_ROUTES[window.location.hash];
-        const panel = route || (forgotMode && loginPortal ? 'forgot' : (loginPortal ? 'login' : 'chooser'));
-        portalChooser.hidden = panel !== 'chooser';
+        const panel = route || (forgotMode && loginPortal ? 'forgot' : 'login');
+        // Sin opción elegida: la última usada en este navegador, o Personal
+        if (panel === 'login' && !loginPortal) applyPortal(savedLoginPortal());
         loginPanel.hidden = panel !== 'login';
         signupPanel.hidden = panel !== 'signup';
         activatePanel.hidden = panel !== 'activate';
@@ -287,35 +291,70 @@ document.addEventListener('DOMContentLoaded', () => {
         history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
-    function openPortal(portal) {
+    function savedLoginPortal() {
+        try {
+            const saved = localStorage.getItem(LOGIN_PORTAL_KEY);
+            return PORTALS[saved] ? saved : 'staff';
+        } catch (err) {
+            return 'staff';
+        }
+    }
+
+    // Marca la pestaña elegida y ajusta los textos de la tarjeta
+    function applyPortal(portal) {
         const info = PORTALS[portal];
         if (!info) return;
         loginPortal = portal;
-        loginForm.reset();
-        loginTitle.textContent = `Iniciar sesión — ${info.title}`;
-        loginExtraLink.hidden = !info.link;
+        loginTabs.querySelectorAll('[data-portal]').forEach(tab => {
+            const selected = tab.dataset.portal === portal;
+            tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+            tab.tabIndex = selected ? 0 : -1;
+            if (selected) loginForm.setAttribute('aria-labelledby', tab.id);
+        });
+        document.getElementById('loginAdminNotice').hidden = portal !== 'admin';
+        loginExtra.hidden = !info.link;
         if (info.link) {
+            document.getElementById('loginExtraText').textContent = info.link.question;
             loginExtraLink.href = info.link.href;
             loginExtraLink.textContent = info.link.text;
         }
-        clearHash();
-        showAuthPanel();
-        document.getElementById('loginEmail').focus();
+        try {
+            localStorage.setItem(LOGIN_PORTAL_KEY, portal);
+        } catch (err) {
+            // Sin almacenamiento: la próxima vez vuelve a Personal
+        }
     }
 
-    function showPortalChooser() {
-        loginPortal = null;
-        loginForm.reset();
+    function openPortal(portal, focusEmail = true) {
+        if (!PORTALS[portal]) return;
+        applyPortal(portal);
+        // El correo escrito se conserva al cambiar de pestaña; la contraseña no
+        document.getElementById('loginPassword').value = '';
         clearHash();
         showAuthPanel();
+        if (focusEmail) document.getElementById('loginEmail').focus();
     }
 
-    portalChooser.addEventListener('click', (e) => {
-        const button = e.target.closest('[data-portal]');
-        if (button) openPortal(button.dataset.portal);
+    loginTabs.addEventListener('click', (e) => {
+        const tab = e.target.closest('[data-portal]');
+        if (tab) openPortal(tab.dataset.portal, false);
     });
 
-    document.getElementById('backToPortals').addEventListener('click', showPortalChooser);
+    // Flechas izquierda/derecha, Inicio y Fin entre las pestañas
+    loginTabs.addEventListener('keydown', (e) => {
+        const tabs = [...loginTabs.querySelectorAll('[data-portal]')];
+        const index = tabs.indexOf(document.activeElement);
+        if (index === -1) return;
+        let next = null;
+        if (e.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
+        if (e.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
+        if (e.key === 'Home') next = tabs[0];
+        if (e.key === 'End') next = tabs[tabs.length - 1];
+        if (!next) return;
+        e.preventDefault();
+        openPortal(next.dataset.portal, false);
+        next.focus();
+    });
 
     window.addEventListener('hashchange', () => {
         if (currentUser) return;
@@ -1062,19 +1101,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.min(Math.max(value, min), Math.max(min, max));
     }
 
-    // Espacio libre entre la barra superior y la barra de estado (o el pie del portal)
+    // Espacio libre entre la barra superior y la barra de estado (o el pie del portal),
+    // a la derecha de la barra lateral del personal
     function chatBounds() {
         let top = 0;
+        let left = 0;
         let bottom = window.innerHeight;
+        const nav = document.getElementById('sideNav');
+        if (window.innerWidth >= 768 && !nav.hidden && nav.getClientRects().length) left = nav.getBoundingClientRect().right;
         const bar = document.querySelector('.topbar');
         if (bar && bar.getClientRects().length) top = Math.max(0, bar.getBoundingClientRect().bottom);
-        ['statusBar', 'portalFooter'].forEach(id => {
+        ['portalFooter'].forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.hidden && el.getClientRects().length) bottom = Math.min(bottom, el.getBoundingClientRect().top);
         });
         const size = chatToggle.offsetHeight || 56;
         return {
-            top, bottom, size,
+            top, bottom, left, size,
             minTop: top + FAB_MARGIN,
             maxTop: bottom - size - FAB_MARGIN,
         };
@@ -1106,7 +1149,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chatToggle.classList.toggle('is-settling', Boolean(animate));
         chatToggle.style.right = 'auto';
         chatToggle.style.bottom = 'auto';
-        chatToggle.style.left = `${pos.side === 'left' ? FAB_MARGIN : window.innerWidth - bounds.size - FAB_MARGIN}px`;
+        chatToggle.style.left = `${pos.side === 'left' ? bounds.left + FAB_MARGIN : window.innerWidth - bounds.size - FAB_MARGIN}px`;
         chatToggle.style.top = `${clamp(pos.top, bounds.minTop, bounds.maxTop)}px`;
         positionChatPanel();
     }
@@ -1129,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const top = fab.bottom - height;
         chatPanel.style.right = 'auto';
         chatPanel.style.bottom = 'auto';
-        chatPanel.style.left = `${clamp(left, FAB_MARGIN, window.innerWidth - width - FAB_MARGIN)}px`;
+        chatPanel.style.left = `${clamp(left, bounds.left + FAB_MARGIN, window.innerWidth - width - FAB_MARGIN)}px`;
         chatPanel.style.top = `${clamp(top, bounds.top + FAB_MARGIN, bounds.bottom - height - FAB_MARGIN)}px`;
     }
 
@@ -1168,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chatToggle.classList.remove('is-settling');
         chatToggle.classList.add('is-dragging');
         const bounds = chatBounds();
-        chatToggle.style.left = `${clamp(e.clientX - fabDrag.offsetX, 0, window.innerWidth - bounds.size)}px`;
+        chatToggle.style.left = `${clamp(e.clientX - fabDrag.offsetX, bounds.left, window.innerWidth - bounds.size)}px`;
         chatToggle.style.top = `${clamp(e.clientY - fabDrag.offsetY, bounds.minTop, bounds.maxTop)}px`;
         positionChatPanel();
     });
@@ -1568,6 +1611,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderDetailPlaceholder() {
+        // Si el ticket abierto ya no está disponible, la página del ticket vuelve a la lista
+        if (document.body.classList.contains('ticket-open')) {
+            exitTicketPage();
+            return;
+        }
         detailContent.replaceChildren();
         const div = document.createElement('div');
         div.className = 'detail-placeholder';
@@ -2668,6 +2716,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const navReports = document.getElementById('navReports');
     const reportsView = document.getElementById('reportsView');
     const adminAccountsView = document.getElementById('adminAccountsView');
+    const homeView = document.getElementById('homeView');
+
+    // Título de cada pantalla en la pestaña del navegador
+    const SCREEN_TITLES = {
+        home: 'Inicio', directory: 'Directorio', drafts: 'Borradores de correo', profile: 'Mi cuenta',
+        reports: 'Reportes de cuentas', adminAccounts: 'Cuentas', accounts: 'Cuentas', admin: 'Administración',
+    };
+
+    function setDocumentTitle(text) {
+        document.title = text ? `${text} · Soporte` : 'Soporte · American Data';
+    }
 
     function setActiveTab(activeTab) {
         document.querySelectorAll('.topbar-tab').forEach(tab => {
@@ -2694,7 +2753,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showView(name) {
+        // Cualquier otra pantalla cierra la página del ticket
+        if (name !== 'tickets') exitTicketPage();
         if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
+        homeView.hidden = name !== 'home';
         directoryView.hidden = name !== 'directory';
         accountsView.hidden = name !== 'accounts';
         adminView.hidden = name !== 'admin';
@@ -2707,6 +2769,12 @@ document.addEventListener('DOMContentLoaded', () => {
             admin: navAdmin, drafts: navDrafts, profile: navProfile, reports: navReports
         };
         setActiveTab(tabs[name]);
+        if (name === 'tickets') {
+            setDocumentTitle(currentUser && currentUser.role === 'requester' ? 'Mis solicitudes' : 'Tickets');
+        } else {
+            setDocumentTitle(SCREEN_TITLES[name]);
+        }
+        if (name === 'home') renderHome();
         if (name === 'directory') loadDirectory();
         if (name === 'accounts') loadAccountsView();
         if (name === 'admin') loadAdminPanel();
@@ -2760,6 +2828,7 @@ document.addEventListener('DOMContentLoaded', () => {
         profileIdNumber.readOnly = locked;
         document.getElementById('profileLockedNote').hidden = !locked;
         showView('profile');
+        if (required) setDocumentTitle('Complete su perfil');
         if (isRequester) (locked ? profilePhone : profileName).focus();
     }
 
@@ -2844,6 +2913,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function refreshTopbarUser() {
         document.querySelector('.topbar-user-name').textContent = currentUser.name || currentUser.email;
+        renderNavUser();
     }
 
     function startEmailResendWait() {
@@ -5188,61 +5258,101 @@ document.addEventListener('DOMContentLoaded', () => {
         return { id, label, count, tone, open: () => setQueueView(id, label) };
     }
 
+    // Vista guardada de la cola: un punto de color en lugar del ícono
+    function savedView(id, label, count, dot, tone) {
+        return { ...ticketItem(id, label, count, tone), dot };
+    }
+
     function openDirectory(role) {
         directoryRoleSelect.value = role;
         showView('directory');
     }
 
+    // Íconos de la barra lateral (trazos de 24 × 24, los mismos del prototipo)
+    const NAV_ICONS = {
+        home: 'M3 10.5L12 3l9 7.5V21h-6v-6H9v6H3z',
+        tickets: 'M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z',
+        mail: 'M4 4h16v16H4zM4 7l8 6 8-6',
+        accounts: 'M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M21 20v-1a4 4 0 0 0-3-3.87M16 4.13a3.5 3.5 0 0 1 0 6.75',
+        team: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+        flag: 'M5 21V4M5 4h11l-2 4 2 4H5',
+        invite: 'M15 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M16 11h6',
+        approvals: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
+        changes: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+        health: 'M22 12h-4l-3 9L9 3l-3 9H2',
+    };
+
+    function navIcon(name) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'nav-icon');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', NAV_ICONS[name]);
+        svg.appendChild(path);
+        return svg;
+    }
+
+    // Grupos sin título: pantallas principales. "Vistas guardadas": atajos a la cola.
     function navGroupsFor(role) {
+        const home = { id: 'home', label: 'Inicio', icon: 'home', open: () => showView('home') };
+        const drafts = { id: 'drafts', label: 'Borradores de correo', icon: 'mail', count: 'drafts_pending',
+                         open: () => showView('drafts') };
         if (role === 'technician') {
             return [
-                { title: 'Mi trabajo', items: [
-                    ticketItem('mine_open', 'Mis abiertos', 'mine_open'),
-                    ticketItem('mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'),
-                    ticketItem('following', 'Siguiendo', 'following_open'),
-                    ticketItem('mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today'),
+                { items: [
+                    home,
+                    { ...ticketItem('mine_open', 'Mis abiertos', 'mine_open'), label: 'Tickets', icon: 'tickets',
+                      open: () => setQueueView('mine_open', 'Mis abiertos') },
+                    drafts,
                 ] },
-                { title: 'Cola general', items: [
-                    ticketItem('unassigned', 'Sin asignar', 'unassigned', 'warn'),
-                    { id: 'drafts', label: 'Borradores de correo', count: 'drafts_pending', open: () => showView('drafts') },
+                { title: 'Vistas guardadas', items: [
+                    savedView('mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn', 'warn'),
+                    savedView('following', 'Siguiendo', 'following_open', 'info'),
+                    savedView('mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', 'ok'),
+                    savedView('unassigned', 'Sin asignar', 'unassigned', 'warn', 'warn'),
                 ] },
-                { title: 'Cuenta', items: [{ id: 'profile', label: 'Mi cuenta', open: () => showProfile() }] },
             ];
         }
-        const isAdmin = role === 'admin';
         const groups = [
-            { title: 'Colas', items: [
-                ticketItem('unassigned', 'Sin asignar', 'unassigned', 'warn'),
-                ticketItem('due_soon', 'Por vencer', 'due_soon', 'warn'),
-                ticketItem('overdue', 'Vencidos', 'overdue', 'alert'),
-                ticketItem('open', 'Todos abiertos', 'open'),
-                ticketItem('resolved_today', 'Resueltos hoy', 'resolved_today'),
-            ] },
-            { title: 'Revisión', items: [
-                { id: 'drafts', label: 'Borradores de correo', count: 'drafts_pending', open: () => showView('drafts') },
-                { id: 'reports', label: 'Reportes de cuentas', count: 'reports_open', tone: 'alert', open: () => {
+            { items: [
+                home,
+                { ...ticketItem('open', 'Todos abiertos', 'open'), label: 'Tickets', icon: 'tickets',
+                  open: () => setQueueView('open', 'Todos abiertos') },
+                drafts,
+                // Personal, clientes e invitaciones en una sola lista (antes "Clientes" iba aparte)
+                { id: 'accounts', label: 'Cuentas', icon: 'accounts', open: () => openAccounts() },
+                // El horario se edita con el botón "Horario" de cada fila del equipo
+                { id: 'team', label: 'Equipo y turnos', icon: 'team', open: () => showAccountsSection('team') },
+                { id: 'reports', label: 'Reportes de cuentas', icon: 'flag', count: 'reports_open', tone: 'alert', open: () => {
                     setReportsAccount(null);
                     showView('reports');
                 } },
+                { id: 'invites', label: 'Invitaciones', icon: 'invite', count: 'invitations_pending',
+                  open: () => navUsers.click() },
             ] },
-            { title: 'Gestión', items: [
-                // El administrador gestiona el equipo y los clientes desde el directorio
-                // El horario se edita con el botón "Horario" de cada fila del equipo
-                { id: 'team', label: 'Equipo y disponibilidad', open: () => showAccountsSection('team') },
-                // Personal, clientes e invitaciones en una sola lista (antes "Clientes" iba aparte)
-                { id: 'accounts', label: 'Cuentas', open: () => openAccounts() },
-                { id: 'invites', label: 'Invitaciones', count: 'invitations_pending', open: () => navUsers.click() },
+            { title: 'Vistas guardadas', items: [
+                savedView('unassigned', 'Sin asignar', 'unassigned', 'warn', 'warn'),
+                savedView('due_soon', 'Por vencer', 'due_soon', 'warn', 'warn'),
+                savedView('overdue', 'Vencidos', 'overdue', 'alert', 'alert'),
+                savedView('resolved_today', 'Resueltos hoy', 'resolved_today', 'ok'),
             ] },
         ];
-        if (isAdmin) {
+        if (role === 'admin') {
             groups.push({ title: 'Administración', items: [
-                { id: 'approvals', label: 'Aprobaciones', count: 'approvals_pending',
+                { id: 'approvals', label: 'Aprobaciones', icon: 'approvals', count: 'approvals_pending',
                   open: () => showAdminSection('approvals') },
-                { id: 'changes', label: 'Registro de cambios', open: () => showAdminSection('changes') },
-                { id: 'health', label: 'Estado del sistema', open: () => showAdminSection('health') },
+                { id: 'changes', label: 'Registro de cambios', icon: 'changes', open: () => showAdminSection('changes') },
+                { id: 'health', label: 'Estado del sistema', icon: 'health', open: () => showAdminSection('health') },
             ] });
         }
-        groups.push({ title: 'Cuenta', items: [{ id: 'profile', label: 'Mi cuenta', open: () => showProfile() }] });
         return groups;
     }
 
@@ -5254,26 +5364,30 @@ document.addEventListener('DOMContentLoaded', () => {
         navGroupsFor(currentUser.role).forEach((group, index) => {
             const section = document.createElement('section');
             section.className = 'nav-group';
-            const header = document.createElement('button');
-            header.type = 'button';
-            header.className = 'nav-group-toggle';
-            header.setAttribute('aria-expanded', 'true');
-            header.setAttribute('aria-controls', `navGroup${index}`);
-            header.textContent = group.title;
             const list = document.createElement('ul');
-            list.id = `navGroup${index}`;
             list.className = 'nav-group-items';
+            if (group.title) {
+                const heading = makeEl('h2', 'nav-group-title', group.title);
+                heading.id = `navGroup${index}`;
+                list.setAttribute('aria-labelledby', heading.id);
+                section.appendChild(heading);
+            }
             group.items.forEach(item => {
                 navItems[item.id] = item;
                 const li = document.createElement('li');
                 const button = document.createElement('button');
                 button.type = 'button';
-                button.className = 'nav-item';
+                button.className = item.dot ? 'nav-item is-saved' : 'nav-item';
                 button.dataset.navId = item.id;
-                const label = document.createElement('span');
-                label.className = 'nav-item-label';
-                label.textContent = item.label;
-                button.appendChild(label);
+                // Con el menú contraído solo queda el ícono: el nombre sale al pasar el puntero
+                button.title = item.label;
+                if (item.icon) button.appendChild(navIcon(item.icon));
+                if (item.dot) {
+                    const dot = makeEl('span', `nav-dot is-${item.dot}`);
+                    dot.setAttribute('aria-hidden', 'true');
+                    button.appendChild(dot);
+                }
+                button.appendChild(makeEl('span', 'nav-item-label', item.label));
                 if (item.count) {
                     const count = document.createElement('span');
                     count.className = 'nav-count';
@@ -5284,16 +5398,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 li.appendChild(button);
                 list.appendChild(li);
             });
-            section.append(header, list);
+            section.appendChild(list);
             sideNavGroups.appendChild(section);
         });
+        renderNavUser();
         setSideNavActive(activeNavId);
         renderNavCounts();
     }
 
+    function renderNavUser() {
+        if (!currentUser) return;
+        document.getElementById('navUserAvatar').textContent = getInitials(currentUser.name);
+        document.getElementById('navUserName').textContent = currentUser.name || currentUser.email;
+        document.getElementById('navUserRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
+    }
+
     function setSideNavActive(id) {
         activeNavId = id;
-        sideNavGroups.querySelectorAll('.nav-item').forEach(button => {
+        sideNav.querySelectorAll('[data-nav-id]').forEach(button => {
             const active = button.dataset.navId === id;
             button.classList.toggle('active', active);
             if (active) button.setAttribute('aria-current', 'page');
@@ -5309,6 +5431,7 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
         });
         renderShift();
+        if (!homeView.hidden) renderHome();
     }
 
     function closeSideNav() {
@@ -5318,13 +5441,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     sideNavGroups.addEventListener('click', (e) => {
-        const toggle = e.target.closest('.nav-group-toggle');
-        if (toggle) {
-            const expanded = toggle.getAttribute('aria-expanded') === 'true';
-            toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-            document.getElementById(toggle.getAttribute('aria-controls')).hidden = expanded;
-            return;
-        }
         const button = e.target.closest('.nav-item');
         if (!button) return;
         const item = navItems[button.dataset.navId];
@@ -5334,6 +5450,65 @@ document.addEventListener('DOMContentLoaded', () => {
         item.open();
         checkSingleSection();
         closeSideNav();
+    });
+
+    document.getElementById('navUser').addEventListener('click', () => {
+        hideError();
+        setSideNavActive('profile');
+        showProfile();
+        closeSideNav();
+    });
+
+    document.getElementById('navLogout').addEventListener('click', () => switchAccountBtn.click());
+
+    // ----- Menú contraído (solo íconos): se recuerda en este navegador -----
+    const NAV_COLLAPSED_KEY = 'ticketeraNavCollapsed';
+    const navCollapse = document.getElementById('navCollapse');
+
+    function readNavCollapsed() {
+        try {
+            return localStorage.getItem(NAV_COLLAPSED_KEY) === '1';
+        } catch (err) {
+            return false; // Sin almacenamiento: menú abierto
+        }
+    }
+
+    function setNavCollapsed(collapsed, save = true) {
+        document.body.classList.toggle('nav-collapsed', collapsed);
+        const label = collapsed ? 'Expandir menú' : 'Minimizar menú';
+        navCollapse.setAttribute('aria-label', label);
+        navCollapse.title = label;
+        navCollapse.textContent = collapsed ? '»' : '«';
+        if (save) {
+            try {
+                localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
+            } catch (err) {
+                // No se pudo guardar: vale solo para esta visita
+            }
+        }
+        applyFabPos(false);
+    }
+
+    navCollapse.addEventListener('click', () => {
+        setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
+    });
+
+    // Buscar: con el menú contraído, el ícono abre el menú y enfoca el buscador
+    function focusGlobalSearch() {
+        if (document.body.classList.contains('nav-collapsed')) setNavCollapsed(false);
+        if (window.innerWidth < 768 && !document.body.classList.contains('nav-open')) navToggle.click();
+        globalSearch.focus();
+        globalSearch.select();
+    }
+
+    document.getElementById('navSearchIcon').addEventListener('click', focusGlobalSearch);
+
+    // Ctrl K (o Cmd K) enfoca el buscador. En la Fase 6 abrirá la paleta de comandos.
+    document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'k') return;
+        if (!isStaffShell() || document.body.classList.contains('ticket-open')) return;
+        e.preventDefault();
+        focusGlobalSearch();
     });
 
     navToggle.addEventListener('click', () => {
@@ -5419,6 +5594,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const label = item.querySelector('.status-text');
         const base = { statusEmail: 'Correo', statusAi: 'Análisis IA', statusAssign: 'Asignación automática' }[id];
         label.textContent = `${base}${extra ? ` (${extra})` : ''}: ${active ? 'activo' : 'inactivo'}`;
+        // Con el menú contraído solo queda el punto: el texto sale al pasar el puntero
+        item.title = label.textContent;
     }
 
     function renderStatusBar(status) {
@@ -5472,15 +5649,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setSideNavActive(null);
         selectedTicketId = ticketId;
         activityFilter = 'public';
-        document.querySelector('.split').classList.add('show-detail');
+        enterTicketPage(ticketId);
         try {
             const ticket = await apiFetch(`/tickets/${ticketId}`);
             showTicketDetail(ticket);
         } catch (err) {
             // apiFetch ya mostró el error (por ejemplo, que no existe)
-            selectedTicketId = null;
-            document.querySelector('.split').classList.remove('show-detail');
-            renderDetailPlaceholder();
+            exitTicketPage();
         }
     }
 
@@ -5547,6 +5722,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.toggle('staff-shell', staff);
         sideNav.hidden = !staff;
         statusBar.hidden = !staff;
+        document.getElementById('staffFooter').hidden = !staff;
         globalSearchForm.hidden = !staff;
         navToggle.hidden = !staff;
         closeSideNav();
@@ -5562,15 +5738,20 @@ document.addEventListener('DOMContentLoaded', () => {
         queuePageNum = 1;
         [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
+        // El técnico no crea tickets (igual que el botón de la barra superior)
+        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
+        setNavCollapsed(readNavCollapsed(), false);
         renderSideNav();
         startNavPolling();
     }
 
     function teardownStaffShell() {
         stopNavPolling();
-        document.body.classList.remove('staff-shell', 'nav-open');
+        document.body.classList.remove('staff-shell', 'nav-open', 'nav-collapsed', 'ticket-open');
+        ticketBar.hidden = true;
         sideNav.hidden = true;
         statusBar.hidden = true;
+        document.getElementById('staffFooter').hidden = true;
         globalSearchForm.hidden = true;
         sideNavBackdrop.hidden = true;
         globalSearch.value = '';
@@ -5661,6 +5842,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setQueueView(view, label, search = '', requester = null) {
+        exitTicketPage();
         queueView = view;
         queueSearch = search;
         queueRequester = requester;
@@ -5668,6 +5850,7 @@ document.addEventListener('DOMContentLoaded', () => {
         queueTitle.textContent = label;
         renderQueueRequester();
         showView('tickets');
+        setDocumentTitle(`${label} · Tickets`);
         loadQueue();
     }
 
@@ -5719,6 +5902,7 @@ document.addEventListener('DOMContentLoaded', () => {
         queueLoadedAt = Date.now();
         renderQueueUpdated();
         renderQueue(data.items);
+        if (document.body.classList.contains('ticket-open')) renderTicketSteps();
     }
 
     function renderQueueUpdated() {
@@ -5787,16 +5971,157 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         selectedTicketId = ticketId;
         activityFilter = 'public';
-        document.querySelector('.split').classList.add('show-detail');
+        enterTicketPage(ticketId);
         try {
             const ticket = await apiFetch(`/tickets/${ticketId}`);
             showTicketDetail(ticket);
         } catch (err) {
-            selectedTicketId = null;
-            document.querySelector('.split').classList.remove('show-detail');
-            renderDetailPlaceholder();
+            exitTicketPage();
         }
     }
+
+    // ----- Página del ticket (personal): sin barra lateral, con Volver y Anterior/Siguiente -----
+    const ticketBar = document.getElementById('ticketBar');
+    const ticketPrev = document.getElementById('ticketPrev');
+    const ticketNext = document.getElementById('ticketNext');
+
+    // Los tickets de la página de la cola que está cargada, en el mismo orden
+    function queueIds() {
+        return [...queueBody.querySelectorAll('.queue-row')].map(row => Number(row.dataset.id));
+    }
+
+    function renderTicketSteps() {
+        const ids = queueIds();
+        const index = ids.indexOf(selectedTicketId);
+        ticketPrev.disabled = index <= 0;
+        ticketNext.disabled = index === -1 || index >= ids.length - 1;
+    }
+
+    function enterTicketPage(ticketId) {
+        document.querySelector('.split').classList.add('show-detail');
+        if (!isStaffShell()) return;
+        document.body.classList.add('ticket-open');
+        ticketBar.hidden = false;
+        document.getElementById('ticketCrumb').textContent = `#${ticketId}`;
+        setDocumentTitle(`Ticket #${ticketId}`);
+        renderTicketSteps();
+        closeSideNav();
+        window.scrollTo(0, 0);
+        applyFabPos(false);
+    }
+
+    // Vuelve a la lista. Sin ticket abierto no hace nada.
+    function exitTicketPage() {
+        if (!document.body.classList.contains('ticket-open')) return;
+        const closedId = selectedTicketId;
+        document.body.classList.remove('ticket-open');
+        ticketBar.hidden = true;
+        document.querySelector('.split').classList.remove('show-detail');
+        selectedTicketId = null;
+        renderDetailPlaceholder();
+        queueBody.querySelectorAll('.queue-row.selected').forEach(row => row.classList.remove('selected'));
+        setDocumentTitle('Tickets');
+        applyFabPos(false);
+        return closedId;
+    }
+
+    document.getElementById('ticketBack').addEventListener('click', () => {
+        const closedId = exitTicketPage();
+        // El foco vuelve a la fila del ticket que estaba abierto
+        const row = queueBody.querySelector(`.queue-row[data-id="${closedId}"]`);
+        if (row) row.focus();
+    });
+
+    document.getElementById('ticketHome').addEventListener('click', () => {
+        setSideNavActive('home');
+        showView('home');
+    });
+
+    ticketPrev.addEventListener('click', () => {
+        const ids = queueIds();
+        const index = ids.indexOf(selectedTicketId);
+        if (index > 0) openQueueTicket(ids[index - 1]);
+    });
+
+    ticketNext.addEventListener('click', () => {
+        const ids = queueIds();
+        const index = ids.indexOf(selectedTicketId);
+        if (index !== -1 && index < ids.length - 1) openQueueTicket(ids[index + 1]);
+    });
+
+    document.getElementById('queueNewTicket').addEventListener('click', () => openNewTicket.click());
+
+    // ----- Inicio: saludo y resumen con los mismos contadores del menú -----
+    const homeQueue = document.getElementById('homeQueue');
+    const homeStats = document.getElementById('homeStats');
+
+    function homeGreeting() {
+        const hour = new Date().getHours();
+        if (hour < 12) return 'Buenos días';
+        if (hour < 19) return 'Buenas tardes';
+        return 'Buenas noches';
+    }
+
+    // Tarjetas del Inicio: [vista de la cola, título de la cola, texto, valor, detalle, tono]
+    function homeCards() {
+        const value = (key) => (typeof navCounts[key] === 'number' ? navCounts[key] : null);
+        if (currentUser.role === 'technician') {
+            return [
+                ['mine_open', 'Mis abiertos', 'Mis abiertos', value('mine_open'), '', ''],
+                ['mine_due_soon', 'Por vencer', 'Por vencer', value('mine_due_soon'), '', 'warn'],
+                ['mine_resolved_today', 'Resueltos hoy', 'Resueltos hoy', value('mine_resolved_today'), '', 'ok'],
+                ['unassigned', 'Sin asignar', 'Sin asignar en la cola', value('unassigned'), '', 'warn'],
+            ];
+        }
+        const overdue = value('overdue');
+        const dueSoon = value('due_soon');
+        const risk = overdue === null || dueSoon === null ? null : overdue + dueSoon;
+        return [
+            ['open', 'Todos abiertos', 'Abiertos', value('open'), '', ''],
+            ['unassigned', 'Sin asignar', 'Sin asignar', value('unassigned'), '', 'warn'],
+            // "En riesgo" suma vencidos y por vencer; la tarjeta abre los vencidos
+            ['overdue', 'Vencidos', 'En riesgo', risk,
+             risk === null ? '' : `${overdue} ${overdue === 1 ? 'vencido' : 'vencidos'} · ${dueSoon} por vencer`, 'alert'],
+            ['resolved_today', 'Resueltos hoy', 'Resueltos hoy', value('resolved_today'), '', 'ok'],
+        ];
+    }
+
+    function renderHome() {
+        if (!currentUser) return;
+        const now = new Date();
+        const day = now.toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'short' });
+        const time = now.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', hour12: false });
+        document.getElementById('homeDate').textContent = `${day.replace('.', '')} · ${time}`.toUpperCase();
+        const firstName = (currentUser.name || '').split(' ')[0];
+        document.getElementById('homeTitle').textContent = firstName ? `${homeGreeting()}, ${firstName}` : homeGreeting();
+        homeStats.replaceChildren();
+        homeCards().forEach(([view, queueLabel, label, value, detail, tone]) => {
+            const card = makeEl('button', 'ui-card home-card');
+            card.type = 'button';
+            card.dataset.view = view;
+            card.dataset.label = queueLabel;
+            card.appendChild(makeEl('span', 'ui-stat-label', label));
+            const valueRow = makeEl('span', 'home-card-value');
+            const number = makeEl('b', `ui-stat-value${tone && value ? ` is-${tone}` : ''}`, value === null ? '—' : String(value));
+            valueRow.appendChild(number);
+            if (detail) valueRow.appendChild(makeEl('span', 'home-card-detail', detail));
+            card.appendChild(valueRow);
+            homeStats.appendChild(card);
+        });
+    }
+
+    homeStats.addEventListener('click', (e) => {
+        const card = e.target.closest('.home-card');
+        if (!card) return;
+        setSideNavActive(card.dataset.view);
+        setQueueView(card.dataset.view, card.dataset.label);
+    });
+
+    homeQueue.addEventListener('click', () => {
+        const view = currentUser.role === 'technician' ? 'mine_open' : 'open';
+        setSideNavActive(view);
+        setQueueView(view, currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos');
+    });
 
     queueBody.addEventListener('click', (e) => {
         const row = e.target.closest('.queue-row');
@@ -6832,7 +7157,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===== Una sola sección por opción del menú =====
-    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y disponibilidad' };
+    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos' };
     const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
 
     function showAccountsSection(section) {
@@ -6841,6 +7166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         document.getElementById('accountsTitle').textContent = ACCOUNT_SECTION_TITLES[section];
         showView('accounts');
+        setDocumentTitle(ACCOUNT_SECTION_TITLES[section]);
     }
 
     function showAdminSection(section) {
@@ -6849,6 +7175,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         document.getElementById('adminTitle').textContent = ADMIN_SECTION_TITLES[section];
         showView('admin');
+        setDocumentTitle(ADMIN_SECTION_TITLES[section]);
     }
 
     // Verificación en el navegador: después de elegir una opción del menú debe verse una sola vista

@@ -49,54 +49,58 @@
     </section>
     <section id="authScreen" class="auth-screen">
         <section class="auth-panel">
-          <div class="logo-plate">
-            <img src="img/logo-adn.svg" alt="American Data Networks" class="auth-logo">
-          </div>
+          <!-- Panal hexagonal suave detrás del logo (decorativo) -->
+          <svg class="auth-hex" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+            <defs>
+              <radialGradient id="authHexFade"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+              <mask id="authHexMask"><rect width="520" height="380" fill="url(#authHexFade)"/></mask>
+              <pattern id="authHexPattern" width="56" height="97" patternUnits="userSpaceOnUse">
+                <path d="M28 0 L56 16 L56 48 L28 64 L0 48 L0 16 Z M28 64 L28 97 M0 48 L0 81 L28 97 L56 81 L56 48" fill="#0B2A7A" fill-opacity="0.25" stroke="#1B3FA0" stroke-opacity="0.35" stroke-width="1"/>
+              </pattern>
+            </defs>
+            <rect width="520" height="380" fill="url(#authHexPattern)" mask="url(#authHexMask)"/>
+          </svg>
+          <img src="img/american-data.svg" alt="American Data Networks" class="auth-logo">
           <p class="auth-kicker">TICKETERA DE SOPORTE</p>
           <p class="auth-tagline">Soporte técnico, en orden.</p>
         </section>
         <div class="auth-card-container">
             <div class="auth-card">
                 <p id="sessionNotice" class="auth-notice session-notice" role="status" hidden></p>
-                <div id="portalChooser" class="auth-form-panel">
-                    <h1 class="auth-title">Iniciar sesión</h1>
-                    <p class="help-text">Elija cómo quiere entrar.</p>
-                    <ul class="portal-options">
-                        <li class="portal-option">
-                            <button type="button" class="portal-btn" data-portal="admin">Administrador</button>
-                        </li>
-                        <li class="portal-option">
-                            <button type="button" class="portal-btn" data-portal="staff">Coordinador / Técnico</button>
-                            <a href="#activar-cuenta" class="auth-link portal-link">Activar cuenta (invitación)</a>
-                        </li>
-                        <li class="portal-option">
-                            <button type="button" class="portal-btn" data-portal="requester">Solicitante</button>
-                            <a href="#crear-cuenta" class="auth-link portal-link">Crear cuenta de cliente</a>
-                        </li>
-                    </ul>
-                </div>
-                <div id="loginPanel" class="auth-form-panel" hidden>
-                    <h1 id="loginTitle" class="auth-title">Iniciar sesión</h1>
-                    <form id="loginForm">
-                        <div class="form-group" style="margin-bottom: 16px;">
+                <div id="loginPanel" class="auth-form-panel">
+                    <div class="auth-head">
+                        <h1 id="loginTitle" class="auth-title">Iniciar sesión</h1>
+                        <p class="auth-subtitle">Elija cómo entra al sistema.</p>
+                    </div>
+                    <!-- Cada opción solo deja entrar a sus roles (lo verifica el servidor) -->
+                    <div id="loginTabs" class="login-tabs" role="tablist" aria-label="Tipo de acceso">
+                        <button type="button" class="login-tab" role="tab" id="loginTabRequester" data-portal="requester" aria-controls="loginForm" aria-selected="false" tabindex="-1">Cliente</button>
+                        <button type="button" class="login-tab" role="tab" id="loginTabStaff" data-portal="staff" aria-controls="loginForm" aria-selected="true">Personal</button>
+                        <button type="button" class="login-tab" role="tab" id="loginTabAdmin" data-portal="admin" aria-controls="loginForm" aria-selected="false" tabindex="-1">Administración</button>
+                    </div>
+                    <form id="loginForm" class="auth-form" role="tabpanel" aria-labelledby="loginTabStaff">
+                        <div class="form-group">
                             <label for="loginEmail">Correo</label>
-                            <input type="email" id="loginEmail" name="email" autocomplete="username" required>
+                            <input type="email" id="loginEmail" name="email" autocomplete="username" placeholder="usted@correo.com" required>
                         </div>
-                        <div class="form-group" style="margin-bottom: 24px;">
-                            <label for="loginPassword">Contraseña</label>
+                        <div class="form-group">
+                            <div class="auth-label-row">
+                                <label for="loginPassword">Contraseña</label>
+                                <button type="button" id="forgotPasswordLink" class="auth-link auth-link-btn auth-link-small">¿La olvidó?</button>
+                            </div>
                             <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
                         </div>
+                        <p id="loginAdminNotice" class="auth-notice auth-info" hidden>Por seguridad, le enviaremos un código a su correo después de la contraseña.</p>
                         <button type="submit" class="btn-submit">Entrar</button>
                     </form>
                     <div id="confirmEmailNotice" class="auth-notice" hidden>
                         <p>Su cuenta todavía no está confirmada.</p>
                         <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
                     </div>
-                    <nav class="auth-links" aria-label="Otras opciones">
-                        <button type="button" id="forgotPasswordLink" class="auth-link auth-link-btn">Olvidé mi contraseña</button>
-                        <a id="loginExtraLink" href="#crear-cuenta" class="auth-link" hidden></a>
-                        <button type="button" id="backToPortals" class="auth-link auth-link-btn">Volver a las opciones</button>
-                    </nav>
+                    <p id="loginExtra" class="login-extra" hidden>
+                        <span id="loginExtraText"></span>
+                        <a id="loginExtraLink" href="#crear-cuenta" class="auth-link auth-link-inline"></a>
+                    </p>
                 </div>
                 <div id="signupPanel" class="auth-form-panel" hidden>
                     <h1 class="auth-title">Crear cuenta de cliente</h1>
@@ -202,11 +206,6 @@
     <span class="brand-mark" aria-hidden="true">T</span>
     <span class="brand-name" id="brandName">Mesa de Servicio</span>
   </div>
-  <form id="globalSearchForm" class="global-search" role="search" hidden>
-    <label for="globalSearch" class="sr-only">Buscar tickets, clientes o #número</label>
-    <input type="search" id="globalSearch" placeholder="Buscar tickets, clientes o #número" maxlength="150" autocomplete="off">
-    <ul id="globalSearchResults" class="global-search-results" hidden></ul>
-  </form>
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
     <button type="button" id="navAssistant" class="topbar-tab" hidden>Asistente</button>
@@ -233,6 +232,24 @@
 </header>
 
     <aside id="sideNav" class="side-nav" hidden aria-label="Menú">
+        <div class="nav-brand">
+            <span class="nav-brand-mark" aria-hidden="true">T</span>
+            <span class="nav-brand-text">
+                <span class="nav-brand-name">Soporte</span>
+                <span class="nav-brand-sub">American Data</span>
+            </span>
+            <button type="button" id="navCollapse" class="nav-collapse" aria-label="Minimizar menú" title="Minimizar menú">«</button>
+        </div>
+        <!-- Buscador: #número abre el ticket; Ctrl K lo enfoca -->
+        <form id="globalSearchForm" class="global-search" role="search" hidden>
+            <label for="globalSearch" class="sr-only">Buscar tickets, clientes o #número</label>
+            <input type="search" id="globalSearch" placeholder="Buscar…" maxlength="150" autocomplete="off">
+            <kbd class="global-search-kbd" aria-hidden="true">Ctrl K</kbd>
+            <ul id="globalSearchResults" class="global-search-results" hidden></ul>
+        </form>
+        <button type="button" id="navSearchIcon" class="nav-search-icon" aria-label="Buscar (Ctrl K)" title="Buscar (Ctrl K)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"/></svg>
+        </button>
         <nav id="sideNavGroups" class="side-nav-groups" aria-label="Vistas"></nav>
         <section id="shiftBox" class="shift-box" hidden aria-labelledby="shiftTitle">
             <h2 id="shiftTitle" class="shift-title">Mi turno</h2>
@@ -248,6 +265,26 @@
                 <option value="away">Ausente</option>
             </select>
         </section>
+        <!-- Barra de estado compacta: correo, IA, asignación automática y técnicos en turno -->
+        <ul id="statusBar" class="status-bar" aria-label="Estado del sistema" hidden>
+            <li class="status-item" id="statusEmail"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Correo</span></li>
+            <li class="status-item" id="statusAi"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Análisis IA</span></li>
+            <li class="status-item" id="statusAssign"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Asignación automática</span></li>
+            <li class="status-item status-shift" id="statusShift"></li>
+        </ul>
+        <div class="nav-foot">
+            <button type="button" id="navUser" class="nav-user" data-nav-id="profile" title="Mi cuenta">
+                <span id="navUserAvatar" class="nav-user-avatar" aria-hidden="true"></span>
+                <span class="nav-user-text">
+                    <span id="navUserName" class="nav-user-name"></span>
+                    <span id="navUserRole" class="nav-user-role"></span>
+                </span>
+                <span class="sr-only">Mi cuenta</span>
+            </button>
+            <button type="button" id="navLogout" class="nav-logout" aria-label="Cerrar sesión" title="Cerrar sesión">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            </button>
+        </div>
     </aside>
     <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
 
@@ -259,6 +296,7 @@
                         <h1 id="queueTitle" class="queue-title">Todos abiertos</h1>
                         <span id="queueTotal" class="queue-total"></span>
                         <span id="queueUpdated" class="queue-updated" aria-live="off"></span>
+                        <button type="button" id="queueNewTicket" class="ui-btn ui-btn-primary ui-btn-sm">Nuevo ticket</button>
                     </div>
                     <div id="queueRequester" class="queue-requester" hidden>
                         <span id="queueRequesterName"></span>
@@ -354,6 +392,17 @@
                 <ul id="ticketList" class="ticket-list"></ul>
             </section>
             <section id="detailPanel" aria-label="Detalle del ticket">
+                <!-- Personal: el detalle es una página completa, sin barra lateral -->
+                <nav id="ticketBar" class="ticket-bar" aria-label="Navegación del ticket" hidden>
+                    <span class="ticket-bar-mark" aria-hidden="true">T</span>
+                    <button type="button" id="ticketBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Tickets</button>
+                    <span class="ticket-bar-crumb">Tickets / <span id="ticketCrumb" class="ui-num"></span></span>
+                    <button type="button" id="ticketHome" class="ticket-bar-link">Ir al inicio</button>
+                    <span class="ticket-bar-steps">
+                        <button type="button" id="ticketPrev" class="ui-btn ui-btn-secondary ui-btn-sm">← Anterior</button>
+                        <button type="button" id="ticketNext" class="ui-btn ui-btn-secondary ui-btn-sm">Siguiente →</button>
+                    </span>
+                </nav>
                 <button type="button" id="backToList">← Volver a la lista</button>
                 <div id="detailContent">
                     <div class="detail-placeholder">
@@ -362,6 +411,17 @@
                 </div>
             </section>
         </div>
+
+        <section id="homeView" class="page-view home-view" hidden aria-labelledby="homeTitle">
+            <div class="home-head">
+                <div class="home-heading">
+                    <p id="homeDate" class="home-date"></p>
+                    <h1 id="homeTitle" class="home-title">Inicio</h1>
+                </div>
+                <button type="button" id="homeQueue" class="ui-btn ui-btn-primary">Ir a la cola de tickets</button>
+            </div>
+            <div id="homeStats" class="home-stats"></div>
+        </section>
 
         <section id="profileView" class="page-view" hidden aria-labelledby="profileTitle">
             <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
@@ -586,7 +646,7 @@
         </section>
 
         <section id="draftsView" class="page-view" hidden aria-labelledby="draftsTitle">
-            <h1 id="draftsTitle" class="view-title">Borradores de correos</h1>
+            <h1 id="draftsTitle" class="view-title">Borradores de correo</h1>
             <p class="view-note drafts-intro">Correos escritos sin la plantilla que la IA preparó como ticket. Revíselos y confírmelos o descártelos.</p>
             <div class="drafts-layout">
                 <ul id="draftsList" class="drafts-list" aria-label="Borradores"></ul>
@@ -792,6 +852,9 @@
             </div>
             <p class="view-note" data-admin-section="health">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
         </section>
+        <footer id="staffFooter" class="staff-footer" hidden>
+            <img id="statusLogo" class="staff-logo" src="img/american-data.svg" alt="American Data Networks" height="26">
+        </footer>
     </main>
 
     <footer id="portalFooter" class="portal-footer" hidden>
@@ -799,13 +862,6 @@
         <img id="portalLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
     </footer>
 
-    <footer id="statusBar" class="status-bar" hidden>
-        <span class="status-item" id="statusEmail"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Correo</span></span>
-        <span class="status-item" id="statusAi"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Análisis IA</span></span>
-        <span class="status-item" id="statusAssign"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Asignación automática</span></span>
-        <span class="status-item" id="statusShift"></span>
-        <img id="statusLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
-    </footer>
 
     <div id="errorMessage" class="error" role="alert"></div>
     <div id="successMessage" class="success"></div>
