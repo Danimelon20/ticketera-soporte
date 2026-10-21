@@ -222,6 +222,11 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshReportsBadge();
         // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
         setupStaffShell();
+        // El personal entra a Inicio (el resumen del día)
+        if (isStaffShell() && !profileRequired()) {
+            setSideNavActive('home');
+            showView('home');
+        }
         setupPortal();
         setupChat();
     }
@@ -2184,6 +2189,53 @@ document.addEventListener('DOMContentLoaded', () => {
         return card;
     }
 
+    // Texto de un cambio del historial: "Ana cambió el estado de Nuevo a En proceso"
+    function appendHistoryText(target, entry, changedByName) {
+        const strongWho = document.createElement('strong');
+        strongWho.textContent = changedByName;
+        target.appendChild(strongWho);
+
+        if (entry.field === 'status') {
+            target.appendChild(document.createTextNode(' cambió el estado de '));
+            const sOld = document.createElement('strong');
+            sOld.textContent = STATE_MAP[entry.old_value] || entry.old_value || 'Nuevo';
+            target.appendChild(sOld);
+            target.appendChild(document.createTextNode(' a '));
+            const sNew = document.createElement('strong');
+            sNew.textContent = STATE_MAP[entry.new_value] || entry.new_value || '';
+            target.appendChild(sNew);
+        } else if (entry.field === 'assigned_to') {
+            if (entry.new_value && parseInt(entry.new_value) === entry.changed_by) {
+                target.appendChild(document.createTextNode(' se asignó el ticket'));
+            } else if (!entry.new_value) {
+                target.appendChild(document.createTextNode(' desasignó el ticket'));
+            } else {
+                target.appendChild(document.createTextNode(' asignó el ticket a '));
+                const sAssign = document.createElement('strong');
+                sAssign.textContent = userMap[parseInt(entry.new_value)] || entry.new_value;
+                target.appendChild(sAssign);
+            }
+        } else if (entry.field === 'priority_id') {
+            target.appendChild(document.createTextNode(' cambió la prioridad de '));
+            const pOld = document.createElement('strong');
+            pOld.textContent = priorityMap[entry.old_value] || entry.old_value || '';
+            target.appendChild(pOld);
+            target.appendChild(document.createTextNode(' a '));
+            const pNew = document.createElement('strong');
+            pNew.textContent = priorityMap[entry.new_value] || entry.new_value || '';
+            target.appendChild(pNew);
+        } else if (entry.field === 'category_id') {
+            target.appendChild(document.createTextNode(' cambió la categoría de '));
+            const cOld = document.createElement('strong');
+            cOld.textContent = categoryMap[entry.old_value] || entry.old_value || '';
+            target.appendChild(cOld);
+            target.appendChild(document.createTextNode(' a '));
+            const cNew = document.createElement('strong');
+            cNew.textContent = categoryMap[entry.new_value] || entry.new_value || '';
+            target.appendChild(cNew);
+        }
+    }
+
     function renderEventsList(ticket, container) {
         container.replaceChildren();
 
@@ -2335,49 +2387,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 rightP.style.gap = '4px';
                 rightP.style.lineHeight = '1.4';
 
-                const strongWho = document.createElement('strong');
-                strongWho.textContent = changedByName;
-                rightP.appendChild(strongWho);
-
-                if (entry.field === 'status') {
-                    rightP.appendChild(document.createTextNode(' cambió el estado de '));
-                    const sOld = document.createElement('strong');
-                    sOld.textContent = STATE_MAP[entry.old_value] || entry.old_value || 'Nuevo';
-                    rightP.appendChild(sOld);
-                    rightP.appendChild(document.createTextNode(' a '));
-                    const sNew = document.createElement('strong');
-                    sNew.textContent = STATE_MAP[entry.new_value] || entry.new_value || '';
-                    rightP.appendChild(sNew);
-                } else if (entry.field === 'assigned_to') {
-                    if (entry.new_value && parseInt(entry.new_value) === entry.changed_by) {
-                        rightP.appendChild(document.createTextNode(' se asignó el ticket'));
-                    } else if (!entry.new_value) {
-                        rightP.appendChild(document.createTextNode(' desasignó el ticket'));
-                    } else {
-                        rightP.appendChild(document.createTextNode(' asignó el ticket a '));
-                        const sAssign = document.createElement('strong');
-                        sAssign.textContent = userMap[parseInt(entry.new_value)] || entry.new_value;
-                        rightP.appendChild(sAssign);
-                    }
-                } else if (entry.field === 'priority_id') {
-                    rightP.appendChild(document.createTextNode(' cambió la prioridad de '));
-                    const pOld = document.createElement('strong');
-                    pOld.textContent = priorityMap[entry.old_value] || entry.old_value || '';
-                    rightP.appendChild(pOld);
-                    rightP.appendChild(document.createTextNode(' a '));
-                    const pNew = document.createElement('strong');
-                    pNew.textContent = priorityMap[entry.new_value] || entry.new_value || '';
-                    rightP.appendChild(pNew);
-                } else if (entry.field === 'category_id') {
-                    rightP.appendChild(document.createTextNode(' cambió la categoría de '));
-                    const cOld = document.createElement('strong');
-                    cOld.textContent = categoryMap[entry.old_value] || entry.old_value || '';
-                    rightP.appendChild(cOld);
-                    rightP.appendChild(document.createTextNode(' a '));
-                    const cNew = document.createElement('strong');
-                    cNew.textContent = categoryMap[entry.new_value] || entry.new_value || '';
-                    rightP.appendChild(cNew);
-                }
+                appendHistoryText(rightP, entry, changedByName);
 
                 rightP.appendChild(document.createTextNode(` · ${formatDateTime(entry.changed_at)}`));
                 li.appendChild(rightP);
@@ -2774,7 +2784,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             setDocumentTitle(SCREEN_TITLES[name]);
         }
-        if (name === 'home') renderHome();
+        if (name === 'home') {
+            renderHome();
+            loadHomeLists();
+        }
         if (name === 'directory') loadDirectory();
         if (name === 'accounts') loadAccountsView();
         if (name === 'admin') loadAdminPanel();
@@ -5431,6 +5444,7 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
         });
         renderShift();
+        renderQueueViews();
         if (!homeView.hidden) renderHome();
     }
 
@@ -5648,7 +5662,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showView('tickets');
         setSideNavActive(null);
         selectedTicketId = ticketId;
-        activityFilter = 'public';
+        activityFilter = 'all';
         enterTicketPage(ticketId);
         try {
             const ticket = await apiFetch(`/tickets/${ticketId}`);
@@ -5841,6 +5855,56 @@ document.addEventListener('DOMContentLoaded', () => {
         if (queueAssignee.value !== current) queueAssignee.value = '';
     }
 
+    // Pestañas de vista de la cola: [vista, título, contador de /nav/counts, tono del contador]
+    function queueViewTabs() {
+        if (currentUser.role === 'technician') {
+            return [
+                ['mine_open', 'Mis abiertos', 'mine_open', ''],
+                ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
+                ['following', 'Siguiendo', 'following_open', ''],
+                ['mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', ''],
+                ['unassigned', 'Sin asignar', 'unassigned', 'warn'],
+            ];
+        }
+        return [
+            ['open', 'Todos abiertos', 'open', ''],
+            ['unassigned', 'Sin asignar', 'unassigned', 'warn'],
+            ['due_soon', 'Por vencer', 'due_soon', 'warn'],
+            ['overdue', 'Vencidos', 'overdue', 'alert'],
+            ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
+        ];
+    }
+
+    const queueViewsBox = document.getElementById('queueViews');
+
+    function renderQueueViews() {
+        if (!isStaffShell()) return;
+        queueViewsBox.replaceChildren();
+        queueViewTabs().forEach(([view, label, countKey, tone]) => {
+            // Con búsqueda o filtro de cliente ninguna pestaña queda marcada
+            const selected = view === queueView && !queueSearch && !queueRequester;
+            const tab = makeEl('button', 'ui-tab', label);
+            tab.type = 'button';
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+            tab.dataset.view = view;
+            tab.dataset.label = label;
+            const value = navCounts[countKey];
+            if (typeof value === 'number') {
+                const count = makeEl('span', `ui-tab-count${tone && value > 0 ? ` is-${tone}` : ''}`, String(value));
+                tab.appendChild(count);
+            }
+            queueViewsBox.appendChild(tab);
+        });
+    }
+
+    queueViewsBox.addEventListener('click', (e) => {
+        const tab = e.target.closest('[data-view]');
+        if (!tab) return;
+        setSideNavActive(tab.dataset.view);
+        setQueueView(tab.dataset.view, tab.dataset.label);
+    });
+
     function setQueueView(view, label, search = '', requester = null) {
         exitTicketPage();
         queueView = view;
@@ -5849,6 +5913,7 @@ document.addEventListener('DOMContentLoaded', () => {
         queuePageNum = 1;
         queueTitle.textContent = label;
         renderQueueRequester();
+        renderQueueViews();
         showView('tickets');
         setDocumentTitle(`${label} · Tickets`);
         loadQueue();
@@ -5866,6 +5931,7 @@ document.addEventListener('DOMContentLoaded', () => {
         queuePageNum = 1;
         queueTitle.textContent = 'Todos los tickets';
         renderQueueRequester();
+        renderQueueViews();
         loadQueue();
     });
 
@@ -5881,19 +5947,62 @@ document.addEventListener('DOMContentLoaded', () => {
         return params;
     }
 
-    // quiet: actualización automática, sin tocar los mensajes en pantalla
+    function queueFiltersSet() {
+        return [queueStatus, queueLevel, queueSource].some(select => select.value)
+            || (queueAssignee.value && currentUser.role !== 'technician');
+    }
+
+    // Filtros como chips: punteados sin valor, azules con valor
+    function renderQueueChips() {
+        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+            select.classList.toggle('is-set', Boolean(select.value));
+        });
+    }
+
+    function clearQueueFilters() {
+        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        renderQueueChips();
+        queuePageNum = 1;
+        loadQueue();
+    }
+
+    const queueNewBanner = document.getElementById('queueNewBanner');
+
+    // quiet: actualización automática, sin tocar los mensajes en pantalla.
+    // Si llegaron tickets nuevos, la lista no se mueve: aparece el aviso "Mostrar".
     async function loadQueue({ quiet = false } = {}) {
         if (!isStaffShell()) return;
         queueAssignee.hidden = currentUser.role === 'technician';
         if (queueAssignee.options.length <= 2) fillAssigneeFilter();
+        renderQueueChips();
         const seq = ++queueSeq;
+        if (!quiet) {
+            queueNewBanner.hidden = true;
+            queueEmpty.hidden = true;
+            showSkeleton(queueBody, { rows: 6, columns: 5 });
+        }
         let data;
         try {
-            data = quiet ? await silentGet(`/queue?${queueParams()}`) : await apiFetch(`/queue?${queueParams()}`);
+            data = quiet ? await silentGet(`/queue?${queueParams()}`) : await apiFetch(`/queue?${queueParams()}`, { silent: true });
         } catch (err) {
-            return; // apiFetch ya mostró el error
+            if (quiet || seq !== queueSeq) return;
+            clearSkeleton(queueBody);
+            queueEmpty.replaceChildren(errorState(err, () => loadQueue()));
+            queueEmpty.hidden = false;
+            return;
         }
         if (!data || seq !== queueSeq) return;
+        if (quiet) {
+            const shown = queueIds();
+            const arrived = data.items.filter(item => !shown.includes(item.id)).length;
+            if (shown.length && arrived > 0) {
+                document.getElementById('queueNewText').textContent = arrived === 1
+                    ? '1 ticket nuevo llegó desde que abrió esta vista. La lista no se movió.'
+                    : `${arrived} tickets nuevos llegaron desde que abrió esta vista. La lista no se movió.`;
+                queueNewBanner.hidden = false;
+                return;
+            }
+        }
         queuePageNum = data.page;
         queueTotal.textContent = `${data.total} ${data.total === 1 ? 'ticket' : 'tickets'}`;
         queuePageLabel.textContent = `Página ${data.page} de ${data.pages}`;
@@ -5901,9 +6010,12 @@ document.addEventListener('DOMContentLoaded', () => {
         queueNext.disabled = data.page >= data.pages;
         queueLoadedAt = Date.now();
         renderQueueUpdated();
+        clearSkeleton(queueBody);
         renderQueue(data.items);
         if (document.body.classList.contains('ticket-open')) renderTicketSteps();
     }
+
+    document.getElementById('queueNewShow').addEventListener('click', () => loadQueue());
 
     function renderQueueUpdated() {
         if (queueLoadedAt === null) {
@@ -5912,8 +6024,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const seconds = Math.max(0, Math.round((Date.now() - queueLoadedAt) / 1000));
         queueUpdated.textContent = seconds < 60
-            ? `Actualizado hace ${seconds} s`
-            : `Actualizado hace ${Math.floor(seconds / 60)} min`;
+            ? `ACTUALIZADO HACE ${seconds} S`
+            : `ACTUALIZADO HACE ${Math.floor(seconds / 60)} MIN`;
     }
 
     setInterval(() => {
@@ -5926,41 +6038,119 @@ document.addEventListener('DOMContentLoaded', () => {
         return td;
     }
 
+    // Qué pasó y qué puede hacer la persona cuando una vista no tiene tickets
+    function queueEmptyState() {
+        if (queueSearch) {
+            return emptyState({
+                title: `No hay tickets que coincidan con «${queueSearch}»`,
+                text: 'Revise lo que escribió o busque por #número.',
+                action: 'Quitar búsqueda',
+                onAction: () => setQueueView(queueView === 'all' ? defaultQueueView() : queueView, defaultQueueLabel()),
+            });
+        }
+        if (queueFiltersSet()) {
+            return emptyState({ title: 'No hay tickets con estos filtros', text: 'Quite algún filtro para ver más tickets.',
+                                action: 'Quitar filtros', onAction: clearQueueFilters });
+        }
+        if (queueRequester) {
+            return emptyState({ title: `${queueRequester.name} no tiene tickets en esta vista` });
+        }
+        const toUnassigned = () => setQueueView('unassigned', 'Sin asignar');
+        const messages = {
+            open: ['No hay tickets abiertos', 'Cuando llegue uno nuevo aparecerá aquí.'],
+            unassigned: ['Todos los tickets tienen responsable', 'No hay nada pendiente de asignar.'],
+            due_soon: ['Ningún ticket está por vencer', 'Los tickets abiertos están dentro de su tiempo meta.'],
+            overdue: ['No hay tickets vencidos', 'Todos los tickets abiertos están a tiempo.'],
+            resolved_today: ['Todavía no se resolvió ningún ticket hoy', 'Los que se resuelvan hoy aparecerán aquí.'],
+            mine_open: ['No tiene tickets abiertos asignados', 'Puede tomar uno de los que están sin asignar.'],
+            mine_due_soon: ['Ninguno de sus tickets está por vencer', 'Sus tickets abiertos están a tiempo.'],
+            following: ['No sigue ningún ticket abierto', 'Use "Seguir" en un ticket para tenerlo a mano aquí.'],
+            mine_resolved_today: ['Todavía no resolvió tickets hoy', 'Los que resuelva hoy aparecerán aquí.'],
+        };
+        const [title, text] = messages[queueView] || ['No hay tickets en esta vista', ''];
+        if (queueView === 'mine_open') return emptyState({ title, text, action: 'Ver sin asignar', onAction: toUnassigned });
+        return emptyState({ title, text });
+    }
+
+    function defaultQueueView() {
+        return currentUser.role === 'technician' ? 'mine_open' : 'open';
+    }
+
+    function defaultQueueLabel() {
+        return currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos';
+    }
+
+    // Nivel con color: 1 gris, 2 azul, 3 azul marino, 4 rojo
+    function levelTag(level) {
+        if (level === null || level === undefined) return makeEl('span', 'ui-tag is-mono', '—');
+        const tone = { 2: ' is-info', 3: ' is-navy', 4: ' is-danger' }[level] || '';
+        const tag = makeEl('span', `ui-tag is-mono${tone}`, `N${level}`);
+        tag.title = AI_LEVEL_NAMES[level] ? `Nivel ${level} · ${AI_LEVEL_NAMES[level]}` : `Nivel ${level}`;
+        return tag;
+    }
+
+    function ownerAvatar(name) {
+        const avatar = makeEl('span', name ? 'owner-avatar' : 'owner-avatar is-unassigned', name ? getInitials(name) : '?');
+        avatar.setAttribute('aria-hidden', 'true');
+        return avatar;
+    }
+
+    function dueClass(state) {
+        return { overdue: 'is-overdue', due_soon: 'is-soon' }[state] || '';
+    }
+
     function renderQueue(items) {
         queueBody.replaceChildren();
         queueEmpty.hidden = items.length > 0;
+        if (!items.length) queueEmpty.replaceChildren(queueEmptyState());
         items.forEach(item => {
             const tr = makeEl('tr', 'queue-row');
             tr.dataset.id = item.id;
             tr.tabIndex = 0;
             if (item.id === selectedTicketId) tr.classList.add('selected');
 
-            const num = queueCell('N.º', 'col-num tabular');
+            const num = queueCell('ID', 'col-num ui-num');
             num.textContent = `#${item.id}`;
 
             const subject = queueCell('Asunto', 'col-subject');
             subject.appendChild(makeEl('div', 'queue-subject', item.title));
-            const meta = makeEl('div', 'queue-meta',
-                `${item.requester_name} · ${levelText(item.level)} · ${SOURCE_LABELS[item.source] || item.source}`);
+            const meta = makeEl('div', 'queue-meta', `${item.requester_name} · ${SOURCE_LABELS[item.source] || item.source}`);
+            // El estado solo se marca cuando no es el habitual de la vista (abierto)
+            if (item.status === 'resolved' || item.status === 'closed') {
+                meta.appendChild(makeEl('span', `state-tag state-${item.status}`, STATE_MAP[item.status]));
+            }
             if (item.reported) meta.appendChild(makeEl('span', 'queue-flag-reported', 'Reportada'));
             if (item.auto_assigned) meta.appendChild(makeEl('span', 'queue-flag-auto', 'asignado automáticamente'));
             subject.appendChild(meta);
 
-            const status = queueCell('Estado', 'col-status');
-            status.appendChild(makeEl('span', `state-tag state-${item.status}`, STATE_MAP[item.status] || item.status));
+            const level = queueCell('Nivel', 'col-level');
+            level.appendChild(levelTag(item.level));
 
             const owner = queueCell('Responsable', 'col-owner');
-            owner.appendChild(item.assigned_name
-                ? makeEl('div', 'queue-owner', item.assigned_name)
-                : makeEl('div', 'queue-owner is-unassigned', 'Sin asignar'));
-            if (item.assignee_note) owner.appendChild(makeEl('div', 'queue-note', ASSIGNEE_NOTES[item.assignee_note]));
+            const ownerBox = makeEl('div', 'queue-owner-box');
+            ownerBox.appendChild(ownerAvatar(item.assigned_name));
+            const ownerText = makeEl('div', 'queue-owner-text');
+            ownerText.appendChild(item.assigned_name
+                ? makeEl('span', 'queue-owner', item.assigned_name)
+                : makeEl('span', 'queue-owner is-unassigned', 'Sin asignar'));
+            if (item.assignee_note) ownerText.appendChild(makeEl('span', 'queue-note', ASSIGNEE_NOTES[item.assignee_note]));
+            ownerBox.appendChild(ownerText);
+            owner.appendChild(ownerBox);
 
-            const due = queueCell('Vence en', 'col-due tabular');
-            due.appendChild(makeEl('div', `queue-due due-text-${item.due_state || 'none'}`,
-                dueText(item.due_state, item.remaining_seconds)));
-            if (item.due_state) due.appendChild(dueBar(item.due_state, item.consumed_pct));
+            const due = queueCell('Vence', 'col-due');
+            const dueLabel = makeEl('div', `ui-due ${dueClass(item.due_state)}`, dueText(item.due_state, item.remaining_seconds));
+            if (item.due_at) dueLabel.title = `Vence el ${exactDateTime(item.due_at)}`;
+            due.appendChild(dueLabel);
+            if (item.due_state) {
+                const bar = makeEl('span', `ui-bar ${dueClass(item.due_state)}`);
+                bar.setAttribute('aria-hidden', 'true');
+                const fill = makeEl('span');
+                fill.style.width = `${item.consumed_pct || 0}%`;
+                bar.appendChild(fill);
+                due.appendChild(bar);
+            }
 
-            tr.append(num, subject, status, owner, due);
+            tr.append(num, subject, level, owner, due);
             queueBody.appendChild(tr);
         });
     }
@@ -5970,7 +6160,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.classList.toggle('selected', Number(row.dataset.id) === ticketId);
         });
         selectedTicketId = ticketId;
-        activityFilter = 'public';
+        activityFilter = 'all';
         enterTicketPage(ticketId);
         try {
             const ticket = await apiFetch(`/tickets/${ticketId}`);
@@ -6002,6 +6192,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isStaffShell()) return;
         document.body.classList.add('ticket-open');
         ticketBar.hidden = false;
+        composerMode = 'reply';
         document.getElementById('ticketCrumb').textContent = `#${ticketId}`;
         setDocumentTitle(`Ticket #${ticketId}`);
         renderTicketSteps();
@@ -6070,7 +6261,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['mine_open', 'Mis abiertos', 'Mis abiertos', value('mine_open'), '', ''],
                 ['mine_due_soon', 'Por vencer', 'Por vencer', value('mine_due_soon'), '', 'warn'],
                 ['mine_resolved_today', 'Resueltos hoy', 'Resueltos hoy', value('mine_resolved_today'), '', 'ok'],
-                ['unassigned', 'Sin asignar', 'Sin asignar en la cola', value('unassigned'), '', 'warn'],
             ];
         }
         const overdue = value('overdue');
@@ -6110,6 +6300,163 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ----- Inicio: listas "Requieren su atención" y "Equipo ahora" -----
+    const homeAttention = document.getElementById('homeAttention');
+    const homeTeam = document.getElementById('homeTeam');
+    const homeTeamPanel = document.getElementById('homeTeamPanel');
+    let homeSeq = 0;
+
+    function homeRow(className) {
+        const li = makeEl('li');
+        const button = makeEl('button', `home-row ${className || ''}`);
+        button.type = 'button';
+        li.appendChild(button);
+        return [li, button];
+    }
+
+    // Vencidos primero y luego por vencer (los del técnico, si es técnico), más los reportes de cuentas abiertos
+    async function loadHomeLists() {
+        const seq = ++homeSeq;
+        const technician = currentUser.role === 'technician';
+        const canManage = REPORT_REVIEW_ROLES.includes(currentUser.role);
+        showSkeleton(homeAttention, { rows: 3 });
+        homeTeamPanel.hidden = !canManage;
+        if (canManage) showSkeleton(homeTeam, { rows: 3 });
+        let overdue;
+        let dueSoon;
+        let reports = [];
+        let team = null;
+        try {
+            [overdue, dueSoon, reports, team] = await Promise.all([
+                technician ? Promise.resolve({ items: [] }) : apiFetch('/queue?view=overdue', { silent: true }),
+                apiFetch(`/queue?view=${technician ? 'mine_due_soon' : 'due_soon'}`, { silent: true }),
+                canManage ? apiFetch('/account-reports?status=open', { silent: true }) : Promise.resolve([]),
+                canManage ? apiFetch('/team', { silent: true }) : Promise.resolve(null),
+            ]);
+        } catch (err) {
+            if (seq !== homeSeq) return;
+            homeAttention.removeAttribute('aria-busy');
+            homeAttention.replaceChildren(errorState(err, loadHomeLists));
+            if (canManage) {
+                homeTeam.removeAttribute('aria-busy');
+                homeTeam.replaceChildren();
+            }
+            return;
+        }
+        if (seq !== homeSeq) return;
+        const seen = new Set();
+        const urgent = [...overdue.items, ...dueSoon.items].filter(item => !seen.has(item.id) && seen.add(item.id));
+        renderHomeAttention(urgent.slice(0, 6), reports.slice(0, 2));
+        if (canManage) renderHomeTeam(team);
+    }
+
+    function renderHomeAttention(items, reports) {
+        homeAttention.removeAttribute('aria-busy');
+        homeAttention.replaceChildren();
+        if (!items.length && !reports.length) {
+            const li = makeEl('li');
+            li.appendChild(emptyState({
+                title: 'Nada urgente por ahora',
+                text: 'No hay tickets vencidos ni por vencer. Revise la cola para ver todo lo abierto.',
+            }));
+            homeAttention.appendChild(li);
+            return;
+        }
+        items.forEach(item => {
+            const [li, button] = homeRow();
+            button.dataset.ticketId = String(item.id);
+            button.appendChild(makeEl('span', 'home-row-id ui-num', `#${item.id}`));
+            const text = makeEl('span', 'home-row-text');
+            text.appendChild(makeEl('span', 'home-row-title', item.title));
+            const owner = item.assigned_name || 'sin asignar';
+            const note = item.assignee_note ? ` · ${ASSIGNEE_NOTES[item.assignee_note].toLowerCase()}` : '';
+            text.appendChild(makeEl('span', 'home-row-sub', `${item.requester_name} · ${owner}${note}`));
+            button.appendChild(text);
+            const tag = makeEl('span', `ui-tag ${item.due_state === 'overdue' ? 'is-danger' : 'is-warn'}`,
+                dueText(item.due_state, item.remaining_seconds));
+            if (item.due_at) tag.title = `Vence el ${exactDateTime(item.due_at)}`;
+            button.appendChild(tag);
+            homeAttention.appendChild(li);
+        });
+        reports.forEach(report => {
+            const [li, button] = homeRow();
+            button.dataset.reportAccount = String(report.target_user_id);
+            button.dataset.reportName = report.target_name;
+            button.appendChild(makeEl('span', 'home-row-id ui-num is-report', 'RPT'));
+            const text = makeEl('span', 'home-row-text');
+            text.appendChild(makeEl('span', 'home-row-title', `Cuenta reportada · ${report.target_name}`));
+            text.appendChild(makeEl('span', 'home-row-sub', `${report.reason_label} · reportado por ${report.reporter}`));
+            button.appendChild(text);
+            button.appendChild(makeEl('span', 'ui-tag is-info', 'Revisar'));
+            homeAttention.appendChild(li);
+        });
+    }
+
+    // Técnicos activos: en turno, horario de hoy y una barra con su carga relativa
+    function renderHomeTeam(team) {
+        homeTeam.removeAttribute('aria-busy');
+        homeTeam.replaceChildren();
+        const technicians = (team || []).filter(member => member.role === 'technician' && member.is_active);
+        const onShift = technicians.filter(member => member.on_shift).length;
+        document.getElementById('homeTeamCount').textContent = `${onShift} de ${technicians.length} en turno`;
+        if (!technicians.length) {
+            const li = makeEl('li');
+            li.appendChild(emptyState({ title: 'Todavía no hay técnicos', text: 'Invite técnicos desde Invitaciones.' }));
+            homeTeam.appendChild(li);
+            return;
+        }
+        const maxLoad = Math.max(1, ...technicians.map(member => member.tickets_assigned_open));
+        technicians.forEach(member => {
+            const li = makeEl('li', 'home-team-row');
+            const away = member.availability && member.availability !== 'available';
+            const avatar = makeEl('span', `owner-avatar home-team-avatar${away ? ' is-away' : ''}`, getInitials(member.name));
+            avatar.setAttribute('aria-hidden', 'true');
+            const text = makeEl('span', 'home-row-text');
+            text.appendChild(makeEl('span', `home-row-title${away ? ' is-muted' : ''}`, member.name));
+            let sub;
+            if (away) {
+                sub = AVAILABILITY_LABELS[member.availability]
+                    + (member.return_date ? ` hasta ${formatPlainDate(member.return_date)}` : '');
+            } else if (member.on_shift) {
+                sub = member.schedule_today ? `En turno · ${member.schedule_today}` : 'En turno';
+            } else {
+                sub = member.schedule_today ? `Fuera de turno · hoy ${member.schedule_today}` : 'Sin turno hoy';
+            }
+            text.appendChild(makeEl('span', `home-row-sub${away ? ' is-warn' : ''}`, sub));
+            li.append(avatar, text);
+            if (!away) {
+                const bar = makeEl('span', `ui-bar home-load${member.tickets_assigned_open / maxLoad >= 0.75 ? ' is-soon' : ''}`);
+                bar.title = `${member.tickets_assigned_open} tickets abiertos asignados`;
+                const fill = makeEl('span');
+                fill.style.width = `${Math.round((member.tickets_assigned_open / maxLoad) * 100)}%`;
+                bar.appendChild(fill);
+                li.appendChild(bar);
+                li.appendChild(makeEl('span', 'sr-only', `${member.tickets_assigned_open} tickets abiertos asignados`));
+            }
+            homeTeam.appendChild(li);
+        });
+    }
+
+    homeAttention.addEventListener('click', (e) => {
+        const row = e.target.closest('.home-row');
+        if (!row) return;
+        if (row.dataset.ticketId) {
+            openTicketById(Number(row.dataset.ticketId));
+            return;
+        }
+        if (row.dataset.reportAccount) {
+            setSideNavActive('reports');
+            openReportsForAccount(Number(row.dataset.reportAccount), row.dataset.reportName);
+        }
+    });
+
+    document.getElementById('homeAttentionAll').addEventListener('click', () => {
+        const technician = currentUser.role === 'technician';
+        const view = technician ? 'mine_due_soon' : 'overdue';
+        setSideNavActive(view);
+        setQueueView(view, technician ? 'Por vencer' : 'Vencidos');
+    });
+
     homeStats.addEventListener('click', (e) => {
         const card = e.target.closest('.home-card');
         if (!card) return;
@@ -6137,6 +6484,7 @@ document.addEventListener('DOMContentLoaded', () => {
     [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
         select.addEventListener('change', () => {
             queuePageNum = 1;
+            renderQueueChips();
             loadQueue();
         });
     });
@@ -6243,76 +6591,169 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Si mientras tanto se abrió otro ticket, no se muestra
         if (!found || ticketId !== selectedTicketId) return;
-        const box = makeEl('div', 'sd-suggestion');
-        const text = makeEl('span', 'sd-suggestion-text', 'Sugerencia: asignar a ');
+        const box = makeEl('section', 'ui-card td-card td-suggestion');
+        box.appendChild(makeEl('h2', 'ui-kicker', 'Sugerencia'));
+        const text = makeEl('p', 'td-suggestion-text', 'Asignar a ');
         text.appendChild(makeEl('strong', '', found.name));
-        text.appendChild(document.createTextNode(` (carga ${found.load})`));
-        const apply = makeEl('button', 'btn-secondary btn-small sd-apply-suggestion', 'Aplicar');
+        text.appendChild(document.createTextNode(`, que está en turno con carga ${found.load}.`));
+        const apply = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm sd-apply-suggestion', 'Aplicar');
         apply.type = 'button';
         apply.dataset.userId = String(found.user_id);
         box.append(text, apply);
         slot.replaceChildren(box);
     }
 
+    // Filtro de la línea de tiempo: todo, conversación con el cliente, notas internas o historial
     function staffTabs(ticket) {
         const comments = ticket.comments || [];
         const tabs = [
+            ['all', 'Todo', comments.length + (ticket.history || []).length],
             ['public', 'Conversación', comments.filter(c => !c.internal).length],
             ['internal', 'Notas internas', comments.filter(c => c.internal).length],
             ['history', 'Historial', (ticket.history || []).length],
         ];
-        if (!['public', 'internal', 'history'].includes(activityFilter)) activityFilter = 'public';
-        const bar = makeEl('div', 'sd-tabs');
+        if (!['all', 'public', 'internal', 'history'].includes(activityFilter)) activityFilter = 'all';
+        const bar = makeEl('div', 'ui-tabs td-filter');
         bar.setAttribute('role', 'tablist');
+        bar.setAttribute('aria-label', 'Mostrar en la actividad');
         tabs.forEach(([key, label, count]) => {
-            const tab = makeEl('button', 'sd-tab', `${label} (${count})`);
+            const tab = makeEl('button', 'ui-tab sd-tab', label);
             tab.type = 'button';
             tab.dataset.filter = key;
             tab.setAttribute('role', 'tab');
             tab.setAttribute('aria-selected', activityFilter === key ? 'true' : 'false');
+            tab.appendChild(makeEl('span', 'ui-tab-count', String(count)));
             bar.appendChild(tab);
         });
         return bar;
     }
 
+    // Línea de tiempo en orden de llegada: mensajes como tarjetas (notas internas en ámbar) y cambios como líneas
+    function renderStaffTimeline(ticket, container) {
+        container.replaceChildren();
+        const events = [];
+        (ticket.comments || []).forEach(c => events.push({ type: 'comment', date: c.created_at, data: c }));
+        (ticket.history || []).forEach(h => events.push({ type: 'history', date: h.changed_at, data: h }));
+        events.sort((x, y) => parseServerDate(x.date) - parseServerDate(y.date));
+        const shown = events.filter(ev => {
+            if (activityFilter === 'history') return ev.type === 'history';
+            if (activityFilter === 'public') return ev.type === 'comment' && !ev.data.internal;
+            if (activityFilter === 'internal') return ev.type === 'comment' && ev.data.internal;
+            return true;
+        });
+        if (!shown.length) {
+            const texts = {
+                public: ['Todavía no hay conversación con el cliente', 'Use "Responder al cliente" para escribirle.'],
+                internal: ['No hay notas internas', 'Las notas internas solo las ve el equipo de soporte.'],
+                history: ['Todavía no hay cambios', 'Aquí aparecen los cambios de estado y de responsable.'],
+                all: ['Todavía no hay actividad', ''],
+            };
+            const [title, text] = texts[activityFilter] || texts.all;
+            container.appendChild(emptyState({ title, text }));
+            return;
+        }
+        const list = makeEl('ol', 'td-timeline');
+        shown.forEach(ev => {
+            const li = makeEl('li');
+            if (ev.type === 'comment') {
+                const comment = ev.data;
+                const article = makeEl('article', comment.internal ? 'td-message is-internal' : 'td-message');
+                const meta = makeEl('p', 'td-message-meta');
+                meta.appendChild(makeEl('strong', '', userMap[comment.user_id] || 'Usuario'));
+                const role = userRoleMap[comment.user_id];
+                const who = comment.internal ? 'nota interna' : (role === 'requester' ? 'cliente' : 'soporte');
+                meta.appendChild(makeEl('span', 'td-message-kind', ` · ${who} · `));
+                meta.appendChild(timeTag(comment.created_at));
+                article.append(meta, makeEl('p', 'td-message-body', comment.content));
+                li.appendChild(article);
+            } else {
+                const entry = ev.data;
+                const name = entry.field === 'assigned_to' && userRoleMap[entry.changed_by] === 'agent'
+                    ? 'Sistema'
+                    : userMap[entry.changed_by] || 'Usuario';
+                const line = makeEl('p', 'td-event');
+                line.appendChild(makeEl('span', 'td-event-arrow', '⟶ '));
+                appendHistoryText(line, entry, name);
+                line.appendChild(document.createTextNode(' · '));
+                line.appendChild(timeTag(entry.changed_at));
+                li.appendChild(line);
+            }
+            list.appendChild(li);
+        });
+        container.appendChild(list);
+    }
+
+    // Compositor: pestañas "Responder al cliente" y "Nota interna" (la nota se ve distinta y no sale al cliente)
+    let composerMode = 'reply';
+
     function staffComposer(ticket) {
-        const box = makeEl('div', 'sd-composer');
+        const box = makeEl('div', 'ui-card td-composer sd-composer');
         if (ticket.status === 'closed') {
-            box.appendChild(makeEl('p', 'sd-muted', 'Este ticket está cerrado y ya no admite comentarios.'));
+            box.appendChild(makeEl('p', 'td-composer-closed', 'Este ticket está cerrado y ya no admite comentarios.'));
             return box;
         }
-        const label = makeEl('label', 'sr-only', 'Respuesta o nota interna');
+        const internal = composerMode === 'note';
+        box.classList.toggle('is-internal', internal);
+        const tabs = makeEl('div', 'ui-tabs-line');
+        tabs.setAttribute('role', 'tablist');
+        tabs.setAttribute('aria-label', 'Tipo de mensaje');
+        [['reply', 'Responder al cliente'], ['note', 'Nota interna']].forEach(([mode, label]) => {
+            const tab = makeEl('button', `ui-tab-line td-composer-tab${mode === 'note' ? ' is-note' : ''}`, label);
+            tab.type = 'button';
+            tab.dataset.mode = mode;
+            tab.id = `composerTab-${mode}`;
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-controls', 'staffReply');
+            tab.setAttribute('aria-selected', composerMode === mode ? 'true' : 'false');
+            tabs.appendChild(tab);
+        });
+        const clientName = userMap[ticket.created_by] || 'el cliente';
+        const label = makeEl('label', 'sr-only', internal ? 'Nota interna para el equipo' : `Respuesta para ${clientName}`);
         label.htmlFor = 'staffReply';
-        const textarea = makeEl('textarea', 'sd-reply');
+        const textarea = makeEl('textarea', 'td-reply sd-reply');
         textarea.id = 'staffReply';
         textarea.rows = 3;
         textarea.maxLength = 5000;
-        textarea.placeholder = 'Escriba una respuesta al cliente o una nota interna';
-        const actions = makeEl('div', 'sd-composer-actions');
-        if (currentUser.role === 'technician') {
-            const ask = makeEl('button', 'btn-secondary btn-small sd-ask-details', 'Pedir más detalles');
+        textarea.placeholder = internal ? 'Escriba una nota para el equipo…' : `Escriba una respuesta para ${clientName}…`;
+        textarea.setAttribute('aria-describedby', 'composerHint');
+        const actions = makeEl('div', 'td-composer-actions sd-composer-actions');
+        if (currentUser.role === 'technician' && !internal) {
+            const ask = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm sd-ask-details', 'Pedir más detalles');
             ask.type = 'button';
             actions.appendChild(ask);
         }
-        const note = makeEl('button', 'btn-secondary btn-small sd-send-internal', 'Nota interna');
-        note.type = 'button';
-        const reply = makeEl('button', 'btn-primary btn-small sd-send-public', 'Responder al cliente');
-        reply.type = 'button';
-        actions.append(note, reply);
-        box.append(label, textarea, actions);
+        const hint = makeEl('span', 'td-composer-hint', internal
+            ? 'Solo la ve el equipo de soporte. No se envía al cliente.'
+            : 'Se envía al cliente por correo y queda en la conversación.');
+        hint.id = 'composerHint';
+        const send = makeEl('button', internal
+            ? 'ui-btn ui-btn-sm td-send-note sd-send-internal'
+            : 'ui-btn ui-btn-primary ui-btn-sm sd-send-public', internal ? 'Guardar nota' : 'Enviar respuesta');
+        send.type = 'button';
+        actions.append(hint, send);
+        box.append(tabs, label, textarea, actions);
         return box;
+    }
+
+    function dueTagText(ticket) {
+        const dueAt = ticket.ai_analysis ? ticket.ai_analysis.due_at : null;
+        if (!dueAt || !ticket.due_state) return null;
+        const remaining = (parseServerDate(dueAt) - Date.now()) / 1000;
+        if (ticket.due_state === 'overdue') return `Vencido hace ${formatDuration(-remaining)}`;
+        return `Vence en ${formatDuration(remaining)}`;
     }
 
     function renderStaffDetail(ticket) {
         detailContent.replaceChildren();
         detailPanel.scrollTop = 0;
         const isClosed = ticket.status === 'closed';
+        const canManage = ['coordinator', 'admin'].includes(currentUser.role);
+        const clientName = userMap[ticket.created_by] || 'Solicitante';
 
-        const head = makeEl('div', 'sd-head');
-        head.appendChild(makeEl('p', 'sd-meta tabular',
-            `#${ticket.id} · ${SOURCE_LABELS[ticket.source] || ticket.source} · ${formatDateTime(ticket.created_at)}`));
-        const titleRow = makeEl('div', 'sd-title-row');
-        titleRow.appendChild(makeEl('h1', 'sd-title', ticket.title));
+        // ----- Encabezado: título, seguir, estado y reasignar -----
+        const head = makeEl('header', 'td-head');
+        const titleRow = makeEl('div', 'td-title-row');
+        titleRow.appendChild(makeEl('h1', 'td-title', ticket.title));
         const followBox = makeEl('div', 'follow-box');
         const followBtn = makeEl('button', 'follow-btn');
         followBtn.type = 'button';
@@ -6320,59 +6761,120 @@ document.addEventListener('DOMContentLoaded', () => {
         followBox.append(followBtn, followHint);
         renderFollowButton(followBtn, followHint, Boolean(ticket.following));
         titleRow.appendChild(followBox);
+        const status = staffStatusControl(ticket);
+        if (status.tagName === 'SELECT') {
+            const statusLabel = makeEl('label', 'td-status-label', 'Cambiar estado');
+            statusLabel.appendChild(status);
+            titleRow.appendChild(statusLabel);
+        }
+        if (canManage && !isClosed) {
+            const reassign = makeEl('button', 'ui-btn ui-btn-primary td-reassign', 'Reasignar');
+            reassign.type = 'button';
+            titleRow.appendChild(reassign);
+        }
         head.appendChild(titleRow);
 
-        const client = makeEl('div', 'sd-client');
-        client.appendChild(makeEl('span', 'sd-client-name', userMap[ticket.created_by] || 'Solicitante'));
-        // Solo llega al personal: el solicitante nunca recibe requester_flags
-        if (ticket.requester_flags) {
-            requesterTags(ticket.requester_flags).forEach(tag => client.appendChild(tag));
-            const report = makeEl('button', 'link-btn btn-report-account', 'Reportar cuenta');
-            report.type = 'button';
-            client.appendChild(report);
+        const tags = makeEl('p', 'td-tags');
+        tags.appendChild(makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
+        const dueTag = dueTagText(ticket);
+        if (dueTag) {
+            tags.appendChild(makeEl('span', `ui-tag ${ticket.due_state === 'overdue' ? 'is-danger' : (ticket.due_state === 'due_soon' ? 'is-warn' : 'is-info')}`, dueTag));
         }
-        head.appendChild(client);
+        const level = ticket.ai_analysis ? ticket.ai_analysis.effective_level : null;
+        const meta = makeEl('span', 'td-tags-meta',
+            ` · ${levelText(level)} · llegó por ${(SOURCE_LABELS[ticket.source] || ticket.source).toLowerCase()} · `);
+        tags.appendChild(meta);
+        tags.appendChild(timeTag(ticket.created_at));
+        head.appendChild(tags);
         detailContent.appendChild(head);
 
+        const grid = makeEl('div', 'td-grid');
+        const main = makeEl('section', 'td-main');
+        main.setAttribute('aria-label', 'Actividad');
+        const side = makeEl('aside', 'td-side');
+        side.setAttribute('aria-label', 'Datos del ticket');
+        grid.append(main, side);
+        detailContent.appendChild(grid);
+
+        // ----- Columna principal: mensaje original, actividad y compositor -----
+        const original = makeEl('article', 'td-message is-original');
+        const originalMeta = makeEl('p', 'td-message-meta');
+        originalMeta.appendChild(makeEl('strong', '', clientName));
+        originalMeta.appendChild(makeEl('span', 'td-message-kind', ' · cliente · '));
+        originalMeta.appendChild(timeTag(ticket.created_at));
+        original.append(originalMeta, makeEl('p', 'td-message-body', ticket.description));
+        main.appendChild(original);
+        main.appendChild(staffTabs(ticket));
+        const events = makeEl('div', 'td-events sd-events');
+        main.appendChild(events);
+        renderStaffTimeline(ticket, events);
+        main.appendChild(staffComposer(ticket));
+
+        // ----- Columna derecha -----
         if (currentUser.role === 'technician' && ticket.assigned_to === null && !isClosed) {
-            const notice = makeEl('div', 'sd-notice');
+            const notice = makeEl('div', 'ui-notice is-warn sd-notice');
             notice.appendChild(makeEl('span', '', 'Este ticket no tiene responsable.'));
-            const assignMe = makeEl('button', 'btn-primary btn-small btn-assign-me', 'Asignármelo');
+            const assignMe = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm btn-assign-me', 'Asignármelo');
             assignMe.type = 'button';
             notice.appendChild(assignMe);
-            detailContent.appendChild(notice);
+            side.appendChild(notice);
         }
 
-        const fields = makeEl('dl', 'sd-fields');
-        staffField(fields, 'Estado', staffStatusControl(ticket));
-        staffField(fields, 'Nivel', staffLevelControl(ticket));
+        const props = makeEl('section', 'ui-card td-card');
+        props.appendChild(makeEl('h2', 'ui-kicker', 'Propiedades'));
+        const fields = makeEl('dl', 'td-props');
         staffField(fields, 'Responsable', staffAssigneeControl(ticket));
-        staffField(fields, 'Vencimiento', staffDueContent(ticket));
+        staffField(fields, 'Nivel', staffLevelControl(ticket));
+        staffField(fields, 'Canal', SOURCE_LABELS[ticket.source] || ticket.source);
+        staffField(fields, 'Vence', staffDueContent(ticket));
         staffField(fields, 'Prioridad', priorityMap[ticket.priority_id] || '');
         staffField(fields, 'Categoría', categoryMap[ticket.category_id] || '');
         if (ticket.contact_phone) staffField(fields, 'Teléfono', ticket.contact_phone);
         if (ticket.contact_id_number) staffField(fields, 'Cédula', ticket.contact_id_number);
-        detailContent.appendChild(fields);
+        props.appendChild(fields);
+        side.appendChild(props);
 
         const suggestionSlot = makeEl('div', 'sd-suggestion-slot');
-        detailContent.appendChild(suggestionSlot);
-        if (['coordinator', 'admin'].includes(currentUser.role) && !isClosed) loadSuggestion(ticket.id, suggestionSlot);
+        side.appendChild(suggestionSlot);
+        if (canManage && !isClosed) loadSuggestion(ticket.id, suggestionSlot);
 
-        detailContent.appendChild(makeEl('p', 'sd-description', ticket.description));
+        const client = makeEl('section', 'ui-card td-card td-client');
+        client.appendChild(makeEl('h2', 'ui-kicker', 'Cliente'));
+        const who = makeEl('div', 'td-client-row');
+        const avatar = makeEl('span', 'owner-avatar td-client-avatar', getInitials(clientName));
+        avatar.setAttribute('aria-hidden', 'true');
+        who.append(avatar, makeEl('span', 'td-client-name sd-client-name', clientName));
+        client.appendChild(who);
+        // Solo llega al personal: el solicitante nunca recibe requester_flags
+        if (ticket.requester_flags) {
+            const flags = makeEl('div', 'td-client-flags');
+            requesterTags(ticket.requester_flags).forEach(tag => flags.appendChild(tag));
+            client.appendChild(flags);
+        }
+        const links = makeEl('div', 'td-client-links');
+        if (canManage) {
+            const tickets = makeEl('button', 'ticket-bar-link td-client-tickets', 'Ver sus tickets');
+            tickets.type = 'button';
+            const account = makeEl('button', 'ticket-bar-link td-client-account', 'Ver ficha del cliente →');
+            account.type = 'button';
+            links.append(tickets, account);
+        }
+        if (ticket.requester_flags) {
+            const report = makeEl('button', 'ticket-bar-link btn-report-account', 'Reportar cuenta');
+            report.type = 'button';
+            links.appendChild(report);
+        }
+        if (links.children.length) client.appendChild(links);
+        side.appendChild(client);
 
         if (ticket.ai_analysis) {
             const card = renderAiCard(ticket);
-            // El nivel se corrige arriba, en el campo Nivel
+            // El nivel se corrige en Propiedades
             const correct = card.querySelector('.ai-correct');
             if (correct) correct.remove();
-            detailContent.appendChild(card);
+            card.classList.add('td-card');
+            side.appendChild(card);
         }
-
-        detailContent.appendChild(staffTabs(ticket));
-        const events = makeEl('div', 'activity-events-container sd-events');
-        detailContent.appendChild(events);
-        renderEventsList(ticket, events);
-        detailContent.appendChild(staffComposer(ticket));
     }
 
     detailPanel.addEventListener('click', async (e) => {
@@ -6384,7 +6886,42 @@ document.addEventListener('DOMContentLoaded', () => {
             detailPanel.querySelectorAll('.sd-tab').forEach(t => {
                 t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
             });
-            renderEventsList(currentTicket, detailPanel.querySelector('.sd-events'));
+            renderStaffTimeline(currentTicket, detailPanel.querySelector('.sd-events'));
+            return;
+        }
+
+        const modeTab = e.target.closest('.td-composer-tab');
+        if (modeTab) {
+            if (modeTab.dataset.mode === composerMode) return;
+            // El texto escrito se conserva al cambiar de pestaña
+            const draft = document.getElementById('staffReply').value;
+            composerMode = modeTab.dataset.mode;
+            const composer = staffComposer(currentTicket);
+            detailPanel.querySelector('.td-composer').replaceWith(composer);
+            const textarea = document.getElementById('staffReply');
+            textarea.value = draft;
+            document.getElementById(`composerTab-${composerMode}`).focus();
+            return;
+        }
+
+        if (e.target.closest('.td-reassign')) {
+            const select = detailPanel.querySelector('.sd-assign-select');
+            if (select) {
+                select.scrollIntoView({ block: 'center' });
+                select.focus();
+            }
+            return;
+        }
+
+        if (e.target.closest('.td-client-tickets')) {
+            const name = userMap[currentTicket.created_by] || 'Cliente';
+            setQueueView('all', `Tickets de ${name}`, '', { id: currentTicket.created_by, name });
+            return;
+        }
+
+        if (e.target.closest('.td-client-account')) {
+            setSideNavActive('accounts');
+            openAccounts('clients', userMap[currentTicket.created_by] || '');
             return;
         }
 
@@ -6419,7 +6956,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 buttons.forEach(b => { b.disabled = false; });
                 return; // apiFetch ya mostró el error
             }
-            activityFilter = internal ? 'internal' : 'public';
+            activityFilter = 'all';
             await reloadSelectedTicketAndList();
             showSuccess(internal ? 'Nota interna guardada' : 'Respuesta enviada al cliente');
             return;

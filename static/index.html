@@ -290,71 +290,90 @@
 
     <main style="display: none;">
         <div class="split">
-            <section id="queuePanel" class="queue-panel" aria-labelledby="queueTitle">
+            <section id="queuePanel" class="queue-panel" aria-labelledby="queueHeading">
                 <header class="queue-head">
                     <div class="queue-title-row">
-                        <h1 id="queueTitle" class="queue-title">Todos abiertos</h1>
-                        <span id="queueTotal" class="queue-total"></span>
-                        <span id="queueUpdated" class="queue-updated" aria-live="off"></span>
-                        <button type="button" id="queueNewTicket" class="ui-btn ui-btn-primary ui-btn-sm">Nuevo ticket</button>
+                        <h1 id="queueHeading" class="queue-heading">Tickets</h1>
+                        <!-- Vista actual (Vencidos, Búsqueda: …); el h1 siempre dice "Tickets" -->
+                        <span id="queueTitle" class="queue-title">Todos abiertos</span>
+                        <span class="queue-sort">· ordenados por vencimiento</span>
+                        <button type="button" id="queueHelp" class="ui-btn ui-btn-secondary ui-btn-icon queue-help" aria-label="Atajos de teclado" title="Atajos de teclado" hidden>?</button>
+                        <button type="button" id="queueNewTicket" class="ui-btn ui-btn-primary">Nuevo ticket</button>
                     </div>
-                    <div id="queueRequester" class="queue-requester" hidden>
-                        <span id="queueRequesterName"></span>
-                        <button type="button" id="queueRequesterClear" class="link-btn">Quitar filtro</button>
-                    </div>
+                    <div id="queueViews" class="ui-tabs queue-views" role="tablist" aria-label="Vistas"></div>
                     <div class="queue-filters">
                         <label for="queueStatus" class="sr-only">Estado</label>
-                        <select id="queueStatus">
-                            <option value="">Estado: todos</option>
-                            <option value="new">Nuevo</option>
-                            <option value="in_progress">En proceso</option>
-                            <option value="resolved">Resuelto</option>
-                            <option value="closed">Cerrado</option>
+                        <select id="queueStatus" class="queue-chip">
+                            <option value="">+ Estado</option>
+                            <option value="new">Estado: Nuevo</option>
+                            <option value="in_progress">Estado: En proceso</option>
+                            <option value="resolved">Estado: Resuelto</option>
+                            <option value="closed">Estado: Cerrado</option>
                         </select>
                         <label for="queueLevel" class="sr-only">Nivel</label>
-                        <select id="queueLevel">
-                            <option value="">Nivel: todos</option>
-                            <option value="4">4 · Crítico</option>
-                            <option value="3">3 · Incidente</option>
-                            <option value="2">2 · Solicitud estándar</option>
-                            <option value="1">1 · Consulta</option>
-                            <option value="0">0 · No es soporte</option>
+                        <select id="queueLevel" class="queue-chip">
+                            <option value="">+ Nivel</option>
+                            <option value="4">Nivel 4 · Crítico</option>
+                            <option value="3">Nivel 3 · Incidente</option>
+                            <option value="2">Nivel 2 · Solicitud estándar</option>
+                            <option value="1">Nivel 1 · Consulta</option>
+                            <option value="0">Nivel 0 · No es soporte</option>
                             <option value="none">Sin nivel</option>
                         </select>
                         <label for="queueAssignee" class="sr-only">Responsable</label>
-                        <select id="queueAssignee">
-                            <option value="">Responsable: todos</option>
+                        <select id="queueAssignee" class="queue-chip">
+                            <option value="">+ Responsable</option>
                             <option value="0">Sin asignar</option>
                         </select>
                         <label for="queueSource" class="sr-only">Canal</label>
-                        <select id="queueSource">
-                            <option value="">Canal: todos</option>
-                            <option value="web">Web</option>
-                            <option value="email">Correo</option>
+                        <select id="queueSource" class="queue-chip">
+                            <option value="">+ Canal</option>
+                            <option value="web">Canal: Web</option>
+                            <option value="email">Canal: Correo</option>
                         </select>
-                        <span class="queue-sort">Orden: vence primero</span>
+                        <div id="queueRequester" class="queue-requester" hidden>
+                            <span id="queueRequesterName"></span>
+                            <button type="button" id="queueRequesterClear" class="link-btn">Quitar filtro</button>
+                        </div>
+                        <span id="queueUpdated" class="queue-updated" aria-live="off"></span>
+                    </div>
+                    <div id="queueNewBanner" class="ui-notice queue-new-banner" role="status" hidden>
+                        <span id="queueNewText"></span>
+                        <button type="button" id="queueNewShow" class="ui-btn ui-btn-primary ui-btn-sm">Mostrar</button>
                     </div>
                 </header>
-                <div class="queue-table-wrap">
-                    <table class="queue-table">
-                        <thead>
-                            <tr>
-                                <th scope="col" class="col-num">N.º</th>
-                                <th scope="col">Asunto</th>
-                                <th scope="col" class="col-status">Estado</th>
-                                <th scope="col" class="col-owner">Responsable</th>
-                                <th scope="col" class="col-due">Vence en</th>
-                            </tr>
-                        </thead>
-                        <tbody id="queueBody"></tbody>
-                    </table>
-                    <p id="queueEmpty" class="queue-empty" hidden>No hay tickets en esta vista.</p>
-                </div>
-                <div class="queue-pager">
-                    <button type="button" id="queuePrev" class="btn-secondary">Anterior</button>
-                    <span id="queuePage" class="queue-page"></span>
-                    <button type="button" id="queueNext" class="btn-secondary">Siguiente</button>
-                </div>
+                <section class="ui-card queue-card" aria-label="Lista de tickets">
+                    <div class="queue-table-wrap">
+                        <table class="queue-table">
+                            <colgroup>
+                                <col class="col-num">
+                                <col class="col-subject">
+                                <col class="col-level">
+                                <col class="col-owner">
+                                <col class="col-due">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="col-num">ID</th>
+                                    <th scope="col">Asunto</th>
+                                    <th scope="col" class="col-level">Nivel</th>
+                                    <th scope="col" class="col-owner">Responsable</th>
+                                    <th scope="col" class="col-due">Vence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="queueBody"></tbody>
+                        </table>
+                        <div id="queueEmpty" class="queue-empty" hidden></div>
+                    </div>
+                    <div class="queue-pager">
+                        <span id="queueTotal" class="queue-total"></span>
+                        <span class="queue-pager-buttons">
+                            <button type="button" id="queuePrev" class="ui-btn ui-btn-secondary ui-btn-sm">Anterior</button>
+                            <span id="queuePage" class="queue-page"></span>
+                            <button type="button" id="queueNext" class="ui-btn ui-btn-secondary ui-btn-sm">Siguiente</button>
+                        </span>
+                    </div>
+                </section>
             </section>
             <section id="portalPanel" class="portal-panel" aria-labelledby="portalTitle">
                 <header class="portal-head">
@@ -421,6 +440,23 @@
                 <button type="button" id="homeQueue" class="ui-btn ui-btn-primary">Ir a la cola de tickets</button>
             </div>
             <div id="homeStats" class="home-stats"></div>
+            <div class="home-grid">
+                <section class="ui-card home-panel" aria-labelledby="homeAttentionTitle">
+                    <div class="ui-card-head">
+                        <h2 id="homeAttentionTitle" class="ui-card-title">Requieren su atención</h2>
+                        <button type="button" id="homeAttentionAll" class="ticket-bar-link">Ver todos →</button>
+                    </div>
+                    <ul id="homeAttention" class="home-list"></ul>
+                </section>
+                <section id="homeTeamPanel" class="ui-card home-panel" aria-labelledby="homeTeamTitle" hidden>
+                    <div class="ui-card-head">
+                        <h2 id="homeTeamTitle" class="ui-card-title">Equipo ahora</h2>
+                        <span id="homeTeamCount" class="home-team-count"></span>
+                    </div>
+                    <ul id="homeTeam" class="home-list home-team"></ul>
+                    <p class="home-panel-foot">La barra es la carga de cada técnico (tickets abiertos asignados).</p>
+                </section>
+            </div>
         </section>
 
         <section id="profileView" class="page-view" hidden aria-labelledby="profileTitle">
