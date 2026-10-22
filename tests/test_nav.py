@@ -12,7 +12,7 @@ FAR_AWAY = MONDAY_9AM + timedelta(days=30)
 
 COORDINATOR_KEYS = {
     "unassigned", "due_soon", "overdue", "open", "resolved_today",
-    "drafts_pending", "reports_open", "invitations_pending",
+    "drafts_pending", "reports_open", "invitations_pending", "cancelled",
 }
 TECHNICIAN_KEYS = {
     "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "unassigned", "drafts_pending", "shift",

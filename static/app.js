@@ -35,7 +35,15 @@ document.addEventListener('DOMContentLoaded', () => {
         new: 'Nuevo',
         in_progress: 'En proceso',
         resolved: 'Resuelto',
-        closed: 'Cerrado'
+        closed: 'Cerrado',
+        // Un ticket cancelado queda "closed"; esta clave solo la usan los conteos y las etiquetas
+        cancelled: 'Cancelado'
+    };
+    const CANCEL_REASON_LABELS = {
+        no_longer_applies: 'Ya no aplica',
+        duplicate: 'Duplicado',
+        no_response: 'Sin respuesta del cliente',
+        test_spam: 'Prueba o spam'
     };
 
     const ROLE_MAP = {
@@ -1408,8 +1416,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Switch account / logout
     if (switchAccountBtn) {
         switchAccountBtn.addEventListener('click', async () => {
-            // Una reasignación que espera su plazo para deshacer se envía antes de salir
+            // Una reasignación o cancelación que espera su plazo para deshacer se envía antes de salir
             await commitPendingAssign();
+            await commitPendingCancel();
             try {
                 await apiFetch('/auth/logout', { method: 'POST' });
             } catch (e) {
@@ -2235,6 +2244,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const cNew = document.createElement('strong');
             cNew.textContent = categoryMap[entry.new_value] || entry.new_value || '';
             target.appendChild(cNew);
+        } else if (entry.field === 'cancelled') {
+            target.appendChild(document.createTextNode(' canceló el ticket'));
+            // El motivo solo lo ve el personal
+            if (isStaffShell()) {
+                target.appendChild(document.createTextNode(' · '));
+                target.appendChild(makeEl('strong', '', CANCEL_REASON_LABELS[entry.new_value] || entry.new_value || ''));
+            }
+        } else if (entry.field === 'reopened') {
+            target.appendChild(document.createTextNode(' reabrió el ticket'));
         }
     }
 
@@ -2742,6 +2760,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showView(name) {
         commitPendingAssign();
+        commitPendingCancel();
         // Cualquier otra pantalla cierra la página del ticket
         if (name !== 'tickets') exitTicketPage();
         if (splitView) splitView.style.display = name === 'tickets' ? '' : 'none';
@@ -4848,7 +4867,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderCountList(adminUsersByRole, health.users_by_role, ROLE_MAP,
                 ['requester', 'technician', 'coordinator', 'admin', 'agent']);
             renderCountList(adminTicketsByStatus, health.tickets_by_status, STATE_MAP,
-                ['new', 'in_progress', 'resolved', 'closed']);
+                ['new', 'in_progress', 'resolved', 'closed', 'cancelled']);
 
             const ai = health.ai_analysis || {};
             const aiLabels = {
@@ -5727,6 +5746,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 savedView('due_soon', 'Por vencer', 'due_soon', 'warn', 'warn'),
                 savedView('overdue', 'Vencidos', 'overdue', 'alert', 'alert'),
                 savedView('resolved_today', 'Resueltos hoy', 'resolved_today', 'ok'),
+                savedView('cancelled', 'Cancelados', 'cancelled', 'muted'),
             ] },
         ];
         if (role === 'admin') {
@@ -6011,6 +6031,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopNavPolling();
         document.body.classList.remove('staff-shell', 'nav-open', 'nav-collapsed', 'ticket-open', 'newticket-open');
         cancelPendingAssignSilently();
+        cancelPendingCancelSilently();
         ticketBar.hidden = true;
         sideNav.hidden = true;
         statusBar.hidden = true;
@@ -6119,6 +6140,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ['due_soon', 'Por vencer', 'due_soon', 'warn'],
             ['overdue', 'Vencidos', 'overdue', 'alert'],
             ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
+            ['cancelled', 'Cancelados', 'cancelled', ''],
         ];
     }
 
@@ -6313,6 +6335,7 @@ document.addEventListener('DOMContentLoaded', () => {
             mine_due_soon: ['Ninguno de sus tickets está por vencer', 'Sus tickets abiertos están a tiempo.'],
             following: ['No sigue ningún ticket abierto', 'Use "Seguir" en un ticket para tenerlo a mano aquí.'],
             mine_resolved_today: ['Todavía no resolvió tickets hoy', 'Los que resuelva hoy aparecerán aquí.'],
+            cancelled: ['No hay tickets cancelados', 'Los tickets que se cancelen aparecen aquí y se pueden reabrir.'],
         };
         const [title, text] = messages[queueView] || ['No hay tickets en esta vista', ''];
         if (queueView === 'mine_open') return emptyState({ title, text, action: 'Ver sin asignar', onAction: toUnassigned });
@@ -6350,20 +6373,35 @@ document.addEventListener('DOMContentLoaded', () => {
         queueBody.replaceChildren();
         queueEmpty.hidden = items.length > 0;
         if (!items.length) queueEmpty.replaceChildren(queueEmptyState());
+        const selectable = queueSelectable();
+        // La selección solo guarda tickets de la página que se ve
+        const ids = items.map(item => item.id);
+        [...queueSelected].forEach(id => { if (!ids.includes(id)) queueSelected.delete(id); });
         items.forEach(item => {
             const tr = makeEl('tr', 'queue-row');
             tr.dataset.id = item.id;
             tr.tabIndex = 0;
             if (item.id === selectedTicketId) tr.classList.add('selected');
+            // Cancelado hace un momento: sigue oculto mientras se puede deshacer
+            if (pendingCancel && pendingCancel.ids.includes(item.id)) tr.hidden = true;
 
             const num = queueCell('ID', 'col-num ui-num');
-            num.textContent = `#${item.id}`;
+            if (selectable) {
+                const check = makeEl('input', 'queue-check');
+                check.type = 'checkbox';
+                check.checked = queueSelected.has(item.id);
+                check.setAttribute('aria-label', `Seleccionar ticket #${item.id}`);
+                num.appendChild(check);
+            }
+            num.appendChild(document.createTextNode(`#${item.id}`));
 
             const subject = queueCell('Asunto', 'col-subject');
             subject.appendChild(makeEl('div', 'queue-subject', item.title));
             const meta = makeEl('div', 'queue-meta', `${item.requester_name} · ${SOURCE_LABELS[item.source] || item.source}`);
             // El estado solo se marca cuando no es el habitual de la vista (abierto)
-            if (item.status === 'resolved' || item.status === 'closed') {
+            if (item.cancelled) {
+                meta.appendChild(makeEl('span', 'state-tag state-cancelled', STATE_MAP.cancelled));
+            } else if (item.status === 'resolved' || item.status === 'closed') {
                 meta.appendChild(makeEl('span', `state-tag state-${item.status}`, STATE_MAP[item.status]));
             }
             if (item.reported) meta.appendChild(makeEl('span', 'queue-flag-reported', 'Reportada'));
@@ -6400,6 +6438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.append(num, subject, level, owner, due);
             queueBody.appendChild(tr);
         });
+        renderQueueBulk();
     }
 
     async function openQueueTicket(ticketId) {
@@ -6436,6 +6475,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function enterTicketPage(ticketId) {
         commitPendingAssign();
+        commitPendingCancel();
         document.querySelector('.split').classList.add('show-detail');
         if (!isStaffShell()) return;
         document.body.classList.add('ticket-open');
@@ -6452,6 +6492,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Vuelve a la lista. Sin ticket abierto no hace nada.
     function exitTicketPage() {
         commitPendingAssign();
+        commitPendingCancel();
         if (!document.body.classList.contains('ticket-open')) return;
         const closedId = selectedTicketId;
         document.body.classList.remove('ticket-open');
@@ -6721,11 +6762,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     queueBody.addEventListener('click', (e) => {
+        // La casilla de Vencidos solo selecciona
+        if (e.target.closest('.queue-check')) return;
         const row = e.target.closest('.queue-row');
         if (row) openQueueTicket(Number(row.dataset.id));
     });
     queueBody.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
+        if (e.target.closest('.queue-check')) return;
         const row = e.target.closest('.queue-row');
         if (!row) return;
         e.preventDefault();
@@ -7022,10 +7066,16 @@ document.addEventListener('DOMContentLoaded', () => {
             reassign.type = 'button';
             titleRow.appendChild(reassign);
         }
+        if (canCancelTickets() && !isClosed) {
+            const cancel = makeEl('button', 'ui-btn ui-btn-secondary td-cancel', 'Cancelar ticket');
+            cancel.type = 'button';
+            titleRow.appendChild(cancel);
+        }
         head.appendChild(titleRow);
 
         const tags = makeEl('p', 'td-tags');
-        tags.appendChild(makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
+        const stateKey = ticket.cancellation ? 'cancelled' : ticket.status;
+        tags.appendChild(makeEl('span', `state-tag state-${stateKey}`, STATE_MAP[stateKey] || ticket.status));
         const dueTag = dueTagText(ticket);
         if (dueTag) {
             tags.appendChild(makeEl('span', `ui-tag ${ticket.due_state === 'overdue' ? 'is-danger' : (ticket.due_state === 'due_soon' ? 'is-warn' : 'is-info')}`, dueTag));
@@ -7067,6 +7117,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const assignMe = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm btn-assign-me', 'Asignármelo');
             assignMe.type = 'button';
             notice.appendChild(assignMe);
+            side.appendChild(notice);
+        }
+
+        // Solo el personal recibe cancellation
+        if (ticket.cancellation) {
+            const info = ticket.cancellation;
+            const notice = makeEl('div', 'ui-notice sd-notice td-cancelled');
+            const text = makeEl('div', 'td-cancelled-text');
+            text.appendChild(makeEl('strong', '', `Cancelado · ${info.reason_label}`));
+            text.appendChild(makeEl('span', 'td-cancelled-by',
+                `Por ${info.cancelled_by_name || 'Usuario'} el ${exactDateTime(info.cancelled_at)}`));
+            if (info.note) text.appendChild(makeEl('span', 'td-cancelled-note', info.note));
+            notice.appendChild(text);
+            if (canCancelTickets()) {
+                const reopen = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm td-reopen', 'Reabrir');
+                reopen.type = 'button';
+                notice.appendChild(reopen);
+            }
             side.appendChild(notice);
         }
 
@@ -7129,6 +7197,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     detailPanel.addEventListener('click', async (e) => {
         if (!selectedTicketId || !currentTicket || !isStaffShell()) return;
+
+        if (e.target.closest('.td-cancel')) {
+            startCancel([currentTicket.id]);
+            return;
+        }
+        const reopen = e.target.closest('.td-reopen');
+        if (reopen) {
+            reopen.disabled = true;
+            try {
+                const ticket = await apiFetch(`/tickets/${currentTicket.id}/reopen`, { method: 'POST' });
+                toast(`Ticket #${ticket.id} reabierto: quedó sin asignar.`);
+                reloadSelectedTicketAndList();
+                pollNavCounts(false);
+            } catch (err) {
+                reopen.disabled = false; // apiFetch ya mostró el error
+            }
+            return;
+        }
 
         const tab = e.target.closest('.sd-tab');
         if (tab) {
@@ -8939,6 +9025,188 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingAssign = null;
     }
 
+    // ----- Cancelar tickets (coordinador y administrador) -----
+    // Como al reasignar: se envía al servidor (y sale el correo al cliente) cuando terminan los 5 s,
+    // o antes si la persona cambia de pantalla. "Deshacer" no envía nada.
+    const CANCEL_ROLES = ['coordinator', 'admin'];
+    const cancelDialog = document.getElementById('cancelDialog');
+    const cancelForm = document.getElementById('cancelForm');
+    const cancelNote = document.getElementById('cancelNote');
+    const cancelNotify = document.getElementById('cancelNotify');
+    const queueBulk = document.getElementById('queueBulk');
+    const queueSelectAll = document.getElementById('queueSelectAll');
+    const queueBulkCancel = document.getElementById('queueBulkCancel');
+    const queueSelected = new Set();
+    let cancelDone = null;
+    let cancelNotifyTouched = false;
+    let pendingCancel = null;
+
+    function canCancelTickets() {
+        return Boolean(currentUser && CANCEL_ROLES.includes(currentUser.role));
+    }
+
+    // Casillas para cancelar varios: solo en Vencidos
+    function queueSelectable() {
+        return canCancelTickets() && queueView === 'overdue';
+    }
+
+    function renderQueueBulk() {
+        const show = queueSelectable();
+        queueBulk.hidden = !show;
+        if (!show) {
+            queueSelected.clear();
+            return;
+        }
+        const checks = [...queueBody.querySelectorAll('.queue-row:not([hidden]) .queue-check')];
+        const count = queueSelected.size;
+        document.getElementById('queueBulkCount').textContent = count ? `${count} ${count === 1 ? 'seleccionado' : 'seleccionados'}` : '';
+        queueBulkCancel.disabled = count === 0;
+        queueBulkCancel.textContent = count ? `Cancelar seleccionados (${count})` : 'Cancelar seleccionados';
+        queueSelectAll.disabled = checks.length === 0;
+        queueSelectAll.checked = checks.length > 0 && checks.every(check => check.checked);
+        queueSelectAll.indeterminate = count > 0 && !queueSelectAll.checked;
+    }
+
+    queueBody.addEventListener('change', (e) => {
+        const check = e.target.closest('.queue-check');
+        if (!check) return;
+        const id = Number(check.closest('.queue-row').dataset.id);
+        if (check.checked) queueSelected.add(id);
+        else queueSelected.delete(id);
+        renderQueueBulk();
+    });
+
+    queueSelectAll.addEventListener('change', () => {
+        queueBody.querySelectorAll('.queue-row:not([hidden]) .queue-check').forEach(check => {
+            check.checked = queueSelectAll.checked;
+            const id = Number(check.closest('.queue-row').dataset.id);
+            if (check.checked) queueSelected.add(id);
+            else queueSelected.delete(id);
+        });
+        renderQueueBulk();
+    });
+
+    queueBulkCancel.addEventListener('click', () => {
+        if (queueSelected.size) startCancel([...queueSelected]);
+    });
+
+    // Devuelve { reason, note, notify } o null si la persona vuelve atrás
+    function openCancelDialog(ids) {
+        return new Promise(resolve => {
+            cancelDone = resolve;
+            cancelForm.reset();
+            cancelNotify.checked = true;
+            cancelNotifyTouched = false;
+            const title = ids.length > 1 ? `Cancelar ${ids.length} tickets` : `Cancelar ticket #${ids[0]}`;
+            document.getElementById('cancelDialogTitle').textContent = title;
+            document.getElementById('cancelDialogSubmit').textContent = ids.length > 1 ? title : 'Cancelar ticket';
+            cancelDialog.showModal();
+            cancelForm.querySelector('input[name="cancelReason"]').focus();
+        });
+    }
+
+    function closeCancelDialog(result) {
+        if (cancelDialog.open) cancelDialog.close();
+        const resolve = cancelDone;
+        cancelDone = null;
+        if (resolve) resolve(result);
+    }
+
+    // "Prueba o spam" no avisa al cliente, salvo que la persona marque la casilla a mano
+    cancelForm.addEventListener('change', (e) => {
+        if (e.target === cancelNotify) {
+            cancelNotifyTouched = true;
+        } else if (e.target.name === 'cancelReason' && !cancelNotifyTouched) {
+            cancelNotify.checked = e.target.value !== 'test_spam';
+        }
+    });
+    cancelForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const reason = cancelForm.querySelector('input[name="cancelReason"]:checked');
+        if (!reason) return;
+        closeCancelDialog({ reason: reason.value, note: cancelNote.value.trim(), notify: cancelNotify.checked });
+    });
+    document.getElementById('cancelDialogClose').addEventListener('click', () => closeCancelDialog(null));
+    cancelDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeCancelDialog(null);
+    });
+
+    function cancelBody(pending) {
+        return JSON.stringify({
+            ticket_ids: pending.ids, reason: pending.reason, note: pending.note || null, notify_requester: pending.notify,
+        });
+    }
+
+    function setQueueRowsHidden(ids, hidden) {
+        queueBody.querySelectorAll('.queue-row').forEach(row => {
+            if (ids.includes(Number(row.dataset.id))) row.hidden = hidden;
+        });
+    }
+
+    async function startCancel(ids) {
+        const choice = await openCancelDialog(ids);
+        if (!choice) return;
+        commitPendingCancel();
+        // Desde el detalle se vuelve a la cola
+        if (document.body.classList.contains('ticket-open') && ids.includes(selectedTicketId)) exitTicketPage();
+        const pending = { ids, ...choice, done: false };
+        pendingCancel = pending;
+        ids.forEach(id => queueSelected.delete(id));
+        setQueueRowsHidden(ids, true);
+        renderQueueBulk();
+        const text = ids.length === 1 ? `Ticket #${ids[0]} cancelado.` : `${ids.length} tickets cancelados.`;
+        pending.toast = toast(text, {
+            action: 'Deshacer',
+            duration: UNDO_SECONDS * 1000,
+            onClose: (reason) => {
+                if (reason === 'action') undoPendingCancel(pending);
+                else commitPendingCancel();
+            },
+        });
+    }
+
+    async function commitPendingCancel() {
+        const pending = pendingCancel;
+        if (!pending || pending.done) return;
+        pending.done = true;
+        pendingCancel = null;
+        pending.toast.close();
+        try {
+            await apiFetch('/tickets/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: cancelBody(pending),
+                silent: true,
+            });
+        } catch (err) {
+            showError(`No se cancelaron los tickets: ${err.message}`);
+            setQueueRowsHidden(pending.ids, false);
+            renderQueueBulk();
+            return;
+        }
+        if (!isStaffShell()) return;
+        loadQueue({ quiet: true });
+        pollNavCounts(false);
+    }
+
+    function undoPendingCancel(pending) {
+        if (pending.done) return;
+        pending.done = true;
+        if (pendingCancel === pending) pendingCancel = null;
+        setQueueRowsHidden(pending.ids, false);
+        renderQueueBulk();
+        toast('Cancelación deshecha. No se envió ningún correo.');
+    }
+
+    // La sesión venció: no se envía nada pendiente
+    function cancelPendingCancelSilently() {
+        if (!pendingCancel) return;
+        pendingCancel.done = true;
+        pendingCancel.toast.close();
+        pendingCancel = null;
+    }
+
     // Al cerrar o recargar la pestaña: se envía con keepalive para que no se pierda
     window.addEventListener('pagehide', () => {
         const pending = pendingAssign;
@@ -8950,6 +9218,18 @@ document.addEventListener('DOMContentLoaded', () => {
             keepalive: true,
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
             body: assignBody(pending),
+        }).catch(() => {});
+    });
+    window.addEventListener('pagehide', () => {
+        const pending = pendingCancel;
+        if (!pending || pending.done || !authToken) return;
+        pending.done = true;
+        pendingCancel = null;
+        fetch(`${API_BASE}/tickets/cancel`, {
+            method: 'POST',
+            keepalive: true,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: cancelBody(pending),
         }).catch(() => {});
     });
 

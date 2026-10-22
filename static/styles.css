@@ -4087,3 +4087,25 @@ body.staff-shell.nav-collapsed .nav-search { display: none; }
 .periods-empty { color: var(--muted); }
 .period-form { margin-top: 4px; }
 #availabilityDialog .periods-list { margin-top: 6px; }
+
+/* ----- Cancelar tickets ----- */
+.state-cancelled { background: var(--danger-soft); color: var(--overdue); }
+.nav-dot.is-muted { background: #8E9AE6; }
+.queue-bulk { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.queue-bulk[hidden] { display: none; }
+.queue-bulk-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.queue-bulk-count { color: var(--muted); }
+.queue-bulk #queueBulkCancel { margin-left: auto; }
+.queue-check { margin: 0 8px 0 0; vertical-align: middle; cursor: pointer; }
+.cancel-reasons { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding: 0; border: none; }
+.cancel-reasons legend { margin-bottom: 6px; font-weight: 600; }
+.cancel-reasons label, .cancel-notify { display: flex; align-items: center; gap: 8px; font-weight: 400; cursor: pointer; }
+.cancel-notify { margin: 4px 0 12px; }
+.td-cancel { margin-left: var(--sp-2); }
+.td-cancelled { display: flex; align-items: flex-start; gap: 12px; background: var(--danger-soft); color: var(--overdue); }
+.td-cancelled-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.td-cancelled-by { font-size: 12px; }
+.td-cancelled-note { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .queue-bulk { flex-wrap: wrap; padding: 8px 12px; }
+}

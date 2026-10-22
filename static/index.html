@@ -326,6 +326,12 @@
                     </div>
                 </header>
                 <section class="ui-card queue-card" aria-label="Lista de tickets">
+                    <!-- Vencidos (coordinador y administrador): cancelar varios con un solo motivo -->
+                    <div id="queueBulk" class="queue-bulk" hidden>
+                        <label class="queue-bulk-all"><input type="checkbox" id="queueSelectAll"> Seleccionar todos</label>
+                        <span id="queueBulkCount" class="queue-bulk-count" aria-live="polite"></span>
+                        <button type="button" id="queueBulkCancel" class="ui-btn ui-btn-danger ui-btn-sm" disabled>Cancelar seleccionados</button>
+                    </div>
                     <div class="queue-table-wrap">
                         <table class="queue-table">
                             <colgroup>
@@ -1158,6 +1164,31 @@
             <div class="dialog-actions">
                 <button type="button" id="roleCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" id="roleSubmit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Cancelar uno o varios tickets con un solo motivo (coordinador y administrador) -->
+    <dialog id="cancelDialog" class="app-dialog" aria-labelledby="cancelDialogTitle">
+        <form id="cancelForm" class="profile-form">
+            <h2 id="cancelDialogTitle" class="modal-title">Cancelar ticket</h2>
+            <p class="help-text">No se borra nada: el ticket sale de las colas y se conserva con su historial. Se puede reabrir desde Cancelados.</p>
+            <fieldset class="cancel-reasons">
+                <legend>Motivo</legend>
+                <label><input type="radio" name="cancelReason" value="no_longer_applies" required> Ya no aplica</label>
+                <label><input type="radio" name="cancelReason" value="duplicate"> Duplicado</label>
+                <label><input type="radio" name="cancelReason" value="no_response"> Sin respuesta del cliente</label>
+                <label><input type="radio" name="cancelReason" value="test_spam"> Prueba o spam</label>
+            </fieldset>
+            <div class="form-group">
+                <label for="cancelNote">Nota (opcional)</label>
+                <textarea id="cancelNote" maxlength="500" rows="2"></textarea>
+                <small class="help-text">Solo la ve el equipo.</small>
+            </div>
+            <label class="cancel-notify"><input type="checkbox" id="cancelNotify" checked> Avisar al cliente por correo</label>
+            <div class="dialog-actions">
+                <button type="button" id="cancelDialogClose" class="btn-secondary">Volver</button>
+                <button type="submit" id="cancelDialogSubmit" class="ui-btn ui-btn-danger">Cancelar ticket</button>
             </div>
         </form>
     </dialog>

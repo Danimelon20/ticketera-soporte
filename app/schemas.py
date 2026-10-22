@@ -258,6 +258,23 @@ class TicketUpdate(BaseModel):
     confirm_unavailable: bool = False
 
 
+class CancellationRead(BaseModel):
+    """Motivo de la cancelación: solo para el personal."""
+    reason: str
+    reason_label: str
+    note: Optional[str] = None
+    cancelled_by_name: Optional[str] = None
+    cancelled_at: datetime
+
+
+class TicketCancelRequest(BaseModel):
+    """Uno o varios tickets con un solo motivo."""
+    ticket_ids: list[int] = Field(min_length=1, max_length=50)
+    reason: Literal["no_longer_applies", "duplicate", "no_response", "test_spam"]
+    note: Optional[str] = Field(default=None, max_length=500)
+    notify_requester: bool = True
+
+
 class TicketRead(BaseModel):
     id: int
     title: str
@@ -276,6 +293,8 @@ class TicketRead(BaseModel):
     progress_step: int = 1
     # Último cambio o comentario público
     last_activity_at: Optional[datetime] = None
+    # Solo para el personal y si está cancelado
+    cancellation: Optional[CancellationRead] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -589,6 +608,7 @@ class NavCounts(BaseModel):
     mine_due_soon: Optional[int] = None
     following_open: Optional[int] = None
     mine_resolved_today: Optional[int] = None
+    cancelled: Optional[int] = None
     shift: Optional[NavShift] = None
 
 
@@ -613,6 +633,7 @@ class QueueItem(BaseModel):
     assigned_name: Optional[str] = None
     reported: bool = False
     auto_assigned: bool = False
+    cancelled: bool = False
     due_at: Optional[datetime] = None
     due_state: Optional[str] = None
     remaining_seconds: Optional[int] = None

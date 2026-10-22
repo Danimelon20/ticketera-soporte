@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, config, models, schedules
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, models, schedules
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -15,7 +15,7 @@ RESOLVED_STATUSES = ("resolved", "closed")
 PAGE_SIZE = 25
 QUEUE_VIEWS = (
     "all", "open", "unassigned", "due_soon", "overdue", "resolved_today",
-    "mine_open", "mine_due_soon", "following", "mine_resolved_today",
+    "mine_open", "mine_due_soon", "following", "mine_resolved_today", "cancelled",
 )
 _OPEN_VIEWS = ("open", "unassigned", "due_soon", "overdue", "mine_open", "mine_due_soon", "following")
 
@@ -52,7 +52,7 @@ def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None) 
 
 
 def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = None) -> set[int]:
-    """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados."""
+    """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados (sin los cancelados)."""
     query = (
         db.query(models.History.ticket_id)
         .join(models.Ticket, models.Ticket.id == models.History.ticket_id)
@@ -61,6 +61,7 @@ def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = No
             models.History.new_value == "resolved",
             models.History.changed_at >= _today_start(now),
             models.Ticket.status.in_(RESOLVED_STATUSES),
+            models.Ticket.id.notin_(db.query(models.TicketCancellation.ticket_id)),
         )
     )
     if assigned_to is not None:
@@ -131,6 +132,8 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         "drafts_pending": _drafts_pending(db),
         "reports_open": db.query(models.AccountReport).filter(models.AccountReport.status == "open").count(),
         "invitations_pending": invitations.count(),
+        # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
+        "cancelled": cancellations.count(db),
     }
     if user.role == "admin":
         result["approvals_pending"] = (
@@ -203,6 +206,8 @@ def queue(
         query = query.join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id).filter(
             models.TicketFollower.user_id == user.id
         )
+    if view == "cancelled":
+        query = query.filter(models.Ticket.id.in_(db.query(models.TicketCancellation.ticket_id)))
     if view in ("resolved_today", "mine_resolved_today"):
         ids = _resolved_today_ids(db, now, assigned_to=user.id if view == "mine_resolved_today" else None)
         query = query.filter(models.Ticket.id.in_(ids))
@@ -246,6 +251,7 @@ def queue(
     creator_ids = list({t.created_by for t in tickets})
     creators = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(creator_ids)).all()} if creator_ids else {}
     reported = account_reports.reported_ids(db, creator_ids)
+    cancelled = cancellations.cancelled_ids(db) if tickets else set()
     staff_ids = list({t.assigned_to for t in tickets if t.assigned_user and t.assigned_user.role in availability.ROLES})
     statuses = availability.statuses_for(db, staff_ids, now)
     shifts = schedules.for_users(db, staff_ids)
@@ -265,6 +271,7 @@ def queue(
             "assigned_name": (ticket.assigned_user.name or "Sin nombre") if ticket.assigned_user else None,
             "reported": ticket.created_by in reported,
             "auto_assigned": auto_assign.is_auto_assigned(db, ticket),
+            "cancelled": ticket.id in cancelled,
             "due_at": due,
             "due_state": state,
             "remaining_seconds": int((due - now).total_seconds()) if due else None,

@@ -14,7 +14,7 @@ from starlette.background import BackgroundTask
 
 from ..database import engine, get_db
 from .. import (
-    account_reports, accounts, alerts, auto_assign, availability, config, daily_summary, email_analysis, email_poller,
+    account_reports, accounts, alerts, auto_assign, availability, cancellations, config, daily_summary, email_analysis, email_poller,
     identity, models, schedules, throttle,
 )
 from ..schemas import (
@@ -637,6 +637,11 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
     tickets_by_status = dict(
         db.query(models.Ticket.status, func.count(models.Ticket.id)).group_by(models.Ticket.status).all()
     )
+    # Los cancelados quedan "closed": se cuentan aparte, no dentro de Cerrado
+    cancelled = cancellations.count(db)
+    if cancelled:
+        tickets_by_status["closed"] = tickets_by_status.get("closed", 0) - cancelled
+        tickets_by_status["cancelled"] = cancelled
     last_run = email_poller.last_run
     return {
         "database": database,

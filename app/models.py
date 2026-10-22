@@ -76,6 +76,8 @@ class Ticket(Base):
     comments = relationship("Comment", back_populates="ticket")
     history = relationship("History", back_populates="ticket")
     ai_analysis = relationship("TicketAIAnalysis", back_populates="ticket", uselist=False)
+    # Solo si está cancelado (ver TicketCancellation)
+    cancellation_row = relationship("TicketCancellation", uselist=False, viewonly=True)
 
 
 class Comment(Base):
@@ -579,3 +581,29 @@ class TicketAutoAssignment(Base):
     created_at = Column(DateTime, nullable=False)
 
     ticket = relationship("Ticket")
+
+
+# Motivos de cancelación: clave guardada en la base y texto que se muestra
+CANCEL_REASONS = {
+    "no_longer_applies": "Ya no aplica",
+    "duplicate": "Duplicado",
+    "no_response": "Sin respuesta del cliente",
+    "test_spam": "Prueba o spam",
+}
+
+
+class TicketCancellation(Base):
+    """Ticket cancelado: queda "closed" y esta fila guarda el motivo. Al reabrirlo, la fila se borra.
+
+    Tabla aparte para no agregar columnas a tickets (create_all no altera tablas). Motivo validado en Python.
+    """
+    __tablename__ = "ticket_cancellations"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    reason = Column(String(30), nullable=False)
+    note = Column(Text, nullable=True)
+    cancelled_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    cancelled_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")

@@ -3,12 +3,12 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import CancellationRead, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
-from .. import config, hacienda
-from ..notifications import STATUS_LABELS, notify_followers
+from .. import cancellations, config, hacienda, mailer
+from ..notifications import STATUS_LABELS, display_name, notify_followers
 from .. import account_reports, alerts, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav, portal
 
 AI_ROLES = ("technician", "coordinator", "admin")
@@ -58,6 +58,16 @@ def ticket_read(ticket: models.Ticket, current_user, last_activity_at=None) -> T
     data.last_activity_at = last_activity_at or ticket.updated_at
     if hides_personal_data(ticket, current_user):
         data.description = _redact(data.description)
+    row = ticket.cancellation_row
+    # El solicitante ve su ticket "Cerrado", sin el motivo interno
+    if row is not None and current_user.role != "requester":
+        data.cancellation = CancellationRead(
+            reason=row.reason,
+            reason_label=models.CANCEL_REASONS.get(row.reason, row.reason),
+            note=row.note,
+            cancelled_by_name=person_name(row.user) if row.user else None,
+            cancelled_at=row.cancelled_at,
+        )
     return data
 
 
@@ -357,6 +367,66 @@ def add_comment(ticket_id: int, comment: CommentCreate, background_tasks: Backgr
         [db_comment.content],
     )
     return db_comment
+
+
+@router.post("/tickets/cancel", response_model=list[TicketRead])
+def cancel_tickets(
+    data: TicketCancelRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Cancela uno o varios tickets con un solo motivo. Todo o nada: si uno no se puede, no cambia ninguno."""
+    cancellations.require_can_cancel(current_user)
+    ids = list(dict.fromkeys(data.ticket_ids))
+    tickets = {t.id: t for t in db.query(models.Ticket).filter(models.Ticket.id.in_(ids)).all()}
+    missing = [i for i in ids if i not in tickets]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"El ticket #{missing[0]} no existe")
+    for ticket_id in ids:
+        cancellations.check_can_be_cancelled(tickets[ticket_id])
+    note = data.note.strip() if data.note else None
+    for ticket_id in ids:
+        cancellations.cancel(db, tickets[ticket_id], current_user, data.reason, note)
+    db.commit()
+
+    reason_label = models.CANCEL_REASONS[data.reason]
+    result = []
+    for ticket_id in ids:
+        ticket = tickets[ticket_id]
+        db.refresh(ticket)
+        notify_followers(
+            db, background_tasks, ticket, current_user,
+            f"[Ticket #{ticket.id}] Cancelado",
+            [f"{current_user.name} canceló el ticket. Motivo: {reason_label}."],
+            exclude_ids=(ticket.created_by,) if data.notify_requester else (),
+        )
+        requester = db.get(models.User, ticket.created_by)
+        if data.notify_requester and requester and requester.is_active and requester.role == "requester":
+            # Solo número, título y motivo: nunca teléfono ni cédula ni la nota interna
+            body = "\n".join([
+                f"Hola {display_name(requester)}.",
+                "",
+                f"Su ticket #{ticket.id} «{ticket.title}» fue cancelado.",
+                f"Motivo: {reason_label}.",
+                "",
+                "Si todavía necesita ayuda, puede crear una solicitud nueva.",
+                f"Puede ver sus solicitudes en {config.APP_URL}",
+            ])
+            background_tasks.add_task(mailer.send_email, requester.email, f"[Ticket #{ticket.id}] Cancelado", body)
+        result.append(ticket_read(ticket, current_user))
+    return result
+
+
+@router.post("/tickets/{ticket_id}/reopen", response_model=TicketRead)
+def reopen_ticket(ticket_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Devuelve un ticket cancelado a la cola: Nuevo y sin responsable."""
+    cancellations.require_can_cancel(current_user)
+    ticket = get_visible_ticket(db, ticket_id, current_user)
+    cancellations.reopen(db, ticket, current_user)
+    db.commit()
+    db.refresh(ticket)
+    return ticket_read(ticket, current_user)
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)

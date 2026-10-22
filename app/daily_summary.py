@@ -87,6 +87,12 @@ def build_summary(db: Session, now: datetime | None = None) -> tuple[str, str]:
     overdue = [t for t in open_tickets if _due_at(t) is not None and _due_at(t) < now]
     due_today = [t for t in open_tickets if _due_at(t) is not None and now <= _due_at(t) < end_of_day]
     unassigned = [t for t in open_tickets if t.assigned_to is None]
+    # Los cancelados ya no son trabajo pendiente, pero se informan aparte
+    cancelled = (
+        db.query(models.TicketCancellation)
+        .filter(models.TicketCancellation.cancelled_at >= now - timedelta(hours=24))
+        .count()
+    )
 
     pending_drafts = (
         db.query(models.EmailDraft)
@@ -120,7 +126,10 @@ def build_summary(db: Session, now: datetime | None = None) -> tuple[str, str]:
     ]
     for section in (
         _section("Tickets críticos (nivel 4) abiertos", [_ticket_line(t) for t in critical]),
-        _section("Tickets vencidos", [_ticket_line(t) for t in overdue]),
+        _section(
+            "Tickets vencidos", [_ticket_line(t) for t in overdue],
+            [f"  Tickets cancelados en las últimas 24 horas: {cancelled}"],
+        ),
         _section("Tickets que vencen hoy", [_ticket_line(t) for t in due_today]),
         _section("Tickets sin asignar", [_ticket_line(t) for t in unassigned]),
         _section(
