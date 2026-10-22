@@ -1664,7 +1664,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (isStaffShell()) {
             renderStaffDetail(ticket);
-            placeHealthBanner();
             return;
         }
         if (isRequesterPortal()) {
@@ -2781,7 +2780,6 @@ document.addEventListener('DOMContentLoaded', () => {
             loadReports();
         }
         if (name === 'adminAccounts') loadAdminAccounts();
-        placeHealthBanner();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
@@ -4339,7 +4337,6 @@ document.addEventListener('DOMContentLoaded', () => {
         reviewAccount = null;
         reportReview.hidden = true;
         reportsListPane.hidden = false;
-        placeHealthBanner();
         setDocumentTitle('Reportes de cuentas');
     }
 
@@ -4373,7 +4370,6 @@ document.addEventListener('DOMContentLoaded', () => {
         reviewAccount = null;
         reportsListPane.hidden = true;
         reportReview.hidden = false;
-        placeHealthBanner();
         window.scrollTo(0, 0);
         const own = item.reporter_id === currentUser.id;
         document.getElementById('reportReviewCrumb').textContent = item.target_name;
@@ -5627,18 +5623,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ===== Mesa de servicio: menú lateral, contadores, buscador global y estado del sistema =====
+    // ===== Mesa de servicio: menú lateral, contadores, buscador global y barra de estado =====
     const STAFF_SHELL_ROLES = ['technician', 'coordinator', 'admin'];
     const sideNav = document.getElementById('sideNav');
     const sideNavGroups = document.getElementById('sideNavGroups');
     const sideNavBackdrop = document.getElementById('sideNavBackdrop');
     const navToggle = document.getElementById('navToggle');
-    const healthBanner = document.getElementById('healthBanner');
-    const healthBannerList = document.getElementById('healthBannerList');
-    const healthBannerLink = document.getElementById('healthBannerLink');
-    const healthDots = [document.getElementById('navHealthDot'), document.getElementById('navToggleDot')];
+    const statusBar = document.getElementById('statusBar');
     const statusLogo = document.getElementById('statusLogo');
     const directoryRoleSelect = document.getElementById('directoryRole');
+    const ASSIGN_MODE_LABELS = { levels: 'por niveles', count: 'por cantidad' };
     let navPollTimer = null;
     let navCounts = {};
     let activeNavId = null;
@@ -5900,7 +5894,7 @@ document.addEventListener('DOMContentLoaded', () => {
     statusLogo.addEventListener('error', () => { statusLogo.hidden = true; });
 
     // ----- Mi turno y disponibilidad (técnico) -----
-    // ----- Contadores y estado del sistema: cada minuto, solo con la pestaña visible -----
+    // ----- Contadores y barra de estado: cada minuto, solo con la pestaña visible -----
     // No usa apiFetch para no borrar un mensaje de error en pantalla.
     async function silentGet(endpoint) {
         const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -5914,134 +5908,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return response.ok ? response.json() : null;
     }
 
-    // ----- Estado del sistema: solo se avisa cuando algo falla -----
-    // /system/status solo dice si cada servicio está encendido: apagado es a propósito (punto gris, sin aviso).
-    // Si un servicio encendido falla, el servidor todavía no lo informa.
-    const HEALTH_DISABLED = { email: 'Correo desactivado', ai_analysis: 'Análisis IA desactivado', auto_assign: 'Asignación automática desactivada' };
-    const HEALTH_RECOVERED = { server: 'La conexión con el servidor volvió.', shift: 'Ya hay técnicos en turno.' };
-    let healthFailures = [];          // { service, level: 'warn' | 'down', text }
-    let healthDismissed = new Set();  // "servicio:nivel" cerrados con ✕
-    let healthShown = '';             // Lo que muestra la franja ahora: solo se toca si cambia
-
-    const healthKey = (failure) => `${failure.service}:${failure.level}`;
-
-    // status null: el servidor no respondió
-    function healthFromStatus(status) {
-        const failures = [];
-        const disabled = [];
-        if (!status) {
-            failures.push({ service: 'server', level: 'down', text: 'No hay conexión con el servidor. Lo que ve en pantalla puede estar desactualizado.' });
-            return { failures, disabled };
-        }
-        Object.keys(HEALTH_DISABLED).forEach(key => { if (!status[key]) disabled.push(HEALTH_DISABLED[key]); });
-        // El técnico no recibe este aviso
-        if (status.technicians_on_shift === 0 && currentUser.role !== 'technician') {
-            failures.push({ service: 'shift', level: 'warn', text: 'No hay técnicos en turno. Los tickets nuevos quedan sin asignar.' });
-        }
-        return { failures, disabled };
+    function setStatusItem(id, active, extra) {
+        const item = document.getElementById(id);
+        item.classList.toggle('is-on', active);
+        item.querySelector('.status-dot').title = active ? 'Activo' : 'Inactivo';
+        const label = item.querySelector('.status-text');
+        const base = { statusEmail: 'Correo', statusAi: 'Análisis IA', statusAssign: 'Asignación automática' }[id];
+        label.textContent = `${base}${extra ? ` (${extra})` : ''}: ${active ? 'activo' : 'inactivo'}`;
+        // Con el menú contraído solo queda el punto: el texto sale al pasar el puntero
+        item.title = label.textContent;
     }
 
-    // La primera frase en negrita: "<b>No hay técnicos en turno.</b> Los tickets nuevos quedan sin asignar."
-    function healthItem(failure) {
-        const li = makeEl('li');
-        const cut = failure.text.indexOf('. ');
-        const first = cut === -1 ? failure.text : failure.text.slice(0, cut + 1);
-        li.appendChild(makeEl('b', '', first));
-        if (cut !== -1) li.appendChild(document.createTextNode(failure.text.slice(cut + 1)));
-        return li;
+    function renderStatusBar(status) {
+        setStatusItem('statusEmail', status.email);
+        setStatusItem('statusAi', status.ai_analysis);
+        setStatusItem('statusAssign', status.auto_assign, ASSIGN_MODE_LABELS[status.auto_assign_mode]);
+        document.getElementById('statusShift').textContent = `Técnicos en turno: ${status.technicians_on_shift}`;
     }
-
-    // Única función que ubica el aviso: justo después del encabezado visible de la pantalla actual
-    // (data-page-header) o, si no tiene, como primer elemento de su contenido.
-    function placeHealthBanner() {
-        const view = visibleViews()[0];
-        if (!view) return;
-        const header = [...view.querySelectorAll('[data-page-header]')].find(el => el.getClientRects().length > 0);
-        if (header) {
-            if (header.nextElementSibling !== healthBanner) header.after(healthBanner);
-        } else if (view.firstElementChild !== healthBanner) {
-            view.prepend(healthBanner);
-        }
-    }
-
-    function renderHealthBanner() {
-        placeHealthBanner();
-        const visible = healthFailures.filter(f => !healthDismissed.has(healthKey(f)));
-        const shown = visible.map(f => `${healthKey(f)}=${f.text}`).join('|');
-        // Sin cambios no se vuelve a escribir: role="alert" solo avisa cuando aparece o cambia
-        if (shown === healthShown) return;
-        healthShown = shown;
-        healthBannerList.replaceChildren(...visible.map(healthItem));
-        healthBanner.classList.toggle('is-down', visible.some(f => f.level === 'down'));
-        healthBannerLink.hidden = currentUser.role !== 'admin';
-        healthBanner.hidden = visible.length === 0;
-    }
-
-    function renderHealthDot(disabled) {
-        const level = healthFailures.some(f => f.level === 'down') ? 'down'
-            : healthFailures.length ? 'warn' : disabled.length ? 'off' : '';
-        const detail = healthFailures.map(f => f.text).concat(disabled.map(text => `${text}.`)).join(' ');
-        healthDots.forEach(dot => {
-            dot.hidden = !level;
-            dot.className = `health-dot${level ? ` is-${level}` : ''}`;
-            dot.title = detail;
-            dot.setAttribute('aria-label', detail);
-        });
-        navToggle.setAttribute('aria-label', level ? `Abrir menú. ${detail}` : 'Abrir menú');
-    }
-
-    function updateHealth(status) {
-        const { failures, disabled } = healthFromStatus(status);
-        const failing = new Set(failures.map(f => f.service));
-        healthFailures.filter(f => !failing.has(f.service)).forEach(f => toast(HEALTH_RECOVERED[f.service]));
-        // Lo que se recuperó se vuelve a avisar si falla otra vez
-        const current = new Set(failures.map(healthKey));
-        healthDismissed = new Set([...healthDismissed].filter(key => current.has(key)));
-        healthFailures = failures;
-        renderHealthBanner();
-        renderHealthDot(disabled);
-    }
-
-    function resetHealth() {
-        healthFailures = [];
-        healthDismissed = new Set();
-        healthShown = '';
-        healthBanner.hidden = true;
-        healthBannerList.replaceChildren();
-        healthDots.forEach(dot => { dot.hidden = true; });
-        navToggle.setAttribute('aria-label', 'Abrir menú');
-    }
-
-    document.getElementById('healthBannerClose').addEventListener('click', () => {
-        healthFailures.forEach(f => healthDismissed.add(healthKey(f)));
-        renderHealthBanner();
-    });
-
-    healthBannerLink.addEventListener('click', () => {
-        hideError();
-        setSideNavActive('health');
-        showAdminSection('health');
-    });
 
     // withQueue: el temporizador también actualiza la cola; tras un cambio solo hacen falta los contadores
     async function pollNavCounts(withQueue = true) {
         if (document.visibilityState !== 'visible' || !authToken || !currentUser) return;
         if (!STAFF_SHELL_ROLES.includes(currentUser.role)) return;
-        let counts = null;
-        let status = null;
         try {
-            [counts, status] = await Promise.all([silentGet('/nav/counts'), silentGet('/system/status')]);
-        } catch (err) {
-            // Sin conexión: el aviso lo dice y se reintenta en el siguiente minuto
-        }
-        // La sesión venció mientras tanto
-        if (!authToken || !currentUser) return;
-        updateHealth(status);
-        try {
+            const [counts, status] = await Promise.all([silentGet('/nav/counts'), silentGet('/system/status')]);
             if (counts) {
                 navCounts = counts;
                 renderNavCounts();
             }
+            if (status) renderStatusBar(status);
             // La cola visible también se actualiza; el detalle abierto no se toca
             if (withQueue && document.querySelector('main .split').style.display !== 'none') {
                 await loadQueue({ quiet: true });
@@ -6089,7 +5984,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const staff = Boolean(currentUser && STAFF_SHELL_ROLES.includes(currentUser.role));
         document.body.classList.toggle('staff-shell', staff);
         sideNav.hidden = !staff;
-        resetHealth();
+        statusBar.hidden = !staff;
         document.getElementById('staffFooter').hidden = !staff;
         navToggle.hidden = !staff;
         closeSideNav();
@@ -6118,7 +6013,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelPendingAssignSilently();
         ticketBar.hidden = true;
         sideNav.hidden = true;
-        resetHealth();
+        statusBar.hidden = true;
         document.getElementById('staffFooter').hidden = true;
         sideNavBackdrop.hidden = true;
     }
@@ -6567,7 +6462,6 @@ document.addEventListener('DOMContentLoaded', () => {
         queueBody.querySelectorAll('.queue-row.selected').forEach(row => row.classList.remove('selected'));
         setDocumentTitle('Tickets');
         applyFabPos(false);
-        placeHealthBanner();
         return closedId;
     }
 
@@ -7108,7 +7002,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ----- Encabezado: título, seguir, estado y reasignar -----
         const head = makeEl('header', 'td-head');
-        head.dataset.pageHeader = '';
         const titleRow = makeEl('div', 'td-title-row');
         titleRow.appendChild(makeEl('h1', 'td-title', ticket.title));
         const followBox = makeEl('div', 'follow-box');

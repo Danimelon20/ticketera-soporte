@@ -1581,7 +1581,7 @@ section {
 }
 
 /* ===== Mesa de servicio: estructura del personal ===== */
-.tabular, .nav-count, .shift-data dd { font-variant-numeric: tabular-nums; }
+.tabular, .nav-count, .status-bar, .shift-data dd { font-variant-numeric: tabular-nums; }
 
 .topbar {
   min-height: 52px;
@@ -1761,7 +1761,29 @@ body.staff-shell .chat-panel { bottom: calc(var(--bar-h) + 82px); }
 
 .side-nav-backdrop { display: none; }
 
+.status-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--bar-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  background: var(--bg-side);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  z-index: 40;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.status-bar[hidden] { display: none; }
+.status-item { display: inline-flex; align-items: center; gap: 6px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #A0A4B8; }
+.status-item.is-on .status-dot { background: var(--on-shift); }
 .status-logo { height: 28px; width: auto; margin-left: auto; flex: 0 0 auto; }
 .status-logo[hidden] { display: none; }
 
@@ -1779,6 +1801,8 @@ body.staff-shell .split { min-height: calc(100vh - 52px - var(--bar-h)); }
   body.staff-shell .side-nav { transform: translateX(-100%); transition: transform 0.15s ease; z-index: 70; }
   body.staff-shell.nav-open .side-nav { transform: none; }
   body.staff-shell.nav-open .side-nav-backdrop { display: block; position: fixed; inset: 52px 0 0 0; background: rgba(16, 19, 46, 0.35); z-index: 65; }
+  .status-item .status-text { display: none; }
+  #statusShift { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   body.staff-shell .side-nav { transition: none; }
@@ -2667,6 +2691,7 @@ body.staff-shell.ticket-open { --nav-w: 0px; }
 body.staff-shell main { margin-left: var(--nav-w); }
 body.staff-shell .split { min-height: calc(100vh - var(--top-h) - var(--bar-h)); }
 body.staff-shell .admin-accounts-view { min-height: calc(100vh - var(--top-h) - var(--bar-h)); }
+body.staff-shell .status-bar { left: var(--nav-w); background: var(--bg-side); border-top-color: var(--line); }
 
 /* ----- Barra lateral ----- */
 body.staff-shell .side-nav {
@@ -3178,50 +3203,37 @@ body.staff-shell.ticket-open #detailContent {
   #verifyScreen .code-digit { width: 38px; height: 48px; }
 }
 
-/* ----- Estado del sistema: solo cuando algo falla ----- */
+/* ----- Barra de estado compacta al pie de la barra lateral ----- */
 body.staff-shell { --bar-h: 0px; }
-/* Tarjeta dentro del contenido, debajo del encabezado de la pantalla (propuesta D) */
-.health-banner {
+body.staff-shell .status-bar {
+  position: static;
+  height: auto;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 12px 0 16px;
-  padding: 11px 14px;
-  border: 1px solid #F3D3A6;
-  border-radius: 10px;
-  background: #FFF8EC;
-  color: #7A3E06;
-  font-size: 13px;
-  line-height: 1.4;
+  flex-direction: column;
+  gap: 3px;
+  margin: 10px 0 0;
+  padding: 10px 10px 0;
+  list-style: none;
+  border: none;
+  border-top: 1px solid var(--navy-line);
+  background: none;
+  font-size: var(--fs-xs);
+  color: var(--navy-muted);
+  white-space: normal;
+  overflow: visible;
 }
-.health-banner[hidden] { display: none; }
-.health-banner-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #F59E0B; }
-.health-banner-list { flex: 1; min-width: 0; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.health-banner-list b { font-weight: 600; }
-.health-banner-link { flex: 0 0 auto; padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 500; text-decoration: underline; cursor: pointer; }
-.health-banner-link[hidden] { display: none; }
-.health-banner-close { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: none; border-radius: 6px; background: none; color: inherit; opacity: 0.7; cursor: pointer; }
-.health-banner-close:hover { opacity: 1; background: rgba(122, 62, 6, 0.08); }
-/* Servidor sin respuesta */
-.health-banner.is-down { border-color: #F1B8B0; background: #FDECEA; color: #B42318; }
-.health-banner.is-down .health-banner-dot { background: #B42318; }
-.health-banner.is-down .health-banner-close:hover { background: rgba(180, 35, 24, 0.08); }
-
-/* Punto al final de la tarjeta del usuario; con la barra contraída, en la esquina del avatar; en el celular, sobre ☰ */
-.health-dot { flex: 0 0 auto; width: 9px; height: 9px; margin-left: auto; border-radius: 50%; }
-.health-dot[hidden] { display: none; }
-.health-dot.is-warn { background: #F59E0B; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25); }
-.health-dot.is-down { background: #B42318; box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.25); }
-.health-dot.is-off { background: #8E9AE6; box-shadow: 0 0 0 3px rgba(142, 154, 230, 0.25); }
-.nav-user { position: relative; }
-body.staff-shell.nav-collapsed .nav-user .health-dot { position: absolute; top: -1px; left: 21px; width: 8px; height: 8px; margin: 0; box-shadow: 0 0 0 2px var(--navy); }
-.nav-toggle { position: relative; }
-.nav-toggle .health-dot { position: absolute; top: -4px; right: -4px; margin: 0; }
+body.staff-shell .status-bar[hidden] { display: none; }
+body.staff-shell .status-dot { background: #6B74C9; }
+body.staff-shell .status-item.is-on .status-dot { background: #4ADE80; }
+body.staff-shell .status-item .status-text { display: inline; }
+body.staff-shell .status-shift { padding-left: 13px; }
+body.staff-shell.nav-collapsed .status-bar { align-items: center; padding: 10px 0 0; }
+body.staff-shell.nav-collapsed .status-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+body.staff-shell.nav-collapsed .status-shift { display: none; }
 @media (max-width: 767px) {
-  body.staff-shell.nav-collapsed .nav-user .health-dot { position: static; width: 9px; height: 9px; margin-left: auto; }
-  body.staff-shell.nav-collapsed .nav-user .health-dot.is-warn { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25); }
-  body.staff-shell.nav-collapsed .nav-user .health-dot.is-down { box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.25); }
-  body.staff-shell.nav-collapsed .nav-user .health-dot.is-off { box-shadow: 0 0 0 3px rgba(142, 154, 230, 0.25); }
+  body.staff-shell.nav-collapsed .status-bar { align-items: stretch; padding: 10px 10px 0; }
+  body.staff-shell.nav-collapsed .status-text { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+  body.staff-shell #statusShift { display: block; }
 }
 
 /* Logo de la empresa al pie del contenido del personal */
