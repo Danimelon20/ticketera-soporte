@@ -201,7 +201,7 @@
     </section>
 
 <header class="topbar">
-  <button type="button" id="navToggle" class="nav-toggle" aria-label="Abrir menú" aria-controls="sideNav" aria-expanded="false">☰</button>
+  <button type="button" id="navToggle" class="nav-toggle" aria-label="Abrir menú" aria-controls="sideNav" aria-expanded="false">☰<span id="navToggleDot" class="health-dot" role="img" hidden></span></button>
   <div class="topbar-brand">
     <span class="brand-mark" aria-hidden="true">T</span>
     <span class="brand-name" id="brandName">Mesa de Servicio</span>
@@ -248,16 +248,11 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"/></svg>
         </button>
         <nav id="sideNavGroups" class="side-nav-groups" aria-label="Vistas"></nav>
-        <!-- Barra de estado compacta: correo, IA, asignación automática y técnicos en turno -->
-        <ul id="statusBar" class="status-bar" aria-label="Estado del sistema" hidden>
-            <li class="status-item" id="statusEmail"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Correo</span></li>
-            <li class="status-item" id="statusAi"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Análisis IA</span></li>
-            <li class="status-item" id="statusAssign"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Asignación automática</span></li>
-            <li class="status-item status-shift" id="statusShift"></li>
-        </ul>
         <div class="nav-foot">
             <button type="button" id="navUser" class="nav-user" data-nav-id="profile" title="Mi cuenta">
                 <span id="navUserAvatar" class="nav-user-avatar" aria-hidden="true"></span>
+                <!-- Estado del sistema: ámbar o rojo con una falla, gris con algo desactivado a propósito -->
+                <span id="navHealthDot" class="health-dot" role="img" hidden></span>
                 <span class="nav-user-text">
                     <span id="navUserName" class="nav-user-name"></span>
                     <span id="navUserRole" class="nav-user-role"></span>
@@ -272,6 +267,12 @@
     <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
 
     <main style="display: none;">
+        <!-- Aviso del estado del sistema para el personal: solo cuando algo falla -->
+        <div id="healthBanner" class="health-banner" role="alert" hidden>
+            <ul id="healthBannerList" class="health-banner-list"></ul>
+            <button type="button" id="healthBannerLink" class="health-banner-link" hidden>Ver estado</button>
+            <button type="button" id="healthBannerClose" class="health-banner-close" aria-label="Cerrar aviso">✕</button>
+        </div>
         <div class="split">
             <section id="queuePanel" class="queue-panel" aria-labelledby="queueHeading">
                 <header class="queue-head">
