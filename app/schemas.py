@@ -535,6 +535,9 @@ class DraftRead(BaseModel):
     ticket_id: Optional[int] = None
     pending_reason: Optional[str] = None
     requester_flags: Optional[RequesterFlags] = None
+    # Adjuntos del correo y lo que no se tomó (rechazados, más de 5, enlaces a la nube)
+    attachments: list[AttachmentRead] = []
+    attachment_notes: list[str] = []
 
 
 class DraftConfirm(BaseModel):

@@ -11,6 +11,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from . import audit, config, models
@@ -121,30 +122,40 @@ def extension(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
 
+class Rejected(ValueError):
+    """Archivo rechazado. str(exc): el mensaje de la pantalla; reason: el motivo corto (notas del correo)."""
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
 def validate(filename: str, data: bytes) -> str:
-    """Devuelve el Content-Type o lanza ValueError con el mensaje para la persona."""
+    """Devuelve el Content-Type o lanza Rejected con el mensaje para la persona."""
     name = clean_name(filename)
     ext = extension(name)
     if ext not in ALLOWED:
-        raise ValueError(REJECTED_TYPE)
+        raise Rejected(REJECTED_TYPE, "no es un tipo de archivo permitido")
     if not data:
-        raise ValueError(f"«{name}» está vacío.")
+        raise Rejected(f"«{name}» está vacío.", "está vacío")
     if len(data) > MAX_BYTES:
-        raise ValueError(f"«{name}» pesa más de 10 MB.")
+        raise Rejected(f"«{name}» pesa más de 10 MB.", "pesa más de 10 MB")
     content_type, matches = ALLOWED[ext]
+    mismatch = Rejected(f"«{name}» no es realmente un archivo .{ext}. No se adjuntó.",
+                        f"su contenido no coincide con la extensión .{ext}")
     if not matches(data):
-        raise ValueError(f"«{name}» no es realmente un archivo .{ext}. No se adjuntó.")
+        raise mismatch
     if ext in ("doc", "xls", "ppt") and any(marker in data for marker in VBA_MARKERS):
-        raise ValueError(MACROS_REJECTED)
+        raise Rejected(MACROS_REJECTED, "contiene macros")
     if ext in ("docx", "xlsx", "pptx"):
         if any(n.replace("\\", "/").rsplit("/", 1)[-1].lower() == "vbaproject.bin" for n in _zip_names(data)):
-            raise ValueError(MACROS_REJECTED)
+            raise Rejected(MACROS_REJECTED, "contiene macros")
     if ext == "zip":
         names = _zip_names(data)
         if names is None:
-            raise ValueError(f"«{name}» no es realmente un archivo .zip. No se adjuntó.")
+            raise mismatch
         if any(not n.endswith("/") and extension(n) in ZIP_BLOCKED for n in names):
-            raise ValueError(ZIP_REJECTED)
+            raise Rejected(ZIP_REJECTED, "el .zip contiene archivos que no se permiten")
     return content_type
 
 
@@ -156,12 +167,41 @@ def format_size(size: int) -> str:
     return f"{size / (1024 * 1024):.1f} MB".replace(".", ",")
 
 
-def path_of(row: models.Attachment) -> str:
+def path_of(row) -> str:
+    """Ruta en disco de un Attachment o un DraftAttachment."""
     return os.path.join(config.ATTACHMENTS_DIR, row.stored_name)
 
 
-def is_inline(row: models.Attachment) -> bool:
+def is_inline(row) -> bool:
     return row.content_type in INLINE_TYPES
+
+
+def store_file(data: bytes) -> tuple[str, str]:
+    """Escribe el archivo con un nombre aleatorio. Devuelve (stored_name, sha256)."""
+    os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
+    stored_name = uuid.uuid4().hex
+    with open(os.path.join(config.ATTACHMENTS_DIR, stored_name), "xb") as handle:
+        handle.write(data)
+    return stored_name, hashlib.sha256(data).hexdigest()
+
+
+def remove_files(stored_names) -> None:
+    for stored_name in stored_names:
+        try:
+            os.remove(os.path.join(config.ATTACHMENTS_DIR, stored_name))
+        except FileNotFoundError:
+            pass
+
+
+def file_response(row) -> FileResponse:
+    """Imágenes y PDF dentro de la página; lo demás solo descarga. Siempre nosniff y sin caché compartida."""
+    return FileResponse(
+        path_of(row),
+        media_type=row.content_type,
+        filename=row.original_name,
+        content_disposition_type="inline" if is_inline(row) else "attachment",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
 
 
 def save(db: Session, comment: models.Comment, user_id: int, files: list[tuple[str, bytes, str]]) -> list[models.Attachment]:
@@ -169,24 +209,22 @@ def save(db: Session, comment: models.Comment, user_id: int, files: list[tuple[s
 
     Si algo falla, borra lo que alcanzó a escribir. Si el commit falla después, quien llama usa discard().
     """
-    os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
     rows = []
     try:
         for filename, data, content_type in files:
+            stored_name, sha256 = store_file(data)
             row = models.Attachment(
                 ticket_id=comment.ticket_id,
                 comment_id=comment.id,
                 original_name=clean_name(filename),
                 content_type=content_type,
                 size=len(data),
-                sha256=hashlib.sha256(data).hexdigest(),
-                stored_name=uuid.uuid4().hex,
+                sha256=sha256,
+                stored_name=stored_name,
                 uploaded_by=user_id,
                 uploaded_at=datetime.now(timezone.utc).replace(tzinfo=None),
             )
             rows.append(row)
-            with open(path_of(row), "xb") as handle:
-                handle.write(data)
             db.add(row)
             db.flush()
             # Sin el nombre original: puede traer datos personales
@@ -200,12 +238,8 @@ def save(db: Session, comment: models.Comment, user_id: int, files: list[tuple[s
     return rows
 
 
-def discard(rows: list[models.Attachment]) -> None:
-    for row in rows:
-        try:
-            os.remove(path_of(row))
-        except FileNotFoundError:
-            pass
+def discard(rows) -> None:
+    remove_files(row.stored_name for row in rows)
 
 
 def by_comment(db: Session, comment_ids: list[int]) -> dict[int, list[models.Attachment]]:

@@ -8,6 +8,8 @@ from . import config
 SCOPES = ["Mail.ReadWrite", "Mail.Send"]
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 TIMEOUT_SECONDS = 30
+# Partes de una sesión de carga: múltiplo de 320 KiB y menos de 4 MB
+UPLOAD_CHUNK_BYTES = 320 * 1024 * 12
 LOGIN_REQUIRED_MESSAGE = (
     "Falta iniciar sesión en Microsoft: ejecuta docker compose exec -it app python -m app.ms_login"
 )
@@ -102,3 +104,24 @@ def graph_request(method, path, json=None, content=None, headers=None) -> httpx.
     if not 200 <= response.status_code < 300:
         raise GraphError(response.status_code, _error_message(response))
     return response
+
+
+def upload_to_session(upload_url: str, data: bytes) -> None:
+    """Sube un adjunto por partes a la uploadUrl de una sesión de carga.
+
+    La uploadUrl ya trae su autorización: no se le manda el token.
+    """
+    total = len(data)
+    start = 0
+    while start < total:
+        chunk = data[start:start + UPLOAD_CHUNK_BYTES]
+        end = start + len(chunk) - 1
+        response = httpx.put(
+            upload_url,
+            content=chunk,
+            headers={"Content-Range": f"bytes {start}-{end}/{total}", "Content-Type": "application/octet-stream"},
+            timeout=TIMEOUT_SECONDS,
+        )
+        if not 200 <= response.status_code < 300:
+            raise GraphError(response.status_code, _error_message(response))
+        start = end + 1

@@ -187,13 +187,21 @@ def free_shared_id_numbers():
 
 @pytest.fixture
 def sent(monkeypatch):
-    """Correos simulados: (destinatario, asunto, cuerpo). Nunca se conecta a Microsoft Graph."""
+    """Correos simulados: (destinatario, asunto, cuerpo). Nunca se conecta a Microsoft Graph.
+
+    Los adjuntos de cada correo quedan en sent.attachments (misma posición; None si no llevaba).
+    """
     from app import mailer
 
-    calls = []
+    class SentList(list):
+        attachments: list
 
-    def _fake_send(to, subject, body):
+    calls = SentList()
+    calls.attachments = []
+
+    def _fake_send(to, subject, body, attachments=None):
         calls.append((to, subject, body))
+        calls.attachments.append(attachments)
         return True
 
     monkeypatch.setattr(mailer, "send_email", _fake_send)

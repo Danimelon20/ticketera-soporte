@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from email import policy
 from urllib.parse import quote, urlencode
 
-from . import config, email_analysis, graph
+from . import config, email_analysis, email_attachments, graph
 from .database import SessionLocal
 from .email_processing import process_message
 from .graph import GraphAuthRequired
@@ -59,6 +59,14 @@ def _process_one(message_id: str) -> str:
         db.close()
 
 
+def _purge_stale_drafts() -> None:
+    db = SessionLocal()
+    try:
+        email_attachments.purge_stale_drafts(db)
+    finally:
+        db.close()
+
+
 def poll_once() -> int:
     global last_run, last_error, last_processed
     processed = 0
@@ -79,6 +87,10 @@ def poll_once() -> int:
                 logging.exception("No se pudo procesar un correo")
             # Leído aunque haya fallado, para no procesarlo en cada revisión
             graph.graph_request("PATCH", f"/me/messages/{message_id}", json={"isRead": True})
+        try:
+            _purge_stale_drafts()
+        except Exception:
+            logging.exception("No se pudieron borrar los adjuntos de borradores viejos")
     except Exception as exc:
         last_run = datetime.now(timezone.utc)
         last_processed = processed

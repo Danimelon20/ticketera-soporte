@@ -5,7 +5,7 @@ from email.header import decode_header, make_header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, hacienda, identity, mailer, models
+from . import config, email_attachments, hacienda, identity, mailer, models
 from .email_parser import extract_sender, get_plain_body, parse_ticket_email, strip_quoted
 from .notifications import display_name, notify_followers
 
@@ -118,18 +118,25 @@ def _handle_ticket_reply(db: Session, msg, message_id: str, sender: str, subject
         return "closed_ticket"
 
     content = strip_quoted(get_plain_body(msg))[:BODY_MAX_LENGTH]
-    if not content:
+    extracted = email_attachments.extract(msg)
+    if not content and not extracted.files:
         _save_result(db, message_id, "empty_reply")
         db.commit()
         return "empty_reply"
 
-    db.add(models.Comment(ticket_id=ticket.id, user_id=user.id, content=content))
+    comment = models.Comment(ticket_id=ticket.id, user_id=user.id, content=content)
+    db.add(comment)
+    # Los adjuntos van al mismo comentario; lo rechazado, a una nota interna
+    stored = email_attachments.save_to_comment(db, comment, user.id, extracted)
     _save_result(db, message_id, "comment_added")
-    db.commit()
+    email_attachments.commit_or_cleanup(db, stored)
+    lines = [content] if content else []
+    if extracted.files:
+        lines.append(f"Adjuntó {len(extracted.files)} archivo(s).")
     notify_followers(
         db, _RunNow(), ticket, user,
         f"[Ticket #{ticket.id}] Nuevo comentario de {display_name(user)}",
-        [content],
+        lines,
     )
     return "comment_added"
 
@@ -176,8 +183,9 @@ def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User
         missing = []
     if not missing:
         draft.status = "pending_review"
+    stored = email_attachments.save_to_draft(db, draft, email_attachments.extract(msg))
     _save_result(db, message_id, "contact_updated")
-    db.commit()
+    email_attachments.commit_or_cleanup(db, stored)
 
     if missing:
         mailer.send_email(
@@ -294,8 +302,9 @@ def process_message(db: Session, msg) -> str:
         db.add(draft)
         if id_taken:
             mark_pending(db, draft, identity.ID_IN_USE_REASON)
+        stored = email_attachments.save_to_draft(db, draft, email_attachments.extract(msg))
         _save_result(db, message_id, "draft_created")
-        db.commit()
+        email_attachments.commit_or_cleanup(db, stored)
         return "draft_created"
 
     # f. Faltan datos: responder con la plantilla
@@ -341,11 +350,13 @@ def process_message(db: Session, msg) -> str:
     db.add(models.TicketFollower(ticket_id=ticket.id, user_id=user.id))
     # La IA lo analiza después, en la revisión del buzón (solo se muestra)
     db.add(models.TicketAIAnalysis(ticket_id=ticket.id, status="pending"))
+    # Los adjuntos del correo, en el primer mensaje del solicitante (antes del comentario del Agente)
+    stored = email_attachments.save_to_new_ticket(db, ticket, user.id, email_attachments.extract(msg))
     if agent is not None:
         db.add(models.Comment(ticket_id=ticket.id, user_id=agent.id, content=AGENT_COMMENT))
     # h. Todo en el mismo commit
     _save_result(db, message_id, "created")
-    db.commit()
+    email_attachments.commit_or_cleanup(db, stored)
 
     send_ticket_created(ticket, user, category, priority)
     # Con la IA se asigna al terminar su análisis (analyze_pending); sin ella, ya mismo

@@ -4218,3 +4218,8 @@ body.staff-shell.overdue-open .side-nav { display: none; }
   .att-card { max-width: 100%; }
   .att-progress { width: 60px; flex-basis: 60px; }
 }
+
+/* Adjuntos del correo en Borradores */
+.draft-attachments { margin: 8px 0 12px; }
+.draft-attachments .att-list { margin-top: 0; }
+.att-note { margin: 6px 0 0; font-size: var(--fs-sm); color: var(--muted); }

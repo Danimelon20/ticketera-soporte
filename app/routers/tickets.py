@@ -379,10 +379,14 @@ def create_comment(db: Session, background_tasks: BackgroundTasks, db_ticket: mo
         raise
     db.refresh(db_comment)
     if not internal:
+        lines = [db_comment.content] if db_comment.content else []
+        if rows:
+            lines.append(f"Adjuntó {len(rows)} archivo(s).")
+        # El solicitante recibe los archivos; los demás seguidores, solo la línea "Adjuntó N archivo(s)."
         notify_followers(
             db, background_tasks, db_ticket, current_user,
             f"[Ticket #{db_ticket.id}] Nuevo comentario de {current_user.name}",
-            [db_comment.content or f"Adjuntó {len(rows)} archivo(s)."],
+            lines, files=[(attachments.clean_name(name), data, kind) for name, data, kind in files],
         )
     return db_comment, rows
 

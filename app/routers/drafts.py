@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -6,10 +7,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, auto_assign, config, email_analysis, identity, models
+from .. import account_reports, attachments, audit, auto_assign, config, email_analysis, email_attachments, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
-from ..schemas import DraftConfirm, DraftRead
+from ..schemas import AttachmentRead, DraftConfirm, DraftRead
 from ..security import get_current_user, mask_email
 from ..validators import mask_id_number, normalize_id_number, normalize_phone
 from .tickets import verify_id_number
@@ -42,9 +43,21 @@ def _pending_reason(db: Session, draft: models.EmailDraft) -> str | None:
     return row.reason if row else None
 
 
+def _draft_files(db: Session, draft_id: int) -> tuple[list[AttachmentRead], list[str]]:
+    rows = db.query(models.DraftAttachment).filter(models.DraftAttachment.draft_id == draft_id).order_by(models.DraftAttachment.id).all()
+    notes = db.query(models.DraftAttachmentNote).filter(models.DraftAttachmentNote.draft_id == draft_id).order_by(models.DraftAttachmentNote.id).all()
+    files = []
+    for row in rows:
+        item = AttachmentRead.model_validate(row)
+        item.inline = attachments.is_inline(row)
+        files.append(item)
+    return files, [note.text for note in notes]
+
+
 def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> DraftRead:
     requester = draft.requester
     phone, id_number = _stored_contact(draft)
+    files, notes = _draft_files(db, draft.id)
     data = DraftRead(
         id=draft.id,
         status=draft.status,
@@ -67,6 +80,8 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
         pending_reason=_pending_reason(db, draft),
         # Los borradores solo los ve el personal
         requester_flags=account_reports.staff_flags(db, requester),
+        attachments=files,
+        attachment_notes=notes,
     )
     if viewer.role == "technician":
         # El técnico no ve datos personales completos (como en el detalle del ticket)
@@ -156,6 +171,8 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     db.flush()
 
     db.add(models.TicketFollower(ticket_id=ticket.id, user_id=requester.id))
+    # Los adjuntos del correo pasan al primer mensaje del ticket (antes del comentario del Agente)
+    email_attachments.move_to_ticket(db, draft, ticket)
     agent = db.query(models.User).filter(models.User.role == "agent").first()
     if agent is not None:
         db.add(models.Comment(
@@ -215,6 +232,26 @@ def discard_draft(draft_id: int, db: Session = Depends(get_db), reviewer=Depends
     draft.status = "discarded"
     draft.reviewed_by = reviewer.id
     draft.reviewed_at = _now()
+    stored = email_attachments.remove_from_draft(db, draft.id)
     db.commit()
+    # Descartado: sus archivos se borran del disco
+    attachments.remove_files(stored)
     db.refresh(draft)
     return _draft_read(db, draft, reviewer)
+
+
+@router.get("/drafts/attachments/{attachment_id}")
+def download_draft_attachment(
+    attachment_id: int, preview: bool = False, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)
+):
+    """Adjunto de un borrador: solo quien revisa borradores. preview=1 (miniaturas) no queda en el registro."""
+    row = db.get(models.DraftAttachment, attachment_id)
+    if row is None or not os.path.isfile(attachments.path_of(row)):
+        raise HTTPException(status_code=404, detail="El adjunto no existe")
+    if not preview:
+        audit.record(
+            db, reviewer.id, "attachment_downloaded",
+            target_label=f"Borrador #{row.draft_id}", new=f"Adjunto de borrador #{row.id}",
+        )
+        db.commit()
+    return attachments.file_response(row)

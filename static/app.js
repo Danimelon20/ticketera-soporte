@@ -215,8 +215,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(() => {
-            loadTickets(getFilters());
+        Promise.all([loadCategories(), loadPriorities(), loadUsers()]).then(async () => {
+            await loadTickets(getFilters());
+            openLinkedTicket();
         });
 
         renderInvitesSection();
@@ -237,6 +238,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         setupPortal();
         setupChat();
+    }
+
+    // Enlace de un correo (#ticket/N): se abre ese ticket después de iniciar sesión
+    let linkedTicketId = null;
+    const ticketLink = window.location.hash.match(/^#ticket\/(\d+)$/);
+    if (ticketLink) linkedTicketId = Number(ticketLink[1]);
+
+    function openLinkedTicket() {
+        if (!linkedTicketId || !currentUser || profileRequired()) return;
+        const ticketId = linkedTicketId;
+        linkedTicketId = null;
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        if (isRequesterPortal()) openPortalTicket(ticketId);
+        else if (isStaffShell()) openTicketById(ticketId);
     }
 
     function showAuthScreen() {
@@ -3374,6 +3389,13 @@ document.addEventListener('DOMContentLoaded', () => {
         draftReason.textContent = draft.pending_reason ? `Pendiente: ${draft.pending_reason}` : '';
         draftReason.hidden = !draft.pending_reason;
         document.getElementById('draftBody').textContent = draft.body;
+        // Adjuntos del correo y lo que no se tomó (rechazados, más de 5, enlaces a la nube)
+        const draftAttachments = document.getElementById('draftAttachments');
+        draftAttachments.replaceChildren();
+        const draftFiles = attachmentList(draft.attachments, '/drafts/attachments');
+        if (draftFiles) draftAttachments.appendChild(draftFiles);
+        (draft.attachment_notes || []).forEach(note => draftAttachments.appendChild(makeEl('p', 'att-note', note)));
+        draftAttachments.hidden = !draftFiles && !(draft.attachment_notes || []).length;
 
         const ai = document.getElementById('draftAi');
         ai.replaceChildren();
@@ -4950,7 +4972,9 @@ document.addEventListener('DOMContentLoaded', () => {
         server_role_changed: 'Rol cambiado',
         overdue_report_downloaded: 'PDF de reporte de vencimiento descargado',
         attachment_uploaded: 'Adjunto subido',
-        attachment_downloaded: 'Adjunto descargado'
+        attachment_downloaded: 'Adjunto descargado',
+        email_attachments_received: 'Adjuntos recibidos por correo',
+        email_attachments_sent: 'Adjuntos enviados por correo'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -6973,7 +6997,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 article.appendChild(meta);
                 // Un comentario puede traer solo adjuntos
                 if (comment.content) article.appendChild(makeEl('p', 'td-message-body', comment.content));
-                const files = attachmentList(comment);
+                const files = attachmentList(comment.attachments);
                 if (files) article.appendChild(files);
                 li.appendChild(article);
             } else {
@@ -7219,8 +7243,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function fetchAttachment(id, preview) {
-        const response = await fetch(`${API_BASE}/attachments/${id}${preview ? '?preview=1' : ''}`, {
+    // url: /attachments/{id} (comentarios) o /drafts/attachments/{id} (borradores)
+    async function fetchAttachment(url, preview) {
+        const response = await fetch(`${API_BASE}${url}${preview ? '?preview=1' : ''}`, {
             headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
         });
         if (response.status === 401) {
@@ -7235,17 +7260,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return response.blob();
     }
 
-    // Miniaturas y tarjetas debajo del texto del comentario
-    function attachmentList(comment) {
-        const files = comment.attachments || [];
-        if (!files.length) return null;
+    // Miniaturas y tarjetas debajo del texto del comentario (o del correo de un borrador)
+    function attachmentList(files, urlBase = '/attachments') {
+        if (!files || !files.length) return null;
         const list = makeEl('ul', 'att-list');
         files.forEach(file => {
             const li = makeEl('li');
             const isImage = file.inline && file.content_type.startsWith('image/');
             const button = makeEl('button', isImage ? 'att-thumb' : 'att-card');
             button.type = 'button';
-            button.dataset.attId = String(file.id);
+            button.dataset.attUrl = `${urlBase}/${file.id}`;
             button.dataset.attName = file.original_name;
             button.dataset.attType = file.content_type;
             if (isImage) {
@@ -7254,7 +7278,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 img.alt = file.original_name;
                 img.loading = 'lazy';
                 button.appendChild(img);
-                loadAttachmentPreview(file.id, img);
+                loadAttachmentPreview(button.dataset.attUrl, img);
             } else {
                 button.setAttribute('aria-label', `Descargar ${file.original_name} (${formatFileSize(file.size)})`);
                 button.appendChild(makeEl('span', 'att-card-icon', ATTACH_ICONS[fileExtension(file.original_name)] || '📎'));
@@ -7269,12 +7293,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return list;
     }
 
-    async function loadAttachmentPreview(id, img) {
+    async function loadAttachmentPreview(url, img) {
         try {
-            if (!attachmentPreviews.has(id)) {
-                attachmentPreviews.set(id, URL.createObjectURL(await fetchAttachment(id, true)));
+            if (!attachmentPreviews.has(url)) {
+                attachmentPreviews.set(url, URL.createObjectURL(await fetchAttachment(url, true)));
             }
-            img.src = attachmentPreviews.get(id);
+            img.src = attachmentPreviews.get(url);
         } catch (err) {
             img.closest('.att-thumb').classList.add('is-broken');
         }
@@ -7286,7 +7310,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openAttachmentImage(button) {
         try {
             // Sin preview: abrirla en grande queda en el Registro de cambios
-            const url = URL.createObjectURL(await fetchAttachment(button.dataset.attId, false));
+            const url = URL.createObjectURL(await fetchAttachment(button.dataset.attUrl, false));
             document.getElementById('attachmentDialogTitle').textContent = button.dataset.attName;
             attachmentDialogImage.alt = button.dataset.attName;
             attachmentDialogImage.src = url;
@@ -7301,7 +7325,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isPdf = button.dataset.attType === 'application/pdf';
         const tab = isPdf ? window.open('about:blank', '_blank') : null;
         try {
-            const url = URL.createObjectURL(await fetchAttachment(button.dataset.attId, false));
+            const url = URL.createObjectURL(await fetchAttachment(button.dataset.attUrl, false));
             if (tab) {
                 tab.location.href = url;
             } else {
@@ -7325,6 +7349,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('attachmentDialogClose').addEventListener('click', () => attachmentDialog.close());
 
+    // Miniatura: se abre en grande; tarjeta: se descarga (o el PDF en otra pestaña)
+    function openAttachmentFromClick(e) {
+        const thumb = e.target.closest('.att-thumb');
+        if (thumb) {
+            openAttachmentImage(thumb);
+            return;
+        }
+        const card = e.target.closest('.att-card');
+        if (card) downloadAttachmentFile(card);
+    }
+
     detailPanel.addEventListener('click', (e) => {
         if (e.target.closest('.att-add')) {
             detailPanel.querySelector('.att-input').click();
@@ -7336,14 +7371,9 @@ document.addEventListener('DOMContentLoaded', () => {
             renderPendingFiles();
             return;
         }
-        const thumb = e.target.closest('.att-thumb');
-        if (thumb) {
-            openAttachmentImage(thumb);
-            return;
-        }
-        const card = e.target.closest('.att-card');
-        if (card) downloadAttachmentFile(card);
+        openAttachmentFromClick(e);
     });
+    draftContent.addEventListener('click', openAttachmentFromClick);
 
     detailPanel.addEventListener('change', (e) => {
         const input = e.target.closest('.att-input');
@@ -8417,7 +8447,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 meta.appendChild(timeTag(comment.created_at));
                 li.appendChild(meta);
                 if (comment.content) li.appendChild(makeEl('p', 'portal-message-text', comment.content));
-                const files = attachmentList(comment);
+                const files = attachmentList(comment.attachments);
                 if (files) li.appendChild(files);
                 list.appendChild(li);
             });

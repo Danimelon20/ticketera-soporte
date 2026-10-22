@@ -246,6 +246,29 @@ class EmailDraft(Base):
     priority = relationship("Priority")
 
 
+class DraftAttachment(Base):
+    """Adjunto de un correo que todavía es borrador. Al confirmarlo pasa a attachments (mismo archivo en disco)."""
+    __tablename__ = "draft_attachments"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), index=True, nullable=False)
+    original_name = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    stored_name = Column(String(36), unique=True, nullable=False)
+    received_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DraftAttachmentNote(Base):
+    """Lo que no se tomó de un correo: rechazados, los que pasaron de 5 y enlaces a la nube."""
+    __tablename__ = "draft_attachment_notes"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), index=True, nullable=False)
+    text = Column(String(300), nullable=False)
+
+
 class UnclearNotice(Base):
     """Cuándo se le pidió más detalles a un solicitante (antibucle)."""
     __tablename__ = "unclear_notices"
@@ -399,6 +422,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "overdue_report_downloaded",
     # Adjuntos de los comentarios (target_label: "Ticket #N"; nunca el nombre original del archivo)
     "attachment_uploaded", "attachment_downloaded",
+    # Adjuntos que entran o salen por correo (solo la cantidad, nunca nombres)
+    "email_attachments_received", "email_attachments_sent",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
 )
