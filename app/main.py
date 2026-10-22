@@ -24,6 +24,7 @@ from .routers.account import router as account_router
 from .routers.accounts import router as accounts_router
 from .routers.reports import router as reports_router
 from .routers.nav import router as nav_router
+from .routers.overdue import router as overdue_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -152,6 +153,7 @@ app.include_router(account_router)
 app.include_router(accounts_router)
 app.include_router(reports_router)
 app.include_router(nav_router)
+app.include_router(overdue_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional, Literal
 from .validators import normalize_phone, normalize_id_number, mask_id_number
 
@@ -774,3 +774,88 @@ class AccountSummary(BaseModel):
     recent_changes: list[AccountChangeRead] = []
     periods: list[AvailabilityPeriodRead] = []
     actions: list[str] = []
+
+
+class NoticeSuggestion(BaseModel):
+    user_id: int
+    name: str
+
+
+class OverdueNotice(BaseModel):
+    """Aviso de la campana: solo número, título enmascarado y fechas."""
+    ticket_id: int
+    title: str
+    kind: Literal["due_50", "due_80", "overdue", "report"]
+    created_at: datetime
+    due_at: Optional[datetime] = None
+    read: bool
+    needs_review: bool = False
+    suggestion: Optional[NoticeSuggestion] = None
+
+
+class OverdueNoticeList(BaseModel):
+    items: list[OverdueNotice]
+    unread: int
+
+
+class NoticeReadRequest(BaseModel):
+    """Un ticket (ticket_id) o todos (all)."""
+    ticket_id: Optional[int] = None
+    all: bool = False
+
+
+class OverdueCauseCreate(BaseModel):
+    cause: Literal["no_staff", "assignee_unavailable", "high_load", "off_hours", "waiting_client", "other"]
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def strip_note(cls, value):
+        return (value.strip() or None) if value else None
+
+    @model_validator(mode="after")
+    def other_needs_note(self):
+        if self.cause == "other" and not self.note:
+            raise ValueError("Describa la causa en la nota")
+        return self
+
+
+class OverdueCauseRead(BaseModel):
+    cause: str
+    label: str
+    note: Optional[str] = None
+    recorded_by_name: Optional[str] = None
+    recorded_at: datetime
+
+
+class OverdueTimelineEvent(BaseModel):
+    at: datetime
+    kind: str
+    actor: Optional[str] = None
+    text: str
+    auto: bool = False
+
+
+class OverdueReport(BaseModel):
+    id: int
+    title: str
+    status: str
+    cancelled: bool = False
+    level: Optional[int] = None
+    source: str
+    priority: Optional[str] = None
+    category: Optional[str] = None
+    requester_name: Optional[str] = None
+    assigned_to: Optional[int] = None
+    assigned_name: Optional[str] = None
+    created_at: datetime
+    due_at: datetime
+    overdue_seconds: int
+    first_response_at: Optional[datetime] = None
+    without_response_seconds: int
+    last_activity_at: Optional[datetime] = None
+    contact_phone: Optional[str] = None
+    contact_id_number: Optional[str] = None
+    timeline: list[OverdueTimelineEvent]
+    cause: Optional[OverdueCauseRead] = None
+    can_record_cause: bool = False

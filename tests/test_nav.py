@@ -16,6 +16,7 @@ COORDINATOR_KEYS = {
 }
 TECHNICIAN_KEYS = {
     "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "unassigned", "drafts_pending", "shift",
+    "overdue",
 }
 
 
@@ -128,7 +129,8 @@ def test_coordinator_counts(make_user, make_ticket):
     counts = _counts(coordinator["id"])
     assert set(counts) == COORDINATOR_KEYS
     assert counts["unassigned"] == 2
-    assert counts["open"] == 3
+    # El vencido se cuenta aparte, en Vencidos
+    assert counts["open"] == 2
     assert counts["overdue"] == 1
     assert counts["due_soon"] == 0
     assert counts["resolved_today"] == 1
@@ -169,13 +171,14 @@ def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkey
     assert counts["following_open"] == 1
     assert counts["mine_resolved_today"] == 1
     assert counts["unassigned"] == 1
+    assert counts["overdue"] == 0
     assert counts["shift"] == {"start": "08:00", "end": "16:00", "on_shift": True, "load": 2}
 
     response = client.get("/api/nav/counts", headers=technician["headers"])
     assert response.status_code == 200
     body = response.json()
     assert set(body) == TECHNICIAN_KEYS
-    for key in ("reports_open", "approvals_pending", "invitations_pending", "overdue", "open"):
+    for key in ("reports_open", "approvals_pending", "invitations_pending", "open"):
         assert key not in body
 
 

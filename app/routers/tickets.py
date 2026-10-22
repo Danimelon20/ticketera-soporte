@@ -34,6 +34,26 @@ def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Tick
     return db_ticket
 
 
+def contact_fields(db_ticket: models.Ticket, current_user) -> tuple[Optional[str], Optional[str]]:
+    """Teléfono y cédula del ticket según quién lo ve.
+
+    Coordinador, administrador o el creador: completos. Técnico asignado: teléfono completo y cédula
+    enmascarada. Técnico no asignado o rol desconocido: nada.
+    """
+    is_creator = current_user.role != "requester" or db_ticket.created_by == current_user.id
+    is_coordinator_or_admin = current_user.role in ("coordinator", "admin")
+    is_assigned_technician = (
+        current_user.role == "technician"
+        and db_ticket.assigned_to is not None
+        and db_ticket.assigned_to == current_user.id
+    )
+    if is_coordinator_or_admin or (is_creator and current_user.role != "technician"):
+        return db_ticket.contact_phone, db_ticket.contact_id_number
+    if is_assigned_technician:
+        return db_ticket.contact_phone, mask_id_number(db_ticket.contact_id_number)
+    return None, None
+
+
 def unavailable_message(user: models.User, status: str, return_date) -> str:
     states = {
         "vacation": "está de vacaciones",
@@ -218,27 +238,8 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
     # Un technician que no está asignado ve None para ambos
     # Un technician sin assigned_to ve None para ambos
     
-    is_creator = current_user.role != "requester" or db_ticket.created_by == current_user.id
-    is_coordinator_or_admin = current_user.role in ("coordinator", "admin")
-    is_assigned_technician = (
-        current_user.role == "technician"
-        and db_ticket.assigned_to is not None
-        and db_ticket.assigned_to == current_user.id
-    )
-    
-    if is_coordinator_or_admin or (is_creator and current_user.role != "technician"):
-        # Coordinator, admin, or creator: ver campos completos
-        contact_phone = db_ticket.contact_phone
-        contact_id_number = db_ticket.contact_id_number
-    elif is_assigned_technician:
-        # Técnico asignado: teléfono completo, cédula enmascarada
-        contact_phone = db_ticket.contact_phone
-        contact_id_number = mask_id_number(db_ticket.contact_id_number)
-    else:
-        # Técnico no asignado o rol desconocido: None para ambos
-        contact_phone = None
-        contact_id_number = None
-    
+    contact_phone, contact_id_number = contact_fields(db_ticket, current_user)
+
     history = (
         db.query(models.History)
         .filter(models.History.ticket_id == ticket_id)

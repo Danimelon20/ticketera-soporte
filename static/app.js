@@ -2713,6 +2713,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const navAccounts = document.getElementById('navAccounts');
     const accountsView = document.getElementById('accountsView');
     const adminView = document.getElementById('adminView');
+    const overdueReportView = document.getElementById('overdueReportView');
     const navDrafts = document.getElementById('navDrafts');
     const draftsView = document.getElementById('draftsView');
     const navProfile = document.getElementById('navProfile');
@@ -2727,7 +2728,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const SCREEN_TITLES = {
         home: 'Inicio', directory: 'Directorio', drafts: 'Borradores de correo', profile: 'Mi cuenta',
         reports: 'Reportes de cuentas', adminAccounts: 'Cuentas', accounts: 'Cuentas', admin: 'Administración',
-        newTicket: 'Nuevo ticket', invites: 'Invitaciones',
+        newTicket: 'Nuevo ticket', invites: 'Invitaciones', overdueReport: 'Reporte de vencimiento',
     };
 
     function setDocumentTitle(text) {
@@ -2776,6 +2777,9 @@ document.addEventListener('DOMContentLoaded', () => {
         profileView.hidden = name !== 'profile';
         reportsView.hidden = name !== 'reports';
         adminAccountsView.hidden = name !== 'adminAccounts';
+        overdueReportView.hidden = name !== 'overdueReport';
+        // El reporte de vencimiento, como el detalle, es una página sin barra lateral
+        document.body.classList.toggle('overdue-open', name === 'overdueReport');
         const tabs = {
             tickets: navTickets, directory: navDirectory, accounts: navAccounts,
             admin: navAdmin, drafts: navDrafts, profile: navProfile, reports: navReports
@@ -4943,7 +4947,8 @@ document.addEventListener('DOMContentLoaded', () => {
         availability_period_removed: 'Vacaciones o incapacidad quitada',
         server_account_deactivated: 'Cuenta desactivada',
         server_account_activated: 'Cuenta activada',
-        server_role_changed: 'Rol cambiado'
+        server_role_changed: 'Rol cambiado',
+        overdue_report_downloaded: 'PDF de reporte de vencimiento descargado'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -5718,6 +5723,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ] },
                 { title: 'Vistas guardadas', items: [
                     savedView('mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn', 'warn'),
+                    savedView('overdue', 'Vencidos', 'overdue', 'alert', 'alert'),
                     savedView('following', 'Siguiendo', 'following_open', 'info'),
                     savedView('mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', 'ok'),
                     savedView('unassigned', 'Sin asignar', 'unassigned', 'warn', 'warn'),
@@ -5951,12 +5957,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.visibilityState !== 'visible' || !authToken || !currentUser) return;
         if (!STAFF_SHELL_ROLES.includes(currentUser.role)) return;
         try {
-            const [counts, status] = await Promise.all([silentGet('/nav/counts'), silentGet('/system/status')]);
+            const [counts, status, notices] = await Promise.all([
+                silentGet('/nav/counts'), silentGet('/system/status'), silentGet('/notifications/overdue'),
+            ]);
             if (counts) {
                 navCounts = counts;
                 renderNavCounts();
             }
             if (status) renderStatusBar(status);
+            if (notices) renderBell(notices);
             // La cola visible también se actualiza; el detalle abierto no se toca
             if (withQueue && document.querySelector('main .split').style.display !== 'none') {
                 await loadQueue({ quiet: true });
@@ -6005,6 +6014,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.toggle('staff-shell', staff);
         sideNav.hidden = !staff;
         statusBar.hidden = !staff;
+        resetBell();
         document.getElementById('staffFooter').hidden = !staff;
         navToggle.hidden = !staff;
         closeSideNav();
@@ -6035,6 +6045,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ticketBar.hidden = true;
         sideNav.hidden = true;
         statusBar.hidden = true;
+        resetBell();
         document.getElementById('staffFooter').hidden = true;
         sideNavBackdrop.hidden = true;
     }
@@ -6129,6 +6140,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return [
                 ['mine_open', 'Mis abiertos', 'mine_open', ''],
                 ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
+                ['overdue', 'Vencidos', 'overdue', 'alert'],
                 ['following', 'Siguiendo', 'following_open', ''],
                 ['mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', ''],
                 ['unassigned', 'Sin asignar', 'unassigned', 'warn'],
@@ -6618,7 +6630,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let team = null;
         try {
             [overdue, dueSoon, reports, team] = await Promise.all([
-                technician ? Promise.resolve({ items: [] }) : apiFetch('/queue?view=overdue', { silent: true }),
+                // El servidor le da al técnico solo sus vencidos
+                apiFetch('/queue?view=overdue', { silent: true }),
                 apiFetch(`/queue?view=${technician ? 'mine_due_soon' : 'due_soon'}`, { silent: true }),
                 canManage ? apiFetch('/account-reports?status=open', { silent: true }) : Promise.resolve([]),
                 canManage ? apiFetch('/team', { silent: true }) : Promise.resolve(null),
@@ -7077,6 +7090,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dueTag) {
             tags.appendChild(makeEl('span', `ui-tag ${ticket.due_state === 'overdue' ? 'is-danger' : (ticket.due_state === 'due_soon' ? 'is-warn' : 'is-info')}`, dueTag));
         }
+        // Mismos permisos que el servidor: coordinador, admin o el técnico responsable
+        if (ticket.due_state === 'overdue' && (canManage || ticket.assigned_to === currentUser.id)) {
+            const report = makeEl('button', 'ticket-bar-link td-overdue-report', 'Ver reporte de vencimiento');
+            report.type = 'button';
+            tags.appendChild(report);
+        }
         const level = ticket.ai_analysis ? ticket.ai_analysis.effective_level : null;
         const meta = makeEl('span', 'td-tags-meta',
             ` · ${levelText(level)} · llegó por ${(SOURCE_LABELS[ticket.source] || ticket.source).toLowerCase()} · `);
@@ -7197,6 +7216,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (e.target.closest('.td-cancel')) {
             startCancel([currentTicket.id]);
+            return;
+        }
+        if (e.target.closest('.td-overdue-report')) {
+            openOverdueReport(currentTicket.id);
             return;
         }
         const reopen = e.target.closest('.td-reopen');
@@ -9022,6 +9045,398 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingAssign.toast.close();
         pendingAssign = null;
     }
+
+    // ----- Avisos de vencimiento (campana) -----
+    // El servidor decide quién ve qué: 50 %, 80 % y vencido al responsable; al 80 %, si el responsable
+    // no está disponible, también a los coordinadores con la sugerencia; el reporte de vencimiento a
+    // coordinadores y administradores. Se revisa con la actualización de cada minuto.
+    const navBell = document.getElementById('navBell');
+    const navBellCount = document.getElementById('navBellCount');
+    const bellPanel = document.getElementById('bellPanel');
+    const bellList = document.getElementById('bellList');
+    let bellItems = [];
+    let bellKnown = new Set();  // Avisos ya vistos en esta sesión: solo los nuevos sacan un toast
+    let bellLoaded = false;
+
+    const noticeKey = (item) => `${item.ticket_id}:${item.kind}`;
+
+    // "2 h 05 min", "45 min", "3 d 4 h"
+    function durationText(seconds) {
+        const minutes = Math.max(0, Math.floor(seconds / 60));
+        const days = Math.floor(minutes / 1440);
+        const hours = Math.floor((minutes % 1440) / 60);
+        const mins = minutes % 60;
+        if (days) return `${days} d ${hours} h`;
+        if (hours) return `${hours} h ${String(mins).padStart(2, '0')}`;
+        return `${mins} min`;
+    }
+
+    function secondsUntil(dateString) {
+        return Math.round((parseServerDate(dateString) - Date.now()) / 1000);
+    }
+
+    function noticeText(item) {
+        const ticket = `El ticket #${item.ticket_id} · ${item.title}`;
+        if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · ${item.title}`;
+        if (item.kind === 'overdue') return `${ticket} venció hace ${durationText(-secondsUntil(item.due_at))}`;
+        return `${ticket} vence en ${durationText(secondsUntil(item.due_at))}`;
+    }
+
+    function noticeToastText(item) {
+        if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · pendiente de causa`;
+        if (item.kind === 'overdue') return `El ticket #${item.ticket_id} acaba de vencer`;
+        return `El ticket #${item.ticket_id} vence en ${durationText(secondsUntil(item.due_at))}`;
+    }
+
+    function resetBell() {
+        bellItems = [];
+        bellKnown = new Set();
+        bellLoaded = false;
+        bellList.replaceChildren();
+        navBellCount.hidden = true;
+        closeBellPanel();
+    }
+
+    function renderBell(data) {
+        bellItems = data.items;
+        navBellCount.hidden = data.unread === 0;
+        navBellCount.textContent = data.unread > 99 ? '99+' : String(data.unread);
+        const label = data.unread ? `Avisos de vencimiento (${data.unread} sin leer)` : 'Avisos de vencimiento';
+        navBell.setAttribute('aria-label', label);
+        navBell.title = label;
+        // Al entrar no se repite lo que ya estaba: solo avisa lo que aparece con la sesión abierta
+        if (bellLoaded) {
+            data.items.filter(item => !item.read && !bellKnown.has(noticeKey(item))).forEach(item => {
+                toast(noticeToastText(item), {
+                    action: item.kind === 'report' || item.kind === 'overdue' ? 'Ver reporte' : 'Ver ticket',
+                    duration: 8000,
+                    onClose: (reason) => { if (reason === 'action') openNotice(item); },
+                });
+            });
+        }
+        data.items.forEach(item => bellKnown.add(noticeKey(item)));
+        bellLoaded = true;
+        if (!bellPanel.hidden) renderBellList();
+    }
+
+    function renderBellList() {
+        bellList.replaceChildren();
+        document.getElementById('bellReadAll').disabled = !bellItems.some(item => !item.read);
+        if (!bellItems.length) {
+            const li = makeEl('li', 'bell-empty', 'No hay avisos de vencimiento.');
+            bellList.appendChild(li);
+            return;
+        }
+        bellItems.forEach(item => {
+            const li = makeEl('li', `bell-item${item.read ? '' : ' is-unread'}${item.kind === 'due_50' ? '' : ' is-urgent'}`);
+            const open = makeEl('button', 'bell-open');
+            open.type = 'button';
+            open.dataset.ticketId = String(item.ticket_id);
+            open.dataset.kind = item.kind;
+            open.appendChild(makeEl('span', 'bell-text', noticeText(item)));
+            if (item.needs_review) open.appendChild(makeEl('span', 'ui-tag is-warn bell-review', 'Pendiente de revisar'));
+            if (!item.read) open.appendChild(makeEl('span', 'sr-only', ' (sin leer)'));
+            li.appendChild(open);
+            if (item.suggestion) {
+                const reassign = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm bell-reassign', `Reasignar a ${item.suggestion.name}`);
+                reassign.type = 'button';
+                reassign.dataset.ticketId = String(item.ticket_id);
+                reassign.dataset.userId = String(item.suggestion.user_id);
+                li.appendChild(reassign);
+            }
+            bellList.appendChild(li);
+        });
+    }
+
+    function openBellPanel() {
+        renderBellList();
+        bellPanel.hidden = false;
+        navBell.setAttribute('aria-expanded', 'true');
+        const first = bellPanel.querySelector('button:not(:disabled)');
+        if (first) first.focus();
+    }
+
+    function closeBellPanel(returnFocus = false) {
+        if (bellPanel.hidden) return;
+        bellPanel.hidden = true;
+        navBell.setAttribute('aria-expanded', 'false');
+        if (returnFocus) navBell.focus();
+    }
+
+    async function markNoticesRead(body) {
+        try {
+            await apiFetch('/notifications/overdue/read', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), silent: true,
+            });
+        } catch (err) {
+            return; // Se vuelve a intentar con el siguiente aviso
+        }
+        const data = await silentGet('/notifications/overdue');
+        if (data) renderBell(data);
+    }
+
+    // Vencido o reporte: al Reporte de vencimiento; 50 % y 80 %: al ticket
+    function openNotice(item) {
+        markNoticesRead({ ticket_id: item.ticket_id });
+        closeBellPanel();
+        closeSideNav();
+        if (item.kind === 'overdue' || item.kind === 'report') openOverdueReport(item.ticket_id);
+        else openTicketById(item.ticket_id);
+    }
+
+    navBell.addEventListener('click', () => {
+        if (bellPanel.hidden) openBellPanel();
+        else closeBellPanel();
+    });
+    bellList.addEventListener('click', async (e) => {
+        const reassign = e.target.closest('.bell-reassign');
+        if (reassign) {
+            const ticketId = Number(reassign.dataset.ticketId);
+            markNoticesRead({ ticket_id: ticketId });
+            closeBellPanel();
+            closeSideNav();
+            await openTicketById(ticketId);
+            // El mismo flujo de reasignar, con Deshacer
+            if (selectedTicketId === ticketId && currentTicket) scheduleReassign(Number(reassign.dataset.userId));
+            return;
+        }
+        const open = e.target.closest('.bell-open');
+        if (!open) return;
+        const item = bellItems.find(i => i.ticket_id === Number(open.dataset.ticketId) && i.kind === open.dataset.kind);
+        if (item) openNotice(item);
+    });
+    document.getElementById('bellReadAll').addEventListener('click', () => markNoticesRead({ all: true }));
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !bellPanel.hidden) closeBellPanel(true);
+    });
+    document.addEventListener('click', (e) => {
+        if (!bellPanel.hidden && !bellPanel.contains(e.target) && !navBell.contains(e.target)) closeBellPanel();
+    });
+
+    // ----- Reporte de vencimiento -----
+    const odContent = document.getElementById('odContent');
+    const OVERDUE_CAUSES = {
+        no_staff: 'Sin técnicos en turno',
+        assignee_unavailable: 'Responsable no disponible',
+        high_load: 'Carga alta',
+        off_hours: 'Fuera de horario',
+        waiting_client: 'Esperando al cliente',
+        other: 'Otro'
+    };
+    let odReport = null;
+    let odSeq = 0;
+
+    async function openOverdueReport(ticketId) {
+        showView('overdueReport');
+        setSideNavActive('overdue');
+        document.getElementById('odCrumb').textContent = `Ticket #${ticketId}`;
+        setDocumentTitle(`Reporte de vencimiento · Ticket #${ticketId}`);
+        window.scrollTo(0, 0);
+        const seq = ++odSeq;
+        odReport = null;
+        showSkeleton(odContent, { rows: 5 });
+        let report;
+        try {
+            report = await apiFetch(`/tickets/${ticketId}/overdue-report`, { silent: true });
+        } catch (err) {
+            if (seq !== odSeq) return;
+            clearSkeleton(odContent);
+            odContent.replaceChildren(errorState(err, () => openOverdueReport(ticketId)));
+            return;
+        }
+        if (seq !== odSeq) return;
+        clearSkeleton(odContent);
+        renderOverdueReport(report);
+    }
+
+    function odCard(label, value, sub) {
+        const card = makeEl('section', 'ui-card od-card');
+        card.appendChild(makeEl('h2', 'ui-kicker', label));
+        card.appendChild(makeEl('p', 'od-card-value', value));
+        if (sub) card.appendChild(makeEl('p', 'od-card-sub', sub));
+        return card;
+    }
+
+    function renderOverdueReport(report) {
+        odReport = report;
+        odContent.replaceChildren();
+        const canManage = ['coordinator', 'admin'].includes(currentUser.role);
+
+        const head = makeEl('header', 'od-head');
+        const titles = makeEl('div', 'od-titles');
+        titles.appendChild(makeEl('p', 'od-kicker ui-num', `#${report.id}`));
+        const title = makeEl('h1', 'od-title', report.title);
+        title.id = 'odTitle';
+        titles.appendChild(title);
+        const tags = makeEl('p', 'od-tags');
+        tags.appendChild(makeEl('span', 'ui-tag is-danger', `Vencido hace ${durationText(report.overdue_seconds)}`));
+        const level = report.level === null ? 'Sin nivel' : `Nivel ${report.level}`;
+        tags.appendChild(makeEl('span', 'od-meta',
+            ` ${level} · ${SOURCE_LABELS[report.source] || report.source} · Prioridad ${report.priority || '—'} · ${report.category || 'Sin categoría'}`));
+        titles.appendChild(tags);
+        head.appendChild(titles);
+        const actions = makeEl('div', 'od-actions');
+        const open = makeEl('button', 'ui-btn ui-btn-secondary od-open', 'Abrir ticket');
+        open.type = 'button';
+        actions.appendChild(open);
+        if (canManage && !['resolved', 'closed'].includes(report.status)) {
+            const reassign = makeEl('button', 'ui-btn ui-btn-primary od-reassign', 'Reasignar');
+            reassign.type = 'button';
+            actions.appendChild(reassign);
+        }
+        const pdf = makeEl('button', 'ui-btn ui-btn-secondary od-pdf', 'Descargar PDF');
+        pdf.type = 'button';
+        actions.appendChild(pdf);
+        head.appendChild(actions);
+        odContent.appendChild(head);
+
+        const cards = makeEl('div', 'od-cards');
+        const contact = [report.contact_phone, report.contact_id_number].filter(Boolean).join(' · ');
+        cards.appendChild(odCard('Cliente', report.requester_name || '—', contact || null));
+        cards.appendChild(odCard('Responsable actual', report.assigned_name || 'Sin asignar'));
+        cards.appendChild(odCard('Creación', exactDateTime(report.created_at)));
+        cards.appendChild(odCard('Vencimiento', exactDateTime(report.due_at)));
+        cards.appendChild(odCard('Sin primera respuesta', durationText(report.without_response_seconds),
+            report.first_response_at ? `Respondió el ${exactDateTime(report.first_response_at)}` : 'Todavía sin respuesta'));
+        cards.appendChild(odCard('Última actividad', report.last_activity_at ? exactDateTime(report.last_activity_at) : '—'));
+        odContent.appendChild(cards);
+
+        const grid = makeEl('div', 'od-grid');
+        const timeline = makeEl('section', 'ui-card od-section');
+        timeline.setAttribute('aria-labelledby', 'odTimelineTitle');
+        const timelineTitle = makeEl('h2', 'ui-kicker', 'Línea de tiempo');
+        timelineTitle.id = 'odTimelineTitle';
+        timeline.appendChild(timelineTitle);
+        const list = makeEl('ol', 'od-timeline');
+        report.timeline.forEach(event => {
+            const li = makeEl('li', `od-event is-${event.kind}`);
+            li.appendChild(makeEl('span', 'od-event-time', exactDateTime(event.at)));
+            const text = makeEl('span', 'od-event-text', event.text);
+            if (event.actor) text.appendChild(makeEl('span', 'od-event-actor', ` · ${event.actor}`));
+            li.appendChild(text);
+            list.appendChild(li);
+        });
+        timeline.appendChild(list);
+        grid.appendChild(timeline);
+        grid.appendChild(renderOverdueCause(report));
+        odContent.appendChild(grid);
+    }
+
+    function renderOverdueCause(report) {
+        const box = makeEl('section', 'ui-card od-section od-cause');
+        box.setAttribute('aria-labelledby', 'odCauseTitle');
+        const heading = makeEl('h2', 'ui-kicker', 'Causa del vencimiento');
+        heading.id = 'odCauseTitle';
+        box.appendChild(heading);
+        const cause = report.cause;
+        if (cause) {
+            box.appendChild(makeEl('p', 'od-cause-current', cause.label));
+            if (cause.note) box.appendChild(makeEl('p', 'od-cause-note', cause.note));
+            box.appendChild(makeEl('p', 'od-card-sub', `Registrada por ${cause.recorded_by_name || 'Usuario'} el ${exactDateTime(cause.recorded_at)}`));
+        } else {
+            box.appendChild(makeEl('p', 'od-cause-pending', 'Causa pendiente de registrar'));
+        }
+        if (!report.can_record_cause) return box;
+        const form = makeEl('form', 'od-cause-form');
+        const label = makeEl('label', '', cause ? 'Cambiar la causa' : 'Causa');
+        label.htmlFor = 'odCauseSelect';
+        const select = makeEl('select', 'ui-input');
+        select.id = 'odCauseSelect';
+        select.required = true;
+        select.appendChild(new Option('Elija la causa', ''));
+        Object.entries(OVERDUE_CAUSES).forEach(([value, text]) => select.appendChild(new Option(text, value)));
+        select.value = cause ? cause.cause : '';
+        const noteLabel = makeEl('label', '', 'Nota (obligatoria con "Otro")');
+        noteLabel.htmlFor = 'odCauseNote';
+        const note = makeEl('textarea', 'ui-input');
+        note.id = 'odCauseNote';
+        note.rows = 2;
+        note.maxLength = 500;
+        note.value = cause && cause.note ? cause.note : '';
+        const save = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm', 'Guardar causa');
+        save.type = 'submit';
+        form.append(label, select, noteLabel, note, save);
+        box.appendChild(form);
+        return box;
+    }
+
+    odContent.addEventListener('submit', async (e) => {
+        if (!e.target.classList.contains('od-cause-form') || !odReport) return;
+        e.preventDefault();
+        const cause = document.getElementById('odCauseSelect').value;
+        const note = document.getElementById('odCauseNote').value.trim();
+        if (cause === 'other' && !note) {
+            showError('Describa la causa en la nota');
+            return;
+        }
+        const button = e.target.querySelector('button[type="submit"]');
+        button.disabled = true;
+        try {
+            const report = await apiFetch(`/tickets/${odReport.id}/overdue-cause`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cause, note: note || null }),
+            });
+            renderOverdueReport(report);
+            toast('Causa registrada.');
+            pollNavCounts(false);
+        } catch (err) {
+            button.disabled = false; // apiFetch ya mostró el error
+        }
+    });
+
+    odContent.addEventListener('click', async (e) => {
+        if (!odReport) return;
+        const ticketId = odReport.id;
+        if (e.target.closest('.od-open')) {
+            openTicketById(ticketId);
+        } else if (e.target.closest('.od-reassign')) {
+            await openTicketById(ticketId);
+            // El mismo control de reasignar del ticket
+            const select = detailPanel.querySelector('.sd-assign-select');
+            if (selectedTicketId === ticketId && select) {
+                select.scrollIntoView({ block: 'center' });
+                select.focus();
+            }
+        } else if (e.target.closest('.od-pdf')) {
+            downloadOverduePdf(ticketId, e.target.closest('.od-pdf'));
+        }
+    });
+
+    async function downloadOverduePdf(ticketId, button) {
+        button.disabled = true;
+        try {
+            const response = await fetch(`${API_BASE}/tickets/${ticketId}/overdue-report.pdf`, {
+                headers: { 'Authorization': `Bearer ${authToken}` },
+            });
+            if (response.status === 401) {
+                const data = await response.json().catch(() => ({}));
+                handleUnauthorized(data.detail);
+                return;
+            }
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                showError(getErrorMessage(data));
+                return;
+            }
+            const blob = await response.blob();
+            const match = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') || '');
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = match ? match[1] : `vencimiento-ticket-${ticketId}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        } catch (err) {
+            showError('No se pudo descargar el PDF');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    document.getElementById('odBack').addEventListener('click', () => {
+        setSideNavActive('overdue');
+        setQueueView('overdue', 'Vencidos');
+    });
 
     // ----- Cancelar tickets (coordinador y administrador) -----
     // Como al reasignar: se envía al servidor (y sale el correo al cliente) cuando terminan los 5 s,

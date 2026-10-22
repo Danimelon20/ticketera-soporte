@@ -264,12 +264,24 @@
                 </span>
                 <span class="sr-only">Mi cuenta</span>
             </button>
+            <!-- Avisos de vencimiento: 50 %, 80 %, vencido y reporte de vencimiento -->
+            <button type="button" id="navBell" class="nav-bell" aria-haspopup="dialog" aria-expanded="false" aria-controls="bellPanel" aria-label="Avisos de vencimiento" title="Avisos de vencimiento">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span id="navBellCount" class="nav-bell-count" aria-hidden="true" hidden></span>
+            </button>
             <button type="button" id="navLogout" class="nav-logout" aria-label="Cerrar sesión" title="Cerrar sesión">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
             </button>
         </div>
     </aside>
     <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
+    <div id="bellPanel" class="bell-panel" role="dialog" aria-labelledby="bellTitle" hidden>
+        <div class="bell-head">
+            <h2 id="bellTitle" class="bell-title">Avisos</h2>
+            <button type="button" id="bellReadAll" class="link-btn bell-read-all">Marcar todas como leídas</button>
+        </div>
+        <ul id="bellList" class="bell-list"></ul>
+    </div>
 
     <main style="display: none;">
         <div class="split">
@@ -954,6 +966,16 @@
                     <p class="sd-muted">Elija una cuenta para ver el detalle.</p>
                 </div>
             </aside>
+        </section>
+
+        <!-- Reporte de vencimiento: página completa, sin barra lateral -->
+        <section id="overdueReportView" class="page-view od-view" hidden aria-labelledby="odTitle">
+            <nav class="ticket-bar od-bar" aria-label="Navegación">
+                <span class="ticket-bar-mark" aria-hidden="true">T</span>
+                <button type="button" id="odBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Vencidos</button>
+                <span class="ticket-bar-crumb">Vencidos / <b id="odCrumb"></b></span>
+            </nav>
+            <div id="odContent" class="od-content"></div>
         </section>
 
         <section id="adminView" class="page-view" hidden aria-labelledby="adminTitle">

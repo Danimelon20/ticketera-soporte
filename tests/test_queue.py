@@ -68,11 +68,13 @@ def test_sorted_by_due_date_without_date_last(make_user):
     overdue = _ticket(requester, due_at=MONDAY_8AM + timedelta(minutes=30))
 
     result = _queue(coordinator)
-    assert _ids(result) == [overdue, soon, late, no_due]
-    first = result["items"][0]
+    # El vencido solo sale en la vista Vencidos
+    assert _ids(result) == [soon, late, no_due]
+    assert result["items"][-1]["due_state"] is None
+    first = _queue(coordinator, view="overdue")["items"][0]
+    assert first["id"] == overdue
     assert first["due_state"] == "overdue" and first["consumed_pct"] == 100
     assert first["remaining_seconds"] == -30 * 60
-    assert result["items"][-1]["due_state"] is None
 
 
 def test_views_and_filters(make_user):
@@ -89,14 +91,16 @@ def test_views_and_filters(make_user):
 
     assert _ids(_queue(coordinator, now, view="overdue")) == [overdue]
     assert _ids(_queue(coordinator, now, view="due_soon")) == [due_soon]
-    assert set(_ids(_queue(coordinator, now, view="unassigned"))) == {overdue, no_level}
+    # Los vencidos solo salen en Vencidos
+    assert set(_ids(_queue(coordinator, now, view="unassigned"))) == {no_level}
     assert resolved not in _ids(_queue(coordinator, now, view="open"))
     assert _ids(_queue(coordinator, now, view="all", status="resolved")) == [resolved]
     assert _ids(_queue(coordinator, now, view="open", source="email")) == [due_soon]
-    assert _ids(_queue(coordinator, now, view="open", level="3")) == [overdue]
+    assert _ids(_queue(coordinator, now, view="open", level="3")) == []
+    assert _ids(_queue(coordinator, now, view="overdue", level="3")) == [overdue]
     assert _ids(_queue(coordinator, now, view="open", level="none")) == [no_level]
     assert _ids(_queue(coordinator, now, view="open", assigned_to=technician["id"])) == [due_soon]
-    assert set(_ids(_queue(coordinator, now, view="open", assigned_to=0))) == {overdue, no_level}
+    assert set(_ids(_queue(coordinator, now, view="open", assigned_to=0))) == {no_level}
     assert _ids(_queue(technician, now, view="mine_due_soon")) == [due_soon]
 
 

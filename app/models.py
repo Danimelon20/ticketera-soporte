@@ -395,6 +395,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "request_created", "request_approved", "request_rejected",
     "availability_changed", "availability_period_added", "availability_period_removed", "report_created", "report_confirmed", "report_dismissed",
     "schedule_changed", "sessions_closed", "invitation_cancelled",
+    # Descarga del PDF de un reporte de vencimiento (target_label: "Ticket #N")
+    "overdue_report_downloaded",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
 )
@@ -605,5 +607,78 @@ class TicketCancellation(Base):
     note = Column(Text, nullable=True)
     cancelled_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     cancelled_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
+
+
+# Avisos de vencimiento de la campana: al 50 % y al 80 % del plazo, al vencer (al responsable)
+# y el reporte de vencimiento (a coordinadores y administradores)
+DUE_NOTICE_KINDS = ("due_50", "due_80", "overdue", "report")
+
+
+class TicketDueNotice(Base):
+    """Aviso ya generado de un ticket, uno por tipo: así no se repite. Tipo validado en Python.
+
+    baseline: generado en la primera revisión después de instalar los avisos; nunca se muestra.
+    """
+    __tablename__ = "ticket_due_notices"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind = Column(String(20), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    # Al 80 %, si el responsable no está disponible: a quién conviene reasignar
+    suggested_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Al 80 %, sin responsable o con el responsable no disponible: también llega a los coordinadores
+    escalated = Column(Boolean, nullable=False, default=False)
+    baseline = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (UniqueConstraint("ticket_id", "kind", name="uq_due_notice_ticket_kind"),)
+
+    ticket = relationship("Ticket")
+    suggested_user = relationship("User")
+
+
+class DueNoticesInstall(Base):
+    """Una fila: cuándo fue la primera revisión de avisos. Lo que ya correspondía ese día no se avisa."""
+    __tablename__ = "due_notices_install"
+
+    id = Column(Integer, primary_key=True)
+    installed_at = Column(DateTime, nullable=False)
+
+
+class OverdueNoticeSeen(Base):
+    """Aviso de la campana que la persona ya leyó."""
+    __tablename__ = "overdue_notices_seen"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(20), nullable=False)
+    seen_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (UniqueConstraint("user_id", "ticket_id", "kind", name="uq_notice_seen"),)
+
+
+OVERDUE_CAUSES = {
+    "no_staff": "Sin técnicos en turno",
+    "assignee_unavailable": "Responsable no disponible",
+    "high_load": "Carga alta",
+    "off_hours": "Fuera de horario",
+    "waiting_client": "Esperando al cliente",
+    "other": "Otro",
+}
+
+
+class OverdueCause(Base):
+    """Causa del vencimiento, registrada por un coordinador o administrador. Causa validada en Python."""
+    __tablename__ = "overdue_causes"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    cause = Column(String(30), nullable=False)
+    note = Column(Text, nullable=True)
+    recorded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    recorded_at = Column(DateTime, nullable=False)
 
     user = relationship("User")

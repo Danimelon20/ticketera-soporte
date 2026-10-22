@@ -41,6 +41,15 @@ def _open_tickets(db: Session, assigned_to: int | None = None) -> list[models.Ti
     return query.all()
 
 
+def is_overdue(ticket: models.Ticket, now: datetime) -> bool:
+    """Abierto y con la fecha límite pasada: solo aparece en la vista Vencidos."""
+    return ticket.status in OPEN_STATUSES and alerts.due_state(ticket, now)[0] == alerts.OVERDUE
+
+
+def _not_overdue(tickets: list[models.Ticket], now: datetime) -> list[models.Ticket]:
+    return [t for t in tickets if not is_overdue(t, now)]
+
+
 def _due_counts(tickets: list[models.Ticket], now: datetime) -> tuple[int, int]:
     """(por vencer, vencidos) con el mismo cálculo que las alertas."""
     states = [alerts.due_state(t, now)[0] for t in tickets]
@@ -69,12 +78,9 @@ def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = No
     return {row[0] for row in query.distinct().all()}
 
 
-def _unassigned(db: Session) -> int:
-    return (
-        db.query(models.Ticket)
-        .filter(models.Ticket.status.in_(OPEN_STATUSES), models.Ticket.assigned_to.is_(None))
-        .count()
-    )
+def _unassigned(db: Session, now: datetime) -> int:
+    # Sin los vencidos: esos se cuentan en Vencidos
+    return sum(1 for t in _not_overdue(_open_tickets(db), now) if t.assigned_to is None)
 
 
 def _drafts_pending(db: Session) -> int:
@@ -101,16 +107,20 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         mine = _open_tickets(db, assigned_to=user.id)
         following = (
             db.query(models.Ticket)
+            .options(joinedload(models.Ticket.ai_analysis))
             .join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id)
             .filter(models.TicketFollower.user_id == user.id, models.Ticket.status.in_(OPEN_STATUSES))
-            .count()
+            .all()
         )
+        mine_due_soon, mine_overdue = _due_counts(mine, now)
         return {
-            "mine_open": len(mine),
-            "mine_due_soon": _due_counts(mine, now)[0],
-            "following_open": following,
+            "mine_open": len(mine) - mine_overdue,
+            "mine_due_soon": mine_due_soon,
+            # Solo sus vencidos
+            "overdue": mine_overdue,
+            "following_open": len(_not_overdue(following, now)),
             "mine_resolved_today": _resolved_today(db, now, assigned_to=user.id),
-            "unassigned": _unassigned(db),
+            "unassigned": _unassigned(db, now),
             "drafts_pending": _drafts_pending(db),
             "shift": _shift(db, user, now),
         }
@@ -124,10 +134,11 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         # Como la lista de invitaciones: el coordinador solo ve las suyas
         invitations = invitations.filter(models.StaffInvitation.created_by == user.id)
     result = {
-        "unassigned": _unassigned(db),
+        "unassigned": _unassigned(db, now),
         "due_soon": due_soon,
         "overdue": overdue,
-        "open": len(tickets),
+        # Los vencidos van aparte, en Vencidos
+        "open": len(tickets) - overdue,
         "resolved_today": _resolved_today(db, now),
         "drafts_pending": _drafts_pending(db),
         "reports_open": db.query(models.AccountReport).filter(models.AccountReport.status == "open").count(),
@@ -202,6 +213,9 @@ def queue(
         query = query.filter(models.Ticket.assigned_to.is_(None))
     if view in ("mine_open", "mine_due_soon"):
         query = query.filter(models.Ticket.assigned_to == user.id)
+    if view == "overdue" and user.role == "technician":
+        # El técnico solo ve sus vencidos
+        query = query.filter(models.Ticket.assigned_to == user.id)
     if view == "following":
         query = query.join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id).filter(
             models.TicketFollower.user_id == user.id
@@ -227,12 +241,17 @@ def queue(
         term = f"%{search.strip()}%"
         query = query.filter(models.Ticket.title.ilike(term) | models.Ticket.description.ilike(term))
 
+    # Buscar o ver los tickets de un cliente encuentra también los vencidos
+    keep_overdue = view == "overdue" or bool(search and search.strip()) or requester_id is not None
     rows = []
     for ticket in query.all():
         state, percent = alerts.due_state(ticket, now)
         if view in ("due_soon", "mine_due_soon") and state != alerts.DUE_SOON:
             continue
         if view == "overdue" and state != alerts.OVERDUE:
+            continue
+        # Los vencidos abiertos solo salen en la vista Vencidos
+        if not keep_overdue and state == alerts.OVERDUE and ticket.status in OPEN_STATUSES:
             continue
         ticket_level = _level(ticket)
         if level == "none" and ticket_level is not None:
