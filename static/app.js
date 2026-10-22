@@ -5989,7 +5989,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showView('tickets');
         setSideNavActive(null);
         selectedTicketId = ticketId;
-        activityFilter = 'all';
+        activityFilter = 'public';
         enterTicketPage(ticketId);
         try {
             const ticket = await apiFetch(`/tickets/${ticketId}`);
@@ -6446,7 +6446,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.classList.toggle('selected', Number(row.dataset.id) === ticketId);
         });
         selectedTicketId = ticketId;
-        activityFilter = 'all';
+        activityFilter = 'public';
         enterTicketPage(ticketId);
         try {
             const ticket = await apiFetch(`/tickets/${ticketId}`);
@@ -6897,16 +6897,15 @@ document.addEventListener('DOMContentLoaded', () => {
         slot.replaceChildren(box);
     }
 
-    // Filtro de la línea de tiempo: todo, conversación con el cliente, notas internas o historial
+    // Filtro de la línea de tiempo: conversación con el cliente (al abrir), notas internas o historial
     function staffTabs(ticket) {
         const comments = ticket.comments || [];
         const tabs = [
-            ['all', 'Todo', comments.length + (ticket.history || []).length],
             ['public', 'Conversación', comments.filter(c => !c.internal).length],
             ['internal', 'Notas internas', comments.filter(c => c.internal).length],
             ['history', 'Historial', (ticket.history || []).length],
         ];
-        if (!['all', 'public', 'internal', 'history'].includes(activityFilter)) activityFilter = 'all';
+        if (!['public', 'internal', 'history'].includes(activityFilter)) activityFilter = 'public';
         const bar = makeEl('div', 'ui-tabs td-filter');
         bar.setAttribute('role', 'tablist');
         bar.setAttribute('aria-label', 'Mostrar en la actividad');
@@ -6932,17 +6931,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const shown = events.filter(ev => {
             if (activityFilter === 'history') return ev.type === 'history';
             if (activityFilter === 'public') return ev.type === 'comment' && !ev.data.internal;
-            if (activityFilter === 'internal') return ev.type === 'comment' && ev.data.internal;
-            return true;
+            return ev.type === 'comment' && ev.data.internal;
         });
         if (!shown.length) {
             const texts = {
                 public: ['Todavía no hay conversación con el cliente', 'Use "Responder al cliente" para escribirle.'],
                 internal: ['No hay notas internas', 'Las notas internas solo las ve el equipo de soporte.'],
                 history: ['Todavía no hay cambios', 'Aquí aparecen los cambios de estado y de responsable.'],
-                all: ['Todavía no hay actividad', ''],
             };
-            const [title, text] = texts[activityFilter] || texts.all;
+            const [title, text] = texts[activityFilter];
             container.appendChild(emptyState({ title, text }));
             return;
         }
@@ -7292,7 +7289,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 buttons.forEach(b => { b.disabled = false; });
                 return; // apiFetch ya mostró el error
             }
-            activityFilter = 'all';
+            // Se ve en su pestaña lo que se acaba de enviar
+            activityFilter = internal ? 'internal' : 'public';
             await reloadSelectedTicketAndList();
             showSuccess(internal ? 'Nota interna guardada' : 'Respuesta enviada al cliente');
             return;
