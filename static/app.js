@@ -1664,6 +1664,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (isStaffShell()) {
             renderStaffDetail(ticket);
+            placeHealthBanner();
             return;
         }
         if (isRequesterPortal()) {
@@ -2780,6 +2781,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadReports();
         }
         if (name === 'adminAccounts') loadAdminAccounts();
+        placeHealthBanner();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
@@ -4337,6 +4339,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reviewAccount = null;
         reportReview.hidden = true;
         reportsListPane.hidden = false;
+        placeHealthBanner();
         setDocumentTitle('Reportes de cuentas');
     }
 
@@ -4370,6 +4373,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reviewAccount = null;
         reportsListPane.hidden = true;
         reportReview.hidden = false;
+        placeHealthBanner();
         window.scrollTo(0, 0);
         const own = item.reporter_id === currentUser.id;
         document.getElementById('reportReviewCrumb').textContent = item.target_name;
@@ -5937,13 +5941,37 @@ document.addEventListener('DOMContentLoaded', () => {
         return { failures, disabled };
     }
 
+    // La primera frase en negrita: "<b>No hay técnicos en turno.</b> Los tickets nuevos quedan sin asignar."
+    function healthItem(failure) {
+        const li = makeEl('li');
+        const cut = failure.text.indexOf('. ');
+        const first = cut === -1 ? failure.text : failure.text.slice(0, cut + 1);
+        li.appendChild(makeEl('b', '', first));
+        if (cut !== -1) li.appendChild(document.createTextNode(failure.text.slice(cut + 1)));
+        return li;
+    }
+
+    // Única función que ubica el aviso: justo después del encabezado visible de la pantalla actual
+    // (data-page-header) o, si no tiene, como primer elemento de su contenido.
+    function placeHealthBanner() {
+        const view = visibleViews()[0];
+        if (!view) return;
+        const header = [...view.querySelectorAll('[data-page-header]')].find(el => el.getClientRects().length > 0);
+        if (header) {
+            if (header.nextElementSibling !== healthBanner) header.after(healthBanner);
+        } else if (view.firstElementChild !== healthBanner) {
+            view.prepend(healthBanner);
+        }
+    }
+
     function renderHealthBanner() {
+        placeHealthBanner();
         const visible = healthFailures.filter(f => !healthDismissed.has(healthKey(f)));
         const shown = visible.map(f => `${healthKey(f)}=${f.text}`).join('|');
         // Sin cambios no se vuelve a escribir: role="alert" solo avisa cuando aparece o cambia
         if (shown === healthShown) return;
         healthShown = shown;
-        healthBannerList.replaceChildren(...visible.map(f => makeEl('li', '', f.text)));
+        healthBannerList.replaceChildren(...visible.map(healthItem));
         healthBanner.classList.toggle('is-down', visible.some(f => f.level === 'down'));
         healthBannerLink.hidden = currentUser.role !== 'admin';
         healthBanner.hidden = visible.length === 0;
@@ -6539,6 +6567,7 @@ document.addEventListener('DOMContentLoaded', () => {
         queueBody.querySelectorAll('.queue-row.selected').forEach(row => row.classList.remove('selected'));
         setDocumentTitle('Tickets');
         applyFabPos(false);
+        placeHealthBanner();
         return closedId;
     }
 
@@ -7079,6 +7108,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ----- Encabezado: título, seguir, estado y reasignar -----
         const head = makeEl('header', 'td-head');
+        head.dataset.pageHeader = '';
         const titleRow = makeEl('div', 'td-title-row');
         titleRow.appendChild(makeEl('h1', 'td-title', ticket.title));
         const followBox = makeEl('div', 'follow-box');

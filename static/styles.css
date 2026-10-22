@@ -3180,43 +3180,48 @@ body.staff-shell.ticket-open #detailContent {
 
 /* ----- Estado del sistema: solo cuando algo falla ----- */
 body.staff-shell { --bar-h: 0px; }
+/* Tarjeta dentro del contenido, debajo del encabezado de la pantalla (propuesta D) */
 .health-banner {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-  margin: 12px 24px 0;
-  padding: 10px 12px 10px 14px;
-  border: 1px solid #F3C98B;
-  border-left: 4px solid var(--due-soon-bar);
-  border-radius: var(--r-md);
-  background: var(--warn-soft);
-  color: var(--due-soon);
+  margin: 12px 0 16px;
+  padding: 11px 14px;
+  border: 1px solid #F3D3A6;
+  border-radius: 10px;
+  background: #FFF8EC;
+  color: #7A3E06;
   font-size: 13px;
+  line-height: 1.4;
 }
-.health-banner.is-down { border-color: #F4B7B0; border-left-color: var(--overdue); background: var(--danger-soft); color: var(--overdue); }
 .health-banner[hidden] { display: none; }
+.health-banner-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #F59E0B; }
 .health-banner-list { flex: 1; min-width: 0; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.health-banner-link { flex: 0 0 auto; padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.health-banner-list b { font-weight: 600; }
+.health-banner-link { flex: 0 0 auto; padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 500; text-decoration: underline; cursor: pointer; }
 .health-banner-link[hidden] { display: none; }
-.health-banner-close { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--r-sm); background: none; color: inherit; cursor: pointer; }
-.health-banner-close:hover { background: rgba(14, 16, 48, 0.06); }
-@media (max-width: 767px) {
-  .health-banner { margin: 12px 16px 0; flex-wrap: wrap; }
-}
+.health-banner-close { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: none; border-radius: 6px; background: none; color: inherit; opacity: 0.7; cursor: pointer; }
+.health-banner-close:hover { opacity: 1; background: rgba(122, 62, 6, 0.08); }
+/* Servidor sin respuesta */
+.health-banner.is-down { border-color: #F1B8B0; background: #FDECEA; color: #B42318; }
+.health-banner.is-down .health-banner-dot { background: #B42318; }
+.health-banner.is-down .health-banner-close:hover { background: rgba(180, 35, 24, 0.08); }
 
-/* Punto sobre el avatar de la tarjeta del usuario y, en el celular, sobre ☰ */
-.health-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--navy); box-sizing: border-box; }
+/* Punto al final de la tarjeta del usuario; con la barra contraída, en la esquina del avatar; en el celular, sobre ☰ */
+.health-dot { flex: 0 0 auto; width: 9px; height: 9px; margin-left: auto; border-radius: 50%; }
 .health-dot[hidden] { display: none; }
-.health-dot.is-warn { background: var(--due-soon-bar); }
-.health-dot.is-down { background: #EF4444; }
-.health-dot.is-off { background: #9CA3AF; }
+.health-dot.is-warn { background: #F59E0B; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25); }
+.health-dot.is-down { background: #B42318; box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.25); }
+.health-dot.is-off { background: #8E9AE6; box-shadow: 0 0 0 3px rgba(142, 154, 230, 0.25); }
 .nav-user { position: relative; }
-.nav-user .health-dot { top: 8px; left: 32px; }
-body.staff-shell.nav-collapsed .nav-user .health-dot { top: -2px; left: 22px; }
+body.staff-shell.nav-collapsed .nav-user .health-dot { position: absolute; top: -1px; left: 21px; width: 8px; height: 8px; margin: 0; box-shadow: 0 0 0 2px var(--navy); }
 .nav-toggle { position: relative; }
-.nav-toggle .health-dot { top: -4px; right: -4px; border-color: #FFFFFF; }
+.nav-toggle .health-dot { position: absolute; top: -4px; right: -4px; margin: 0; }
 @media (max-width: 767px) {
-  body.staff-shell.nav-collapsed .nav-user .health-dot { top: 8px; left: 32px; }
+  body.staff-shell.nav-collapsed .nav-user .health-dot { position: static; width: 9px; height: 9px; margin-left: auto; }
+  body.staff-shell.nav-collapsed .nav-user .health-dot.is-warn { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25); }
+  body.staff-shell.nav-collapsed .nav-user .health-dot.is-down { box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.25); }
+  body.staff-shell.nav-collapsed .nav-user .health-dot.is-off { box-shadow: 0 0 0 3px rgba(142, 154, 230, 0.25); }
 }
 
 /* Logo de la empresa al pie del contenido del personal */
