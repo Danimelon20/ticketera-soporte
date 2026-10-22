@@ -45,7 +45,7 @@ def llm(monkeypatch):
     """Simula Ollama: devuelve las respuestas en orden y guarda lo enviado."""
     state = {"payloads": [], "replies": []}
 
-    def _fake_post_chat(payload):
+    def _fake_post_chat(payload, task=None):
         state["payloads"].append(payload)
         reply = state["replies"].pop(0)
         if isinstance(reply, Exception):
@@ -122,10 +122,13 @@ def test_payload_options(make_user, llm):
     email_analysis.analyze_pending()
 
     payload = llm["payloads"][0]
-    assert payload["format"] == "json"
+    # Esquema estructurado: el modelo solo puede responder esa forma
+    assert payload["format"]["required"] == ["level", "category", "summary"]
+    assert payload["format"]["properties"]["category"]["enum"] == ["Hardware", "Software", "Red", "Accesos"]
     assert payload["think"] is False
     assert payload["stream"] is False
-    assert payload["options"]["temperature"] == 0.1
+    assert payload["keep_alive"] == "24h"
+    assert payload["options"] == {"temperature": 0.1, "num_predict": 300}
     assert payload["model"] == "qwen3:1.7b"
     system = payload["messages"][0]["content"]
     assert "Si dudas entre dos niveles, elige el más alto." in system

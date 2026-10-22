@@ -1352,12 +1352,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const history = chatHistory.slice(-CHAT_HISTORY_LIMIT);
         const session = chatSession;
 
+        let bubble = null;
         try {
             // fetch propio: los 429/503 se muestran dentro del chat, no en el aviso rojo
-            const response = await fetch(`${API_BASE}/chat`, {
+            const response = await fetch(`${API_BASE}/chat/stream`, {
                 method: 'POST',
                 headers: {
-                    'Accept': 'application/json',
+                    'Accept': 'text/plain, application/json',
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
@@ -1368,16 +1369,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleUnauthorized(data.detail);
                 return;
             }
-            const data = await response.json().catch(() => ({}));
-            if (session !== chatSession) return;
-            pending.remove();
             if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                if (session !== chatSession) return;
+                pending.remove();
                 addChatMessage(getErrorMessage(data), 'notice');
                 return;
             }
-            addChatMessage(data.reply, 'model');
+            // El texto aparece mientras el modelo lo escribe
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let reply = '';
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (session !== chatSession) {
+                    reader.cancel();
+                    return;
+                }
+                if (done) break;
+                reply += decoder.decode(value, { stream: true });
+                if (!bubble) {
+                    pending.remove();
+                    bubble = addChatMessage('', 'model');
+                }
+                bubble.textContent = reply;
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            reply += decoder.decode();
+            if (!bubble) {
+                pending.remove();
+                bubble = addChatMessage(reply, 'model');
+            }
+            bubble.textContent = reply;
             chatHistory.push({ role: 'user', text: message.slice(0, CHAT_TURN_CHARS) });
-            chatHistory.push({ role: 'model', text: String(data.reply).slice(0, CHAT_TURN_CHARS) });
+            chatHistory.push({ role: 'model', text: reply.slice(0, CHAT_TURN_CHARS) });
             chatHistory = chatHistory.slice(-CHAT_HISTORY_LIMIT);
         } catch (err) {
             if (session !== chatSession) return;

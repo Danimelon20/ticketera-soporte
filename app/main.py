@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager, suppress
 from logging.handlers import RotatingFileHandler
 
@@ -8,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, config, models
+from . import auto_assign, chatbot, config, models
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -88,9 +89,19 @@ def init_db():
         db.close()
 
 
+def start_warm_up() -> threading.Thread | None:
+    """Carga el modelo en segundo plano: no frena el arranque y, si falla, no pasa nada."""
+    if not (config.CHATBOT_ENABLED or config.AI_ANALYSIS_ENABLED):
+        return None
+    thread = threading.Thread(target=chatbot.warm_up, name="ollama-warm-up", daemon=True)
+    thread.start()
+    return thread
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    start_warm_up()
 
     poller = None
     if config.EMAIL_ENABLED:

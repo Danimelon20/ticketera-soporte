@@ -417,7 +417,7 @@ def test_web_ticket_is_assigned_after_ai_analysis(client, make_user, monkeypatch
     monkeypatch.setattr(auto_assign, "_now", lambda: MONDAY_10AM)
     seen = {}
 
-    def _fake_post_chat(payload):
+    def _fake_post_chat(payload, task=None):
         # Cuando la IA responde todavía no hay asignación
         seen["assigned_during_analysis"] = db_assigned_any()
         return json.dumps({"level": 4, "category": "Software", "summary": "Caída."})
@@ -452,7 +452,7 @@ def test_web_ticket_with_failed_analysis_counts_as_two(client, make_user, monkey
     monkeypatch.setattr(config, "AI_ANALYSIS_ENABLED", True)
     monkeypatch.setattr(auto_assign, "_now", lambda: MONDAY_10AM)
 
-    def _fail(payload):
+    def _fail(payload, task=None):
         raise RuntimeError("Ollama no responde")
 
     monkeypatch.setattr(chatbot, "post_chat", _fail)
@@ -508,7 +508,7 @@ def test_email_ticket_is_assigned_after_pending_analysis(make_user, monkeypatch)
 
     monkeypatch.setattr(config, "AI_ANALYSIS_ENABLED", True)
     monkeypatch.setattr(auto_assign, "_now", lambda: MONDAY_10AM)
-    monkeypatch.setattr(chatbot, "post_chat", lambda payload: json.dumps(
+    monkeypatch.setattr(chatbot, "post_chat", lambda payload, task=None: json.dumps(
         {"level": 3, "category": "Software", "summary": "No abre."}
     ))
     technician = _tech(make_user)

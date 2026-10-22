@@ -178,7 +178,8 @@ def test_call_llm_strips_think_and_disables_thinking(monkeypatch):
     assert payload["think"] is False
     assert payload["stream"] is False
     assert payload["model"] == "qwen3:1.7b"
-    assert payload["options"] == {"temperature": 0.3, "num_predict": 500, "num_ctx": 4096}
+    assert payload["keep_alive"] == "24h"
+    assert payload["options"] == {"temperature": 0.3, "num_predict": 400, "num_ctx": 4096}
     assert [m["role"] for m in payload["messages"]] == ["system", "user", "assistant", "user"]
     assert payload["messages"][0]["content"] == "SISTEMA"
     assert payload["messages"][-1]["content"] == "¿Cómo va mi ticket?"

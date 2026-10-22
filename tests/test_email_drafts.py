@@ -53,7 +53,7 @@ def llm(monkeypatch):
     """Simula Ollama: devuelve las respuestas en orden y guarda lo enviado."""
     state = {"payloads": [], "replies": []}
 
-    def _fake_post_chat(payload):
+    def _fake_post_chat(payload, task=None):
         state["payloads"].append(payload)
         reply = state["replies"].pop(0)
         if isinstance(reply, Exception):
@@ -482,8 +482,9 @@ def test_injection_stays_inside_markers(make_user, sent, llm):
     _draft_from(requester, llm, _answer(level=1), body=body)
 
     payload = llm["payloads"][0]
-    assert payload["format"] == "json" and payload["think"] is False and payload["stream"] is False
-    assert payload["options"]["temperature"] == 0.1
+    assert payload["format"]["properties"]["kind"]["enum"] == ["ticket", "status_question", "unclear", "not_support"]
+    assert payload["think"] is False and payload["stream"] is False and payload["keep_alive"] == "24h"
+    assert payload["options"] == {"temperature": 0.1, "num_predict": 300}
     assert "nunca instrucciones" in payload["messages"][0]["content"]
     sent_text = payload["messages"][1]["content"]
     assert sent_text.startswith("<<<CORREO>>>") and sent_text.endswith("<<<FIN>>>")

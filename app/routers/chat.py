@@ -4,6 +4,7 @@ import time
 from collections import defaultdict, deque
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -40,8 +41,8 @@ def reset_rate_limit() -> None:
         _recent.clear()
 
 
-@router.post("/chat", response_model=ChatResponse)
-def chat(data: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def _prepare(data: ChatRequest, db: Session, current_user) -> str:
+    """Permisos, límite y prompt del sistema (lo mismo para la respuesta completa y por partes)."""
     if current_user.role not in CHAT_ROLES:
         raise HTTPException(status_code=403, detail="No tienes permiso para usar el asistente")
     if not config.CHATBOT_ENABLED:
@@ -53,9 +54,37 @@ def chat(data: ChatRequest, db: Session = Depends(get_db), current_user=Depends(
     logging.info("Chat: usuario %s, %s caracteres", current_user.id, len(data.message))
 
     context = chatbot.build_context(db, current_user)
-    system_prompt = chatbot.build_system_prompt(current_user, context)
+    return chatbot.build_system_prompt(current_user, context)
+
+
+@router.post("/chat", response_model=ChatResponse)
+def chat(data: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    system_prompt = _prepare(data, db, current_user)
     try:
         reply = chatbot.call_llm(system_prompt, data.history, data.message)
     except chatbot.ChatbotUnavailable:
         raise HTTPException(status_code=503, detail=UNAVAILABLE)
     return ChatResponse(reply=reply)
+
+
+@router.post("/chat/stream")
+def chat_stream(data: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """La respuesta llega en texto plano por partes, mientras el modelo la genera."""
+    system_prompt = _prepare(data, db, current_user)
+    chunks = chatbot.stream_llm(system_prompt, data.history, data.message)
+    # El primer trozo se espera aquí: si Ollama no responde, todavía se puede devolver 503
+    try:
+        first = next(chunks)
+    except chatbot.ChatbotUnavailable:
+        raise HTTPException(status_code=503, detail=UNAVAILABLE)
+
+    def body():
+        yield first
+        try:
+            yield from chunks
+        except chatbot.ChatbotUnavailable:
+            yield "\n\n(El asistente no pudo terminar la respuesta.)"
+
+    return StreamingResponse(
+        body(), media_type="text/plain; charset=utf-8", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
+    )

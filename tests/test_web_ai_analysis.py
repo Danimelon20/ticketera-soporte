@@ -37,7 +37,7 @@ def llm(monkeypatch):
     state = {"payloads": [], "error": None,
              "reply": json.dumps({"level": 3, "category": "Software", "summary": "No abre el sistema."})}
 
-    def _fake_post_chat(payload):
+    def _fake_post_chat(payload, task=None):
         # Un solo análisis a la vez: el modelo solo se llama con el lock tomado
         assert email_analysis.ANALYSIS_LOCK.locked()
         state["payloads"].append(payload)
