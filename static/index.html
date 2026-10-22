@@ -1191,6 +1191,13 @@
     </dialog>
 
     <!-- Cancelar uno o varios tickets con un solo motivo (coordinador y administrador) -->
+    <dialog id="attachmentDialog" class="app-dialog att-viewer" aria-labelledby="attachmentDialogTitle">
+        <div class="att-viewer-head">
+            <h2 id="attachmentDialogTitle" class="modal-title"></h2>
+            <button type="button" id="attachmentDialogClose" class="ui-btn ui-btn-secondary ui-btn-sm">Cerrar</button>
+        </div>
+        <img id="attachmentDialogImage" class="att-viewer-image" alt="">
+    </dialog>
     <dialog id="cancelDialog" class="app-dialog" aria-labelledby="cancelDialogTitle">
         <form id="cancelForm" class="profile-form">
             <h2 id="cancelDialogTitle" class="modal-title">Cancelar ticket</h2>

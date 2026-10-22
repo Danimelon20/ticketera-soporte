@@ -1,0 +1,9 @@
+# Nunca dentro de la imagen: datos, base, secretos (.env llega por env_file en docker-compose.yml)
+data/
+.env
+*.db
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/

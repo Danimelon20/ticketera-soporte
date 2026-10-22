@@ -17,6 +17,17 @@ class CommentCreate(BaseModel):
         return v.strip()
 
 
+class AttachmentRead(BaseModel):
+    id: int
+    original_name: str
+    content_type: str
+    size: int
+    # Imágenes y PDF: se muestran dentro del ticket; lo demás solo se descarga
+    inline: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CommentRead(BaseModel):
     id: int
     ticket_id: int
@@ -25,6 +36,7 @@ class CommentRead(BaseModel):
     created_at: datetime
     # Solo el personal recibe comentarios internos
     internal: bool = False
+    attachments: list[AttachmentRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 

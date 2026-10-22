@@ -1,15 +1,17 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException
 from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import CancellationRead, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import AttachmentRead, CancellationRead, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import cancellations, config, hacienda, mailer
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav, portal
+from .. import account_reports, alerts, attachments, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav, portal
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -107,9 +109,16 @@ def ticket_people(db: Session, ticket: models.Ticket, comments: list, history: l
     return [PersonRead(id=u.id, name=person_name(u), role=u.role) for u in users]
 
 
-def comment_read(comment: models.Comment, ticket: models.Ticket, current_user, internal: bool = False) -> CommentRead:
+def attachment_read(row: models.Attachment) -> AttachmentRead:
+    data = AttachmentRead.model_validate(row)
+    data.inline = attachments.is_inline(row)
+    return data
+
+
+def comment_read(comment: models.Comment, ticket: models.Ticket, current_user, internal: bool = False, files=()) -> CommentRead:
     data = CommentRead.model_validate(comment)
     data.internal = internal
+    data.attachments = [attachment_read(row) for row in files]
     if hides_personal_data(ticket, current_user):
         data.content = _redact(data.content)
     return data
@@ -252,6 +261,8 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         comments_query = internal_comments.not_internal(comments_query)
     comments = comments_query.order_by(models.Comment.id.asc()).all()
     internal = internal_comments.internal_ids(db, [c.id for c in comments])
+    # Solo los adjuntos de los comentarios que esta persona puede ver (sin notas internas para el solicitante)
+    files = attachments.by_comment(db, [c.id for c in comments])
     following = (
         db.query(models.TicketFollower)
         .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
@@ -271,7 +282,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
     return TicketDetail(
         **ticket_read(db_ticket, current_user, portal.last_activity(db, [db_ticket])[db_ticket.id]).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
-        comments=[comment_read(c, db_ticket, current_user, c.id in internal) for c in comments],
+        comments=[comment_read(c, db_ticket, current_user, c.id in internal, files.get(c.id, ())) for c in comments],
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
         following=following,
@@ -336,8 +347,7 @@ def unfollow_ticket(ticket_id: int, db: Session = Depends(get_db), current_user 
     return Response(status_code=204)
 
 
-@router.post("/tickets/{ticket_id}/comments", response_model=CommentRead)
-def add_comment(ticket_id: int, comment: CommentCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def check_can_comment(db: Session, ticket_id: int, current_user, internal: bool) -> models.Ticket:
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
         raise HTTPException(status_code=404, detail="El ticket no existe")
@@ -346,28 +356,85 @@ def add_comment(ticket_id: int, comment: CommentCreate, background_tasks: Backgr
     # Regla: el solicitante solo comenta en los tickets que él creó
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Solo puedes comentar en tus propios tickets")
-    if comment.internal:
-        if current_user.role not in nav.STAFF_ROLES:
-            raise HTTPException(status_code=403, detail="Solo el personal puede agregar notas internas")
+    if internal and current_user.role not in nav.STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Solo el personal puede agregar notas internas")
+    return db_ticket
+
+
+def create_comment(db: Session, background_tasks: BackgroundTasks, db_ticket: models.Ticket, current_user,
+                   content: str, internal: bool, files=()) -> tuple[models.Comment, list]:
+    """Guarda el comentario y sus adjuntos (ya validados) en un solo commit."""
+    if internal:
         # Nota interna: no se avisa a los seguidores ni al solicitante
-        db_comment = internal_comments.add_internal(db, ticket_id, current_user.id, comment.content)
+        db_comment = internal_comments.add_internal(db, db_ticket.id, current_user.id, content)
+    else:
+        db_comment = models.Comment(ticket_id=db_ticket.id, user_id=current_user.id, content=content)
+        db.add(db_comment)
+        db.flush()
+    rows = attachments.save(db, db_comment, current_user.id, files) if files else []
+    try:
         db.commit()
-        db.refresh(db_comment)
-        return comment_read(db_comment, db_ticket, current_user, internal=True)
-    db_comment = models.Comment(
-        ticket_id=ticket_id,
-        user_id=current_user.id,
-        content=comment.content,
-    )
-    db.add(db_comment)
-    db.commit()
+    except Exception:
+        attachments.discard(rows)
+        raise
     db.refresh(db_comment)
-    notify_followers(
-        db, background_tasks, db_ticket, current_user,
-        f"[Ticket #{db_ticket.id}] Nuevo comentario de {current_user.name}",
-        [db_comment.content],
-    )
+    if not internal:
+        notify_followers(
+            db, background_tasks, db_ticket, current_user,
+            f"[Ticket #{db_ticket.id}] Nuevo comentario de {current_user.name}",
+            [db_comment.content or f"Adjuntó {len(rows)} archivo(s)."],
+        )
+    return db_comment, rows
+
+
+@router.post("/tickets/{ticket_id}/comments", response_model=CommentRead)
+def add_comment(ticket_id: int, comment: CommentCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    db_ticket = check_can_comment(db, ticket_id, current_user, comment.internal)
+    db_comment, _ = create_comment(db, background_tasks, db_ticket, current_user, comment.content, comment.internal)
+    if comment.internal:
+        return comment_read(db_comment, db_ticket, current_user, internal=True)
     return db_comment
+
+
+@router.post("/tickets/{ticket_id}/comments/with-attachments", response_model=CommentRead)
+async def add_comment_with_attachments(
+    ticket_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Comentario con adjuntos (multipart: content, internal, files). Todo o nada: si un archivo no sirve, no se guarda nada."""
+    # Antes de leer el cuerpo: más de lo que pueden pesar 5 archivos de 10 MB (con margen para el formulario)
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > attachments.MAX_FILES * attachments.MAX_BYTES + 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Los archivos pesan demasiado: máximo 10 MB por archivo y 5 archivos.")
+    try:
+        form = await request.form(max_files=attachments.MAX_FILES + 1, max_fields=10)
+    except MultiPartException as exc:
+        detail = attachments.TOO_MANY if str(exc).startswith("Too many files") else "No se pudo leer el formulario"
+        raise HTTPException(status_code=400, detail=detail)
+    try:
+        content = str(form.get("content") or "").strip()
+        internal = str(form.get("internal") or "").lower() in ("true", "1")
+        uploads = [f for f in form.getlist("files") if isinstance(f, UploadFile) and f.filename]
+        db_ticket = check_can_comment(db, ticket_id, current_user, internal)
+        if len(uploads) > attachments.MAX_FILES:
+            raise HTTPException(status_code=400, detail=attachments.TOO_MANY)
+        if not content and not uploads:
+            raise HTTPException(status_code=400, detail="El comentario no puede estar vacío")
+        files = []
+        for upload in uploads:
+            data = await upload.read(attachments.MAX_BYTES + 1)
+            try:
+                content_type = attachments.validate(upload.filename, data)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            files.append((upload.filename, data, content_type))
+    finally:
+        await form.close()
+    db_comment, rows = create_comment(db, background_tasks, db_ticket, current_user, content, internal, files)
+    return comment_read(db_comment, db_ticket, current_user, internal, rows)
 
 
 @router.post("/tickets/cancel", response_model=list[TicketRead])

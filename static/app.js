@@ -4948,7 +4948,9 @@ document.addEventListener('DOMContentLoaded', () => {
         server_account_deactivated: 'Cuenta desactivada',
         server_account_activated: 'Cuenta activada',
         server_role_changed: 'Rol cambiado',
-        overdue_report_downloaded: 'PDF de reporte de vencimiento descargado'
+        overdue_report_downloaded: 'PDF de reporte de vencimiento descargado',
+        attachment_uploaded: 'Adjunto subido',
+        attachment_downloaded: 'Adjunto descargado'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -6968,7 +6970,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const who = comment.internal ? 'nota interna' : (role === 'requester' ? 'cliente' : 'soporte');
                 meta.appendChild(makeEl('span', 'td-message-kind', ` · ${who} · `));
                 meta.appendChild(timeTag(comment.created_at));
-                article.append(meta, makeEl('p', 'td-message-body', comment.content));
+                article.appendChild(meta);
+                // Un comentario puede traer solo adjuntos
+                if (comment.content) article.appendChild(makeEl('p', 'td-message-body', comment.content));
+                const files = attachmentList(comment);
+                if (files) article.appendChild(files);
                 li.appendChild(article);
             } else {
                 const entry = ev.data;
@@ -7035,9 +7041,343 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'ui-btn ui-btn-primary ui-btn-sm sd-send-public', internal ? 'Guardar nota' : 'Enviar respuesta');
         send.type = 'button';
         actions.append(hint, send);
-        box.append(tabs, label, textarea, actions);
+        box.append(tabs, label, textarea, attachmentPicker(), actions);
         return box;
     }
+
+    // ===== Adjuntos de los comentarios =====
+    // Mismas reglas que app/attachments.py (solo comodidad: el servidor revisa el contenido real)
+    const ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+    const ATTACH_MAX_FILES = 5;
+    const ATTACH_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'zip'];
+    const ATTACH_REJECTED = 'Este tipo de archivo no se puede adjuntar. Se permiten imágenes, documentos y .zip.';
+    const ATTACH_ICONS = {
+        pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊', csv: '📊', ppt: '📽️', pptx: '📽️',
+        txt: '📃', zip: '🗜️', heic: '🖼️'
+    };
+    // Archivos elegidos para el comentario que se está escribiendo (se olvidan al cambiar de ticket)
+    let pendingFiles = [];
+    let pendingFilesTicket = null;
+    let uploadingFiles = false;
+    const attachmentPreviews = new Map();
+
+    function fileExtension(name) {
+        const dot = name.lastIndexOf('.');
+        return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+    }
+
+    function attachmentPicker() {
+        if (pendingFilesTicket !== selectedTicketId) {
+            pendingFiles = [];
+            pendingFilesTicket = selectedTicketId;
+        }
+        const picker = makeEl('div', 'att-picker');
+        const input = makeEl('input', 'att-input');
+        input.type = 'file';
+        input.multiple = true;
+        input.hidden = true;
+        input.accept = ATTACH_EXTS.map(ext => `.${ext}`).join(',');
+        const add = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm att-add', '📎 Adjuntar');
+        add.type = 'button';
+        const limits = makeEl('span', 'att-limits',
+            `Hasta ${ATTACH_MAX_FILES} archivos de 10 MB: imágenes, documentos y .zip. También puede arrastrarlos o pegar una captura.`);
+        const list = makeEl('ul', 'att-pending');
+        list.setAttribute('aria-label', 'Archivos para adjuntar');
+        picker.append(input, add, limits, list);
+        renderPendingFiles(list);
+        return picker;
+    }
+
+    function renderPendingFiles(list = detailPanel.querySelector('.att-pending')) {
+        if (!list) return;
+        list.replaceChildren();
+        pendingFiles.forEach((file, index) => {
+            const li = makeEl('li', 'att-chip');
+            li.dataset.index = String(index);
+            li.appendChild(makeEl('span', 'att-chip-name', file.name));
+            li.appendChild(makeEl('span', 'att-chip-size', formatFileSize(file.size)));
+            const progress = makeEl('progress', 'att-progress');
+            progress.max = 1;
+            progress.value = 0;
+            progress.hidden = !uploadingFiles;
+            progress.setAttribute('aria-label', `Subiendo ${file.name}`);
+            li.appendChild(progress);
+            const remove = makeEl('button', 'att-remove', '✕');
+            remove.type = 'button';
+            remove.disabled = uploadingFiles;
+            remove.setAttribute('aria-label', `Quitar ${file.name}`);
+            li.appendChild(remove);
+            list.appendChild(li);
+        });
+    }
+
+    function pad2(n) {
+        return String(n).padStart(2, '0');
+    }
+
+    function addPendingFiles(fileList, fromPaste = false) {
+        if (uploadingFiles) return;
+        for (let file of fileList) {
+            if (pendingFiles.length >= ATTACH_MAX_FILES) {
+                showError(`Puede adjuntar hasta ${ATTACH_MAX_FILES} archivos por comentario.`);
+                break;
+            }
+            if (fromPaste && file.type.startsWith('image/')) {
+                // Las capturas llegan como "image.png": se les da un nombre con la fecha
+                const d = new Date();
+                const stamp = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+                const ext = fileExtension(file.name) || file.type.split('/')[1] || 'png';
+                file = new File([file], `captura-${stamp}.${ext}`, { type: file.type });
+            }
+            if (!ATTACH_EXTS.includes(fileExtension(file.name))) {
+                showError(ATTACH_REJECTED);
+                continue;
+            }
+            if (file.size > ATTACH_MAX_BYTES) {
+                showError(`«${file.name}» pesa más de 10 MB.`);
+                continue;
+            }
+            pendingFiles.push(file);
+        }
+        renderPendingFiles();
+    }
+
+    // Reparte el avance total entre los archivos, en el orden en que viajan
+    function showUploadProgress(fraction) {
+        const total = pendingFiles.reduce((sum, f) => sum + f.size, 0) || 1;
+        let start = 0;
+        const done = fraction * total;
+        detailPanel.querySelectorAll('.att-pending .att-progress').forEach((bar, index) => {
+            const size = pendingFiles[index] ? pendingFiles[index].size : 0;
+            bar.value = size ? Math.min(1, Math.max(0, (done - start) / size)) : 1;
+            start += size;
+        });
+    }
+
+    function uploadCommentWithFiles(content, internal) {
+        return new Promise((resolve, reject) => {
+            const form = new FormData();
+            form.append('content', content);
+            form.append('internal', internal ? 'true' : 'false');
+            pendingFiles.forEach(file => form.append('files', file, file.name));
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API_BASE}/tickets/${selectedTicketId}/comments/with-attachments`);
+            xhr.setRequestHeader('Accept', 'application/json');
+            if (authToken) xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) showUploadProgress(e.loaded / e.total);
+            });
+            xhr.addEventListener('load', () => {
+                let data = {};
+                try { data = JSON.parse(xhr.responseText); } catch (err) { data = {}; }
+                if (xhr.status === 401) {
+                    handleUnauthorized(data.detail);
+                    reject(new Error('Unauthorized'));
+                } else if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(data);
+                } else {
+                    reject(new Error(getErrorMessage(data)));
+                }
+            });
+            xhr.addEventListener('error', () => reject(new Error('No se pudieron subir los archivos. Revise su conexión.')));
+            xhr.send(form);
+        });
+    }
+
+    // Con archivos va por multipart con barra de progreso; sin archivos, igual que siempre. Devuelve true si se guardó.
+    async function sendComment(content, internal) {
+        if (!pendingFiles.length) {
+            try {
+                await apiFetch(`/tickets/${selectedTicketId}/comments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(internal ? { content, internal } : { content })
+                });
+                return true;
+            } catch (err) {
+                return false; // apiFetch ya mostró el error
+            }
+        }
+        uploadingFiles = true;
+        renderPendingFiles();
+        try {
+            await uploadCommentWithFiles(content, internal);
+            pendingFiles = [];
+            return true;
+        } catch (err) {
+            if (err.message !== 'Unauthorized') showError(err.message);
+            return false;
+        } finally {
+            uploadingFiles = false;
+            renderPendingFiles();
+        }
+    }
+
+    async function fetchAttachment(id, preview) {
+        const response = await fetch(`${API_BASE}/attachments/${id}${preview ? '?preview=1' : ''}`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+        if (response.status === 401) {
+            const data = await response.json().catch(() => ({}));
+            handleUnauthorized(data.detail);
+            throw new Error('Unauthorized');
+        }
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(getErrorMessage(data));
+        }
+        return response.blob();
+    }
+
+    // Miniaturas y tarjetas debajo del texto del comentario
+    function attachmentList(comment) {
+        const files = comment.attachments || [];
+        if (!files.length) return null;
+        const list = makeEl('ul', 'att-list');
+        files.forEach(file => {
+            const li = makeEl('li');
+            const isImage = file.inline && file.content_type.startsWith('image/');
+            const button = makeEl('button', isImage ? 'att-thumb' : 'att-card');
+            button.type = 'button';
+            button.dataset.attId = String(file.id);
+            button.dataset.attName = file.original_name;
+            button.dataset.attType = file.content_type;
+            if (isImage) {
+                button.setAttribute('aria-label', `Ver ${file.original_name} en grande`);
+                const img = makeEl('img');
+                img.alt = file.original_name;
+                img.loading = 'lazy';
+                button.appendChild(img);
+                loadAttachmentPreview(file.id, img);
+            } else {
+                button.setAttribute('aria-label', `Descargar ${file.original_name} (${formatFileSize(file.size)})`);
+                button.appendChild(makeEl('span', 'att-card-icon', ATTACH_ICONS[fileExtension(file.original_name)] || '📎'));
+                const text = makeEl('span', 'att-card-text');
+                text.appendChild(makeEl('span', 'att-card-name', file.original_name));
+                text.appendChild(makeEl('span', 'att-card-size', formatFileSize(file.size)));
+                button.appendChild(text);
+            }
+            li.appendChild(button);
+            list.appendChild(li);
+        });
+        return list;
+    }
+
+    async function loadAttachmentPreview(id, img) {
+        try {
+            if (!attachmentPreviews.has(id)) {
+                attachmentPreviews.set(id, URL.createObjectURL(await fetchAttachment(id, true)));
+            }
+            img.src = attachmentPreviews.get(id);
+        } catch (err) {
+            img.closest('.att-thumb').classList.add('is-broken');
+        }
+    }
+
+    const attachmentDialog = document.getElementById('attachmentDialog');
+    const attachmentDialogImage = document.getElementById('attachmentDialogImage');
+
+    async function openAttachmentImage(button) {
+        try {
+            // Sin preview: abrirla en grande queda en el Registro de cambios
+            const url = URL.createObjectURL(await fetchAttachment(button.dataset.attId, false));
+            document.getElementById('attachmentDialogTitle').textContent = button.dataset.attName;
+            attachmentDialogImage.alt = button.dataset.attName;
+            attachmentDialogImage.src = url;
+            attachmentDialog.showModal();
+        } catch (err) {
+            if (err.message !== 'Unauthorized') showError(err.message);
+        }
+    }
+
+    async function downloadAttachmentFile(button) {
+        // El PDF se abre en una pestaña nueva; se abre ya (antes de esperar) para que el navegador no la bloquee
+        const isPdf = button.dataset.attType === 'application/pdf';
+        const tab = isPdf ? window.open('about:blank', '_blank') : null;
+        try {
+            const url = URL.createObjectURL(await fetchAttachment(button.dataset.attId, false));
+            if (tab) {
+                tab.location.href = url;
+            } else {
+                const link = makeEl('a');
+                link.href = url;
+                link.download = button.dataset.attName;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+            }
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (err) {
+            if (tab) tab.close();
+            if (err.message !== 'Unauthorized') showError(err.message);
+        }
+    }
+
+    attachmentDialog.addEventListener('close', () => {
+        URL.revokeObjectURL(attachmentDialogImage.src);
+        attachmentDialogImage.removeAttribute('src');
+    });
+    document.getElementById('attachmentDialogClose').addEventListener('click', () => attachmentDialog.close());
+
+    detailPanel.addEventListener('click', (e) => {
+        if (e.target.closest('.att-add')) {
+            detailPanel.querySelector('.att-input').click();
+            return;
+        }
+        const remove = e.target.closest('.att-remove');
+        if (remove) {
+            pendingFiles.splice(Number(remove.closest('.att-chip').dataset.index), 1);
+            renderPendingFiles();
+            return;
+        }
+        const thumb = e.target.closest('.att-thumb');
+        if (thumb) {
+            openAttachmentImage(thumb);
+            return;
+        }
+        const card = e.target.closest('.att-card');
+        if (card) downloadAttachmentFile(card);
+    });
+
+    detailPanel.addEventListener('change', (e) => {
+        const input = e.target.closest('.att-input');
+        if (!input) return;
+        addPendingFiles(input.files);
+        input.value = '';
+    });
+
+    detailPanel.addEventListener('dragover', (e) => {
+        const composer = e.target.closest('.sd-composer');
+        if (!composer || !e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        composer.classList.add('is-dragging');
+    });
+
+    detailPanel.addEventListener('dragleave', (e) => {
+        const composer = e.target.closest('.sd-composer');
+        if (composer && !composer.contains(e.relatedTarget)) composer.classList.remove('is-dragging');
+    });
+
+    detailPanel.addEventListener('drop', (e) => {
+        const composer = e.target.closest('.sd-composer');
+        if (!composer) return;
+        e.preventDefault();
+        composer.classList.remove('is-dragging');
+        addPendingFiles(e.dataTransfer.files);
+    });
+
+    // Ctrl+V con una captura: solo se intercepta si el portapapeles trae archivos (el texto se pega normal)
+    detailPanel.addEventListener('paste', (e) => {
+        if (!e.target.closest('.sd-composer') || !e.clipboardData || !e.clipboardData.files.length) return;
+        e.preventDefault();
+        addPendingFiles(e.clipboardData.files, true);
+    });
 
     function dueTagText(ticket) {
         const dueAt = ticket.ai_analysis ? ticket.ai_analysis.due_at : null;
@@ -7296,21 +7636,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const internal = send.classList.contains('sd-send-internal');
             const textarea = document.getElementById('staffReply');
             const content = textarea.value.trim();
-            if (!content || content === ASK_DETAILS_TEXT.trim()) {
+            if (!pendingFiles.length && (!content || content === ASK_DETAILS_TEXT.trim())) {
                 showError('Escriba el mensaje antes de enviarlo');
                 return;
             }
             const buttons = detailPanel.querySelectorAll('.sd-composer button');
             buttons.forEach(b => { b.disabled = true; });
-            try {
-                await apiFetch(`/tickets/${selectedTicketId}/comments`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content, internal })
-                });
-            } catch (err) {
+            if (!(await sendComment(content, internal))) {
                 buttons.forEach(b => { b.disabled = false; });
-                return; // apiFetch ya mostró el error
+                return;
             }
             // Se ve en su pestaña lo que se acaba de enviar
             activityFilter = internal ? 'internal' : 'public';
@@ -8082,7 +8416,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const meta = makeEl('p', 'portal-message-meta', `${author} · `);
                 meta.appendChild(timeTag(comment.created_at));
                 li.appendChild(meta);
-                li.appendChild(makeEl('p', 'portal-message-text', comment.content));
+                if (comment.content) li.appendChild(makeEl('p', 'portal-message-text', comment.content));
+                const files = attachmentList(comment);
+                if (files) li.appendChild(files);
                 list.appendChild(li);
             });
             detailContent.appendChild(list);
@@ -8092,7 +8428,6 @@ document.addEventListener('DOMContentLoaded', () => {
             detailContent.appendChild(makeEl('p', 'sd-muted', 'Esta solicitud está cerrada y ya no admite respuestas.'));
             return;
         }
-        // Sin adjuntos: el sistema no los admite
         const composer = makeEl('div', 'ui-card sd-composer portal-composer');
         const label = makeEl('label', 'sr-only', 'Su respuesta');
         label.htmlFor = 'portalReply';
@@ -8105,7 +8440,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const send = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm portal-send', 'Enviar respuesta');
         send.type = 'button';
         actions.appendChild(send);
-        composer.append(label, textarea, actions);
+        composer.append(label, textarea, attachmentPicker(), actions);
         detailContent.appendChild(composer);
     }
 
@@ -8114,20 +8449,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!send || !selectedTicketId || !isRequesterPortal()) return;
         const textarea = document.getElementById('portalReply');
         const content = textarea.value.trim();
-        if (!content) {
+        if (!content && !pendingFiles.length) {
             showError('Escriba su respuesta antes de enviarla');
             return;
         }
         send.disabled = true;
-        try {
-            await apiFetch(`/tickets/${selectedTicketId}/comments`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content })
-            });
-        } catch (err) {
+        if (!(await sendComment(content, false))) {
             send.disabled = false;
-            return; // apiFetch ya mostró el error
+            return;
         }
         await reloadSelectedTicketAndList();
         showSuccess('Respuesta enviada');

@@ -397,6 +397,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "schedule_changed", "sessions_closed", "invitation_cancelled",
     # Descarga del PDF de un reporte de vencimiento (target_label: "Ticket #N")
     "overdue_report_downloaded",
+    # Adjuntos de los comentarios (target_label: "Ticket #N"; nunca el nombre original del archivo)
+    "attachment_uploaded", "attachment_downloaded",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
 )
@@ -475,6 +477,22 @@ class InternalComment(Base):
 
     id = Column(Integer, primary_key=True)
     comment_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+
+class Attachment(Base):
+    """Archivo adjunto a un comentario. En disco se guarda como stored_name (uuid); el nombre original solo aquí."""
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    comment_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), index=True, nullable=False)
+    original_name = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    stored_name = Column(String(36), unique=True, nullable=False)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    uploaded_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 # Disponible y Ausente salen del horario; Vacaciones e Incapacidad, de un periodo registrado (AvailabilityPeriod)

@@ -40,6 +40,9 @@ AUTO_ASSIGN_ENABLED = os.getenv("AUTO_ASSIGN_ENABLED", "false").lower() == "true
 AUTO_ASSIGN_LOAD_MODE = os.getenv("AUTO_ASSIGN_LOAD_MODE", "levels").lower()
 AUTO_ASSIGN_CHECK_SECONDS = int(os.getenv("AUTO_ASSIGN_CHECK_SECONDS", "60"))
 
+# Carpeta de los adjuntos de los comentarios (dentro de data/, que ya persiste el volumen)
+ATTACHMENTS_DIR = os.getenv("ATTACHMENTS_DIR", "data/attachments")
+
 
 # Hacienda: se leen en cada llamada para poder cambiarlas sin reiniciar (y en pruebas)
 def hacienda_check_enabled() -> bool:
