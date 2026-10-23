@@ -176,6 +176,8 @@ def test_warm_up_runs_in_background(monkeypatch):
 def test_no_warm_up_when_ai_is_off(monkeypatch):
     monkeypatch.setattr(config, "CHATBOT_ENABLED", False)
     monkeypatch.setattr(config, "AI_ANALYSIS_ENABLED", False)
+    # La agrupación también precarga (el modelo de embeddings)
+    monkeypatch.setattr(config, "GROUPING_ENABLED", False)
     assert main.start_warm_up() is None
 
 

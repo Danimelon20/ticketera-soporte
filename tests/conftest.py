@@ -1,18 +1,72 @@
 import itertools
 import os
+import socket
 import tempfile
 import uuid
 
-# Debe ir ANTES de importar la app: database.py lee esta variable al cargarse
+# ----- Entorno propio de las pruebas: nada del .env real (docker compose lo carga con env_file) -----
+# Debe ir ANTES de importar la app: config.py y database.py leen las variables al cargarse
 _tmp_dir = tempfile.mkdtemp()
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp_dir}/test.db"
-os.environ["EMAIL_ENABLED"] = "false"
-os.environ["CHATBOT_ENABLED"] = "false"
-os.environ["AI_ANALYSIS_ENABLED"] = "false"
-# Que un .env real no asigne tickets ni arranque el ciclo de asignación durante las pruebas
-os.environ["AUTO_ASSIGN_ENABLED"] = "false"
-os.environ["MS_TOKEN_CACHE"] = f"{_tmp_dir}/ms_token_cache.json"
-os.environ["ATTACHMENTS_DIR"] = f"{_tmp_dir}/attachments"
+# Todas las variables que lee app/config.py: sin ellas cada una toma su valor por defecto
+APP_ENV_VARS = (
+    "EMAIL_ENABLED", "MS_TENANT_ID", "MS_CLIENT_ID", "SUPPORT_MAILBOX", "MAIL_FOLDER", "MS_TOKEN_CACHE",
+    "EMAIL_POLL_SECONDS", "APP_URL", "CHATBOT_ENABLED", "LLM_BASE_URL", "LLM_MODEL", "AI_ANALYSIS_ENABLED",
+    "OFFICE_DAYS", "OFFICE_START", "OFFICE_END", "OFFICE_TZ", "OFFICE_HOLIDAYS",
+    "DAILY_SUMMARY_ENABLED", "DAILY_SUMMARY_HOUR", "ALERTS_ENABLED", "ALERT_WARN_PERCENT", "ALERTS_CHECK_SECONDS",
+    "AUTO_ASSIGN_ENABLED", "AUTO_ASSIGN_LOAD_MODE", "AUTO_ASSIGN_CHECK_SECONDS",
+    "GROUPING_ENABLED", "EMBEDDING_MODEL", "GROUPING_MERGE_THRESHOLD", "GROUPING_INCIDENT_THRESHOLD",
+    "GROUPING_INCIDENT_MIN", "GROUPING_INCIDENT_HOURS", "GROUPING_TIMEOUT_SECONDS",
+    "ATTACHMENTS_DIR", "HACIENDA_CHECK", "HACIENDA_STRICT", "SESSION_IDLE_MINUTES", "SESSION_MAX_HOURS",
+    "DATABASE_URL",
+)
+for _name in APP_ENV_VARS:
+    os.environ.pop(_name, None)
+# Ollama que no existe: nada escucha en el puerto 9 (y la red además está bloqueada abajo)
+UNREACHABLE_OLLAMA = "http://127.0.0.1:9"
+TEST_ENV = {
+    "DATABASE_URL": f"sqlite:///{_tmp_dir}/test.db",
+    "EMAIL_ENABLED": "false",
+    # Sin chat, análisis ni agrupación tampoco hay precarga del modelo (main.start_warm_up)
+    "CHATBOT_ENABLED": "false",
+    "AI_ANALYSIS_ENABLED": "false",
+    "GROUPING_ENABLED": "false",
+    "AUTO_ASSIGN_ENABLED": "false",
+    "ALERTS_ENABLED": "false",
+    "DAILY_SUMMARY_ENABLED": "false",
+    "LLM_BASE_URL": UNREACHABLE_OLLAMA,
+    "MS_TOKEN_CACHE": f"{_tmp_dir}/ms_token_cache.json",
+    "ATTACHMENTS_DIR": f"{_tmp_dir}/attachments",
+}
+os.environ.update(TEST_ENV)
+
+# ----- Sin red real: ni Graph, ni Ollama, ni Hacienda -----
+# Se bloquea en el socket para cubrir httpx, requests (msal) y urllib. Cada intento queda anotado y
+# la prueba que lo hizo falla (no_real_network), aunque el código atrape el error.
+REAL_NETWORK_ATTEMPTS = []
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+_real_connect = socket.socket.connect
+_real_connect_ex = socket.socket.connect_ex
+_real_getaddrinfo = socket.getaddrinfo
+
+
+def _blocked(self, address, real):
+    if self.family in (socket.AF_INET, socket.AF_INET6):
+        REAL_NETWORK_ATTEMPTS.append(f"{address[0]}:{address[1]}")
+        raise ConnectionRefusedError(f"Pruebas: conexión de red bloqueada ({address[0]}:{address[1]})")
+    return real(self, address)
+
+
+def _blocked_getaddrinfo(host, *args, **kwargs):
+    # Una consulta DNS ya sale a la red
+    if host not in _LOOPBACK:
+        REAL_NETWORK_ATTEMPTS.append(f"dns:{host}")
+        raise socket.gaierror(socket.EAI_NONAME, f"Pruebas: consulta DNS bloqueada ({host})")
+    return _real_getaddrinfo(host, *args, **kwargs)
+
+
+socket.socket.connect = lambda self, address: _blocked(self, address, _real_connect)
+socket.socket.connect_ex = lambda self, address: _blocked(self, address, _real_connect_ex)
+socket.getaddrinfo = _blocked_getaddrinfo
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -146,6 +200,19 @@ def make_ticket(client):
         assert response.status_code == 200, response.text
         return response.json()
     return _make
+
+
+@pytest.fixture(autouse=True)
+def no_real_network():
+    """Falla la prueba que intente salir a la red. EMAIL_ENABLED solo se enciende con monkeypatch en la prueba."""
+    from app import config
+
+    assert config.EMAIL_ENABLED is False, "EMAIL_ENABLED llegó encendido a la prueba"
+    start = len(REAL_NETWORK_ATTEMPTS)
+    yield
+    attempts = REAL_NETWORK_ATTEMPTS[start:]
+    if attempts:
+        pytest.fail(f"La prueba intentó conectarse a la red real: {sorted(set(attempts))}")
 
 
 @pytest.fixture(autouse=True)

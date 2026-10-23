@@ -8,7 +8,7 @@ from email.utils import make_msgid
 
 import pytest
 
-from app import attachments, config, email_attachments, graph, mailer, models
+from app import attachments, chatbot, config, email_attachments, graph, mailer, models
 from app.database import SessionLocal
 from app.email_processing import process_message
 
@@ -35,6 +35,12 @@ def setup(monkeypatch, sent):
     monkeypatch.setattr(config, "SUPPORT_MAILBOX", MAILBOX)
     monkeypatch.setattr(config, "AI_ANALYSIS_ENABLED", True)
     monkeypatch.setattr(config, "APP_URL", "http://soporte.test")
+
+    # Con la IA encendida, los tickets de la web también se analizan: Ollama simulado sin respuesta
+    def _no_ollama(payload, task="chat", timeout=None):
+        raise chatbot.ChatbotUnavailable()
+
+    monkeypatch.setattr(chatbot, "post_chat", _no_ollama)
     db = SessionLocal()
     try:
         db.query(models.EmailDraft).delete()
