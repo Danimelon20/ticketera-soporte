@@ -213,7 +213,7 @@ def test_summary_has_no_personal_data(make_user, make_ticket):
     assert "Llámeme al [dato oculto]" in body
 
 
-def test_recipients_are_active_coordinators_and_admins(make_user, sent):
+def test_recipients_are_active_coordinators_only(make_user, sent):
     coordinator = make_user("coordinator")
     admin = make_user("admin")
     technician = make_user("technician")
@@ -228,7 +228,8 @@ def test_recipients_are_active_coordinators_and_admins(make_user, sent):
 
     assert _maybe_send(MONDAY_9AM) is True
     to = {call[0] for call in sent}
-    assert coordinator["email"] in to and admin["email"] in to
+    # Resumen de tickets: solo coordinadores (el administrador no entra al flujo de tickets)
+    assert coordinator["email"] in to and admin["email"] not in to
     assert technician["email"] not in to and requester["email"] not in to and inactive["email"] not in to
     assert {call[1] for call in sent} == {"[Ticketera] Resumen del día 04/03/2030"}
 
@@ -283,8 +284,9 @@ def test_failed_send_is_retried(make_user, monkeypatch):
     assert _summary_rows() == []
 
 
-@pytest.mark.parametrize("role", ["coordinator", "technician"])
-def test_send_now_requires_admin(client, make_user, sent, monkeypatch, role):
+# "Enviar resumen ahora" es un reporte de operación: lo envía el coordinador
+@pytest.mark.parametrize("role", ["admin", "technician"])
+def test_send_now_requires_coordinator(client, make_user, sent, monkeypatch, role):
     monkeypatch.setattr(config, "EMAIL_ENABLED", True)
     user = make_user(role)
     assert client.post("/api/admin/daily-summary/send-now", headers=user["headers"]).status_code == 403
@@ -293,7 +295,7 @@ def test_send_now_requires_admin(client, make_user, sent, monkeypatch, role):
 
 def test_send_now_ignores_daily_control(client, make_user, sent, monkeypatch):
     monkeypatch.setattr(config, "EMAIL_ENABLED", True)
-    admin = make_user("admin")
+    admin = make_user("coordinator")
     assert _maybe_send(MONDAY_9AM) is True
     before = len(sent)
 
@@ -307,7 +309,7 @@ def test_send_now_ignores_daily_control(client, make_user, sent, monkeypatch):
 
 def test_send_now_with_email_off(client, make_user, sent, monkeypatch):
     monkeypatch.setattr(config, "EMAIL_ENABLED", False)
-    admin = make_user("admin")
+    admin = make_user("coordinator")
     response = client.post("/api/admin/daily-summary/send-now", headers=admin["headers"])
     assert response.status_code == 400
     assert sent == []

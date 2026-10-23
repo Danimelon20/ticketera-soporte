@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, schedules
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, schedules, ticket_access
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -84,10 +84,14 @@ def _unassigned(db: Session, now: datetime) -> int:
     return sum(1 for t in _not_overdue(_open_tickets(db), now) if t.assigned_to is None)
 
 
-def _drafts_pending(db: Session) -> int:
-    # Los mismos estados que muestra la pantalla de borradores (aquí: drafts importa el router de tickets)
-    from .routers.drafts import DEFAULT_STATUSES as DRAFT_STATUSES
-    return db.query(models.EmailDraft).filter(models.EmailDraft.status.in_(DRAFT_STATUSES)).count()
+def _drafts_pending(db: Session, reviewer_id: int | None = None) -> int:
+    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor."""
+    query = db.query(models.EmailDraft).filter(models.EmailDraft.status.in_(auto_assign.DRAFT_PENDING_STATUSES))
+    if reviewer_id is not None:
+        query = query.join(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id).filter(
+            models.DraftAssignment.user_id == reviewer_id
+        )
+    return query.count()
 
 
 def _shift(db: Session, user: models.User, now: datetime) -> dict:
@@ -102,17 +106,28 @@ def _shift(db: Session, user: models.User, now: datetime) -> dict:
 
 
 def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
-    """Contadores según el rol. El técnico nunca recibe reportes, aprobaciones ni invitaciones."""
+    """Contadores según el rol. El técnico solo cuenta lo suyo; el coordinador, la operación; el administrador,
+    solo cuentas (nunca tickets ni borradores)."""
     now = now or _now()
+    if user.role == "admin":
+        invitations = db.query(models.StaffInvitation).filter(
+            models.StaffInvitation.used_by.is_(None), models.StaffInvitation.expires_at > now
+        )
+        return {
+            "reports_open": db.query(models.AccountReport).filter(models.AccountReport.status == "open").count(),
+            "invitations_pending": invitations.count(),
+            "approvals_pending": (
+                db.query(models.AccountRequest).filter(models.AccountRequest.status == "pending").count()
+            ),
+        }
     if user.role == "technician":
         mine = _open_tickets(db, assigned_to=user.id)
-        following = (
+        following = ticket_access.filter_visible(db, user, (
             db.query(models.Ticket)
             .options(joinedload(models.Ticket.ai_analysis))
             .join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id)
             .filter(models.TicketFollower.user_id == user.id, models.Ticket.status.in_(OPEN_STATUSES))
-            .all()
-        )
+        )).all()
         mine_due_soon, mine_overdue = _due_counts(mine, now)
         return {
             "mine_open": len(mine) - mine_overdue,
@@ -121,20 +136,14 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
             "overdue": mine_overdue,
             "following_open": len(_not_overdue(following, now)),
             "mine_resolved_today": _resolved_today(db, now, assigned_to=user.id),
-            "unassigned": _unassigned(db, now),
-            "drafts_pending": _drafts_pending(db),
+            # Solo los borradores que le asignaron
+            "drafts_pending": _drafts_pending(db, reviewer_id=user.id),
             "shift": _shift(db, user, now),
         }
 
     tickets = _open_tickets(db)
     due_soon, overdue = _due_counts(tickets, now)
-    invitations = db.query(models.StaffInvitation).filter(
-        models.StaffInvitation.used_by.is_(None), models.StaffInvitation.expires_at > now
-    )
-    if user.role == "coordinator":
-        # Como la lista de invitaciones: el coordinador solo ve las suyas
-        invitations = invitations.filter(models.StaffInvitation.created_by == user.id)
-    result = {
+    return {
         "unassigned": _unassigned(db, now),
         "due_soon": due_soon,
         "overdue": overdue,
@@ -142,16 +151,9 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         "open": len(tickets) - overdue,
         "resolved_today": _resolved_today(db, now),
         "drafts_pending": _drafts_pending(db),
-        "reports_open": db.query(models.AccountReport).filter(models.AccountReport.status == "open").count(),
-        "invitations_pending": invitations.count(),
         # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
         "cancelled": cancellations.count(db),
     }
-    if user.role == "admin":
-        result["approvals_pending"] = (
-            db.query(models.AccountRequest).filter(models.AccountRequest.status == "pending").count()
-        )
-    return result
 
 
 def system_status(db: Session, now: datetime | None = None) -> dict:
@@ -201,13 +203,15 @@ def queue(
 ) -> dict:
     """Cola de tickets por vista, ordenada por vencimiento (los que no tienen fecha al final), de 25 en 25.
 
-    Mismo alcance que GET /tickets para el personal. El técnico no filtra por responsable: assigned_to se ignora.
+    Mismo alcance que GET /tickets (ticket_access). El técnico no filtra por responsable: assigned_to se ignora.
     Solo datos para la lista: nunca descripción, teléfono, cédula ni correo.
     """
     now = now or _now()
     query = db.query(models.Ticket).options(
         joinedload(models.Ticket.ai_analysis), joinedload(models.Ticket.assigned_user)
     ).filter(models.Ticket.id.notin_(grouping.merged_source_ids(db)))  # Los fusionados se ven desde su destino
+    # Técnico: los suyos y los que tuvo antes (solo lectura); nunca los de los demás
+    query = ticket_access.filter_visible(db, user, query)
     if view in _OPEN_VIEWS:
         query = query.filter(models.Ticket.status.in_(OPEN_STATUSES))
     if view == "unassigned":

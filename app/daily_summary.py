@@ -19,7 +19,8 @@ from .notifications import STATUS_LABELS, display_name
 CHECK_SECONDS = 300
 MAX_ITEMS = 10
 OPEN_STATUSES = ("new", "in_progress")
-RECIPIENT_ROLES = ("coordinator", "admin")
+# Avisos de tickets: solo quien dirige la operación (el administrador no entra al flujo de tickets)
+RECIPIENT_ROLES = ("coordinator",)
 LEVEL_ORDER = (4, 3, 2, 1, 0, None)
 NONE_TEXT = "Ninguno"
 

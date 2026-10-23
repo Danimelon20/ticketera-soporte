@@ -4235,3 +4235,13 @@ body.staff-shell.overdue-open .side-nav { display: none; }
 .draft-attachments { margin: 8px 0 12px; }
 .draft-attachments .att-list { margin-top: 0; }
 .att-note { margin: 6px 0 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* ----- Borradores con dueño (fase 1) ----- */
+.draft-item-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.draft-assignee { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.drafts-filter { margin-top: 8px; }
+.drafts-filter select, .draft-reassign select { width: 100%; }
+.draft-reassign { max-width: 360px; margin: 0 0 16px; }
+.draft-not-yours { margin: 0 0 12px; }
+.home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2, 8px); }
+.draft-actions[hidden], .drafts-filter[hidden], .draft-reassign[hidden], .draft-not-yours[hidden], .home-actions .ui-btn[hidden] { display: none; }

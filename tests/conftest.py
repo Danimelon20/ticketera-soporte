@@ -275,6 +275,29 @@ def sent(monkeypatch):
     return calls
 
 
+def assign_draft_to(draft_id: int, user_id: int | None, notify: bool = False) -> None:
+    """Revisor del borrador (como lo dejaría la asignación automática). None: "Sin revisor"."""
+    from datetime import datetime, timezone
+    from app.database import SessionLocal
+    from app import models
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db = SessionLocal()
+    try:
+        row = db.query(models.DraftAssignment).filter(models.DraftAssignment.draft_id == draft_id).first()
+        if row is None:
+            row = models.DraftAssignment(draft_id=draft_id, created_at=now)
+            db.add(row)
+        row.user_id = user_id
+        row.status = "assigned" if user_id is not None else "waiting"
+        row.assigned_at = now if user_id is not None else None
+        row.notify = notify
+        row.seen_at = None
+        db.commit()
+    finally:
+        db.close()
+
+
 def code_from(body: str) -> str:
     import re
 

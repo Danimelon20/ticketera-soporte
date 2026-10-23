@@ -81,16 +81,18 @@ def test_one_open_report_per_person_and_account(client, make_user):
     assert _report(client, coordinator, requester["id"]).status_code == 201
 
 
-def test_only_coordinator_and_admin_review(client, make_user, make_ticket):
+def test_only_admin_reviews(client, make_user, make_ticket):
     requester, _ = _requester_with_ticket(make_user, make_ticket)
     technician = make_user("technician")
     report = _report(client, technician, requester["id"]).json()
-    assert client.get("/api/account-reports", headers=technician["headers"]).status_code == 403
-    assert client.get("/api/account-reports/open-count", headers=technician["headers"]).status_code == 403
-    assert _resolve(client, technician, report["id"], "confirm").status_code == 403
-    assert _resolve(client, technician, report["id"], "dismiss").status_code == 403
+    # Técnico y coordinador crean reportes, pero revisarlos es del administrador
+    for actor in (technician, make_user("coordinator")):
+        assert client.get("/api/account-reports", headers=actor["headers"]).status_code == 403
+        assert client.get("/api/account-reports/open-count", headers=actor["headers"]).status_code == 403
+        assert _resolve(client, actor, report["id"], "confirm").status_code == 403
+        assert _resolve(client, actor, report["id"], "dismiss").status_code == 403
 
-    coordinator = make_user("coordinator")
+    coordinator = make_user("admin")
     listed = client.get("/api/account-reports?status=open", headers=coordinator["headers"])
     assert listed.status_code == 200
     item = next(r for r in listed.json() if r["id"] == report["id"])
@@ -110,12 +112,13 @@ def test_only_coordinator_and_admin_review(client, make_user, make_ticket):
 
 
 def test_reporter_cannot_confirm_own_report(client, make_user):
-    coordinator = make_user("coordinator")
+    # Solo el administrador revisa: si él mismo reportó, lo confirma otro administrador
+    admin = make_user("admin")
     requester = make_user("requester")
-    report = _report(client, coordinator, requester["id"]).json()
-    response = _resolve(client, coordinator, report["id"], "confirm")
+    report = _report(client, admin, requester["id"]).json()
+    response = _resolve(client, admin, report["id"], "confirm")
     assert response.status_code == 403
-    assert response.json()["detail"] == "Otro coordinador o un administrador debe confirmar este reporte"
+    assert response.json()["detail"] == "Otro administrador debe confirmar este reporte"
     # Otra persona sí puede confirmarlo
     assert _resolve(client, make_user("admin"), report["id"], "confirm").status_code == 200
 
@@ -155,7 +158,7 @@ def test_reported_label_while_open_or_confirmed(client, make_user, make_ticket):
 
     other, _ = _requester_with_ticket(make_user, make_ticket)
     third = _report(client, coordinator, other["id"]).json()
-    _resolve(client, coordinator, third["id"], "dismiss")
+    _resolve(client, admin, third["id"], "dismiss")
     # Solo descartados: sin etiqueta
     assert _directory_row(client, coordinator, other)["reported"] is False
 
@@ -180,11 +183,11 @@ def test_reports_are_recorded_without_comment_or_note(client, make_user):
     first = _report(client, coordinator, requester["id"], "other", "Comentario privado 1234").json()
     _resolve(client, admin, first["id"], "confirm", note="Nota privada 5678")
     second = _report(client, coordinator, requester["id"], "fake_data").json()
-    _resolve(client, coordinator, second["id"], "dismiss", note="Otra nota privada")
+    _resolve(client, admin, second["id"], "dismiss", note="Otra nota privada")
     rows = _actions(requester["id"])
     assert [(a, actor) for a, actor, _, _ in rows] == [
         ("report_created", coordinator["id"]), ("report_confirmed", admin["id"]),
-        ("report_created", coordinator["id"]), ("report_dismissed", coordinator["id"]),
+        ("report_created", coordinator["id"]), ("report_dismissed", admin["id"]),
     ]
     assert rows[0][3] == "Otro" and rows[2][3] == "Datos falsos"
     text = " ".join(f"{old} {new}" for _, _, old, new in rows)
@@ -249,8 +252,12 @@ def test_staff_sees_identity_label(client, make_user, make_ticket, result):
     requester, ticket = _requester_with_ticket(make_user, make_ticket)
     _set_identity(requester["id"], result)
     expected = result or "unverified"
-    for role in ("technician", "coordinator", "admin"):
-        detail = client.get(f"/api/tickets/{ticket['id']}", headers=make_user(role)["headers"]).json()
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    # El técnico ve solo sus tickets; el administrador no abre tickets (solo con "Ver conversación")
+    client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
+    for viewer in (technician, coordinator):
+        detail = client.get(f"/api/tickets/{ticket['id']}", headers=viewer["headers"]).json()
         assert detail["requester_flags"]["identity"] == expected
     assert _directory_row(client, make_user("coordinator"), requester)["identity"] == expected
 
@@ -298,7 +305,8 @@ def _count_for(client, viewer, target_id):
 
 
 def test_reviewer_sees_open_reports_by_others(client, make_user, make_ticket):
-    coordinator = make_user("coordinator")
+    # Quien revisa es el administrador
+    coordinator = make_user("admin")
     requester, _ = _requester_with_ticket(make_user, make_ticket)
     other_requester, _ = _requester_with_ticket(make_user, make_ticket)
     _report(client, make_user("technician"), requester["id"])
@@ -313,7 +321,8 @@ def test_reviewer_sees_open_reports_by_others(client, make_user, make_ticket):
 
 
 def test_list_filters_by_account_and_shows_other_open(client, make_user, make_ticket):
-    coordinator = make_user("coordinator")
+    # La lista de reportes es del administrador
+    coordinator = make_user("admin")
     admin = make_user("admin")
     requester, _ = _requester_with_ticket(make_user, make_ticket)
     other_requester, _ = _requester_with_ticket(make_user, make_ticket)
@@ -369,8 +378,8 @@ def test_list_includes_reporter_role(client, make_user, make_ticket):
     assert items[by_technician["id"]]["reporter_role"] == "technician"
 
 
-def test_coordinator_resolves_reports_from_technicians(client, make_user, make_ticket):
-    coordinator = make_user("coordinator")
+def test_admin_resolves_reports_from_technicians(client, make_user, make_ticket):
+    coordinator = make_user("admin")
     requester, _ = _requester_with_ticket(make_user, make_ticket)
     first = _report(client, make_user("technician"), requester["id"]).json()
     second = _report(client, make_user("technician"), requester["id"]).json()

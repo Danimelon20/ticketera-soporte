@@ -27,13 +27,11 @@ PERMISSIONS = {
         # Cambio directo de rol
         "role": ("coordinator", "technician", "requester"),
     },
+    # Desactivar, restablecer, desbloquear y cerrar sesiones: solo el administrador (cuida las cuentas).
+    # El coordinador maneja turnos y disponibilidad de los técnicos
     "coordinator": {
-        "active": ("technician", "requester"),
-        "reset": ("technician",),
-        "unlock": ("technician", "requester"),
         "availability": ("technician",),
         "schedule": ("technician",),
-        "sessions": ("technician", "requester"),
         # Solo como solicitud con aprobación del administrador
         "role": ("technician", "requester"),
     },

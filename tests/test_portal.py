@@ -73,7 +73,10 @@ def test_last_activity_ignores_internal_notes(make_user, make_ticket, client):
     old = datetime(2020, 1, 1, 12, 0)
     db = SessionLocal()
     try:
-        db.get(models.Ticket, ticket_id).updated_at = old
+        ticket = db.get(models.Ticket, ticket_id)
+        # Comenta el técnico asignado (el único técnico que puede)
+        ticket.assigned_to = technician["id"]
+        ticket.updated_at = old
         db.commit()
         comments.add_internal(db, ticket_id, technician["id"], "Revisar mañana")
         db.commit()

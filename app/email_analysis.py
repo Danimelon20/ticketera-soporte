@@ -489,6 +489,10 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
             draft.status = "error"
         logging.warning("No se pudo analizar el borrador %s (intento %s): %s", draft.id, draft.attempts, type(exc).__name__)
         db.commit()
+        if draft.status == "error":
+            # Con error también lo revisa una persona
+            from . import auto_assign
+            auto_assign.assign_draft(draft.id)
         return draft.status
 
     result = _parse_draft(content, categories)
@@ -530,6 +534,9 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         missing_contact = missing_contact and not has_reason
         draft.status = "waiting_contact" if missing_contact else "pending_review"
         db.commit()
+        # Ya espera a una persona: se le busca revisor (import local: auto_assign importa este módulo)
+        from . import auto_assign
+        auto_assign.assign_draft(draft.id)
         mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user, missing_contact))
 
     logging.info("Borrador %s analizado por la IA: %s", draft.id, draft.status)

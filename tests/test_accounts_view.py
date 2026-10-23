@@ -75,7 +75,8 @@ def accounts_set(client, make_user, sent):
     _identity(reported["id"], "mismatch")
     _report(client, admin, reported)
     admin_invitation = _invite(client, admin, tag, role="coordinator")
-    coordinator_invitation = _invite(client, coordinator, tag)
+    # Las invitaciones son solo del administrador
+    coordinator_invitation = _invite(client, admin, tag)
     return {
         "tag": tag, "admin": admin, "coordinator": coordinator, "technician": technician, "locked": locked,
         "verified": verified, "unverified": unverified, "reported": reported,
@@ -126,15 +127,16 @@ def test_search_narrows_counts(client, accounts_set):
     }
 
 
-def test_coordinator_sees_only_technicians_clients_and_own_invitations(client, accounts_set):
+def test_coordinator_sees_only_technicians_and_clients(client, accounts_set):
     s = accounts_set
     coordinator = s["coordinator"]
     page = _list(client, coordinator, q=s["tag"])
     roles = {row["role"] for row in page["items"] if row["kind"] == "user"}
     assert roles == {"technician", "requester"}
     assert s["admin"]["id"] not in _ids(page) and coordinator["id"] not in _ids(page)
-    assert _ids(page, "invitation") == {s["coordinator_invitation"]["id"]}
-    assert page["counts"]["staff"] == 2 and page["counts"]["invitations"] == 1
+    # Las invitaciones son del administrador: el coordinador no ve ninguna
+    assert _ids(page, "invitation") == set()
+    assert page["counts"]["staff"] == 2 and page["counts"]["invitations"] == 0
 
     # Otro coordinador tampoco aparece, ni en la lista ni en el detalle
     other = client.get("/api/accounts", params={"filter": "staff"}, headers=coordinator["headers"]).json()
@@ -146,14 +148,14 @@ def test_coordinator_sees_only_technicians_clients_and_own_invitations(client, a
 def test_coordinator_actions_stay_within_permissions(client, accounts_set):
     s = accounts_set
     coordinator = s["coordinator"]
+    # Cuentas en solo lectura para operar: turnos, disponibilidad y pedir el cambio de rol
     technician = _summary(client, coordinator, s["technician"]["id"]).json()
-    assert set(technician["actions"]) == {
-        "change-role", "schedule", "availability", "close-sessions", "reset-access", "deactivate",
-    }
+    assert set(technician["actions"]) == {"change-role", "schedule", "availability"}
     locked = _summary(client, coordinator, s["locked"]["id"]).json()
-    assert "unlock" in locked["actions"]
+    assert "unlock" not in locked["actions"]
+    # Ve sus tickets y puede reportarla; revisar reportes es del administrador
     requester = _summary(client, coordinator, s["reported"]["id"]).json()
-    assert set(requester["actions"]) == {"view-tickets", "review-reports", "close-sessions", "deactivate"}
+    assert set(requester["actions"]) == {"view-tickets", "report"}
     # Nunca: restablecer a un cliente, ver datos completos ni aprobar solicitudes
     for detail in (technician, locked, requester):
         assert "full-data" not in detail["actions"] and "approve-role" not in detail["actions"]
@@ -169,8 +171,11 @@ def test_admin_actions_never_on_self_or_other_admin(client, accounts_set, make_u
     coordinator = _summary(client, admin, s["coordinator"]["id"]).json()
     assert {"change-role", "schedule", "reset-access", "deactivate"} <= set(coordinator["actions"])
     client_detail = _summary(client, admin, s["verified"]["id"]).json()
-    assert {"view-tickets", "report", "full-data", "deactivate"} <= set(client_detail["actions"])
-    assert "reset-access" not in client_detail["actions"]
+    assert {"full-data", "deactivate"} <= set(client_detail["actions"])
+    # El administrador no entra al flujo de tickets: sin "Ver sus tickets"
+    assert "reset-access" not in client_detail["actions"] and "view-tickets" not in client_detail["actions"]
+    reported = _summary(client, admin, s["reported"]["id"]).json()
+    assert "review-reports" in reported["actions"]
 
 
 def test_masked_email_and_no_personal_data(client, accounts_set):
@@ -235,18 +240,17 @@ def test_cancel_invitation(client, make_user, sent):
     coordinator = make_user("coordinator")
     tag = uuid.uuid4().hex[:10]
     by_admin = _invite(client, admin, tag)
-    by_coordinator = _invite(client, coordinator, tag)
+    second = _invite(client, admin, tag)
 
-    # El coordinador no ve ni cancela las ajenas
-    assert client.delete(f"/api/staff-invitations/{by_admin['id']}", headers=coordinator["headers"]).status_code == 404
-    assert client.delete(f"/api/staff-invitations/{by_coordinator['id']}",
-                         headers=coordinator["headers"]).status_code == 204
+    # Solo el administrador cancela invitaciones
+    assert client.delete(f"/api/staff-invitations/{by_admin['id']}", headers=coordinator["headers"]).status_code == 403
+    assert client.delete(f"/api/staff-invitations/{second['id']}", headers=admin["headers"]).status_code == 204
     assert client.delete(f"/api/staff-invitations/{by_admin['id']}", headers=admin["headers"]).status_code == 204
     assert _list(client, admin, filter="invitations", q=tag)["items"] == []
 
     technician = make_user("technician")
     third = _invite(client, admin, tag)
-    assert client.delete(f"/api/staff-invitations/{third['id']}", headers=technician["headers"]).status_code == 404
+    assert client.delete(f"/api/staff-invitations/{third['id']}", headers=technician["headers"]).status_code == 403
 
     changes = client.get("/api/admin/account-changes", params={"action": "invitation_cancelled"},
                          headers=admin["headers"]).json()

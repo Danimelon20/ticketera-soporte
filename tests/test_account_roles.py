@@ -27,18 +27,15 @@ def _sessions(user_id):
         db.close()
 
 
-# (rol de quien actúa, rol de la cuenta, acción) que sí están permitidos
+# (rol de quien actúa, rol de la cuenta, acción) que sí están permitidos.
+# Las cuentas las cuida el administrador: el coordinador ya no desactiva, restablece ni desbloquea
 ALLOWED = {
     ("admin", target, action)
     for target in ("coordinator", "technician", "requester")
     for action in ("deactivate", "reactivate", "unlock")
 } | {
     ("admin", "coordinator", "reset-access"), ("admin", "technician", "reset-access"),
-} | {
-    ("coordinator", target, action)
-    for target in ("technician", "requester")
-    for action in ("deactivate", "reactivate", "unlock")
-} | {("coordinator", "technician", "reset-access")}
+}
 
 
 @pytest.mark.parametrize("actor_role", ["admin", "coordinator", "technician", "requester"])
@@ -168,8 +165,8 @@ def test_role_change_closes_sessions(client, make_user):
     assert client.get("/api/auth/me", headers=user["headers"]).status_code == 401
 
 
-def test_coordinator_deactivates_and_reactivates_requester(client, make_user):
-    coordinator = make_user("coordinator")
+def test_admin_deactivates_and_reactivates_requester(client, make_user):
+    coordinator = make_user("admin")
     requester = make_user("requester")
     assert _post(client, coordinator, requester["id"], "deactivate").status_code == 204
     assert not _db_user(requester["id"]).is_active
@@ -201,7 +198,8 @@ def test_deactivating_technician_releases_open_tickets(client, make_user, make_t
         client.patch(f"/api/tickets/{tickets[-1]['id']}", json={"status": status}, headers=coordinator["headers"])
     sent.clear()
 
-    assert _post(client, coordinator, technician["id"], "deactivate").status_code == 204
+    # Desactivar es del administrador; el aviso de tickets liberados va a los coordinadores
+    assert _post(client, make_user("admin"), technician["id"], "deactivate").status_code == 204
     assert _sessions(technician["id"]) == 0
 
     for ticket in tickets[:-1]:
@@ -216,7 +214,7 @@ def test_deactivating_technician_releases_open_tickets(client, make_user, make_t
     try:
         expected = {
             u.email for u in db.query(models.User).filter(
-                models.User.role.in_(("coordinator", "admin")), models.User.is_active.is_(True)
+                models.User.role == "coordinator", models.User.is_active.is_(True)
             )
         }
     finally:
@@ -232,7 +230,7 @@ def test_deactivated_account_cannot_be_assigned(client, make_user, make_ticket):
     coordinator = make_user("coordinator")
     technician = make_user("technician")
     ticket = make_ticket(make_user("requester"))
-    _post(client, coordinator, technician["id"], "deactivate")
+    assert _post(client, make_user("admin"), technician["id"], "deactivate").status_code == 204
     response = client.patch(
         f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"]
     )
@@ -240,7 +238,8 @@ def test_deactivated_account_cannot_be_assigned(client, make_user, make_ticket):
 
 
 def test_unlock_clears_lockout(client, make_user):
-    coordinator = make_user("coordinator")
+    # Desbloquear es del administrador
+    coordinator = make_user("admin")
     requester = make_user("requester")
     for _ in range(5):
         client.post("/api/auth/login", json={"email": requester["email"], "password": "mala", "portal": "requester"})

@@ -39,7 +39,8 @@ def get_users(db: Session = Depends(get_db), current_user = Depends(get_current_
 
 @router.get("/requesters", response_model=list[RequesterRead])
 def get_requesters(q: Optional[str] = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    if current_user.role not in ("coordinator", "admin"):
+    # Para crear un ticket a nombre de un cliente: solo el coordinador
+    if current_user.role != "coordinator":
         raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
     
     query = db.query(models.User).filter(models.User.role == "requester", models.User.is_active == True)

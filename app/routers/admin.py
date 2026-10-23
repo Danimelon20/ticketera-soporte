@@ -443,8 +443,12 @@ def _account_actions(
         return []
     actions = []
     if user.role == "requester":
-        actions.append("view-tickets")
-        actions.append("review-reports" if alerts.open_reports else "report")
+        # Sus tickets y los reportes: el coordinador ve los tickets y reporta; el administrador revisa reportes
+        if viewer.role == "coordinator":
+            actions.append("view-tickets")
+            actions.append("report")
+        elif alerts.open_reports:
+            actions.append("review-reports")
         # Nombre y cédula fijos: el coordinador pide la corrección al administrador
         if viewer.role == "coordinator" and identity.is_locked(db, user):
             actions += ["request-name", "request-id_number"]
@@ -670,8 +674,10 @@ def _isoformat(value: datetime | None) -> str | None:
 
 
 @router.post("/admin/daily-summary/send-now")
-def send_daily_summary_now(db: Session = Depends(get_db), admin=Depends(require_admin)):
-    # Envío manual: no cuenta para el control de una vez por día
+def send_daily_summary_now(db: Session = Depends(get_db), admin=Depends(get_current_user)):
+    # Reporte de operación: lo envía el coordinador. Envío manual: no cuenta para el control de una vez por día
+    if admin.role != "coordinator":
+        raise HTTPException(status_code=403, detail="Solo un coordinador puede enviar el resumen")
     if not config.EMAIL_ENABLED:
         raise HTTPException(status_code=400, detail="El envío de correos está apagado")
     sent, total = daily_summary.send_summary(db)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from . import auto_assign, models
 
 # Única fuente del permiso: cancelar y reabrir
-CANCEL_ROLES = ("coordinator", "admin")
+CANCEL_ROLES = ("coordinator",)
 NO_PERMISSION = "No tienes permiso para cancelar tickets"
 MAX_TICKETS = 50
 

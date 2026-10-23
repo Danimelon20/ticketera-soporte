@@ -292,7 +292,8 @@ def test_template_ticket_gets_files_in_first_message(client, requester, monkeypa
 def followed_ticket(make_user, make_ticket, requester):
     ticket = make_ticket(requester)
     coordinator = make_user("coordinator", name="Coordinadora")
-    follower = make_user("technician", name="Técnico Seguidor")
+    # Otro seguidor que ve el ticket (un técnico no asignado ya no lo ve ni recibe sus avisos)
+    follower = make_user("coordinator", name="Coordinador Seguidor")
     db = SessionLocal()
     try:
         for user in (requester, follower):

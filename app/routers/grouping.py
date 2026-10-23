@@ -8,7 +8,7 @@ from ..security import get_current_user
 
 router = APIRouter(prefix="/api", tags=["grouping"])
 
-INCIDENT_ROLES = ("coordinator", "admin")
+INCIDENT_ROLES = ("coordinator",)
 
 
 @router.post("/merges/{merge_id}/undo", status_code=204)

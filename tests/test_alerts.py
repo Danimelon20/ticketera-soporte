@@ -130,7 +130,8 @@ def test_critical_open_ticket_only(make_user, make_ticket, sent):
     calls = _alerts_sent(sent, "[Ticketera] CRÍTICO")
     assert {call[1] for call in calls} == {f"[Ticketera] CRÍTICO: Ticket #{critical} Servidor caído"}
     to = {call[0] for call in calls}
-    assert coordinator["email"] in to and admin["email"] in to
+    # Avisos de tickets: solo coordinadores (el administrador no entra al flujo de tickets)
+    assert coordinator["email"] in to and admin["email"] not in to
     assert technician["email"] not in to and requester["email"] not in to
     body = calls[0][2]
     assert "Nivel 4 (Crítico)" in body and "Sin asignar" in body
@@ -207,7 +208,8 @@ def test_overdue_includes_assignee_and_skips_resolved(make_user, make_ticket, se
     calls = _alerts_sent(sent, "[Ticketera] Vencido")
     assert {call[1] for call in calls} == {f"[Ticketera] Vencido: Ticket #{overdue} Impresora"}
     to = [call[0] for call in calls]
-    assert coordinator["email"] in to and admin["email"] in to and technician["email"] in to
+    assert coordinator["email"] in to and technician["email"] in to
+    assert admin["email"] not in to
     assert len(to) == len(set(to))
 
 

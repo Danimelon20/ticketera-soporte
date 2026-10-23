@@ -5,15 +5,17 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import AttachmentRead, CancellationRead, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import cancellations, config, hacienda, mailer
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, attachments, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal
+from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, ticket_access
 
-AI_ROLES = ("technician", "coordinator", "admin")
+AI_ROLES = ("technician", "coordinator")
+# Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
+OPERATION_ROLES = ("coordinator",)
 
 router = APIRouter(prefix="/api", tags=["tickets"])
 
@@ -25,14 +27,22 @@ def verify_id_number(id_number: str) -> None:
         raise HTTPException(status_code=400, detail=error)
 
 
-def get_visible_ticket(db: Session, ticket_id: int, current_user) -> models.Ticket:
-    """Mismas reglas que el detalle: 404 si no existe, 403 si no puede verlo."""
+def check_access(db: Session, db_ticket: models.Ticket, current_user, full: bool = False) -> str:
+    """Reglas de ticket_access: 403 si no puede verlo; con full, también si solo puede leerlo."""
+    level = ticket_access.access(db, current_user, db_ticket)
+    if level is None:
+        raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
+    if full and level != ticket_access.FULL:
+        raise HTTPException(status_code=403, detail=ticket_access.READ_ONLY)
+    return level
+
+
+def get_visible_ticket(db: Session, ticket_id: int, current_user, full: bool = False) -> models.Ticket:
+    """Mismas reglas que el detalle: 404 si no existe, 403 si no puede verlo (o cambiarlo, con full)."""
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not db_ticket:
         raise HTTPException(status_code=404, detail="El ticket no existe")
-    # Regla: el solicitante no puede abrir tickets ajenos
-    if current_user.role == "requester" and db_ticket.created_by != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para ver este ticket")
+    check_access(db, db_ticket, current_user, full)
     return db_ticket
 
 
@@ -148,9 +158,11 @@ def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIA
 def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if current_user.role == "technician":
         raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
+    if current_user.role == "admin":
+        raise HTTPException(status_code=403, detail="El administrador no crea tickets")
     
     if ticket.requester_id is not None:
-        if current_user.role not in ("coordinator", "admin"):
+        if current_user.role not in OPERATION_ROLES:
             raise HTTPException(status_code=403, detail="No puedes crear tickets a nombre de otra persona")
         owner = db.query(models.User).filter(models.User.id == ticket.requester_id).first()
         if not owner or owner.role != "requester":
@@ -209,11 +221,10 @@ def list_tickets(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    query = db.query(models.Ticket)
-
-    # Regla: el solicitante solo ve los tickets que él creó
-    if current_user.role == "requester":
-        query = query.filter(models.Ticket.created_by == current_user.id)
+    # Solicitante: los suyos; técnico: asignados y los que tuvo; administrador: ninguno
+    if current_user.role == "admin":
+        raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
+    query = ticket_access.filter_visible(db, current_user, db.query(models.Ticket))
 
     if status:
         query = query.filter(models.Ticket.status == status)
@@ -243,7 +254,29 @@ def list_tickets(
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail, response_model_exclude_unset=True)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
-    
+    return ticket_detail(db, db_ticket, current_user)
+
+
+@router.post("/tickets/{ticket_id}/view-conversation", response_model=TicketDetail, response_model_exclude_unset=True)
+def view_conversation(ticket_id: int, data: ConversationViewRequest, db: Session = Depends(get_db),
+                      current_user=Depends(get_current_user)):
+    """Solo el administrador: lectura puntual con motivo, que queda en el Registro de cambios."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo el administrador usa Ver conversación")
+    db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not db_ticket:
+        raise HTTPException(status_code=404, detail="El ticket no existe")
+    # El motivo puede traer datos personales: se guarda enmascarado
+    audit.record(
+        db, current_user.id, ticket_access.CONVERSATION_ACTION,
+        target_label=ticket_access.conversation_label(db_ticket.id), new=_redact(data.reason)[:150],
+    )
+    db.commit()
+    return ticket_detail(db, db_ticket, current_user)
+
+
+def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> TicketDetail:
+    ticket_id = db_ticket.id
     # Determinar qué campos de contacto mostrar según el rol del usuario que ve
     # El creador del ticket, coordinator y admin ven los campos completos
     # Un technician que es el assigned_to ve teléfono completo y cédula enmascarada
@@ -275,7 +308,9 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         is not None
     )
     extra = {}
-    if current_user.role in AI_ROLES:
+    if current_user.role == "admin" or ticket_access.access(db, current_user, db_ticket) == ticket_access.READ:
+        extra["read_only"] = True
+    if current_user.role in AI_ROLES or current_user.role == "admin":
         row = db_ticket.ai_analysis
         extra["ai_analysis"] = ai_analysis_read(row, db_ticket) if row else None
     if current_user.role != "requester":
@@ -305,7 +340,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
 def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if current_user.role not in AI_ROLES:
         raise HTTPException(status_code=403, detail="No tienes permiso para corregir el análisis")
-    db_ticket = get_visible_ticket(db, ticket_id, current_user)
+    db_ticket = get_visible_ticket(db, ticket_id, current_user, full=True)
     row = db_ticket.ai_analysis
     if row is None:
         raise HTTPException(status_code=404, detail="Este ticket no tiene análisis de la IA")
@@ -321,7 +356,7 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
 @router.get("/tickets/{ticket_id}/suggestion", response_model=Optional[SuggestionRead])
 def get_suggestion(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Sugerencia de responsable con la lógica de la asignación automática. No asigna nada."""
-    if current_user.role not in ("coordinator", "admin"):
+    if current_user.role not in OPERATION_ROLES:
         raise HTTPException(status_code=403, detail="No tiene permiso para ver sugerencias de asignación")
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     found = nav.suggestion(db, db_ticket)
@@ -365,6 +400,8 @@ def check_can_comment(db: Session, ticket_id: int, current_user, internal: bool)
     # Regla: el solicitante solo comenta en los tickets que él creó
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Solo puedes comentar en tus propios tickets")
+    # Técnico: solo el asignado; el administrador no comenta
+    check_access(db, db_ticket, current_user, full=True)
     if internal and current_user.role not in nav.STAFF_ROLES:
         raise HTTPException(status_code=403, detail="Solo el personal puede agregar notas internas")
     return db_ticket
@@ -523,6 +560,8 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     # Regla: el solicitante no puede cambiar estado, prioridad, categoría ni asignación
     if current_user.role == "requester":
         raise HTTPException(status_code=403, detail="Los solicitantes no pueden modificar tickets")
+    # Técnico: solo el que tiene asignado; el administrador no entra al flujo de tickets
+    check_access(db, db_ticket, current_user, full=True)
 
     # Transiciones de status permitidas
     if data.status is not None:
@@ -554,12 +593,9 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         # Regla: solo técnicos y coordinadores pueden ser asignados
         if user.role not in ("technician", "coordinator"):
             raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos o coordinadores")
-        # Reglas: el técnico solo puede asignarse a sí mismo un ticket sin asignar
-        if current_user.role == "technician":
-            if data.assigned_to != current_user.id:
-                raise HTTPException(status_code=403, detail="Un técnico solo puede asignarse tickets a sí mismo")
-            if db_ticket.assigned_to is not None and db_ticket.assigned_to != current_user.id:
-                raise HTTPException(status_code=403, detail="Este ticket ya está asignado a otra persona")
+        # Regla: asignar y reasignar es del coordinador (el técnico solo atiende lo suyo)
+        if current_user.role not in OPERATION_ROLES and data.assigned_to != db_ticket.assigned_to:
+            raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
         # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
         if (
             data.assigned_to != db_ticket.assigned_to

@@ -34,7 +34,9 @@ def released(client, make_user, make_ticket, sent):
     client.post(f"/api/tickets/{ticket['id']}/comments", json={"content": "Comentario público"},
                 headers=coordinator["headers"])
     sent.clear()
-    assert client.post(f"/api/accounts/{leaving['id']}/deactivate", headers=coordinator["headers"]).status_code == 204
+    # Desactivar cuentas es del administrador
+    admin = make_user("admin")
+    assert client.post(f"/api/accounts/{leaving['id']}/deactivate", headers=admin["headers"]).status_code == 204
     return {"ticket": ticket, "requester": requester, "coordinator": coordinator}
 
 
@@ -51,8 +53,19 @@ def test_requester_does_not_get_it_in_ticket_detail_or_list(client, released):
 
 @pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
 def test_staff_sees_it_marked_internal(client, make_user, released, role):
+    ticket_id = released["ticket"]["id"]
     viewer = released["coordinator"] if role == "coordinator" else make_user(role)
-    comments = client.get(f"/api/tickets/{released['ticket']['id']}", headers=viewer["headers"]).json()["comments"]
+    if role == "technician":
+        # El técnico ve los tickets que tiene asignados
+        client.patch(f"/api/tickets/{ticket_id}", json={"assigned_to": viewer["id"]},
+                     headers=released["coordinator"]["headers"])
+    if role == "admin":
+        # El administrador, solo con "Ver conversación"
+        response = client.post(f"/api/tickets/{ticket_id}/view-conversation", json={"reason": "Auditoría interna"},
+                               headers=viewer["headers"])
+    else:
+        response = client.get(f"/api/tickets/{ticket_id}", headers=viewer["headers"])
+    comments = response.json()["comments"]
     assert [(c["content"], c["internal"]) for c in comments] == [("Comentario público", False), (TEXT, True)]
 
 

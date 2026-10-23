@@ -53,11 +53,18 @@ def test_manual_assignment_notifies_technician(client, make_user, make_ticket, s
 
 
 def test_self_assignment_sends_nothing(client, make_user, make_ticket, sent):
+    # El técnico ya no se asigna tickets (ni los ve): 403 y ningún correo
     technician = make_user("technician")
     ticket = make_ticket(make_user("requester"))
     sent.clear()
-    _assign(client, technician, ticket["id"], technician["id"])
+    response = client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]},
+                            headers=technician["headers"])
+    assert response.status_code == 403
     assert _to(sent, technician["email"]) == []
+    # El coordinador que se asigna a sí mismo tampoco recibe aviso
+    coordinator = make_user("coordinator")
+    _assign(client, coordinator, ticket["id"], coordinator["id"])
+    assert _to(sent, coordinator["email"]) == []
 
 
 def test_assigning_coordinator_sends_no_technician_notice(client, make_user, make_ticket, sent):
@@ -74,8 +81,14 @@ def test_follower_technician_gets_one_email(client, make_user, make_ticket, sent
     technician = make_user("technician")
     other_follower = make_user("coordinator")
     ticket = make_ticket(make_user("requester"))
-    for user in (technician, other_follower):
-        assert client.post(f"/api/tickets/{ticket['id']}/follow", headers=user["headers"]).status_code == 204
+    assert client.post(f"/api/tickets/{ticket['id']}/follow", headers=other_follower["headers"]).status_code == 204
+    # El técnico ya no puede seguir un ticket ajeno: el seguimiento viene de antes de este cambio
+    db = SessionLocal()
+    try:
+        db.add(models.TicketFollower(ticket_id=ticket["id"], user_id=technician["id"]))
+        db.commit()
+    finally:
+        db.close()
     sent.clear()
     _assign(client, coordinator, ticket["id"], technician["id"])
     # Un solo correo: el aviso de asignación, no además el de seguidor

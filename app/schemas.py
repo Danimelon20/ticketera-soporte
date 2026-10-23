@@ -407,8 +407,20 @@ class TicketDetail(TicketRead):
     # Para todos: número del ticket al que se agregó; grouping solo para el personal
     merged_into: Optional[int] = None
     grouping: Optional[GroupingRead] = None
+    # Técnico que lo tuvo asignado antes, o administrador con "Ver conversación": solo lectura
+    read_only: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ConversationViewRequest(BaseModel):
+    """Motivo corto por el que el administrador abre la conversación de un ticket."""
+    reason: str = Field(min_length=5, max_length=150)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value):
+        return " ".join(value.split()) if isinstance(value, str) else value
 
 
 class CategoryRead(BaseModel):
@@ -570,6 +582,17 @@ class DraftRead(BaseModel):
     attachment_notes: list[str] = []
     # Se agregó a un ticket abierto del mismo cliente
     merged_into: Optional[int] = None
+    # Revisor: nulo es "Sin revisor"
+    assigned_to: Optional[int] = None
+    assigned_name: Optional[str] = None
+    can_review: bool = False
+    can_reassign: bool = False
+
+
+class DraftAssign(BaseModel):
+    """El coordinador elige otro técnico para revisar el borrador."""
+    user_id: int
+    confirm_unavailable: bool = False
 
 
 class DraftConfirm(BaseModel):
@@ -830,10 +853,11 @@ class NoticeSuggestion(BaseModel):
 
 
 class OverdueNotice(BaseModel):
-    """Aviso de la campana: solo número, título enmascarado y fechas."""
-    ticket_id: int
+    """Aviso de la campana: solo número, título enmascarado y fechas. Los de borradores traen draft_id."""
+    ticket_id: Optional[int] = None
+    draft_id: Optional[int] = None
     title: str
-    kind: Literal["due_50", "due_80", "overdue", "report"]
+    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned"]
     created_at: datetime
     due_at: Optional[datetime] = None
     read: bool
@@ -847,8 +871,9 @@ class OverdueNoticeList(BaseModel):
 
 
 class NoticeReadRequest(BaseModel):
-    """Un ticket (ticket_id) o todos (all)."""
+    """Un ticket (ticket_id), un borrador (draft_id) o todos (all)."""
     ticket_id: Optional[int] = None
+    draft_id: Optional[int] = None
     all: bool = False
 
 

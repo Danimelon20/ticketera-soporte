@@ -3,8 +3,9 @@
 - Al 50 % y al 80 % del plazo (horas hábiles, con los plazos de siempre) y al vencer: al responsable.
 - Al 80 %, si no tiene responsable o el responsable no está disponible: también a los coordinadores,
   con la sugerencia de a quién reasignar.
-- Al vencer, el reporte de vencimiento: a coordinadores y administradores, pendiente de revisar
+- Al vencer, el reporte de vencimiento: a coordinadores, pendiente de revisar
   hasta que se registre la causa.
+- "Nuevo borrador asignado": al revisor del borrador, mientras siga pendiente (draft_assignments).
 Cada aviso se genera una sola vez por ticket (ticket_due_notices). La primera revisión después de
 instalar esto solo registra lo que ya correspondía (baseline) y no lo muestra.
 Privacidad: solo número, título enmascarado y nombres; nunca descripción, teléfono ni cédula.
@@ -13,11 +14,11 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import alerts, availability, models, nav
+from . import alerts, auto_assign, availability, models, nav
 from .chatbot import _redact
 
 ALERT_KINDS = ("due_50", "due_80", "overdue")  # De menos a más avanzado
-REPORT_ROLES = ("coordinator", "admin")
+REPORT_ROLES = ("coordinator",)
 NOTICE_ROLES = ("technician", "coordinator", "admin")
 
 
@@ -123,16 +124,58 @@ def items_for(db: Session, user: models.User, now: datetime | None = None) -> li
             "needs_review": notice.kind == "report" and ticket.id not in cause_ids,
             "suggestion": suggestion,
         })
-    items.sort(key=lambda i: (i["created_at"], i["ticket_id"]), reverse=True)
+    items += _draft_items(db, user)
+    items.sort(key=lambda i: (i["created_at"], i["ticket_id"] or 0, i.get("draft_id") or 0), reverse=True)
     return items
 
 
-def mark_read(db: Session, user: models.User, ticket_id: int | None = None, now: datetime | None = None) -> int:
-    """Marca como leídos los avisos que la persona ve (de un ticket o todos). Hace commit."""
+def _draft_rows(db: Session, user: models.User) -> list[models.DraftAssignment]:
+    return (
+        db.query(models.DraftAssignment)
+        .options(joinedload(models.DraftAssignment.draft))
+        .join(models.EmailDraft, models.EmailDraft.id == models.DraftAssignment.draft_id)
+        .filter(
+            models.DraftAssignment.user_id == user.id,
+            models.DraftAssignment.status == "assigned",
+            models.DraftAssignment.notify.is_(True),
+            models.EmailDraft.status.in_(auto_assign.DRAFT_PENDING_STATUSES),
+        )
+        .all()
+    )
+
+
+def _draft_items(db: Session, user: models.User) -> list[dict]:
+    """Borradores que le asignaron para revisar (sin datos del correo: solo el asunto enmascarado)."""
+    return [
+        {
+            "ticket_id": None,
+            "draft_id": row.draft_id,
+            "title": _redact(row.draft.title or row.draft.subject or "Borrador"),
+            "kind": "draft_assigned",
+            "created_at": row.assigned_at or row.created_at,
+            "due_at": None,
+            "read": row.seen_at is not None,
+            "needs_review": False,
+            "suggestion": None,
+        }
+        for row in _draft_rows(db, user)
+    ]
+
+
+def mark_read(db: Session, user: models.User, ticket_id: int | None = None, now: datetime | None = None,
+              draft_id: int | None = None) -> int:
+    """Marca como leídos los avisos que la persona ve (de un ticket, de un borrador o todos). Hace commit."""
     now = now or _now()
     count = 0
+    every = ticket_id is None and draft_id is None
+    for row in _draft_rows(db, user):
+        if row.seen_at is None and (every or row.draft_id == draft_id):
+            row.seen_at = now
+            count += 1
     for item in items_for(db, user, now):
-        if item["read"] or (ticket_id is not None and item["ticket_id"] != ticket_id):
+        if item["kind"] == "draft_assigned":
+            continue
+        if item["read"] or (not every and item["ticket_id"] != ticket_id):
             continue
         db.add(models.OverdueNoticeSeen(user_id=user.id, ticket_id=item["ticket_id"], kind=item["kind"], seen_at=now))
         count += 1

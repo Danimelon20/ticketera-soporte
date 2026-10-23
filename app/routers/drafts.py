@@ -7,19 +7,22 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, attachments, audit, auto_assign, config, email_analysis, email_attachments, grouping, identity, models
+from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, email_analysis, email_attachments, grouping, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
-from ..schemas import AttachmentRead, DraftConfirm, DraftRead
+from ..schemas import AttachmentRead, DraftAssign, DraftConfirm, DraftRead
 from ..security import get_current_user, mask_email
 from ..validators import mask_id_number, normalize_id_number, normalize_phone
-from .tickets import verify_id_number
+from .tickets import person_name, unavailable_message, verify_id_number
 
 router = APIRouter(prefix="/api", tags=["drafts"])
 
-REVIEW_ROLES = ("technician", "coordinator", "admin")
+REVIEW_ROLES = ("technician", "coordinator")
+# Ven todos los borradores, los reasignan y confirman cualquiera
+MANAGER_ROLES = ("coordinator",)
+NOT_YOURS = "Este borrador está asignado a otra persona"
 # Los poco claros y los que no son soporte no se revisan: no se listan ni se cuentan
-DEFAULT_STATUSES = ("pending_review", "waiting_contact", "error")
+DEFAULT_STATUSES = auto_assign.DRAFT_PENDING_STATUSES
 DraftStatus = Literal[
     "analyzing", "pending_review", "waiting_contact", "unclear", "not_support",
     "status_reply", "confirmed", "discarded", "error",
@@ -54,6 +57,23 @@ def _draft_files(db: Session, draft_id: int) -> tuple[list[AttachmentRead], list
     return files, [note.text for note in notes]
 
 
+def _reviewer_id(db: Session, draft_id: int) -> int | None:
+    row = auto_assign.draft_row(db, draft_id)
+    return row.user_id if row is not None and row.status in ("assigned", "done") else None
+
+
+def can_review(db: Session, draft: models.EmailDraft, user: models.User) -> bool:
+    """El coordinador, o el técnico que es su revisor."""
+    if user.role in MANAGER_ROLES:
+        return True
+    return user.role == "technician" and _reviewer_id(db, draft.id) == user.id
+
+
+def _check_can_review(db: Session, draft: models.EmailDraft, user: models.User) -> None:
+    if not can_review(db, draft, user):
+        raise HTTPException(status_code=403, detail=NOT_YOURS)
+
+
 def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> DraftRead:
     requester = draft.requester
     phone, id_number = _stored_contact(draft)
@@ -86,6 +106,14 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
     merge = grouping.active_draft_merge(db, draft.id)
     if merge is not None:
         data.merged_into = merge.target_ticket_id
+    reviewer_id = _reviewer_id(db, draft.id)
+    if reviewer_id is not None:
+        reviewer = db.get(models.User, reviewer_id)
+        data.assigned_to = reviewer_id
+        data.assigned_name = person_name(reviewer) if reviewer else None
+    pending = draft.status in DEFAULT_STATUSES
+    data.can_review = pending and can_review(db, draft, viewer)
+    data.can_reassign = pending and viewer.role in MANAGER_ROLES
     if viewer.role == "technician":
         # El técnico no ve datos personales completos (como en el detalle del ticket)
         data.body = _redact(data.body)
@@ -126,14 +154,24 @@ def _now() -> datetime:
 
 
 @router.get("/drafts", response_model=list[DraftRead])
-def list_drafts(status: Optional[DraftStatus] = None, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
+def list_drafts(
+    status: Optional[DraftStatus] = None,
+    # Solo el coordinador filtra: mine (los que revisa él), none (Sin revisor) o all. El técnico ve solo los suyos
+    assigned: Literal["all", "mine", "none"] = "all",
+    db: Session = Depends(get_db),
+    reviewer=Depends(require_reviewer),
+):
     statuses = (status,) if status else DEFAULT_STATUSES
-    drafts = (
+    query = (
         db.query(models.EmailDraft)
+        .outerjoin(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id)
         .filter(models.EmailDraft.status.in_(statuses))
-        .order_by(models.EmailDraft.created_at.asc(), models.EmailDraft.id.asc())
-        .all()
     )
+    if reviewer.role not in MANAGER_ROLES or assigned == "mine":
+        query = query.filter(models.DraftAssignment.user_id == reviewer.id)
+    elif assigned == "none":
+        query = query.filter(models.DraftAssignment.user_id.is_(None))
+    drafts = query.order_by(models.EmailDraft.created_at.asc(), models.EmailDraft.id.asc()).all()
     return [_draft_read(db, d, reviewer) for d in drafts]
 
 
@@ -141,6 +179,7 @@ def list_drafts(status: Optional[DraftStatus] = None, db: Session = Depends(get_
 def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: BackgroundTasks,
                   db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
     draft = _open_draft(db, draft_id)
+    _check_can_review(db, draft, reviewer)
     category = db.get(models.Category, data.category_id)
     if not category:
         raise HTTPException(status_code=400, detail="La categoría no existe")
@@ -159,6 +198,12 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     elif contact_id_number != requester.id_number and identity.id_number_taken(db, contact_id_number, requester.id):
         raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
 
+    # Responsable: el técnico que confirma; si confirma un coordinador, el revisor del borrador.
+    # Sin ninguno de los dos, lo decide la asignación automática como siempre
+    owner_id = reviewer.id if reviewer.role == "technician" else _reviewer_id(db, draft.id)
+    owner = db.get(models.User, owner_id) if owner_id is not None else None
+    if owner is not None and (not owner.is_active or owner.role != "technician"):
+        owner = None
     ticket = models.Ticket(
         title=data.title,
         description=data.description,
@@ -169,9 +214,14 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
         source="email",
+        assigned_to=owner.id if owner else None,
     )
     db.add(ticket)
     db.flush()
+    if owner is not None:
+        db.add(models.History(
+            ticket_id=ticket.id, field="assigned_to", old_value=None, new_value=str(owner.id), changed_by=reviewer.id,
+        ))
 
     db.add(models.TicketFollower(ticket_id=ticket.id, user_id=requester.id))
     # Los adjuntos del correo pasan al primer mensaje del ticket (antes del comentario del Agente)
@@ -205,24 +255,32 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     draft.reviewed_by = reviewer.id
     draft.reviewed_at = _now()
     draft.ticket_id = ticket.id
+    auto_assign.finish_draft(db, draft.id)
     db.commit()
     # Cargados antes de cerrar la sesión: el correo se envía después de responder
     for obj in (draft, ticket, requester, category, priority):
         db.refresh(obj)
+    if owner is not None:
+        db.refresh(owner)
+        # Confirmó un coordinador: el revisor recibe el aviso de siempre ("Asignarme a mí" no se avisa)
+        if assignment_notice.should_notify(owner, reviewer):
+            assignment_notice.schedule(background_tasks, ticket, owner)
 
     background_tasks.add_task(send_ticket_created, ticket, requester, category, priority)
     # Solo el caso B (otros clientes): el mismo cliente ya se revisó al llegar el correo.
     # Antes de asignar, para que herede el responsable del principal
     if config.GROUPING_ENABLED:
         background_tasks.add_task(grouping.after_ticket_created, ticket.id, ("link",))
-    # El nivel ya existe (viene del análisis del borrador)
-    background_tasks.add_task(auto_assign.assign_new, ticket.id)
+    # El nivel ya existe (viene del análisis del borrador). Con responsable, assign_new no lo cambia
+    if owner is None:
+        background_tasks.add_task(auto_assign.assign_new, ticket.id)
     return _draft_read(db, draft, reviewer)
 
 
 @router.post("/drafts/{draft_id}/request-details")
 def request_details(draft_id: int, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
     draft = _open_draft(db, draft_id)
+    _check_can_review(db, draft, reviewer)
     if draft.status not in ("pending_review", "waiting_contact"):
         raise HTTPException(status_code=409, detail="Este borrador ya no está pendiente")
     # Lo decide una persona: se envía aunque el antibucle de 24 horas ya haya avisado
@@ -236,9 +294,11 @@ def request_details(draft_id: int, db: Session = Depends(get_db), reviewer=Depen
 @router.post("/drafts/{draft_id}/discard", response_model=DraftRead)
 def discard_draft(draft_id: int, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
     draft = _open_draft(db, draft_id)
+    _check_can_review(db, draft, reviewer)
     draft.status = "discarded"
     draft.reviewed_by = reviewer.id
     draft.reviewed_at = _now()
+    auto_assign.finish_draft(db, draft.id)
     stored = email_attachments.remove_from_draft(db, draft.id)
     db.commit()
     # Descartado: sus archivos se borran del disco
@@ -255,6 +315,7 @@ def download_draft_attachment(
     row = db.get(models.DraftAttachment, attachment_id)
     if row is None or not os.path.isfile(attachments.path_of(row)):
         raise HTTPException(status_code=404, detail="El adjunto no existe")
+    _check_can_review(db, db.get(models.EmailDraft, row.draft_id), reviewer)
     if not preview:
         audit.record(
             db, reviewer.id, "attachment_downloaded",
@@ -262,3 +323,37 @@ def download_draft_attachment(
         )
         db.commit()
     return attachments.file_response(row)
+
+
+@router.post("/drafts/{draft_id}/assign", response_model=DraftRead)
+def assign_draft(draft_id: int, data: DraftAssign, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
+    """Solo el coordinador: otro técnico revisa el borrador. Le llega el aviso "Nuevo borrador asignado"."""
+    if reviewer.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Solo un coordinador puede reasignar borradores")
+    draft = _open_draft(db, draft_id)
+    if draft.status not in DEFAULT_STATUSES:
+        raise HTTPException(status_code=409, detail="Este borrador ya no está pendiente")
+    user = db.get(models.User, data.user_id)
+    if user is None or not user.is_active or user.role != "technician":
+        raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos activos")
+    row = auto_assign.draft_row(db, draft.id)
+    if row is not None and row.user_id == user.id and row.status == "assigned":
+        return _draft_read(db, draft, reviewer)
+    # Igual que con los tickets: a alguien no disponible, solo con confirmación
+    if not data.confirm_unavailable and not availability.is_available(db, user):
+        status_, return_date = availability.get(db, user)
+        raise HTTPException(status_code=409, detail=unavailable_message(user, status_, return_date))
+    now = _now().replace(tzinfo=None)
+    if row is None:
+        row = models.DraftAssignment(draft_id=draft.id, created_at=now)
+        db.add(row)
+    row.status = "assigned"
+    row.user_id = user.id
+    row.assigned_at = now
+    row.assigned_by = reviewer.id
+    row.notify = True
+    row.seen_at = None
+    db.commit()
+    logging.info("Borrador %s reasignado al técnico %s por el usuario %s", draft.id, user.id, reviewer.id)
+    db.refresh(draft)
+    return _draft_read(db, draft, reviewer)

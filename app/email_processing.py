@@ -186,6 +186,10 @@ def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User
     stored = email_attachments.save_to_draft(db, draft, email_attachments.extract(msg))
     _save_result(db, message_id, "contact_updated")
     email_attachments.commit_or_cleanup(db, stored)
+    if draft.status == "pending_review":
+        # Normalmente ya tiene revisor (desde "Esperando datos"); si no, se le busca
+        from . import auto_assign
+        auto_assign.assign_draft(draft.id)
 
     if missing:
         mailer.send_email(

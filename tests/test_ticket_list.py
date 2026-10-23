@@ -72,8 +72,12 @@ def test_requester_sees_only_own_tickets(client, make_user, make_ticket):
     assert de_luis["id"] not in result
 
 
-def test_technician_sees_all_tickets(client, make_user, make_ticket):
+def test_technician_sees_only_own_tickets(client, make_user, make_ticket):
+    # Ya no ve los tickets de los demás: solo los asignados y los que tuvo antes
     tecnico = make_user("technician")
     solicitante = make_user("requester")
     ticket = make_ticket(solicitante, "Ticket visible ALL1")
+    assert ticket["id"] not in ids(list_as(client, tecnico))
+    coordinator = make_user("coordinator")
+    client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": tecnico["id"]}, headers=coordinator["headers"])
     assert ticket["id"] in ids(list_as(client, tecnico))

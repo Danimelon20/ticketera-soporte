@@ -18,14 +18,15 @@ from ..security import get_current_user, mask_email
 router = APIRouter(prefix="/api", tags=["reports"])
 
 REPORTER_ROLES = ("technician", "coordinator", "admin")
-REVIEW_ROLES = ("coordinator", "admin")
+# Revisar, confirmar y descartar: solo el administrador (crear el reporte sigue siendo del personal)
+REVIEW_ROLES = ("admin",)
 NO_PERMISSION = "No tiene permiso para hacer esto"
 ONLY_REQUESTERS = "Solo se pueden reportar cuentas de solicitante"
 UNKNOWN_REASON = "Elija un motivo de la lista"
 OTHER_NEEDS_TEXT = "Describa el motivo del reporte"
 DUPLICATE = "Ya tiene un reporte abierto sobre esta cuenta"
 NOT_OPEN = "El reporte ya fue resuelto"
-OWN_CONFIRM = "Otro coordinador o un administrador debe confirmar este reporte"
+OWN_CONFIRM = "Otro administrador debe confirmar este reporte"
 NOT_VISIBLE = "La cuenta no existe"
 
 

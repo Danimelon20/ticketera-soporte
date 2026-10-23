@@ -81,12 +81,16 @@ def count_changes(action: str) -> int:
 
 
 @pytest.fixture
-def setup(make_user, make_ticket):
+def setup(client, make_user, make_ticket):
     requester = make_user("requester", name="Cliente Uno")
     other = make_user("requester", name="Cliente Dos")
     technician = make_user("technician", name="Técnico Uno")
     coordinator = make_user("coordinator", name="Coordinadora Una")
     ticket = make_ticket(requester)
+    # El técnico solo ve (y descarga) los adjuntos de sus tickets
+    response = client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]},
+                            headers=coordinator["headers"])
+    assert response.status_code == 200, response.text
     return {"requester": requester, "other": other, "technician": technician,
             "coordinator": coordinator, "ticket": ticket}
 

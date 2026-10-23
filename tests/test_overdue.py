@@ -212,11 +212,11 @@ def test_overdue_notice_and_report_by_role(client, people, monkeypatch):
     _at(monkeypatch, AFTER_DUE)
     assert _kinds(_notices(client, technician), ticket) == {"overdue"}
     assert _kinds(_notices(client, people["other_technician"]), ticket) == set()
-    # Coordinadores y administradores: solo el reporte, pendiente de revisar
-    for role in ("coordinator", "admin"):
-        items = [i for i in _notices(client, people[role])["items"] if i["ticket_id"] == ticket]
-        assert [i["kind"] for i in items] == ["report"], role
-        assert items[0]["needs_review"] is True
+    # Coordinadores: solo el reporte, pendiente de revisar. El administrador no recibe avisos de tickets
+    items = [i for i in _notices(client, people["coordinator"])["items"] if i["ticket_id"] == ticket]
+    assert [i["kind"] for i in items] == ["report"]
+    assert items[0]["needs_review"] is True
+    assert [i for i in _notices(client, people["admin"])["items"] if i["ticket_id"] == ticket] == []
 
 
 def test_assigned_coordinator_gets_own_notices(client, people, monkeypatch):
@@ -277,9 +277,11 @@ def test_report_permissions(client, people, monkeypatch):
     _at(monkeypatch, AFTER_DUE)
     url = f"/api/tickets/{ticket}/overdue-report"
 
-    for role in ("coordinator", "admin", "technician"):
+    for role in ("coordinator", "technician"):
         response = client.get(url, headers=people[role]["headers"])
         assert response.status_code == 200, (role, response.text)
+    # El administrador no entra al flujo de tickets
+    assert client.get(url, headers=people["admin"]["headers"]).status_code == 403
     assert client.get(url, headers=people["other_technician"]["headers"]).status_code == 403
     assert client.get(url, headers=people["requester"]["headers"]).status_code == 403
     response = client.get(f"/api/tickets/{not_due}/overdue-report", headers=people["coordinator"]["headers"])
@@ -338,7 +340,7 @@ def test_cause_permissions_and_review(client, people, monkeypatch):
     url = f"/api/tickets/{ticket}/overdue-cause"
     payload = {"cause": "high_load"}
 
-    for role in ("technician", "requester"):
+    for role in ("technician", "requester", "admin"):
         assert client.post(url, json=payload, headers=people[role]["headers"]).status_code == 403, role
     other = client.post(url, json={"cause": "other"}, headers=people["coordinator"]["headers"])
     assert other.status_code == 422
@@ -346,7 +348,8 @@ def test_cause_permissions_and_review(client, people, monkeypatch):
     response = client.post(url, json=payload, headers=people["coordinator"]["headers"])
     assert response.status_code == 200, response.text
     assert response.json()["cause"]["label"] == "Carga alta"
-    response = client.post(url, json={"cause": "other", "note": "Falla eléctrica"}, headers=people["admin"]["headers"])
+    # Se puede cambiar: queda la última
+    response = client.post(url, json={"cause": "other", "note": "Falla eléctrica"}, headers=people["coordinator"]["headers"])
     assert response.status_code == 200
     assert response.json()["cause"]["note"] == "Falla eléctrica"
 

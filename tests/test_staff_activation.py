@@ -136,13 +136,13 @@ def test_invitation_stores_only_hash(client, make_user, sent):
     assert code not in _invitation(email).code_hash
 
 
-def test_coordinator_invites_only_technicians(client, make_user, sent):
+def test_coordinator_cannot_invite(client, make_user, sent):
+    # Las invitaciones son del administrador: el coordinador ya no invita técnicos ni coordinadores
     coord = make_user("coordinator")
-    _email_t, response = _invite(client, coord, "technician")
-    assert response.status_code == 201
-    _email_c, response = _invite(client, coord, "coordinator")
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Solo el administrador puede invitar coordinadores"
+    for role in ("technician", "coordinator"):
+        _email, response = _invite(client, coord, role)
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Solo el administrador puede invitar personal"
 
 
 @pytest.mark.parametrize("role", ["requester", "technician"])
@@ -157,14 +157,13 @@ def test_existing_account_cannot_be_invited(client, make_user, sent):
     assert response.status_code == 409
 
 
-def test_list_hides_codes_and_coordinator_sees_own(client, make_user, sent):
+def test_list_hides_codes_and_only_admin_lists(client, make_user, sent):
     admin = make_user("admin")
     coord = make_user("coordinator")
     admin_email, _ = _invite(client, admin, "coordinator")
-    coord_email, _ = _invite(client, coord, "technician")
+    coord_email, _ = _invite(client, admin, "technician")
 
-    mine = client.get("/api/staff-invitations", headers=coord["headers"]).json()
-    assert [i["email"] for i in mine] == [coord_email]
+    assert client.get("/api/staff-invitations", headers=coord["headers"]).status_code == 403
     everything = client.get("/api/staff-invitations", headers=admin["headers"]).json()
     emails = [i["email"] for i in everything]
     assert admin_email in emails and coord_email in emails

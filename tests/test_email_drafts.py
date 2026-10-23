@@ -9,6 +9,8 @@ from app import chatbot, config, email_analysis, mailer, models
 from app.database import SessionLocal
 from app.email_processing import process_message
 
+from conftest import assign_draft_to
+
 MAILBOX = "soporte@ejemplo.com"
 TEMPLATE_BODY = (
     "Categoría: Software\n"
@@ -388,7 +390,8 @@ def test_draft_single_person_keeps_ai_level(make_user, sent, llm):
 
 
 def test_list_hides_unclear_and_not_support(client, make_user, sent):
-    technician = make_user("technician")
+    # El coordinador ve todos los borradores (el técnico, solo los que tiene asignados)
+    technician = make_user("coordinator")
     requester = make_user("requester", profile=False)
     db = SessionLocal()
     try:
@@ -513,6 +516,7 @@ def test_list_and_confirm(client, make_user, sent, llm):
     requester = make_user("requester", "Laura Cliente", profile=False)
     technician = make_user("technician", "Tomás Técnico")
     draft = _draft_from(requester, llm, _answer(level=3))
+    assign_draft_to(draft.id, technician["id"])
     sent.clear()
 
     listed = client.get("/api/drafts", headers=technician["headers"]).json()
@@ -547,6 +551,8 @@ def test_list_and_confirm(client, make_user, sent, llm):
         assert analysis.due_at is not None
         stored = db.get(models.EmailDraft, draft.id)
         assert stored.reviewed_by == technician["id"] and stored.reviewed_at is not None
+        # Quien confirma queda como responsable
+        assert ticket.assigned_to == technician["id"]
     finally:
         db.close()
 
@@ -576,7 +582,9 @@ def test_confirm_requires_contact(client, make_user, sent, llm):
 
 def test_discard(client, make_user, sent, llm):
     requester = make_user("requester", profile=False)
-    admin = make_user("admin")
+    # El administrador no entra a los borradores: descarta el coordinador
+    assert client.post("/api/drafts/1/discard", headers=make_user("admin")["headers"]).status_code == 403
+    admin = make_user("coordinator")
     draft = _draft_from(requester, llm, _answer())
     sent.clear()
     response = client.post(f"/api/drafts/{draft.id}/discard", headers=admin["headers"])
@@ -683,6 +691,7 @@ def test_technician_gets_masked_draft(client, make_user, sent, llm):
     technician = make_user("technician")
     draft = _personal_draft(make_user, llm)
     assert draft.status == "pending_review"
+    assign_draft_to(draft.id, technician["id"])
 
     response = client.get("/api/drafts", headers=technician["headers"])
     item = next(d for d in response.json() if d["id"] == draft.id)
@@ -708,6 +717,7 @@ def test_coordinator_sees_full_draft(client, make_user, sent, llm):
 def test_technician_confirms_with_stored_contact(client, make_user, sent, llm, phone, id_number):
     technician = make_user("technician")
     draft = _personal_draft(make_user, llm)
+    assign_draft_to(draft.id, technician["id"])
     payload = _confirm_payload(contact_phone=phone, contact_id_number=id_number)
     response = client.post(f"/api/drafts/{draft.id}/confirm", json=payload, headers=technician["headers"])
     assert response.status_code == 200, response.text
@@ -721,6 +731,7 @@ def test_technician_confirms_with_stored_contact(client, make_user, sent, llm, p
 def test_technician_new_contact_is_validated(client, make_user, sent, llm):
     technician = make_user("technician")
     draft = _personal_draft(make_user, llm)
+    assign_draft_to(draft.id, technician["id"])
     bad = _confirm_payload(contact_phone="123", contact_id_number="******567")
     response = client.post(f"/api/drafts/{draft.id}/confirm", json=bad, headers=technician["headers"])
     assert response.status_code == 422
@@ -759,6 +770,7 @@ def _notices(user_id):
 def test_request_details_sends_and_deletes_draft(client, make_user, sent, llm):
     technician = make_user("technician")
     requester, draft, msg = _pending_with_message(make_user, llm)
+    assign_draft_to(draft.id, technician["id"])
 
     response = client.post(f"/api/drafts/{draft.id}/request-details", headers=technician["headers"])
     assert response.status_code == 200, response.text

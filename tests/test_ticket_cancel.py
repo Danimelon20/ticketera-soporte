@@ -31,7 +31,8 @@ def _cancellation(ticket_id):
         db.close()
 
 
-@pytest.mark.parametrize("role", ["coordinator", "admin"])
+# Cancelar es del coordinador: el administrador no entra al flujo de tickets
+@pytest.mark.parametrize("role", ["coordinator"])
 def test_staff_with_permission_cancels(client, make_user, make_ticket, requester, sent, role):
     actor = make_user(role)
     ticket = make_ticket(requester, title="Ya no se necesita")
@@ -56,7 +57,7 @@ def test_staff_with_permission_cancels(client, make_user, make_ticket, requester
     assert "Lo resolvió solo" not in to_requester[0][2]
 
 
-@pytest.mark.parametrize("role", ["technician", "requester"])
+@pytest.mark.parametrize("role", ["technician", "requester", "admin"])
 def test_others_cannot_cancel_or_reopen(client, make_user, make_ticket, requester, role):
     actor = requester if role == "requester" else make_user(role)
     ticket = make_ticket(requester)
@@ -160,7 +161,8 @@ def test_admin_health_counts_cancelled_apart(client, make_user, make_ticket, req
     admin = make_user("admin")
     ticket = make_ticket(requester)
     before = client.get("/api/admin/health", headers=admin["headers"]).json()["tickets_by_status"]
-    assert _cancel(client, admin, [ticket["id"]]).status_code == 200
+    # Cancela el coordinador; el administrador lo ve en Estado del sistema
+    assert _cancel(client, make_user("coordinator"), [ticket["id"]]).status_code == 200
 
     after = client.get("/api/admin/health", headers=admin["headers"]).json()["tickets_by_status"]
     assert after["cancelled"] == before.get("cancelled", 0) + 1

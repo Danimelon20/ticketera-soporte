@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import attachments, audit, comments as internal_comments, models
+from .. import attachments, audit, comments as internal_comments, models, ticket_access
 from ..security import get_current_user
 from .tickets import get_visible_ticket
 
@@ -21,7 +21,12 @@ def download_attachment(
     row = db.get(models.Attachment, attachment_id)
     if row is None:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
-    get_visible_ticket(db, row.ticket_id, current_user)
+    if current_user.role == "admin":
+        # Solo durante la hora siguiente a "Ver conversación" en ese ticket
+        if not ticket_access.admin_files_open(db, current_user, row.ticket_id):
+            raise HTTPException(status_code=403, detail="Use Ver conversación en este ticket para abrir sus adjuntos")
+    else:
+        get_visible_ticket(db, row.ticket_id, current_user)
     # El solicitante nunca ve adjuntos de notas internas: 404, ni siquiera sabe que existen
     if current_user.role == "requester" and internal_comments.internal_ids(db, [row.comment_id]):
         raise HTTPException(status_code=404, detail=NOT_FOUND)

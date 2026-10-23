@@ -107,7 +107,8 @@ def test_technician_can_change_status_and_priority(client, make_user, make_ticke
     tecnico = make_user("technician")
     solicitante = make_user("requester")
     ticket = make_ticket(solicitante)
-    assert patch(client, ticket["id"], tecnico, assigned_to=tecnico["id"]).status_code == 200
+    # Lo asigna el coordinador (el técnico ya no se asigna tickets)
+    assert patch(client, ticket["id"], make_user("coordinator"), assigned_to=tecnico["id"]).status_code == 200
     assert patch(client, ticket["id"], tecnico, status="in_progress").status_code == 200
     assert patch(client, ticket["id"], tecnico, priority_id=4).status_code == 200
 
@@ -131,12 +132,12 @@ def test_coordinator_assigns_technician(client, make_user, make_ticket):
     assert response.json()["assigned_to"] == tecnico["id"]
 
 
-def test_technician_assigns_self(client, make_user, make_ticket):
-    # Regla 11: el técnico se asigna un ticket libre
+def test_technician_cannot_assign_self(client, make_user, make_ticket):
+    # Regla 11 (fase 1): asignar es del coordinador; el técnico ni siquiera ve los tickets libres
     tecnico = make_user("technician")
     ticket = make_ticket(make_user("requester"))
     response = patch(client, ticket["id"], tecnico, assigned_to=tecnico["id"])
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 def test_technician_cannot_assign_other(client, make_user, make_ticket):

@@ -21,7 +21,7 @@ ROLE_GUIDANCE = {
     "requester": "Ayuda al usuario a entender el estado de sus tickets y a describir bien su problema.",
     "technician": "Ayuda con resúmenes, prioridades y pasos de diagnóstico de soporte técnico.",
     "coordinator": "Ayuda con resúmenes del equipo, carga de trabajo y tickets atrasados.",
-    "admin": "Ayuda con resúmenes del equipo, carga de trabajo y tickets atrasados.",
+    "admin": "Ayuda con la administración del sistema: cuentas, invitaciones, permisos, correo e IA. No tienes datos de tickets.",
 }
 
 OPEN_STATUSES = ("new", "in_progress", "resolved")
@@ -203,7 +203,8 @@ def build_context(db: Session, user: models.User) -> str:
         lines = _requester_context(db, user)
     elif user.role == "technician":
         lines = _technician_context(db, user)
-    elif user.role in ("coordinator", "admin"):
+    elif user.role == "coordinator":
+        # El administrador no recibe datos de tickets
         lines = _team_context(db)
     else:
         lines = []

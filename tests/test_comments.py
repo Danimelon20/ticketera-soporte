@@ -106,10 +106,19 @@ def test_requester_cannot_comment_others_ticket(client, make_user, make_ticket):
     assert comment(client, ticket_de_luis["id"], ana, "Me meto").status_code == 403
 
 
-def test_technician_comments_any_ticket(client, make_user, make_ticket):
-    # Cualquier rol comenta; el técnico, en tickets de otros
+def _assign(client, coordinator, ticket_id, user):
+    """Asigna el coordinador: el técnico ya no se asigna tickets."""
+    response = client.patch(f"/api/tickets/{ticket_id}", json={"assigned_to": user["id"]},
+                            headers=coordinator["headers"])
+    assert response.status_code == 200, response.text
+
+
+def test_technician_comments_only_assigned_ticket(client, make_user, make_ticket):
+    # El técnico solo comenta en el ticket que tiene asignado
     tecnico = make_user("technician")
     ticket = make_ticket(make_user("requester"))
+    assert comment(client, ticket["id"], tecnico, "Lo reviso mañana").status_code == 403
+    _assign(client, make_user("coordinator"), ticket["id"], tecnico)
     assert comment(client, ticket["id"], tecnico, "Lo reviso mañana").status_code == 200
 
 
@@ -124,15 +133,14 @@ def test_requester_cannot_open_others_ticket(client, make_user, make_ticket):
 
 # ---------- Pruebas adicionales requeridas ----------
 
-def test_unassigned_technician_comments_ticket(client, make_user, make_ticket):
+def test_unassigned_technician_cannot_comment_ticket(client, make_user, make_ticket):
+    # Ya no ve los tickets de los demás: ni los abre ni comenta
     requester = make_user("requester")
     ticket = make_ticket(requester)
     technician = make_user("technician")
     response = comment(client, ticket["id"], technician, "Comentario de técnico no asignado")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["user_id"] == technician["id"]
-    assert data["content"] == "Comentario de técnico no asignado"
+    assert response.status_code == 403
+    assert detail(client, ticket["id"], technician).status_code == 403
 
 
 def test_two_different_technicians_comment_ticket(client, make_user, make_ticket):
@@ -140,10 +148,15 @@ def test_two_different_technicians_comment_ticket(client, make_user, make_ticket
     ticket = make_ticket(requester)
     tech1 = make_user("technician")
     tech2 = make_user("technician")
+    coordinator = make_user("coordinator")
+    _assign(client, coordinator, ticket["id"], tech1)
     res1 = comment(client, ticket["id"], tech1, "Comentario del técnico 1")
     assert res1.status_code == 200
     assert res1.json()["user_id"] == tech1["id"]
 
+    # Reasignado: el anterior solo lee; el nuevo comenta
+    _assign(client, coordinator, ticket["id"], tech2)
+    assert comment(client, ticket["id"], tech1, "Ya no me toca").status_code == 403
     res2 = comment(client, ticket["id"], tech2, "Comentario del técnico 2")
     assert res2.status_code == 200
     assert res2.json()["user_id"] == tech2["id"]

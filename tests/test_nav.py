@@ -10,14 +10,15 @@ MONDAY_8AM = datetime(2031, 4, 7, 14, 0)
 MONDAY_9AM = datetime(2031, 4, 7, 15, 0)
 FAR_AWAY = MONDAY_9AM + timedelta(days=30)
 
+# Reportes de cuentas e invitaciones son del administrador; el técnico ya no ve los tickets sin asignar
 COORDINATOR_KEYS = {
-    "unassigned", "due_soon", "overdue", "open", "resolved_today",
-    "drafts_pending", "reports_open", "invitations_pending", "cancelled",
+    "unassigned", "due_soon", "overdue", "open", "resolved_today", "drafts_pending", "cancelled",
 }
 TECHNICIAN_KEYS = {
-    "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "unassigned", "drafts_pending", "shift",
-    "overdue",
+    "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "drafts_pending", "shift", "overdue",
 }
+# El administrador no entra al flujo de tickets: solo contadores de cuentas
+ADMIN_KEYS = {"reports_open", "invitations_pending", "approvals_pending"}
 
 
 @pytest.fixture(autouse=True)
@@ -140,7 +141,7 @@ def test_admin_gets_approvals(make_user, client):
     admin = make_user("admin")
     response = client.get("/api/nav/counts", headers=admin["headers"])
     assert response.status_code == 200
-    assert set(response.json()) == COORDINATOR_KEYS | {"approvals_pending"}
+    assert set(response.json()) == ADMIN_KEYS
 
 
 def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkeypatch):
@@ -168,9 +169,9 @@ def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkey
     assert set(counts) == TECHNICIAN_KEYS
     assert counts["mine_open"] == 1
     assert counts["mine_due_soon"] == 1
-    assert counts["following_open"] == 1
+    # Sigue un ticket de otro técnico (desde antes): ya no lo ve, así que no cuenta
+    assert counts["following_open"] == 0
     assert counts["mine_resolved_today"] == 1
-    assert counts["unassigned"] == 1
     assert counts["overdue"] == 0
     assert counts["shift"] == {"start": "08:00", "end": "16:00", "on_shift": True, "load": 2}
 
@@ -178,7 +179,7 @@ def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkey
     assert response.status_code == 200
     body = response.json()
     assert set(body) == TECHNICIAN_KEYS
-    for key in ("reports_open", "approvals_pending", "invitations_pending", "open"):
+    for key in ("reports_open", "approvals_pending", "invitations_pending", "open", "unassigned"):
         assert key not in body
 
 

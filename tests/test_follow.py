@@ -92,8 +92,9 @@ def test_status_change_notifies_followers_only(client, make_user, make_ticket, s
     ticket = make_ticket(requester)
 
     _follow(client, ticket["id"], follower)
+    # Asigna el coordinador (el técnico ya no se asigna); después el técnico puede seguirlo
+    _patch(client, ticket["id"], not_follower, assigned_to=technician["id"])
     _follow(client, ticket["id"], technician)
-    _patch(client, ticket["id"], technician, assigned_to=technician["id"])
     sent.clear()
 
     _patch(client, ticket["id"], technician, status="in_progress")

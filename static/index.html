@@ -519,7 +519,11 @@
                     <p id="homeDate" class="home-date"></p>
                     <h1 id="homeTitle" class="home-title">Inicio</h1>
                 </div>
-                <button type="button" id="homeQueue" class="ui-btn ui-btn-primary">Ir a la cola de tickets</button>
+                <div class="home-actions">
+                    <!-- Reporte de operación: solo el coordinador -->
+                    <button type="button" id="sendSummaryNow" class="ui-btn ui-btn-secondary" hidden>Enviar resumen ahora</button>
+                    <button type="button" id="homeQueue" class="ui-btn ui-btn-primary">Ir a la cola de tickets</button>
+                </div>
             </div>
             <div id="homeStats" class="home-stats"></div>
             <div id="homeIncidents" class="home-incidents" hidden></div>
@@ -846,7 +850,15 @@
                 <section class="drafts-side" aria-labelledby="draftsTitle">
                     <div class="drafts-side-head">
                         <h1 id="draftsTitle" class="drafts-title">Borradores de correo</h1>
-                        <p class="drafts-intro">La IA leyó estos correos. Usted decide si se vuelven ticket.</p>
+                        <p id="draftsIntro" class="drafts-intro">La IA leyó estos correos. Usted decide si se vuelven ticket.</p>
+                        <div id="draftsFilterField" class="ui-field drafts-filter" hidden>
+                            <label for="draftsFilter">Mostrar</label>
+                            <select id="draftsFilter" class="ui-input">
+                                <option value="all">Todos</option>
+                                <option value="mine">Mis borradores</option>
+                                <option value="none">Sin revisor</option>
+                            </select>
+                        </div>
                     </div>
                     <ul id="draftsList" class="drafts-list" aria-label="Borradores"></ul>
                 </section>
@@ -858,6 +870,7 @@
                                 <p id="draftNumber" class="draft-number"></p>
                                 <h2 id="draftSubject" class="draft-subject"></h2>
                                 <p id="draftMeta" class="draft-meta"></p>
+                                <p id="draftAssignee" class="draft-assignee"></p>
                             </div>
                             <span id="draftTag" class="ui-tag"></span>
                         </div>
@@ -866,6 +879,10 @@
                             <button type="button" id="draftReportBtn" class="ticket-bar-link">Reportar cuenta</button>
                         </div>
                         <p id="draftReason" class="ui-notice is-warn draft-reason" hidden></p>
+                        <div id="draftReassignField" class="ui-field draft-reassign" hidden>
+                            <label for="draftReassign">Reasignar a</label>
+                            <select id="draftReassign" class="ui-input"></select>
+                        </div>
                         <h3 class="sr-only">Correo original</h3>
                         <pre id="draftBody" class="ui-card draft-body" tabindex="0"></pre>
                         <div id="draftAttachments" class="draft-attachments" aria-label="Adjuntos del correo" hidden></div>
@@ -903,7 +920,8 @@
                                     <input type="text" id="draftIdNumber" class="ui-input" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
                                 </div>
                             </div>
-                            <div class="draft-actions">
+                            <p id="draftNotYours" class="ui-notice draft-not-yours" hidden>Solo su revisor o un coordinador puede crear el ticket o descartar este borrador.</p>
+                            <div id="draftActions" class="draft-actions">
                                 <button type="submit" id="draftConfirmBtn" class="ui-btn ui-btn-primary">Crear ticket</button>
                                 <button type="button" id="draftDetailsBtn" class="ui-btn ui-btn-secondary">Pedir más detalles</button>
                                 <button type="button" id="draftDiscardBtn" class="ui-btn ui-btn-quiet-danger">Descartar</button>
@@ -1009,7 +1027,7 @@
                 <article class="admin-card" data-admin-section="health">
                     <h2>Resumen diario</h2>
                     <p id="summaryStatus" class="admin-text"></p>
-                    <button type="button" id="sendSummaryNow" class="btn-secondary">Enviar resumen ahora</button>
+                    <p class="admin-text">Es un reporte de operación: lo envía un coordinador desde su Inicio.</p>
                 </article>
                 <article class="admin-card" data-admin-section="health">
                     <h2>Alertas</h2>
@@ -1117,6 +1135,25 @@
             <div class="dialog-actions">
                 <button type="button" id="reportCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-submit">Enviar reporte</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <dialog id="conversationDialog" class="app-dialog" aria-labelledby="conversationDialogTitle">
+        <form id="conversationForm" class="profile-form">
+            <h2 id="conversationDialogTitle" class="modal-title">Ver conversación</h2>
+            <p id="conversationDialogTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="conversationReason">Motivo</label>
+                <input type="text" id="conversationReason" minlength="5" maxlength="150" required
+                       placeholder="Por ejemplo: revisión de una queja del cliente">
+            </div>
+            <small class="help-text">Es solo lectura. Su nombre, el ticket, el motivo y la fecha quedan en el Registro de cambios.</small>
+            <p id="conversationError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="conversationCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Ver conversación</button>
             </div>
         </form>
     </dialog>

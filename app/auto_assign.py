@@ -1,8 +1,9 @@
-"""Asignación automática de tickets nuevos al técnico disponible, en turno y con menos carga.
+"""Asignación automática de tickets nuevos y de borradores al técnico disponible, en turno y con menos carga.
 
 Solo con AUTO_ASSIGN_ENABLED. Corre después del análisis de la IA (el nivel ya existe) y nunca cambia
-una asignación existente. Sin candidatos, el ticket queda en espera y lo reintenta auto_assign_forever,
-que no depende del correo.
+una asignación existente. Sin candidatos, el ticket queda en espera y el borrador "Sin revisor"; los
+reintenta auto_assign_forever, que no depende del correo.
+Carga = tickets abiertos + borradores pendientes asignados.
 """
 import asyncio
 import logging
@@ -19,6 +20,8 @@ from .notifications import notify_followers
 
 # Abierto: cualquier estado que no sea resuelto o cerrado
 OPEN_STATUSES = ("new", "in_progress")
+# Borradores que esperan a una persona (los mismos que lista la pantalla de borradores)
+DRAFT_PENDING_STATUSES = ("pending_review", "waiting_contact", "error")
 LOAD_MODES = ("levels", "count")
 NO_LEVEL = 2
 # Una asignación a la vez en todo el proceso; el UPDATE condicionado cubre lo demás
@@ -53,7 +56,8 @@ def candidates(db: Session, now: datetime) -> list[models.User]:
 
 
 def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
-    """Carga de cada técnico: suma de niveles (sin nivel cuenta 2) o cantidad de tickets abiertos."""
+    """Carga de cada técnico: suma de niveles (sin nivel cuenta 2) o cantidad de tickets abiertos y
+    borradores pendientes que tiene para revisar."""
     result = {uid: 0 for uid in user_ids}
     if not user_ids:
         return result
@@ -67,6 +71,18 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     for ticket in tickets:
         level = email_analysis.effective_level(ticket.ai_analysis) if ticket.ai_analysis else None
         result[ticket.assigned_to] += (level if level is not None else NO_LEVEL) if by_levels else 1
+    drafts = (
+        db.query(models.DraftAssignment.user_id, models.EmailDraft.ai_level)
+        .join(models.EmailDraft, models.EmailDraft.id == models.DraftAssignment.draft_id)
+        .filter(
+            models.DraftAssignment.status == "assigned",
+            models.DraftAssignment.user_id.in_(user_ids),
+            models.EmailDraft.status.in_(DRAFT_PENDING_STATUSES),
+        )
+        .all()
+    )
+    for user_id, level in drafts:
+        result[user_id] += (level if level is not None else NO_LEVEL) if by_levels else 1
     return result
 
 
@@ -224,10 +240,139 @@ def is_auto_assigned(db: Session, ticket: models.Ticket) -> bool:
     return last is not None and last[0] == row.history_id
 
 
+# ----- Borradores: un revisor por borrador -----
+
+def draft_row(db: Session, draft_id: int) -> models.DraftAssignment | None:
+    return db.query(models.DraftAssignment).filter(models.DraftAssignment.draft_id == draft_id).first()
+
+
+def _assign_draft(db: Session, draft: models.EmailDraft, row: models.DraftAssignment | None, now: datetime,
+                  notify: bool = True) -> bool:
+    """Elige revisor si hay candidato; si no, queda "Sin revisor" (en espera). No hace commit."""
+    if row is None:
+        row = models.DraftAssignment(draft_id=draft.id, status="waiting", notify=notify, created_at=now)
+        db.add(row)
+    user = choose(db, now)
+    if user is None:
+        db.flush()
+        return False
+    row.status = "assigned"
+    row.user_id = user.id
+    row.assigned_at = now
+    row.assigned_by = None
+    row.seen_at = None
+    # Uno por uno: la carga del siguiente ya cuenta este borrador
+    db.flush()
+    logging.info("Borrador %s asignado automáticamente al técnico %s", draft.id, user.id)
+    return True
+
+
+def _drafts_baseline(db: Session, now: datetime, skip_id: int | None = None) -> int:
+    """La primera vez: los borradores pendientes que ya existían se asignan sin avisos. Devuelve cuántos
+    asignó. No hace commit."""
+    if db.query(models.DraftAssignmentInstall).first() is not None:
+        return 0
+    db.add(models.DraftAssignmentInstall(installed_at=now))
+    pending = (
+        db.query(models.EmailDraft)
+        .outerjoin(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id)
+        .filter(models.EmailDraft.status.in_(DRAFT_PENDING_STATUSES), models.DraftAssignment.id.is_(None))
+        .order_by(models.EmailDraft.created_at, models.EmailDraft.id)
+        .all()
+    )
+    assigned = 0
+    for draft in pending:
+        if draft.id != skip_id and _assign_draft(db, draft, None, now, notify=False):
+            assigned += 1
+    return assigned
+
+
+def assign_draft(draft_id: int, now: datetime | None = None) -> str:
+    """Al quedar un borrador pendiente de revisión. Nunca lanza excepciones.
+
+    Con la asignación automática apagada no se asigna: queda "Sin revisor" y lo reparte un coordinador.
+    """
+    if not config.AUTO_ASSIGN_ENABLED:
+        return "disabled"
+    now = now or _now()
+    with AUTO_ASSIGN_LOCK:
+        db = SessionLocal()
+        try:
+            draft = db.get(models.EmailDraft, draft_id)
+            if draft is None or draft.status not in DRAFT_PENDING_STATUSES:
+                return "skipped"
+            _drafts_baseline(db, now, skip_id=draft_id)
+            row = draft_row(db, draft_id)
+            if row is not None and row.status != "waiting":
+                db.commit()
+                return "skipped"
+            assigned = _assign_draft(db, draft, row, now)
+            db.commit()
+            return "assigned" if assigned else "waiting"
+        except Exception:
+            db.rollback()
+            logging.exception("Falló la asignación del borrador %s", draft_id)
+            return "error"
+        finally:
+            db.close()
+
+
+def run_pending_drafts(now: datetime | None = None) -> int:
+    """Borradores sin revisor (en espera o sin fila), del más antiguo al más nuevo. Devuelve cuántos asignó."""
+    if not config.AUTO_ASSIGN_ENABLED:
+        return 0
+    now = now or _now()
+    assigned = 0
+    with AUTO_ASSIGN_LOCK:
+        db = SessionLocal()
+        try:
+            assigned += _drafts_baseline(db, now)
+            db.commit()
+            # Los que ya no esperan a una persona salen de la espera
+            for row in (
+                db.query(models.DraftAssignment)
+                .join(models.EmailDraft, models.EmailDraft.id == models.DraftAssignment.draft_id)
+                .filter(models.DraftAssignment.status == "waiting", models.EmailDraft.status.notin_(DRAFT_PENDING_STATUSES))
+            ):
+                row.status = "done"
+            db.commit()
+            drafts = (
+                db.query(models.EmailDraft)
+                .outerjoin(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id)
+                .filter(
+                    models.EmailDraft.status.in_(DRAFT_PENDING_STATUSES),
+                    models.DraftAssignment.id.is_(None) | (models.DraftAssignment.status == "waiting"),
+                )
+                .order_by(models.EmailDraft.created_at, models.EmailDraft.id)
+                .all()
+            )
+            for draft in drafts:
+                row = draft_row(db, draft.id)
+                if _assign_draft(db, draft, row, now, notify=row.notify if row is not None else True):
+                    assigned += 1
+                db.commit()
+        except Exception:
+            db.rollback()
+            logging.exception("Falló la revisión de borradores sin revisor")
+        finally:
+            db.close()
+    if assigned:
+        logging.info("Asignación automática: %s borradores asignados", assigned)
+    return assigned
+
+
+def finish_draft(db: Session, draft_id: int) -> None:
+    """Confirmado o descartado: el borrador ya no cuenta como carga ni espera revisor. No hace commit."""
+    row = draft_row(db, draft_id)
+    if row is not None:
+        row.status = "done"
+
+
 async def auto_assign_forever() -> None:
     while True:
         try:
             await asyncio.to_thread(run_pending)
+            await asyncio.to_thread(run_pending_drafts)
         except Exception:
             logging.exception("Falló la revisión de asignaciones pendientes")
         await asyncio.sleep(config.AUTO_ASSIGN_CHECK_SECONDS)

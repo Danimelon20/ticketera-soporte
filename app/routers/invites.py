@@ -11,13 +11,10 @@ router = APIRouter(prefix="/api", tags=["invites"])
 
 
 def _check_can_invite(current_user: models.User, role: str) -> None:
+    # Las cuentas las cuida el administrador: el coordinador ya no invita
     if current_user.role == "admin":
         return
-    if current_user.role == "coordinator":
-        if role == "coordinator":
-            raise HTTPException(status_code=403, detail="Solo el administrador puede invitar coordinadores")
-        return
-    raise HTTPException(status_code=403, detail="No tienes permiso para invitar personal")
+    raise HTTPException(status_code=403, detail="Solo el administrador puede invitar personal")
 
 
 def _record_sent(db: Session, actor: models.User, invitation: models.StaffInvitation) -> None:
@@ -74,21 +71,19 @@ def create_invitation(
 
 @router.get("/staff-invitations", response_model=list[StaffInvitationRead])
 def list_invitations(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user.role not in ("coordinator", "admin"):
+    if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="No tienes permiso")
     query = db.query(models.StaffInvitation)
-    if current_user.role == "coordinator":
-        query = query.filter(models.StaffInvitation.created_by == current_user.id)
     invitations = query.order_by(models.StaffInvitation.created_at.desc(), models.StaffInvitation.id.desc()).all()
     return [_invitation_read(i) for i in invitations]
 
 
 def _own_invitation(db: Session, current_user: models.User, invitation_id: int) -> models.StaffInvitation:
-    """El administrador gestiona todas; el coordinador, solo las suyas y nunca una de coordinador."""
+    """Solo el administrador las gestiona (todas)."""
+    _check_can_invite(current_user, "")
     invitation = db.get(models.StaffInvitation, invitation_id)
-    if invitation is None or (current_user.role != "admin" and invitation.created_by != current_user.id):
+    if invitation is None:
         raise HTTPException(status_code=404, detail="La invitación no existe")
-    _check_can_invite(current_user, invitation.role)
     if invitation.used_by is not None:
         raise HTTPException(status_code=409, detail="Esta invitación ya se usó")
     return invitation

@@ -1,6 +1,6 @@
 """Reporte de vencimiento de un ticket: datos para la pantalla y el PDF.
 
-Permisos: coordinador y administrador, cualquier ticket; técnico, solo el que tiene asignado.
+Permisos: coordinador, cualquier ticket; técnico, solo el que tiene asignado. El administrador, ninguno.
 En la pantalla, teléfono y cédula con el mismo enmascarado del detalle; en el PDF, siempre
 enmascarados (el archivo puede salir del sistema). Nunca comentarios: solo eventos.
 """
@@ -18,7 +18,7 @@ from .daily_summary import _local
 from .notifications import STATUS_LABELS
 from .validators import mask_id_number, mask_last4
 
-CAUSE_ROLES = ("coordinator", "admin")
+CAUSE_ROLES = ("coordinator",)
 NOT_ALLOWED = "No tienes permiso para ver el reporte de este ticket"
 LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img", "american-data.png")
 LOGO_TEXT = "American Data Networks · Ticketera de soporte"

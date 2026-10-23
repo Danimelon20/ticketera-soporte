@@ -135,10 +135,15 @@ def test_ticket_detail_shows_masked_id_for_assigned_technician(client, make_user
 
 
 def test_ticket_detail_shows_none_for_unassigned_technician(client, make_user, make_ticket):
+    # Sin asignar: ya no lo abre. Lo tuvo antes: lo ve en solo lectura, sin teléfono ni cédula
     technician = make_user("technician", "Tech User2")
     requester = make_user("requester", "Tech2 Requester")
     ticket = make_ticket(requester, title="Ticket sin asignar")
-    
+    assert client.get(f"/api/tickets/{ticket['id']}", headers=technician["headers"]).status_code == 403
+    coordinator = make_user("coordinator")
+    for user in (technician, make_user("technician")):
+        client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": user["id"]}, headers=coordinator["headers"])
+
     response = client.get(f"/api/tickets/{ticket['id']}", headers=technician["headers"])
     assert response.status_code == 200
     data = response.json()

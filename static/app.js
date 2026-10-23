@@ -157,7 +157,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 message = 'La contraseña debe tener al menos 8 caracteres';
             } else if ((endpoint === '/tickets' || endpoint === '/profile' || endpoint.startsWith('/account/')
                 || endpoint.startsWith('/accounts/') || endpoint.startsWith('/account-requests')
-                || endpoint.startsWith('/account-reports'))
+                || endpoint.startsWith('/account-reports') || endpoint.startsWith('/drafts/')
+                || endpoint.endsWith('/view-conversation'))
                 && ['POST', 'PUT'].includes(options.method)) {
                 message = getErrorMessage(errorData);
             } else if (response.status === 401 && endpoint.includes('/auth/login')) {
@@ -211,7 +212,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 userAvatarEl.textContent = getInitials(currentUser.name);
             }
             if (openNewTicketBtn) {
-                openNewTicketBtn.style.display = currentUser.role === 'technician' ? 'none' : 'block';
+                // Ni el técnico ni el administrador crean tickets
+                openNewTicketBtn.style.display = ['technician', 'admin'].includes(currentUser.role) ? 'none' : 'block';
             }
         }
 
@@ -231,11 +233,8 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshReportsBadge();
         // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
         setupStaffShell();
-        // El personal entra a Inicio (el resumen del día)
-        if (isStaffShell() && !profileRequired()) {
-            setSideNavActive('home');
-            showView('home');
-        }
+        // El personal entra a Inicio (el resumen del día); el administrador, a Cuentas
+        if (isStaffShell() && !profileRequired()) showStaffHome();
         setupPortal();
         setupChat();
     }
@@ -2810,8 +2809,8 @@ document.addEventListener('DOMContentLoaded', () => {
         navAdmin.hidden = role !== 'admin';
         navAccounts.hidden = role !== 'coordinator';
         navReports.hidden = !REPORT_REVIEW_ROLES.includes(role);
-        // La lista de cuentas con correos solo es para quien gestiona cuentas
-        navUsers.hidden = !(role === 'coordinator' || role === 'admin');
+        // Invitaciones: solo el administrador (cuida las cuentas)
+        navUsers.hidden = role !== 'admin';
         navDrafts.hidden = !DRAFT_ROLES.includes(role);
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
@@ -2956,8 +2955,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('accountHome').addEventListener('click', () => {
         if (isStaffShell()) {
-            setSideNavActive('home');
-            showView('home');
+            showStaffHome();
         } else {
             showView('tickets');
         }
@@ -3238,7 +3236,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ----- Borradores de correos -----
-    const DRAFT_ROLES = ['technician', 'coordinator', 'admin'];
+    // El administrador no entra a los borradores (no confirma ni descarta)
+    const DRAFT_ROLES = ['technician', 'coordinator'];
     const DRAFT_STATUS_LABELS = {
         analyzing: 'Analizando',
         pending_review: 'Por revisar',
@@ -3334,10 +3333,38 @@ document.addEventListener('DOMContentLoaded', () => {
         draftsPollTimer = setInterval(pollDraftsBadge, 60000);
     }
 
+    // El coordinador ve todos y filtra; el técnico, solo los que le asignaron
+    const draftsFilter = document.getElementById('draftsFilter');
+    const draftReassign = document.getElementById('draftReassign');
+
+    function setupDraftsFilter() {
+        const manager = OPERATION_ROLES.includes(currentUser.role);
+        document.getElementById('draftsFilterField').hidden = !manager;
+        document.getElementById('draftsIntro').textContent = manager
+            ? 'La IA leyó estos correos. Cada uno tiene un técnico que lo revisa; usted puede reasignarlo.'
+            : 'Mis borradores: los correos que le asignaron. Usted decide si se vuelven ticket.';
+    }
+
+    function openDraftById(draftId) {
+        selectedDraftId = draftId;
+        // Con un filtro puesto podría no aparecer
+        draftsFilter.value = 'all';
+        setSideNavActive('drafts');
+        showView('drafts');
+    }
+
+    draftsFilter.addEventListener('change', () => {
+        selectedDraftId = null;
+        loadDrafts();
+    });
+
     async function loadDrafts() {
         if (!drafts.length) showSkeleton(draftsList, { rows: 4 });
+        setupDraftsFilter();
+        const query = OPERATION_ROLES.includes(currentUser.role) && draftsFilter.value !== 'all'
+            ? `?assigned=${draftsFilter.value}` : '';
         try {
-            drafts = await apiFetch('/drafts', { silent: true });
+            drafts = await apiFetch(`/drafts${query}`, { silent: true });
         } catch (err) {
             draftsList.removeAttribute('aria-busy');
             draftsList.replaceChildren();
@@ -3347,7 +3374,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         draftsList.removeAttribute('aria-busy');
-        updateDraftsBadge(drafts.length);
+        if (!query) updateDraftsBadge(drafts.length);
         renderDraftList();
         const current = drafts.find(d => d.id === selectedDraftId);
         if (current) {
@@ -3373,6 +3400,26 @@ document.addEventListener('DOMContentLoaded', () => {
         return [DRAFT_STATUS_LABELS[draft.status] || draft.status, ''];
     }
 
+    function draftOwnerText(draft) {
+        return draft.assigned_name ? `Asignado a ${draft.assigned_name}` : 'Sin revisor';
+    }
+
+    // Solo técnicos activos (el servidor lo vuelve a validar)
+    function fillDraftReassign(draft) {
+        draftReassign.replaceChildren();
+        const current = staffOption('', draft.assigned_name ? `${draft.assigned_name} (actual)` : 'Sin revisor', true);
+        current.disabled = true;
+        draftReassign.appendChild(current);
+        Object.keys(userMap).forEach(userId => {
+            if (userRoleMap[userId] !== 'technician' || Number(userId) === draft.assigned_to) return;
+            const availability = userAvailabilityMap[userId];
+            const text = availability && availability !== 'available'
+                ? `${userMap[userId]} — ${AVAILABILITY_LABELS[availability]}`
+                : userMap[userId];
+            draftReassign.appendChild(staffOption(userId, text, false));
+        });
+    }
+
     function renderDraftList() {
         draftsList.replaceChildren();
         drafts.forEach(draft => {
@@ -3388,7 +3435,10 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.appendChild(makeEl('span', 'draft-item-subject', draft.subject || '(Sin asunto)'));
             btn.appendChild(makeEl('span', 'draft-item-snippet', (draft.body || '').replace(/\s+/g, ' ').trim()));
             const [tag, tone] = draftTag(draft);
-            btn.appendChild(makeEl('span', `ui-tag ${tone}`, tag));
+            const tags = makeEl('span', 'draft-item-tags');
+            tags.appendChild(makeEl('span', `ui-tag ${tone}`, tag));
+            tags.appendChild(makeEl('span', draft.assigned_name ? 'ui-tag' : 'ui-tag is-warn', draftOwnerText(draft)));
+            btn.appendChild(tags);
             li.appendChild(btn);
             draftsList.appendChild(li);
         });
@@ -3419,7 +3469,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         document.getElementById('draftNumber').textContent = `BORRADOR #${draft.id}`;
-        draftDetailsBtn.hidden = !['pending_review', 'waiting_contact'].includes(draft.status);
+        draftDetailsBtn.hidden = !draft.can_review || !['pending_review', 'waiting_contact'].includes(draft.status);
         document.getElementById('draftDetailsHint').hidden = draftDetailsBtn.hidden;
         document.getElementById('draftSubject').textContent = draft.subject || '(Sin asunto)';
         const draftMeta = document.getElementById('draftMeta');
@@ -3429,6 +3479,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftTagEl = document.getElementById('draftTag');
         draftTagEl.textContent = tag;
         draftTagEl.className = `ui-tag ${tone}`;
+        document.getElementById('draftAssignee').textContent = draftOwnerText(draft);
+        // Reasignar: solo el coordinador. Confirmar o descartar: el revisor o un coordinador
+        document.getElementById('draftReassignField').hidden = !draft.can_reassign;
+        if (draft.can_reassign) fillDraftReassign(draft);
+        document.getElementById('draftActions').hidden = !draft.can_review;
+        document.getElementById('draftNotYours').hidden = draft.can_review;
         shownDraft = draft;
         renderDraftFlags(draft);
         const draftReason = document.getElementById('draftReason');
@@ -3483,6 +3539,36 @@ document.addEventListener('DOMContentLoaded', () => {
         draftDiscardBtn.disabled = busy;
         draftDetailsBtn.disabled = busy;
     }
+
+    draftReassign.addEventListener('change', async () => {
+        if (selectedDraftId === null || !draftReassign.value) return;
+        const draftId = selectedDraftId;
+        const userId = Number(draftReassign.value);
+        const send = (confirmUnavailable) => apiFetch(`/drafts/${draftId}/assign`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, confirm_unavailable: confirmUnavailable }),
+            silent: true
+        });
+        draftReassign.disabled = true;
+        try {
+            try {
+                await send(false);
+            } catch (err) {
+                // De vacaciones, con incapacidad o fuera de su horario: se puede, confirmando
+                if (err.status !== 409 || !window.confirm(err.message)) throw err;
+                await send(true);
+            }
+            showSuccess(`Borrador #${draftId} reasignado a ${userMap[userId] || 'otro técnico'}`);
+            await loadDrafts();
+        } catch (err) {
+            if (err.status !== 409) showError(err.message || 'No se pudo reasignar el borrador');
+            const current = drafts.find(d => d.id === draftId);
+            if (current) fillDraftReassign(current);
+        } finally {
+            draftReassign.disabled = false;
+        }
+    });
 
     draftsList.addEventListener('click', (e) => {
         const btn = e.target.closest('.draft-item');
@@ -3754,13 +3840,14 @@ document.addEventListener('DOMContentLoaded', () => {
             sessions: ['coordinator', 'technician', 'requester'],
             role: ['coordinator', 'technician', 'requester']
         },
+        // Las cuentas las cuida el administrador: el coordinador maneja turnos y disponibilidad de técnicos
         coordinator: {
-            active: ['technician', 'requester'],
-            reset: ['technician'],
-            unlock: ['technician', 'requester'],
+            active: [],
+            reset: [],
+            unlock: [],
             availability: ['technician'],
             schedule: ['technician'],
-            sessions: ['technician', 'requester'],
+            sessions: [],
             role: ['technician', 'requester']
         }
     };
@@ -3845,7 +3932,9 @@ document.addEventListener('DOMContentLoaded', () => {
         match: 'Verificado', mismatch: 'No coincide', not_found: 'No encontrado', unverified: 'Sin verificar'
     };
     const REPORT_STATUS = { open: 'Abierto', confirmed: 'Confirmado', dismissed: 'Descartado' };
-    const REPORT_REVIEW_ROLES = ['coordinator', 'admin'];
+    // Revisar reportes de cuentas: solo el administrador. Dirigir la operación (equipo, incidentes, clientes): el coordinador
+    const REPORT_REVIEW_ROLES = ['admin'];
+    const OPERATION_ROLES = ['coordinator'];
 
     // "2026-11-03" → "03/11/2026" sin pasar por la zona horaria
     function formatPlainDate(value) {
@@ -5025,7 +5114,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ticket_merge_undone: 'Fusión separada',
         ticket_linked: 'Tickets relacionados',
         ticket_link_undone: 'Relación separada',
-        incident_marked: 'Posible incidente'
+        incident_marked: 'Posible incidente',
+        conversation_viewed: 'Ver conversación (motivo)'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -5334,7 +5424,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showView('newTicket');
             ticketForm.reset();
             resetRequesterField();
-            const canChooseRequester = currentUser && ['coordinator', 'admin'].includes(currentUser.role);
+            const canChooseRequester = currentUser && OPERATION_ROLES.includes(currentUser.role);
             requesterGroup.hidden = !canChooseRequester;
             const portal = isRequesterPortal();
             document.getElementById('newTicketTitle').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
@@ -5587,7 +5677,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderInvitesSection() {
         const old = document.getElementById('invitesSection');
         if (old) old.remove();
-        if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) return;
+        // Invitaciones: solo el administrador
+        if (!currentUser || currentUser.role !== 'admin') return;
         const modalBody = document.getElementById('invitesHost');
         if (!modalBody) return;
 
@@ -5692,7 +5783,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadInvitesTable() {
-        if (!currentUser || (currentUser.role !== 'coordinator' && currentUser.role !== 'admin')) return;
+        if (!currentUser || currentUser.role !== 'admin') return;
         let invites;
         try {
             invites = await apiFetch('/staff-invitations');
@@ -5803,26 +5894,42 @@ document.addEventListener('DOMContentLoaded', () => {
                     savedView('overdue', 'Vencidos', 'overdue', 'alert', 'alert'),
                     savedView('following', 'Siguiendo', 'following_open', 'info'),
                     savedView('mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', 'ok'),
-                    savedView('unassigned', 'Sin asignar', 'unassigned', 'warn', 'warn'),
                 ] },
             ];
         }
-        const groups = [
+        // Personal, clientes e invitaciones en una sola lista (antes "Clientes" iba aparte)
+        const accounts = { id: 'accounts', label: 'Cuentas', icon: 'accounts', open: () => openAccounts() };
+        // El horario se edita con el botón "Horario" de cada fila del equipo
+        const team = { id: 'team', label: 'Equipo y turnos', icon: 'team', open: () => showAccountsSection('team') };
+        if (role === 'admin') {
+            // El administrador cuida el sistema: sin cola de tickets ni borradores
+            return [
+                { items: [
+                    accounts,
+                    team,
+                    { id: 'reports', label: 'Reportes de cuentas', icon: 'flag', count: 'reports_open', tone: 'alert', open: () => {
+                        setReportsAccount(null);
+                        showView('reports');
+                    } },
+                    { id: 'invites', label: 'Invitaciones', icon: 'invite', count: 'invitations_pending',
+                      open: () => navUsers.click() },
+                ] },
+                { title: 'Administración', items: [
+                    { id: 'approvals', label: 'Aprobaciones', icon: 'approvals', count: 'approvals_pending',
+                      open: () => showAdminSection('approvals') },
+                    { id: 'changes', label: 'Registro de cambios', icon: 'changes', open: () => showAdminSection('changes') },
+                    { id: 'health', label: 'Estado del sistema', icon: 'health', open: () => showAdminSection('health') },
+                ] },
+            ];
+        }
+        return [
             { items: [
                 home,
                 { ...ticketItem('open', 'Todos abiertos', 'open'), label: 'Tickets', icon: 'tickets',
                   open: () => setQueueView('open', 'Todos abiertos') },
                 drafts,
-                // Personal, clientes e invitaciones en una sola lista (antes "Clientes" iba aparte)
-                { id: 'accounts', label: 'Cuentas', icon: 'accounts', open: () => openAccounts() },
-                // El horario se edita con el botón "Horario" de cada fila del equipo
-                { id: 'team', label: 'Equipo y turnos', icon: 'team', open: () => showAccountsSection('team') },
-                { id: 'reports', label: 'Reportes de cuentas', icon: 'flag', count: 'reports_open', tone: 'alert', open: () => {
-                    setReportsAccount(null);
-                    showView('reports');
-                } },
-                { id: 'invites', label: 'Invitaciones', icon: 'invite', count: 'invitations_pending',
-                  open: () => navUsers.click() },
+                accounts,
+                team,
             ] },
             { title: 'Vistas guardadas', items: [
                 savedView('unassigned', 'Sin asignar', 'unassigned', 'warn', 'warn'),
@@ -5832,15 +5939,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 savedView('cancelled', 'Cancelados', 'cancelled', 'muted'),
             ] },
         ];
-        if (role === 'admin') {
-            groups.push({ title: 'Administración', items: [
-                { id: 'approvals', label: 'Aprobaciones', icon: 'approvals', count: 'approvals_pending',
-                  open: () => showAdminSection('approvals') },
-                { id: 'changes', label: 'Registro de cambios', icon: 'changes', open: () => showAdminSection('changes') },
-                { id: 'health', label: 'Estado del sistema', icon: 'health', open: () => showAdminSection('health') },
-            ] });
-        }
-        return groups;
     }
 
     let navItems = {};
@@ -6044,7 +6142,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (status) renderStatusBar(status);
             if (notices) renderBell(notices);
             // La cola visible también se actualiza; el detalle abierto no se toca
-            if (withQueue && document.querySelector('main .split').style.display !== 'none') {
+            // El administrador no tiene cola de tickets
+            if (withQueue && currentUser.role !== 'admin' && document.querySelector('main .split').style.display !== 'none') {
                 await loadQueue({ quiet: true });
             }
         } catch (err) {
@@ -6072,18 +6171,80 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ----- Buscador global: #número abre el ticket; el texto busca tickets y, con permiso, clientes -----
     async function openTicketById(ticketId) {
+        // El administrador no abre tickets directamente: primero el motivo de "Ver conversación"
+        const admin = currentUser && currentUser.role === 'admin';
+        const reason = admin ? await askConversationReason(ticketId) : null;
+        if (admin && reason === null) return;
         showView('tickets');
         setSideNavActive(null);
         selectedTicketId = ticketId;
         activityFilter = 'public';
         enterTicketPage(ticketId);
         try {
-            const ticket = await apiFetch(`/tickets/${ticketId}`);
+            const ticket = admin
+                ? await apiFetch(`/tickets/${ticketId}/view-conversation`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason })
+                })
+                : await apiFetch(`/tickets/${ticketId}`);
             showTicketDetail(ticket);
         } catch (err) {
             // apiFetch ya mostró el error (por ejemplo, que no existe)
             exitTicketPage();
         }
+    }
+
+    // ----- "Ver conversación" (administrador): motivo corto, de 5 a 150 caracteres -----
+    const conversationDialog = document.getElementById('conversationDialog');
+    const conversationForm = document.getElementById('conversationForm');
+    const conversationReason = document.getElementById('conversationReason');
+    const conversationError = document.getElementById('conversationError');
+    let conversationDone = null;
+
+    function askConversationReason(ticketId) {
+        return new Promise(resolve => {
+            conversationDone = resolve;
+            conversationForm.reset();
+            conversationError.hidden = true;
+            document.getElementById('conversationDialogTarget').textContent = `Ticket #${ticketId}`;
+            conversationDialog.showModal();
+            conversationReason.focus();
+        });
+    }
+
+    function closeConversationDialog(reason) {
+        if (conversationDialog.open) conversationDialog.close();
+        const resolve = conversationDone;
+        conversationDone = null;
+        if (resolve) resolve(reason);
+    }
+
+    document.getElementById('conversationCancel').addEventListener('click', () => closeConversationDialog(null));
+    conversationDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeConversationDialog(null);
+    });
+    conversationForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const reason = conversationReason.value.trim().replace(/\s+/g, ' ');
+        if (reason.length < 5) {
+            conversationError.textContent = 'Escriba un motivo de al menos 5 caracteres';
+            conversationError.hidden = false;
+            return;
+        }
+        closeConversationDialog(reason);
+    });
+
+    // Inicio del personal. El administrador no tiene Inicio de tickets (no entra al flujo): va a Cuentas
+    function showStaffHome() {
+        if (currentUser && currentUser.role === 'admin') {
+            setSideNavActive('accounts');
+            openAccounts();
+            return;
+        }
+        setSideNavActive('home');
+        showView('home');
     }
 
     function setupStaffShell() {
@@ -6603,10 +6764,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (row) row.focus();
     });
 
-    document.getElementById('ticketHome').addEventListener('click', () => {
-        setSideNavActive('home');
-        showView('home');
-    });
+    document.getElementById('ticketHome').addEventListener('click', () => showStaffHome());
 
     ticketPrev.addEventListener('click', () => {
         const ids = queueIds();
@@ -6664,6 +6822,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('homeDate').textContent = `${day.replace('.', '')} · ${time}`.toUpperCase();
         const firstName = (currentUser.name || '').split(' ')[0];
         document.getElementById('homeTitle').textContent = firstName ? `${homeGreeting()}, ${firstName}` : homeGreeting();
+        sendSummaryNowBtn.hidden = !OPERATION_ROLES.includes(currentUser.role);
         homeStats.replaceChildren();
         homeCards().forEach(([view, queueLabel, label, value, detail, tone]) => {
             const card = makeEl('button', 'ui-card home-card');
@@ -6699,7 +6858,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadHomeLists() {
         const seq = ++homeSeq;
         const technician = currentUser.role === 'technician';
-        const canManage = REPORT_REVIEW_ROLES.includes(currentUser.role);
+        const canManage = OPERATION_ROLES.includes(currentUser.role);
         showSkeleton(homeAttention, { rows: 3 });
         homeTeamPanel.hidden = !canManage;
         if (canManage) showSkeleton(homeTeam, { rows: 3 });
@@ -6713,7 +6872,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // El servidor le da al técnico solo sus vencidos
                 apiFetch('/queue?view=overdue', { silent: true }),
                 apiFetch(`/queue?view=${technician ? 'mine_due_soon' : 'due_soon'}`, { silent: true }),
-                canManage ? apiFetch('/account-reports?status=open', { silent: true }) : Promise.resolve([]),
+                REPORT_REVIEW_ROLES.includes(currentUser.role)
+                    ? apiFetch('/account-reports?status=open', { silent: true }) : Promise.resolve([]),
                 canManage ? apiFetch('/team', { silent: true }) : Promise.resolve(null),
                 // Si falla, Inicio sigue sin la franja
                 canManage ? apiFetch('/incidents', { silent: true }).catch(() => []) : Promise.resolve([]),
@@ -6957,7 +7117,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffAssigneeControl(ticket) {
         const name = ticket.assigned_to !== null ? (userMap[ticket.assigned_to] || 'Sin nombre') : null;
-        const canAssign = ['coordinator', 'admin'].includes(currentUser.role) && ticket.status !== 'closed';
+        const canAssign = OPERATION_ROLES.includes(currentUser.role) && ticket.status !== 'closed';
         if (!canAssign) {
             const text = makeEl('span', name ? '' : 'is-unassigned', name || 'Sin asignar');
             if (name && ticket.auto_assigned) text.textContent = `${name} · asignado automáticamente`;
@@ -7499,7 +7659,9 @@ document.addEventListener('DOMContentLoaded', () => {
         detailContent.replaceChildren();
         detailPanel.scrollTop = 0;
         const isClosed = ticket.status === 'closed';
-        const canManage = ['coordinator', 'admin'].includes(currentUser.role);
+        const canManage = OPERATION_ROLES.includes(currentUser.role);
+        // Técnico que lo tuvo antes o administrador con "Ver conversación": solo lectura
+        const readOnly = Boolean(ticket.read_only);
         const clientName = userMap[ticket.created_by] || 'Solicitante';
 
         // ----- Encabezado: título, seguir, estado y reasignar -----
@@ -7512,9 +7674,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const followHint = makeEl('p', 'follow-hint');
         followBox.append(followBtn, followHint);
         renderFollowButton(followBtn, followHint, Boolean(ticket.following));
-        titleRow.appendChild(followBox);
+        if (currentUser.role !== 'admin') titleRow.appendChild(followBox);
         const status = staffStatusControl(ticket);
-        if (status.tagName === 'SELECT') {
+        if (!readOnly && status.tagName === 'SELECT') {
             const statusLabel = makeEl('label', 'td-status-label', 'Cambiar estado');
             statusLabel.appendChild(status);
             titleRow.appendChild(statusLabel);
@@ -7572,17 +7734,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const events = makeEl('div', 'td-events sd-events');
         main.appendChild(events);
         renderStaffTimeline(ticket, events);
-        main.appendChild(staffComposer(ticket));
+        if (readOnly) {
+            const box = makeEl('div', 'ui-card td-composer sd-composer');
+            box.appendChild(makeEl('p', 'td-composer-closed', currentUser.role === 'admin'
+                ? 'Está viendo la conversación en solo lectura. Este acceso quedó en el Registro de cambios.'
+                : 'Este ticket ya no está asignado a usted: puede verlo, pero no comentarlo ni cambiarlo.'));
+            main.appendChild(box);
+        } else {
+            main.appendChild(staffComposer(ticket));
+        }
 
         // ----- Columna derecha -----
-        if (currentUser.role === 'technician' && ticket.assigned_to === null && !isClosed) {
-            const notice = makeEl('div', 'ui-notice is-warn sd-notice');
-            notice.appendChild(makeEl('span', '', 'Este ticket no tiene responsable.'));
-            const assignMe = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm btn-assign-me', 'Asignármelo');
-            assignMe.type = 'button';
-            notice.appendChild(assignMe);
-            side.appendChild(notice);
-        }
 
         // Solo el personal recibe cancellation
         if (ticket.cancellation) {
@@ -7609,7 +7771,8 @@ document.addEventListener('DOMContentLoaded', () => {
         props.appendChild(makeEl('h2', 'ui-kicker', 'Propiedades'));
         const fields = makeEl('dl', 'td-props');
         staffField(fields, 'Responsable', staffAssigneeControl(ticket));
-        staffField(fields, 'Nivel', staffLevelControl(ticket));
+        staffField(fields, 'Nivel', readOnly
+            ? levelText(ticket.ai_analysis ? ticket.ai_analysis.effective_level : null) : staffLevelControl(ticket));
         staffField(fields, 'Canal', SOURCE_LABELS[ticket.source] || ticket.source);
         staffField(fields, 'Vence', staffDueContent(ticket));
         staffField(fields, 'Prioridad', priorityMap[ticket.priority_id] || '');
@@ -9170,12 +9333,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let paletteClientTimer = null;
     let paletteReturnFocus = null;
 
+    // Crear a nombre de un cliente y reasignar: el coordinador (el administrador no entra al flujo de tickets)
     function canCreateTicket() {
-        return Boolean(currentUser && ['coordinator', 'admin'].includes(currentUser.role));
+        return Boolean(currentUser && OPERATION_ROLES.includes(currentUser.role));
     }
 
     function canAssign() {
-        return Boolean(currentUser && ['coordinator', 'admin'].includes(currentUser.role));
+        return Boolean(currentUser && OPERATION_ROLES.includes(currentUser.role));
     }
 
     // Sin tildes ni mayúsculas, para que "creditos" encuentre "Créditos"
@@ -9189,7 +9353,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const number = query.trim().match(/^#?\s*(\d+)$/);
         if (number) {
             groups.push({ title: 'Ticket', items: [{
-                label: `Abrir ticket #${number[1]}`, hint: 'Ticket',
+                label: currentUser.role === 'admin' ? `Ver conversación del ticket #${number[1]}` : `Abrir ticket #${number[1]}`,
+                hint: 'Ticket',
                 run: () => openTicketById(parseInt(number[1], 10)),
             }] });
         }
@@ -9215,7 +9380,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const shownActions = actions.filter(item => !q || plain(item.label).includes(q));
         if (shownActions.length) groups.push({ title: 'Acciones', items: shownActions });
 
-        if (q.length >= 2 && !number) {
+        // El administrador no busca en los tickets (no tiene cola)
+        if (q.length >= 2 && !number && currentUser.role !== 'admin') {
             const text = query.trim();
             const search = [{ label: `Buscar «${text}» en los tickets`, hint: 'Búsqueda', run: () => {
                 setSideNavActive(null);
@@ -9319,7 +9485,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPalette();
         clearTimeout(paletteClientTimer);
         const text = paletteInput.value.trim();
-        if (REPORT_REVIEW_ROLES.includes(currentUser.role) && text.length >= 2 && !/^#?\s*\d+$/.test(text)) {
+        if (OPERATION_ROLES.includes(currentUser.role) && text.length >= 2 && !/^#?\s*\d+$/.test(text)) {
             paletteClientTimer = setTimeout(() => searchPaletteClients(text), 300);
         }
     });
@@ -9573,7 +9739,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let bellKnown = new Set();  // Avisos ya vistos en esta sesión: solo los nuevos sacan un toast
     let bellLoaded = false;
 
-    const noticeKey = (item) => `${item.ticket_id}:${item.kind}`;
+    // Los de borradores no tienen ticket: se identifican por el borrador
+    const noticeKey = (item) => (item.kind === 'draft_assigned' ? `draft:${item.draft_id}` : `${item.ticket_id}:${item.kind}`);
 
     // "2 h 05 min", "45 min", "3 d 4 h"
     function durationText(seconds) {
@@ -9591,6 +9758,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function noticeText(item) {
+        if (item.kind === 'draft_assigned') return `Nuevo borrador asignado · ${item.title}`;
         const ticket = `El ticket #${item.ticket_id} · ${item.title}`;
         if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · ${item.title}`;
         if (item.kind === 'overdue') return `${ticket} venció hace ${durationText(-secondsUntil(item.due_at))}`;
@@ -9598,6 +9766,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function noticeToastText(item) {
+        if (item.kind === 'draft_assigned') return `Nuevo borrador asignado · ${item.title}`;
         if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · pendiente de causa`;
         if (item.kind === 'overdue') return `El ticket #${item.ticket_id} acaba de vencer`;
         return `El ticket #${item.ticket_id} vence en ${durationText(secondsUntil(item.due_at))}`;
@@ -9623,7 +9792,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bellLoaded) {
             data.items.filter(item => !item.read && !bellKnown.has(noticeKey(item))).forEach(item => {
                 toast(noticeToastText(item), {
-                    action: item.kind === 'report' || item.kind === 'overdue' ? 'Ver reporte' : 'Ver ticket',
+                    action: item.kind === 'draft_assigned' ? 'Ver borrador'
+                        : (item.kind === 'report' || item.kind === 'overdue' ? 'Ver reporte' : 'Ver ticket'),
                     duration: 8000,
                     onClose: (reason) => { if (reason === 'action') openNotice(item); },
                 });
@@ -9643,11 +9813,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         bellItems.forEach(item => {
-            const li = makeEl('li', `bell-item${item.read ? '' : ' is-unread'}${item.kind === 'due_50' ? '' : ' is-urgent'}`);
+            const calm = item.kind === 'due_50' || item.kind === 'draft_assigned';
+            const li = makeEl('li', `bell-item${item.read ? '' : ' is-unread'}${calm ? '' : ' is-urgent'}`);
             const open = makeEl('button', 'bell-open');
             open.type = 'button';
-            open.dataset.ticketId = String(item.ticket_id);
-            open.dataset.kind = item.kind;
+            open.dataset.key = noticeKey(item);
             open.appendChild(makeEl('span', 'bell-text', noticeText(item)));
             if (item.needs_review) open.appendChild(makeEl('span', 'ui-tag is-warn bell-review', 'Pendiente de revisar'));
             if (!item.read) open.appendChild(makeEl('span', 'sr-only', ' (sin leer)'));
@@ -9692,10 +9862,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Vencido o reporte: al Reporte de vencimiento; 50 % y 80 %: al ticket
     function openNotice(item) {
-        markNoticesRead({ ticket_id: item.ticket_id });
+        markNoticesRead(item.kind === 'draft_assigned' ? { draft_id: item.draft_id } : { ticket_id: item.ticket_id });
         closeBellPanel();
         closeSideNav();
-        if (item.kind === 'overdue' || item.kind === 'report') openOverdueReport(item.ticket_id);
+        if (item.kind === 'draft_assigned') openDraftById(item.draft_id);
+        else if (item.kind === 'overdue' || item.kind === 'report') openOverdueReport(item.ticket_id);
         else openTicketById(item.ticket_id);
     }
 
@@ -9717,7 +9888,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const open = e.target.closest('.bell-open');
         if (!open) return;
-        const item = bellItems.find(i => i.ticket_id === Number(open.dataset.ticketId) && i.kind === open.dataset.kind);
+        const item = bellItems.find(i => noticeKey(i) === open.dataset.key);
         if (item) openNotice(item);
     });
     document.getElementById('bellReadAll').addEventListener('click', () => markNoticesRead({ all: true }));
@@ -9775,7 +9946,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderOverdueReport(report) {
         odReport = report;
         odContent.replaceChildren();
-        const canManage = ['coordinator', 'admin'].includes(currentUser.role);
+        const canManage = OPERATION_ROLES.includes(currentUser.role);
 
         const head = makeEl('header', 'od-head');
         const titles = makeEl('div', 'od-titles');
@@ -9956,7 +10127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Cancelar tickets (coordinador y administrador) -----
     // Como al reasignar: se envía al servidor (y sale el correo al cliente) cuando terminan los 5 s,
     // o antes si la persona cambia de pantalla. "Deshacer" no envía nada.
-    const CANCEL_ROLES = ['coordinator', 'admin'];
+    const CANCEL_ROLES = ['coordinator'];
     const cancelDialog = document.getElementById('cancelDialog');
     const cancelForm = document.getElementById('cancelForm');
     const cancelNote = document.getElementById('cancelNote');

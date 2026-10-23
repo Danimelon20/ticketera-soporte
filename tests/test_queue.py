@@ -143,19 +143,22 @@ def test_assignee_notes(make_user):
 
 
 def test_technician_assigned_to_is_ignored(make_user, client):
+    # El técnico solo ve los suyos: ni los de otro técnico ni los sin asignar, y no filtra por responsable
     technician = make_user("technician")
     other = make_user("technician")
     requester = make_user("requester")
+    mine = _ticket(requester, assigned_to=technician["id"])
     _ticket(requester, assigned_to=other["id"])
     _ticket(requester)
 
     everything = _queue(technician, view="open")
     filtered = _queue(technician, view="open", assigned_to=other["id"])
-    assert filtered["total"] == everything["total"] == 2
+    assert _ids(filtered) == _ids(everything) == [mine]
 
     response = client.get(f"/api/queue?assigned_to={other['id']}", headers=technician["headers"])
     assert response.status_code == 200
-    assert response.json()["total"] == 2
+    assert [item["id"] for item in response.json()["items"]] == [mine]
+    assert client.get("/api/queue?view=unassigned", headers=technician["headers"]).status_code == 403
 
 
 def test_queue_response_has_no_personal_data(make_user, client):

@@ -162,8 +162,9 @@ def test_only_hash_is_stored(client, make_user, sent):
         db.close()
 
 
+# Restablecer el acceso es del administrador (el coordinador ya no gestiona cuentas)
 @pytest.mark.parametrize("actor_role,target_role", [
-    ("coordinator", "technician"), ("admin", "technician"), ("admin", "coordinator"),
+    ("admin", "technician"), ("admin", "coordinator"),
 ])
 def test_reset_access_sends_code_to_the_person(client, make_user, sent, actor_role, target_role):
     actor = make_user(actor_role)
@@ -219,7 +220,7 @@ def test_forgot_email_links_to_code_step(client, make_user, sent, role, portal):
 
 
 def test_forced_reset_email_links_to_code_step(client, make_user, sent):
-    coordinator = make_user("coordinator")
+    coordinator = make_user("admin")
     technician = make_user("technician")
     client.post(f"/api/accounts/{technician['id']}/reset-access", headers=coordinator["headers"])
     links = _reset_links(sent, technician["email"])
@@ -239,7 +240,7 @@ def test_having_a_code_sends_no_new_email(client, make_user, sent):
 
 
 @pytest.mark.parametrize("actor_role,target_role", [
-    ("coordinator", "technician"), ("admin", "technician"), ("admin", "coordinator"),
+    ("admin", "technician"), ("admin", "coordinator"),
 ])
 def test_forced_reset_closes_sessions_and_disables_password(client, make_user, sent, actor_role, target_role):
     actor = make_user(actor_role)
@@ -267,7 +268,7 @@ def test_forced_reset_closes_sessions_and_disables_password(client, make_user, s
 
 def test_forced_reset_is_recorded(client, make_user, sent):
     admin = make_user("admin")
-    coordinator = make_user("coordinator")
+    coordinator = make_user("admin")
     technician = make_user("technician")
     client.post(f"/api/accounts/{technician['id']}/reset-access", headers=coordinator["headers"])
     response = client.get(

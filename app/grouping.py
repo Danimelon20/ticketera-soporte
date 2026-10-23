@@ -29,7 +29,7 @@ SAME_REQUESTER_DAYS = 7
 OTHER_REQUESTERS_HOURS = 48
 TEXT_CHARS = 500
 REASON_CHARS = 300
-SEPARATE_ROLES = ("coordinator", "admin")
+SEPARATE_ROLES = ("coordinator",)
 NO_PERMISSION = "No tienes permiso para separar estos tickets"
 # Llevan el número del ticket de otro cliente: el solicitante no los recibe
 STAFF_HISTORY_FIELDS = ("linked", "unlinked")
@@ -542,10 +542,17 @@ def after_draft_created(draft_id: int) -> str | None:
 # ----- Permisos y lectura -----
 
 def can_separate(user: models.User, *tickets: models.Ticket) -> bool:
-    """Coordinador, admin o el técnico asignado a cualquiera de los tickets del par."""
+    """Coordinador o el técnico asignado a cualquiera de los tickets del par."""
     if user.role in SEPARATE_ROLES:
         return True
     return user.role == "technician" and any(t is not None and t.assigned_to == user.id for t in tickets)
+
+
+def _title_for(db: Session, user: models.User, ticket: models.Ticket) -> str | None:
+    """El técnico no ve los tickets de los demás: de esos, solo el número."""
+    from . import ticket_access
+
+    return ticket.title if ticket_access.access(db, user, ticket) is not None else None
 
 
 def staff_view(db: Session, ticket: models.Ticket, user: models.User) -> dict:
@@ -569,12 +576,12 @@ def staff_view(db: Session, ticket: models.Ticket, user: models.User) -> dict:
     link = _active_links(db).filter(models.TicketLink.related_ticket_id == ticket.id).first()
     if link is not None:
         main = db.get(models.Ticket, link.principal_ticket_id)
-        principal = {"link_id": link.id, "ticket_id": main.id, "title": main.title,
+        principal = {"link_id": link.id, "ticket_id": main.id, "title": _title_for(db, user, main),
                      "similarity": link.similarity, "can_separate": can_separate(user, ticket, main)}
     related = []
     for link in _active_links(db).filter(models.TicketLink.principal_ticket_id == ticket.id).order_by(models.TicketLink.id).all():
         other = db.get(models.Ticket, link.related_ticket_id)
-        related.append({"link_id": link.id, "ticket_id": other.id, "title": other.title, "status": other.status,
+        related.append({"link_id": link.id, "ticket_id": other.id, "title": _title_for(db, user, other), "status": other.status,
                         "similarity": link.similarity, "can_separate": can_separate(user, ticket, other)})
     return {
         "merged_from": merged_from,

@@ -35,9 +35,14 @@ def overdue_notices(db: Session = Depends(get_db), current_user=Depends(require_
 def mark_overdue_notices_read(
     data: NoticeReadRequest, db: Session = Depends(get_db), current_user=Depends(require_notice_reader)
 ):
-    if not data.all and data.ticket_id is None:
-        raise HTTPException(status_code=400, detail="Indique un ticket o todos")
-    due_notices.mark_read(db, current_user, None if data.all else data.ticket_id, _now())
+    if not data.all and data.ticket_id is None and data.draft_id is None:
+        raise HTTPException(status_code=400, detail="Indique un ticket, un borrador o todos")
+    if data.all:
+        due_notices.mark_read(db, current_user, None, _now())
+    elif data.draft_id is not None:
+        due_notices.mark_read(db, current_user, None, _now(), draft_id=data.draft_id)
+    else:
+        due_notices.mark_read(db, current_user, data.ticket_id, _now())
     return Response(status_code=204)
 
 

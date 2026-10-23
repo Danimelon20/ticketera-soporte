@@ -426,6 +426,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "email_attachments_received", "email_attachments_sent",
     # Agrupación de tickets similares (target_label: "Ticket #15 → #12"; new_value: similitud y si fue automático)
     "ticket_merged", "ticket_merge_undone", "ticket_linked", "ticket_link_undone", "incident_marked",
+    # "Ver conversación" del administrador (target_label: "Ticket #N"; new_value: el motivo, enmascarado)
+    "conversation_viewed",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
 )
@@ -628,6 +630,36 @@ class TicketAutoAssignment(Base):
     created_at = Column(DateTime, nullable=False)
 
     ticket = relationship("Ticket")
+
+
+class DraftAssignment(Base):
+    """Revisor de un borrador: en espera (sin revisor), asignado o ya resuelto (done). Estado en Python.
+
+    notify: si se avisa en la campana (no en la primera asignación al instalar). seen_at: el aviso ya se leyó.
+    """
+    __tablename__ = "draft_assignments"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), unique=True, nullable=False)
+    status = Column(String(20), nullable=False, default="waiting")
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    # Nulo: la asignación automática
+    assigned_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notify = Column(Boolean, nullable=False, default=True)
+    seen_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    draft = relationship("EmailDraft")
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class DraftAssignmentInstall(Base):
+    """Una fila: la primera asignación de borradores. Lo que ya estaba pendiente se asigna sin avisos."""
+    __tablename__ = "draft_assignment_install"
+
+    id = Column(Integer, primary_key=True)
+    installed_at = Column(DateTime, nullable=False)
 
 
 # Motivos de cancelación: clave guardada en la base y texto que se muestra

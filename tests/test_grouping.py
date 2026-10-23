@@ -558,18 +558,27 @@ def make_merge(client, make_user, make_ticket, requester=None):
 def test_separate_forbidden_for_requester_and_unassigned_technician(client, make_user, make_ticket, grouping_on):
     requester = make_user("requester")
     technician = make_user("technician")
-    _, second, merge = make_merge(client, make_user, make_ticket, requester)
-    for actor in (requester, technician):
+    # El administrador tampoco separa: no entra al flujo de tickets
+    first, second, merge = make_merge(client, make_user, make_ticket, requester)
+    for actor in (requester, technician, make_user("admin")):
         response = client.post(f"/api/merges/{merge.id}/undo", headers=actor["headers"])
         assert response.status_code == 403
         assert response.json()["detail"] == grouping.NO_PERMISSION
     assert active_merge(second["id"]) is not None
+    # Un técnico que tuvo el ticket (ya fusionado y cerrado) y ya no: lo ve en solo lectura, sin "Separar"
+    db = SessionLocal()
+    try:
+        db.add(models.History(ticket_id=second["id"], field="assigned_to", old_value=str(technician["id"]),
+                              new_value=None, changed_by=requester["id"]))
+        db.commit()
+    finally:
+        db.close()
     detail = client.get(f"/api/tickets/{second['id']}", headers=technician["headers"])
     assert detail.status_code == 200, detail.text
     assert detail.json()["grouping"]["merged_into"]["can_separate"] is False
 
 
-@pytest.mark.parametrize("role", ["assigned_technician", "coordinator", "admin"])
+@pytest.mark.parametrize("role", ["assigned_technician", "coordinator"])
 def test_separate_allowed(client, make_user, make_ticket, grouping_on, role):
     coordinator = make_user("coordinator")
     first, second, merge = make_merge(client, make_user, make_ticket)
@@ -609,7 +618,7 @@ def test_detection_log_has_no_text(make_user, make_ticket, grouping_on, caplog):
 
 
 def test_change_log_has_similarity_and_automatic(client, make_user, make_ticket, grouping_on):
-    admin = make_user("admin")
+    admin = make_user("coordinator")
     first, second, merge = make_merge(client, make_user, make_ticket)
     label = f"Ticket #{second['id']} → #{first['id']}"
     merged = rows(models.AccountChange, models.AccountChange.action == "ticket_merged", models.AccountChange.target_label == label)

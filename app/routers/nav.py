@@ -43,6 +43,9 @@ def ticket_queue(
     db: Session = Depends(get_db),
     current_user=Depends(require_staff),
 ):
+    # El administrador no entra al flujo de tickets; el técnico no ve los tickets sin asignar
+    if current_user.role == "admin" or (view == "unassigned" and current_user.role == "technician"):
+        raise HTTPException(status_code=403, detail="No tiene permiso para ver esta información")
     # Cancelados: solo quien puede cancelar y reabrir
     if view == "cancelled":
         cancellations.require_can_cancel(current_user)

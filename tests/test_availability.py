@@ -258,12 +258,16 @@ def test_assigning_technician_out_of_shift_needs_confirmation(client, make_user,
     assert response.json()["detail"] == "Luis Soto está fuera de su horario. ¿Asignar de todas formas?"
 
 
-def test_technician_with_incapacity_assigning_self_needs_confirmation(client, make_user, make_ticket):
+def test_technician_with_incapacity_is_assigned_only_by_coordinator_with_confirmation(client, make_user, make_ticket):
+    # El técnico ya no se asigna tickets (ni confirmando); el coordinador sí, con la confirmación de siempre
     technician = make_user("technician")
     _own(client, technician, "incapacity", TODAY, TODAY)
     ticket = make_ticket(make_user("requester"))
-    assert _assign(client, technician, ticket["id"], technician["id"]).status_code == 409
-    assert _assign(client, technician, ticket["id"], technician["id"], confirm=True).status_code == 200
+    assert _assign(client, technician, ticket["id"], technician["id"]).status_code == 403
+    assert _assign(client, technician, ticket["id"], technician["id"], confirm=True).status_code == 403
+    coordinator = make_user("coordinator")
+    assert _assign(client, coordinator, ticket["id"], technician["id"]).status_code == 409
+    assert _assign(client, coordinator, ticket["id"], technician["id"], confirm=True).status_code == 200
 
 
 def test_available_technician_needs_no_confirmation(client, make_user, make_ticket):

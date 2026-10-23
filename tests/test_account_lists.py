@@ -6,6 +6,8 @@ import pytest
 from app import models
 from app.database import SessionLocal
 
+from conftest import assign_draft_to
+
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
 # Rutas que listan cuentas (o datos de cuentas ajenas)
@@ -63,7 +65,9 @@ def test_coordinator_and_admin_still_get_full_list(client, make_user, role):
     row = next(r for r in rows if r["id"] == requester["id"])
     assert row["email"] == requester["email"]
     assert client.get("/api/directory", headers=viewer["headers"]).status_code == 200
-    assert client.get("/api/requesters", headers=viewer["headers"]).status_code == 200
+    # Buscar solicitantes sirve para crear un ticket a su nombre: solo el coordinador (el admin no crea tickets)
+    expected = 200 if role == "coordinator" else 403
+    assert client.get("/api/requesters", headers=viewer["headers"]).status_code == expected
 
 
 def test_ticket_brings_names_without_emails(client, make_user, make_ticket):
@@ -93,13 +97,17 @@ def test_technician_never_sees_requester_email_in_drafts(client, make_user):
     requester = make_user("requester", name="", profile=False)
     db = SessionLocal()
     try:
-        db.add(models.EmailDraft(
+        draft = models.EmailDraft(
             message_id=f"<lista-{requester['id']}@test>", requester_id=requester["id"],
             subject="Ayuda", body="Texto", status="pending_review",
-        ))
+        )
+        db.add(draft)
         db.commit()
+        draft_id = draft.id
     finally:
         db.close()
+    # El técnico solo ve los borradores que tiene asignados
+    assign_draft_to(draft_id, technician["id"])
 
     drafts = client.get("/api/drafts", headers=technician["headers"]).json()
     mine = [d for d in drafts if d["requester_id"] == requester["id"]]
