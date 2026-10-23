@@ -233,8 +233,8 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshReportsBadge();
         // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
         setupStaffShell();
-        // El personal entra a Inicio (el resumen del día); el administrador, a Cuentas
-        if (isStaffShell() && !profileRequired()) showStaffHome();
+        // El personal entra por la ruta del enlace (#/módulo/sección) o al inicio de su rol
+        if (isStaffShell() && !profileRequired()) startStaffRoute();
         setupPortal();
         setupChat();
     }
@@ -248,7 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!linkedTicketId || !currentUser || profileRequired()) return;
         const ticketId = linkedTicketId;
         linkedTicketId = null;
-        history.replaceState(null, '', window.location.pathname + window.location.search);
+        // El personal pasa a la ruta del ticket (#/módulo/sección/N); el portal queda sin ruta
+        if (!isStaffShell()) history.replaceState(null, '', window.location.pathname + window.location.search);
         if (isRequesterPortal()) openPortalTicket(ticketId);
         else if (isStaffShell()) openTicketById(ticketId);
     }
@@ -2819,6 +2820,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showView(name) {
+        currentViewName = name;
         commitPendingAssign();
         commitPendingCancel();
         // Cualquier otra pantalla cierra la página del ticket
@@ -2827,7 +2829,7 @@ document.addEventListener('DOMContentLoaded', () => {
         homeView.hidden = name !== 'home';
         document.getElementById('invitesView').hidden = name !== 'invites';
         newTicketView.hidden = name !== 'newTicket';
-        // Nuevo ticket, como el detalle, es una página sin barra lateral
+        // Nuevo ticket: página propia, con la barra superior y el menú
         document.body.classList.toggle('newticket-open', name === 'newTicket');
         directoryView.hidden = name !== 'directory';
         accountsView.hidden = name !== 'accounts';
@@ -2837,7 +2839,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reportsView.hidden = name !== 'reports';
         adminAccountsView.hidden = name !== 'adminAccounts';
         overdueReportView.hidden = name !== 'overdueReport';
-        // El reporte de vencimiento, como el detalle, es una página sin barra lateral
+        // El reporte de vencimiento: página propia, con la barra superior y el menú
         document.body.classList.toggle('overdue-open', name === 'overdueReport');
         const tabs = {
             tickets: navTickets, directory: navDirectory, accounts: navAccounts,
@@ -2862,6 +2864,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadReports();
         }
         if (name === 'adminAccounts') loadAdminAccounts();
+        if (isStaffShell()) renderPageHead();
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
@@ -3343,6 +3346,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('draftsIntro').textContent = manager
             ? 'La IA leyó estos correos. Cada uno tiene un técnico que lo revisa; usted puede reasignarlo.'
             : 'Mis borradores: los correos que le asignaron. Usted decide si se vuelven ticket.';
+    }
+
+    // Secciones de Borradores: el filtro del coordinador (el técnico ve siempre los suyos)
+    function showDrafts(filter) {
+        draftsFilter.value = filter;
+        selectedDraftId = null;
+        showView('drafts');
     }
 
     function openDraftById(draftId) {
@@ -3877,7 +3887,7 @@ document.addEventListener('DOMContentLoaded', () => {
             buttons.push(button);
         }
         if (canManage(user, 'availability')) {
-            buttons.push(makeActionButton('availability', 'Vacaciones e incapacidad'));
+            buttons.push(makeActionButton('availability', 'Vacaciones y ausencias'));
         }
         // Solo cuentas de solicitante; el servidor también lo revisa
         if (user.role === 'requester') buttons.push(makeActionButton('report', 'Reportar cuenta'));
@@ -3927,7 +3937,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----- Disponibilidad, identidad y reportes (solo personal) -----
-    const AVAILABILITY_LABELS = { available: 'Disponible', vacation: 'Vacaciones', incapacity: 'Incapacidad', away: 'Ausente' };
+    const AVAILABILITY_LABELS = { available: 'Disponible', vacation: 'Vacaciones', incapacity: 'Ausencia', away: 'Ausente' };
     const IDENTITY_LABELS = {
         match: 'Verificado', mismatch: 'No coincide', not_found: 'No encontrado', unverified: 'Sin verificar'
     };
@@ -3985,7 +3995,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ----- Disponibilidad automática (técnicos y coordinadores) -----
     const AVAILABILITY_ROLES = ['technician', 'coordinator'];
-    const PERIOD_KINDS = { vacation: 'Vacaciones', incapacity: 'Incapacidad' };
+    const PERIOD_KINDS = { vacation: 'Vacaciones', incapacity: 'Ausencia' };
 
     function hasAvailability(user) {
         return Boolean(user && AVAILABILITY_ROLES.includes(user.role));
@@ -3995,7 +4005,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function availabilityNowText(status, returnDate) {
         const back = returnDate ? ` · regresa el ${formatPlainDate(returnDate)}` : '';
         if (status === 'vacation') return `De vacaciones${back}`;
-        if (status === 'incapacity') return `Con incapacidad${back}`;
+        if (status === 'incapacity') return `Con ausencia${back}`;
         if (status === 'away') return 'Ausente ahora: fuera de su horario';
         return 'Disponible ahora';
     }
@@ -4008,7 +4018,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderPeriodList(list, periods) {
         list.replaceChildren();
         if (!periods.length) {
-            list.appendChild(makeEl('li', 'periods-empty', 'No hay vacaciones ni incapacidades registradas.'));
+            list.appendChild(makeEl('li', 'periods-empty', 'No hay vacaciones ni ausencias registradas.'));
             return;
         }
         const today = localToday();
@@ -5100,8 +5110,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sessions_closed: 'Sesiones cerradas',
         invitation_cancelled: 'Invitación cancelada',
         availability_changed: 'Disponibilidad cambiada',
-        availability_period_added: 'Vacaciones o incapacidad registrada',
-        availability_period_removed: 'Vacaciones o incapacidad quitada',
+        availability_period_added: 'Vacaciones o ausencia registrada',
+        availability_period_removed: 'Vacaciones o ausencia quitada',
         server_account_deactivated: 'Cuenta desactivada',
         server_account_activated: 'Cuenta activada',
         server_role_changed: 'Rol cambiado',
@@ -5421,6 +5431,8 @@ document.addEventListener('DOMContentLoaded', () => {
             hideError();
             exitTicketPage();
             setSideNavActive(null);
+            // Ruta propia: Atrás vuelve a la sección de donde vino
+            if (isStaffShell()) pushRoute(NEW_TICKET_SECTION.route);
             showView('newTicket');
             ticketForm.reset();
             resetRequesterField();
@@ -5876,136 +5888,312 @@ document.addEventListener('DOMContentLoaded', () => {
         return svg;
     }
 
-    // Grupos sin título: pantallas principales. "Vistas guardadas": atajos a la cola.
-    function navGroupsFor(role) {
-        const home = { id: 'home', label: 'Inicio', icon: 'home', open: () => showView('home') };
-        const drafts = { id: 'drafts', label: 'Borradores de correo', icon: 'mail', count: 'drafts_pending',
-                         open: () => showView('drafts') };
+    // ===== Menú por módulos y rutas (#/módulo/sección) =====
+    // Cada sección conserva el id de siempre (setSideNavActive), tiene su ruta, su contador de /nav/counts
+    // y lo que abre. aliases: vistas de la cola que se ven dentro de la misma sección (sus pestañas).
+    function navSection(id, label, route, open, extra = {}) {
+        return { id, label, route, open, ...extra };
+    }
+
+    function queueSection(id, label, route, extra = {}) {
+        return navSection(id, label, route, () => setQueueView(id, extra.title || label), extra);
+    }
+
+    function draftsSection(id, label, route, filter, extra = {}) {
+        return navSection(id, label, route, () => showDrafts(filter), extra);
+    }
+
+    function homeTitleText() {
+        const firstName = (currentUser.name || '').split(' ')[0];
+        return firstName ? `${homeGreeting()}, ${firstName}` : homeGreeting();
+    }
+
+    function homeContextText() {
+        const day = new Date().toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'long' });
+        return `${day.charAt(0).toUpperCase()}${day.slice(1)} · así está la operación ahora`;
+    }
+
+    // Módulos de cada rol (los mismos permisos de la Fase 1: el servidor vuelve a revisar todo)
+    function navModulesFor(role) {
         if (role === 'technician') {
             return [
-                { items: [
-                    home,
-                    { ...ticketItem('mine_open', 'Mis abiertos', 'mine_open'), label: 'Tickets', icon: 'tickets',
-                      open: () => setQueueView('mine_open', 'Mis abiertos') },
-                    drafts,
-                ] },
-                { title: 'Vistas guardadas', items: [
-                    savedView('mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn', 'warn'),
-                    savedView('overdue', 'Vencidos', 'overdue', 'alert', 'alert'),
-                    savedView('following', 'Siguiendo', 'following_open', 'info'),
-                    savedView('mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', 'ok'),
+                { id: 'work', label: 'Mi trabajo', icon: 'tickets', sections: [
+                    queueSection('mine_open', 'Mis tickets', 'mi-trabajo/tickets', {
+                        count: 'mine_open', aliases: ['mine_resolved_today', 'following'],
+                        context: 'Abiertos a su cargo · ordenados por vencimiento',
+                    }),
+                    draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
+                        count: 'drafts_pending', context: 'Correos que le asignaron. Al confirmar uno, el ticket queda a su cargo.',
+                    }),
+                    queueSection('mine_due_soon', 'Por vencer', 'mi-trabajo/por-vencer', {
+                        count: 'mine_due_soon', tone: 'warn', context: 'Sus tickets cerca del tiempo de respuesta',
+                    }),
+                    queueSection('overdue', 'Vencidos', 'mi-trabajo/vencidos', {
+                        count: 'overdue', tone: 'alert', context: 'Sus tickets que pasaron el tiempo de respuesta',
+                    }),
                 ] },
             ];
         }
-        // Personal, clientes e invitaciones en una sola lista (antes "Clientes" iba aparte)
-        const accounts = { id: 'accounts', label: 'Cuentas', icon: 'accounts', open: () => openAccounts() };
-        // El horario se edita con el botón "Horario" de cada fila del equipo
-        const team = { id: 'team', label: 'Equipo y turnos', icon: 'team', open: () => showAccountsSection('team') };
         if (role === 'admin') {
-            // El administrador cuida el sistema: sin cola de tickets ni borradores
             return [
-                { items: [
-                    accounts,
-                    team,
-                    { id: 'reports', label: 'Reportes de cuentas', icon: 'flag', count: 'reports_open', tone: 'alert', open: () => {
+                { id: 'admin', label: 'Administración', icon: 'accounts', sections: [
+                    navSection('accounts', 'Cuentas', 'admin/cuentas', () => openAccounts(), {
+                        context: 'Personal y clientes · datos de contacto enmascarados',
+                    }),
+                    navSection('invites', 'Invitaciones', 'admin/invitaciones', () => navUsers.click(), {
+                        count: 'invitations_pending', context: 'Invite personal nuevo y revise las invitaciones que ya envió',
+                    }),
+                    navSection('reports', 'Reportes de cuentas', 'admin/reportes-cuentas', () => {
                         setReportsAccount(null);
                         showView('reports');
-                    } },
-                    { id: 'invites', label: 'Invitaciones', icon: 'invite', count: 'invitations_pending',
-                      open: () => navUsers.click() },
-                ] },
-                { title: 'Administración', items: [
-                    { id: 'approvals', label: 'Aprobaciones', icon: 'approvals', count: 'approvals_pending',
-                      open: () => showAdminSection('approvals') },
-                    { id: 'changes', label: 'Registro de cambios', icon: 'changes', open: () => showAdminSection('changes') },
-                    { id: 'health', label: 'Estado del sistema', icon: 'health', open: () => showAdminSection('health') },
+                    }, { count: 'reports_open', tone: 'alert', context: 'Cuentas de solicitante reportadas por el personal' }),
+                    navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
+                        count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
+                    }),
+                    navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
+                        context: 'Horarios de la semana, vacaciones y ausencias',
+                    }),
+                    navSection('changes', 'Registro de cambios', 'admin/registro', () => showAdminSection('changes'), {
+                        context: 'Quién hizo qué y cuándo · los datos personales salen enmascarados',
+                    }),
+                    navSection('health', 'Estado del sistema', 'admin/estado', () => showAdminSection('health'), {
+                        context: 'Servicios, copias de seguridad y registros del servidor',
+                    }),
                 ] },
             ];
         }
         return [
-            { items: [
-                home,
-                { ...ticketItem('open', 'Todos abiertos', 'open'), label: 'Tickets', icon: 'tickets',
-                  open: () => setQueueView('open', 'Todos abiertos') },
-                drafts,
-                accounts,
-                team,
+            { id: 'home', label: 'Inicio', icon: 'home', sections: [
+                navSection('home', 'Inicio', 'inicio', () => showView('home'), { title: homeTitleText, context: homeContextText }),
             ] },
-            { title: 'Vistas guardadas', items: [
-                savedView('unassigned', 'Sin asignar', 'unassigned', 'warn', 'warn'),
-                savedView('due_soon', 'Por vencer', 'due_soon', 'warn', 'warn'),
-                savedView('overdue', 'Vencidos', 'overdue', 'alert', 'alert'),
-                savedView('resolved_today', 'Resueltos hoy', 'resolved_today', 'ok'),
-                savedView('cancelled', 'Cancelados', 'cancelled', 'muted'),
+            { id: 'tickets', label: 'Tickets', icon: 'tickets', sections: [
+                queueSection('open', 'Todos', 'tickets/todos', {
+                    title: 'Todos los tickets', count: 'open', aliases: ['due_soon', 'resolved_today', 'cancelled', 'all'],
+                    context: 'Abiertos · ordenados por vencimiento',
+                }),
+                queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
+                    count: 'unassigned', tone: 'warn', context: 'Tickets abiertos que todavía no tienen responsable',
+                }),
+                queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
+                    count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
+                }),
+                // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
+                navSection('clients', 'Clientes', 'tickets/clientes', () => openAccounts('clients'), {
+                    aliases: ['accounts'], context: 'Fichas de los clientes, en solo lectura',
+                }),
+            ] },
+            { id: 'drafts', label: 'Borradores', icon: 'mail', sections: [
+                draftsSection('drafts', 'Todos', 'borradores/todos', 'all', {
+                    title: 'Borradores de correo', count: 'drafts_pending',
+                    context: 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
+                }),
+                draftsSection('drafts_none', 'Sin revisor', 'borradores/sin-revisor', 'none', {
+                    title: 'Borradores sin revisor', context: 'Llegaron sin nadie en turno: se asignan solos al entrar alguien, o puede repartirlos',
+                }),
+            ] },
+            { id: 'team', label: 'Equipo', icon: 'team', sections: [
+                navSection('team', 'Turnos', 'equipo/turnos', () => showAccountsSection('team'), {
+                    title: 'Turnos de la semana', context: 'Horarios, vacaciones y ausencias del equipo',
+                }),
+                navSection('people', 'Personas', 'equipo/personas', () => openAccounts('staff'), {
+                    context: 'Técnicos: turnos, vacaciones y ausencias, y cambios de rol',
+                }),
             ] },
         ];
     }
 
+    // Mi cuenta: no está en el menú de módulos (se abre desde el perfil y desde abajo del menú)
+    const PROFILE_SECTION = navSection('profile', 'Mi cuenta', 'mi-cuenta', () => {
+        profileTab = 'perfil';
+        showProfile();
+    });
+
+    // Nuevo ticket: solo quien puede crearlos (coordinador); tampoco está en el menú
+    const NEW_TICKET_SECTION = navSection('newTicket', 'Nuevo ticket', 'tickets/nuevo', () => openNewTicket.click());
+
+    let navModules = [];
     let navItems = {};
+    let activeSection = null;
+    // Mientras se aplica una ruta (Atrás, Adelante o un enlace) no se agrega otra entrada al historial
+    let routing = false;
+
+    function allSections() {
+        const extra = canCreateTicket() ? [PROFILE_SECTION, NEW_TICKET_SECTION] : [PROFILE_SECTION];
+        return [...navModules.flatMap(module => module.sections), ...extra];
+    }
+
+    function moduleOf(section) {
+        return navModules.find(module => module.sections.includes(section)) || null;
+    }
+
+    function sectionById(id) {
+        if (!id) return null;
+        const sections = allSections();
+        return sections.find(s => s.id === id) || sections.find(s => (s.aliases || []).includes(id)) || null;
+    }
+
+    function homeRoute() {
+        return { technician: 'mi-trabajo/tickets', coordinator: 'inicio', admin: 'admin/cuentas' }[currentUser.role];
+    }
+
+    function routePath() {
+        return window.location.hash.startsWith('#/') ? decodeURIComponent(window.location.hash.slice(2)) : '';
+    }
+
+    function pushRoute(path) {
+        if (routing || !isStaffShell()) return;
+        const hash = `#/${path}`;
+        if (window.location.hash !== hash) history.pushState(null, '', hash);
+    }
+
+    // "tickets/vencidos", "tickets/vencidos/176" o "tickets/vencidos/176/reporte". Desconocida: null
+    function parseRoute(path) {
+        const match = path.match(/^(.*?)(?:\/(\d+)(\/reporte)?)?$/);
+        const section = allSections().find(s => s.route === match[1]);
+        if (!section) return null;
+        return { section, ticketId: match[2] ? Number(match[2]) : null, report: Boolean(match[3]) };
+    }
+
+    // La ruta de un ticket cuelga de la sección donde se abrió (o de la principal del rol)
+    function ticketRoute(ticketId, report = false) {
+        const section = activeSection && ![PROFILE_SECTION, NEW_TICKET_SECTION].includes(activeSection)
+            ? activeSection : parseRoute(homeRoute()).section;
+        return `${section.route}/${ticketId}${report ? '/reporte' : ''}`;
+    }
+
+    function applyRoute() {
+        if (!currentUser || !isStaffShell() || profileRequired()) return;
+        // Enlace de un correo (#ticket/N) con la sesión abierta: pasa a la ruta del ticket
+        const linked = window.location.hash.match(/^#ticket\/(\d+)$/);
+        if (linked) history.replaceState(null, '', `#/${ticketRoute(Number(linked[1]))}`);
+        let route = parseRoute(routePath());
+        // Ruta desconocida o de otro rol: al inicio del rol, sin dejar la mala en el historial
+        if (!route) {
+            history.replaceState(null, '', `#/${homeRoute()}`);
+            route = parseRoute(homeRoute());
+        }
+        routing = true;
+        try {
+            hideError();
+            closeBellPanel();
+            closeProfileMenu();
+            if (route.ticketId) {
+                setSideNavActive(route.section.id);
+                if (route.report) openOverdueReport(route.ticketId);
+                else openTicketById(route.ticketId);
+            } else {
+                route.section.open();
+                setSideNavActive(route.section.id);
+            }
+        } finally {
+            routing = false;
+        }
+        closeSideNav();
+        checkSingleSection();
+    }
+
+    // Ir a una sección: nueva entrada en el historial (o la misma, si ya está ahí) y se abre
+    function goRoute(path) {
+        const hash = `#/${path}`;
+        if (window.location.hash === hash) history.replaceState(null, '', hash);
+        else history.pushState(null, '', hash);
+        applyRoute();
+    }
+
+    window.addEventListener('popstate', applyRoute);
 
     function renderSideNav() {
-        sideNavGroups.replaceChildren();
+        navModules = navModulesFor(currentUser.role);
         navItems = {};
-        navGroupsFor(currentUser.role).forEach((group, index) => {
-            const section = document.createElement('section');
-            section.className = 'nav-group';
-            const list = document.createElement('ul');
-            list.className = 'nav-group-items';
-            if (group.title) {
-                const heading = makeEl('h2', 'nav-group-title', group.title);
-                heading.id = `navGroup${index}`;
-                list.setAttribute('aria-labelledby', heading.id);
-                section.appendChild(heading);
+        sideNavGroups.replaceChildren();
+        const heading = makeEl('h2', 'nav-modules-title', 'Módulos');
+        heading.id = 'navModulesTitle';
+        const list = makeEl('ul', 'nav-modules');
+        list.setAttribute('aria-labelledby', heading.id);
+        navModules.forEach(module => {
+            const li = makeEl('li', 'nav-module-item');
+            li.dataset.module = module.id;
+            const single = module.sections.length === 1;
+            const button = makeEl('button', 'nav-module');
+            button.type = 'button';
+            button.dataset.moduleId = module.id;
+            if (single) button.dataset.navId = module.sections[0].id;
+            button.appendChild(navIcon(module.icon));
+            button.appendChild(makeEl('span', 'nav-item-label', module.label));
+            li.appendChild(button);
+            if (single) {
+                navItems[module.sections[0].id] = module.sections[0];
+            } else {
+                const caret = makeEl('span', 'nav-module-caret', '▾');
+                caret.setAttribute('aria-hidden', 'true');
+                button.appendChild(caret);
+                button.setAttribute('aria-expanded', 'false');
+                const sub = makeEl('ul', 'nav-sections');
+                sub.id = `navSections-${module.id}`;
+                button.setAttribute('aria-controls', sub.id);
+                sub.hidden = true;
+                module.sections.forEach(section => {
+                    navItems[section.id] = section;
+                    const sectionLi = document.createElement('li');
+                    const item = makeEl('button', 'nav-item');
+                    item.type = 'button';
+                    item.dataset.navId = section.id;
+                    item.appendChild(makeEl('span', 'nav-item-label', section.label));
+                    if (section.count) {
+                        const count = makeEl('span', 'nav-count');
+                        count.dataset.count = section.count;
+                        if (section.tone) count.dataset.tone = section.tone;
+                        item.appendChild(count);
+                    }
+                    sectionLi.appendChild(item);
+                    sub.appendChild(sectionLi);
+                });
+                li.appendChild(sub);
             }
-            group.items.forEach(item => {
-                navItems[item.id] = item;
-                const li = document.createElement('li');
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = item.dot ? 'nav-item is-saved' : 'nav-item';
-                button.dataset.navId = item.id;
-                // Con el menú contraído solo queda el ícono: el nombre sale al pasar el puntero
-                button.title = item.label;
-                if (item.icon) button.appendChild(navIcon(item.icon));
-                if (item.dot) {
-                    const dot = makeEl('span', `nav-dot is-${item.dot}`);
-                    dot.setAttribute('aria-hidden', 'true');
-                    button.appendChild(dot);
-                }
-                button.appendChild(makeEl('span', 'nav-item-label', item.label));
-                if (item.count) {
-                    const count = document.createElement('span');
-                    count.className = 'nav-count';
-                    count.dataset.count = item.count;
-                    if (item.tone) count.dataset.tone = item.tone;
-                    button.appendChild(count);
-                }
-                li.appendChild(button);
-                list.appendChild(li);
-            });
-            section.appendChild(list);
-            sideNavGroups.appendChild(section);
+            list.appendChild(li);
         });
+        sideNavGroups.append(heading, list);
         renderNavUser();
+        // Solo marca la sección: la ruta la decide el inicio de sesión o el enlace
+        const wasRouting = routing;
+        routing = true;
         setSideNavActive(activeNavId);
+        routing = wasRouting;
         renderNavCounts();
     }
 
     function renderNavUser() {
         if (!currentUser) return;
-        document.getElementById('navUserAvatar').textContent = getInitials(currentUser.name);
-        document.getElementById('navUserName').textContent = currentUser.name || currentUser.email;
-        document.getElementById('navUserRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
+        document.getElementById('topProfileAvatar').textContent = getInitials(currentUser.name);
+        document.getElementById('topProfileName').textContent = currentUser.name || currentUser.email;
+        document.getElementById('topProfileRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
     }
 
+    // Marca la sección (y abre su módulo), actualiza la ruta y la cabecera de la página
     function setSideNavActive(id) {
         activeNavId = id;
+        const section = sectionById(id);
+        activeSection = section;
+        const activeId = section ? section.id : id;
         sideNav.querySelectorAll('[data-nav-id]').forEach(button => {
-            const active = button.dataset.navId === id;
+            const active = button.dataset.navId === activeId;
             button.classList.toggle('active', active);
             if (active) button.setAttribute('aria-current', 'page');
             else button.removeAttribute('aria-current');
         });
+        const module = section ? moduleOf(section) : null;
+        sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
+            // Con un solo módulo (técnico) queda siempre abierto
+            const open = navModules.length === 1 || Boolean(module && li.dataset.module === module.id);
+            li.querySelector('.nav-module').classList.toggle('is-active', Boolean(module && li.dataset.module === module.id));
+            const sub = li.querySelector('.nav-sections');
+            if (sub) {
+                sub.hidden = !open;
+                li.querySelector('.nav-module').setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+        });
+        if (section) pushRoute(section.route);
+        renderPageHead();
     }
 
     function renderNavCounts() {
@@ -6015,8 +6203,75 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-alert', el.dataset.tone === 'alert' && value > 0);
             el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
         });
+        renderNavShift();
         renderQueueViews();
         if (!homeView.hidden) renderHome();
+    }
+
+    // Abajo del menú: el turno de hoy (técnico y coordinador) o el estado del sistema (administrador)
+    let lastSystemStatus = null;
+
+    function renderNavShift() {
+        const box = document.getElementById('navShift');
+        const text = document.getElementById('navShiftText');
+        if (!currentUser) return;
+        if (currentUser.role === 'admin') {
+            if (!lastSystemStatus) {
+                box.hidden = true;
+                return;
+            }
+            const off = [['email', 'correo'], ['ai_analysis', 'IA'], ['auto_assign', 'asignación automática']]
+                .filter(([key]) => !lastSystemStatus[key]).map(([, label]) => label);
+            box.hidden = false;
+            box.className = `nav-shift ${off.length ? 'is-warn' : 'is-on'}`;
+            text.textContent = off.length ? `Sistema: ${off.join(', ')} apagado` : 'Sistema: todo funciona';
+            return;
+        }
+        const shift = navCounts.shift;
+        box.hidden = !shift;
+        if (!shift) return;
+        box.className = `nav-shift ${shift.on_shift ? 'is-on' : 'is-off'}`;
+        if (shift.on_shift) text.textContent = `En turno hasta ${shift.end}`;
+        else text.textContent = shift.start ? `Fuera de turno · hoy ${shift.start}–${shift.end}` : 'Sin turno hoy';
+    }
+
+    // ----- Cabecera de la página: ruta (Módulo › Sección), título, contexto y acciones -----
+    const pageHead = document.getElementById('pageHead');
+    const pageActions = document.getElementById('pageActions');
+    let currentViewName = null;
+
+    function renderPageHead() {
+        if (!isStaffShell()) {
+            pageHead.hidden = true;
+            return;
+        }
+        const crumbs = [];
+        let title = '';
+        let context = '';
+        const section = activeSection;
+        if (section) {
+            const module = moduleOf(section);
+            if (module && module.sections.length > 1) crumbs.push(module.label);
+            crumbs.push(section.label);
+            title = typeof section.title === 'function' ? section.title() : (section.title || section.label);
+            context = typeof section.context === 'function' ? section.context() : (section.context || '');
+        } else if (currentViewName === 'tickets') {
+            // Búsqueda o tickets de un cliente: sin sección del menú
+            crumbs.push('Tickets', queueTitle.textContent);
+            title = queueTitle.textContent;
+        }
+        // Nuevo ticket y el reporte de vencimiento tienen su propia barra
+        pageHead.hidden = !crumbs.length || ['newTicket', 'overdueReport'].includes(currentViewName);
+        const list = document.getElementById('pageCrumb');
+        list.replaceChildren(...crumbs.map((crumb, index) => {
+            const li = makeEl('li', 'page-crumb-item', crumb);
+            if (index === crumbs.length - 1) li.setAttribute('aria-current', 'page');
+            return li;
+        }));
+        document.getElementById('pageTitle').textContent = title;
+        const contextEl = document.getElementById('pageContext');
+        contextEl.textContent = context;
+        contextEl.hidden = !context;
     }
 
     function closeSideNav() {
@@ -6026,24 +6281,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     sideNavGroups.addEventListener('click', (e) => {
-        const button = e.target.closest('.nav-item');
+        const button = e.target.closest('.nav-item, .nav-module');
         if (!button) return;
-        const item = navItems[button.dataset.navId];
-        if (!item) return;
-        hideError();
-        setSideNavActive(item.id);
-        item.open();
-        checkSingleSection();
-        closeSideNav();
+        // Un módulo abre su primera sección; una sección, la suya
+        const module = button.classList.contains('nav-module')
+            ? navModules.find(m => m.id === button.dataset.moduleId) : null;
+        const section = module ? module.sections[0] : navItems[button.dataset.navId];
+        if (!section) return;
+        goRoute(section.route);
     });
 
-    document.getElementById('navUser').addEventListener('click', () => {
-        hideError();
-        profileTab = 'perfil';
-        setSideNavActive('profile');
-        showProfile();
-        closeSideNav();
+    document.getElementById('navUser').addEventListener('click', () => goRoute(PROFILE_SECTION.route));
+
+    // ----- Perfil en la barra superior: Mi cuenta y Cerrar sesión -----
+    const topProfile = document.getElementById('topProfile');
+    const profileMenu = document.getElementById('profileMenu');
+
+    function closeProfileMenu(returnFocus = false) {
+        if (profileMenu.hidden) return;
+        profileMenu.hidden = true;
+        topProfile.setAttribute('aria-expanded', 'false');
+        if (returnFocus) topProfile.focus();
+    }
+
+    topProfile.addEventListener('click', () => {
+        const open = profileMenu.hidden;
+        profileMenu.hidden = !open;
+        topProfile.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) profileMenu.querySelector('.profile-menu-item').focus();
     });
+    document.getElementById('profileMenuAccount').addEventListener('click', () => {
+        closeProfileMenu();
+        goRoute(PROFILE_SECTION.route);
+    });
+    document.getElementById('profileMenuLogout').addEventListener('click', () => {
+        closeProfileMenu();
+        switchAccountBtn.click();
+    });
+    profileMenu.addEventListener('keydown', (e) => {
+        const items = [...profileMenu.querySelectorAll('.profile-menu-item')];
+        const index = items.indexOf(document.activeElement);
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeProfileMenu(true);
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            items[(index + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+        }
+    });
+    document.addEventListener('click', (e) => {
+        if (!profileMenu.hidden && !profileMenu.contains(e.target) && !topProfile.contains(e.target)) closeProfileMenu();
+    });
+
+    // El buscador de la barra superior abre la paleta (Ctrl K)
+    document.getElementById('topSearch').addEventListener('click', () => openPalette());
 
     document.getElementById('navLogout').addEventListener('click', () => switchAccountBtn.click());
 
@@ -6121,6 +6412,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderStatusBar(status) {
+        lastSystemStatus = status;
+        renderNavShift();
         setStatusItem('statusEmail', status.email);
         setStatusItem('statusAi', status.ai_analysis);
         setStatusItem('statusAssign', status.auto_assign, ASSIGN_MODE_LABELS[status.auto_assign_mode]);
@@ -6173,10 +6466,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openTicketById(ticketId) {
         // El administrador no abre tickets directamente: primero el motivo de "Ver conversación"
         const admin = currentUser && currentUser.role === 'admin';
+        // Abierto desde una ruta (Atrás, Adelante, enlace): no se agrega otra entrada al historial
+        const fromRoute = routing;
         const reason = admin ? await askConversationReason(ticketId) : null;
         if (admin && reason === null) return;
         showView('tickets');
-        setSideNavActive(null);
+        if (!fromRoute) {
+            history.pushState(null, '', `#/${ticketRoute(ticketId)}`);
+        }
         selectedTicketId = ticketId;
         activityFilter = 'public';
         enterTicketPage(ticketId);
@@ -6238,20 +6535,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Inicio del personal. El administrador no tiene Inicio de tickets (no entra al flujo): va a Cuentas
     function showStaffHome() {
-        if (currentUser && currentUser.role === 'admin') {
-            setSideNavActive('accounts');
-            openAccounts();
-            return;
-        }
-        setSideNavActive('home');
-        showView('home');
+        goRoute(homeRoute());
+    }
+
+    // Al iniciar sesión: la ruta que traía la dirección o, sin ella, el inicio del rol
+    function startStaffRoute() {
+        if (!routePath()) history.replaceState(null, '', `#/${homeRoute()}`);
+        applyRoute();
     }
 
     function setupStaffShell() {
         const staff = Boolean(currentUser && STAFF_SHELL_ROLES.includes(currentUser.role));
         document.body.classList.toggle('staff-shell', staff);
         sideNav.hidden = !staff;
-        statusBar.hidden = !staff;
+        // La barra de estado vieja ya no se muestra: el estado va abajo del menú
+        statusBar.hidden = true;
         resetBell();
         document.getElementById('staffFooter').hidden = !staff;
         navToggle.hidden = !staff;
@@ -6270,7 +6568,8 @@ document.addEventListener('DOMContentLoaded', () => {
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
         // El técnico no crea tickets (igual que el botón de la barra superior)
         document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
-        setNavCollapsed(readNavCollapsed(), false);
+        // El menú por módulos no se contrae
+        document.body.classList.remove('nav-collapsed');
         renderSideNav();
         startNavPolling();
     }
@@ -6286,6 +6585,11 @@ document.addEventListener('DOMContentLoaded', () => {
         resetBell();
         document.getElementById('staffFooter').hidden = true;
         sideNavBackdrop.hidden = true;
+        pageHead.hidden = true;
+        closeProfileMenu();
+        activeSection = null;
+        // La ruta del personal no queda para la próxima sesión
+        if (routePath()) history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
     // ===== Cola de tickets y panel de detalle del personal =====
@@ -6303,7 +6607,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const queuePageLabel = document.getElementById('queuePage');
     const SOURCE_LABELS = { web: 'Web', email: 'Correo' };
     const ASSIGNEE_NOTES = {
-        vacation: 'De vacaciones', incapacity: 'Con incapacidad', away: 'Fuera de su horario',
+        vacation: 'De vacaciones', incapacity: 'Con ausencia', away: 'Fuera de su horario',
         after_shift: 'Vence después del fin de su turno de hoy'
     };
     // Las mismas transiciones que valida el servidor
@@ -6693,6 +6997,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function openQueueTicket(ticketId) {
+        if (isStaffShell() && !routing) {
+            const hash = `#/${ticketRoute(ticketId)}`;
+            if (window.location.hash !== hash) history.pushState(null, '', hash);
+        }
         queueBody.querySelectorAll('.queue-row').forEach(row => {
             row.classList.toggle('selected', Number(row.dataset.id) === ticketId);
         });
@@ -6707,7 +7015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ----- Página del ticket (personal): sin barra lateral, con Volver y Anterior/Siguiente -----
+    // ----- Página del ticket (personal): con Volver y Anterior/Siguiente -----
     const ticketBar = document.getElementById('ticketBar');
     const ticketPrev = document.getElementById('ticketPrev');
     const ticketNext = document.getElementById('ticketNext');
@@ -6759,6 +7067,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('ticketBack').addEventListener('click', () => {
         const closedId = exitTicketPage();
+        // La ruta vuelve a la sección
+        if (activeSection) pushRoute(activeSection.route);
         // El foco vuelve a la fila del ticket que estaba abierto
         const row = queueBody.querySelector(`.queue-row[data-id="${closedId}"]`);
         if (row) row.focus();
@@ -8041,7 +8351,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const accountMenu = document.getElementById('accountMenu');
     const ACCOUNT_STATE_LABELS = {
         active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada',
-        vacation: 'Vacaciones', incapacity: 'Incapacidad', away: 'Ausente', invited: 'Invitación pendiente'
+        vacation: 'Vacaciones', incapacity: 'Ausencia', away: 'Ausente', invited: 'Invitación pendiente'
     };
     const ACCOUNT_TYPE_LABELS = {
         requester: 'Cliente', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
@@ -8058,7 +8368,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_MENU_LABELS = {
         'view-tickets': 'Ver sus tickets', report: 'Reportar cuenta', 'review-reports': 'Revisar reportes',
         'request-name': 'Corregir nombre', 'request-id_number': 'Corregir cédula', 'full-data': 'Ver datos completos',
-        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Vacaciones e incapacidad',
+        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Vacaciones y ausencias',
         unlock: 'Desbloquear', 'close-sessions': 'Cerrar sesiones', 'reset-access': 'Forzar restablecimiento',
         deactivate: 'Desactivar', reactivate: 'Reactivar',
         'resend-invitation': 'Reenviar invitación', 'cancel-invitation': 'Cancelar invitación'
@@ -8913,7 +9223,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentUser.role === 'admin' && user.role === 'admin') return items;
         if (currentUser.role === 'coordinator' && user.role !== 'technician') return items;
         if (canManage(user, 'availability')) {
-            items.push({ action: 'availability', label: 'Vacaciones e incapacidad' });
+            items.push({ action: 'availability', label: 'Vacaciones y ausencias' });
         }
         if (canChangeRole(user)) items.push({ action: 'change-role', label: 'Cambiar rol…' });
         if (user.is_active && canManage(user, 'reset')) items.push({ action: 'reset-access', label: 'Forzar restablecimiento' });
@@ -9065,7 +9375,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const menu = teamMenuItems(user);
         const availability = menu.find(item => item.action === 'availability');
         if (availability) {
-            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm account-action', 'Vacaciones e incapacidad');
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm account-action', 'Vacaciones y ausencias');
             button.type = 'button';
             button.dataset.action = 'availability';
             actions.appendChild(button);
@@ -9358,19 +9668,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 run: () => openTicketById(parseInt(number[1], 10)),
             }] });
         }
-        // Las mismas pantallas del menú de este rol
+        // Las mismas secciones del menú de este rol
         const screens = [];
-        navGroupsFor(currentUser.role).forEach(group => group.items.forEach(item => {
-            screens.push({ label: item.label, hint: group.title || 'Ir a', run: () => {
-                setSideNavActive(item.id);
-                item.open();
-            } });
+        navModules.forEach(module => module.sections.forEach(section => {
+            const label = module.sections.length > 1 ? `${module.label} › ${section.label}` : section.label;
+            screens.push({ label, hint: 'Ir a', run: () => goRoute(section.route) });
         }));
-        screens.push({ label: 'Mi cuenta', hint: 'Ir a', run: () => {
-            profileTab = 'perfil';
-            setSideNavActive('profile');
-            showProfile();
-        } });
+        screens.push({ label: 'Mi cuenta', hint: 'Ir a', run: () => goRoute(PROFILE_SECTION.route) });
         const go = screens.filter(item => !q || plain(item.label).includes(q));
         if (go.length) groups.push({ title: 'Ir a', items: go });
 
@@ -9656,7 +9960,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const availability = userAvailabilityMap[userId];
         let confirmUnavailable = false;
         if (availability && availability !== 'available') {
-            const label = { vacation: 'de vacaciones', incapacity: 'con incapacidad', away: 'fuera de su horario' }[availability]
+            const label = { vacation: 'de vacaciones', incapacity: 'con ausencia', away: 'fuera de su horario' }[availability]
                 || 'no disponible';
             if (!confirm(`${name} está ${label}. Las alertas de este ticket irán a los coordinadores. ¿Asignarle el ticket de todos modos?`)) return false;
             confirmUnavailable = true;
@@ -9913,8 +10217,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let odSeq = 0;
 
     async function openOverdueReport(ticketId) {
+        const fromRoute = routing;
         showView('overdueReport');
-        setSideNavActive('overdue');
+        if (!fromRoute) {
+            // Vencidos queda marcado en el menú y la ruta es la del reporte
+            routing = true;
+            setSideNavActive('overdue');
+            routing = false;
+            history.pushState(null, '', `#/${ticketRoute(ticketId, true)}`);
+        }
         document.getElementById('odCrumb').textContent = `Ticket #${ticketId}`;
         setDocumentTitle(`Reporte de vencimiento · Ticket #${ticketId}`);
         window.scrollTo(0, 0);

@@ -204,8 +204,17 @@
   <button type="button" id="navToggle" class="nav-toggle" aria-label="Abrir menú" aria-controls="sideNav" aria-expanded="false">☰</button>
   <div class="topbar-brand">
     <span class="brand-mark" aria-hidden="true">T</span>
-    <span class="brand-name" id="brandName">Mesa de Servicio</span>
+    <span class="brand-text">
+      <span class="brand-name" id="brandName">Mesa de Servicio</span>
+      <span class="brand-sub">American Data</span>
+    </span>
   </div>
+  <!-- Personal: el buscador abre la paleta de comandos (Ctrl K) -->
+  <button type="button" id="topSearch" class="top-search" aria-haspopup="dialog" aria-keyshortcuts="Control+K" aria-label="Buscar tickets, clientes o número (Ctrl K)">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"/></svg>
+    <span class="top-search-text">Buscar tickets, clientes o #número…</span>
+    <kbd class="top-search-kbd" aria-hidden="true">Ctrl K</kbd>
+  </button>
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
     <button type="button" id="navAssistant" class="topbar-tab" hidden>Asistente</button>
@@ -219,6 +228,25 @@
   </nav>
   <div class="topbar-section topbar-action">
     <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
+  </div>
+  <!-- Avisos de vencimiento y de borradores asignados -->
+  <button type="button" id="navBell" class="nav-bell" aria-haspopup="dialog" aria-expanded="false" aria-controls="bellPanel" aria-label="Avisos" title="Avisos">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    <span id="navBellCount" class="nav-bell-count" aria-hidden="true" hidden></span>
+  </button>
+  <!-- Perfil del personal: Mi cuenta y Cerrar sesión -->
+  <div class="top-profile-box">
+    <button type="button" id="topProfile" class="top-profile" aria-haspopup="menu" aria-expanded="false" aria-controls="profileMenu">
+      <span id="topProfileAvatar" class="top-profile-avatar" aria-hidden="true"></span>
+      <span class="top-profile-text">
+        <span id="topProfileName" class="top-profile-name"></span>
+        <span id="topProfileRole" class="top-profile-role"></span>
+      </span>
+    </button>
+    <div id="profileMenu" class="profile-menu" role="menu" aria-labelledby="topProfile" hidden>
+      <button type="button" id="profileMenuAccount" class="profile-menu-item" role="menuitem">Mi cuenta</button>
+      <button type="button" id="profileMenuLogout" class="profile-menu-item" role="menuitem">Cerrar sesión</button>
+    </div>
   </div>
   <div class="topbar-section topbar-user">
     <span class="topbar-avatar" aria-hidden="true"></span>
@@ -255,23 +283,14 @@
             <li class="status-item" id="statusAssign"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Asignación automática</span></li>
             <li class="status-item status-shift" id="statusShift"></li>
         </ul>
+        <!-- Abajo: estado del turno (o del sistema, para el administrador) y Mi cuenta -->
         <div class="nav-foot">
-            <button type="button" id="navUser" class="nav-user" data-nav-id="profile" title="Mi cuenta">
-                <span id="navUserAvatar" class="nav-user-avatar" aria-hidden="true"></span>
-                <span class="nav-user-text">
-                    <span id="navUserName" class="nav-user-name"></span>
-                    <span id="navUserRole" class="nav-user-role"></span>
-                </span>
-                <span class="sr-only">Mi cuenta</span>
-            </button>
-            <!-- Avisos de vencimiento: 50 %, 80 %, vencido y reporte de vencimiento -->
-            <button type="button" id="navBell" class="nav-bell" aria-haspopup="dialog" aria-expanded="false" aria-controls="bellPanel" aria-label="Avisos de vencimiento" title="Avisos de vencimiento">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                <span id="navBellCount" class="nav-bell-count" aria-hidden="true" hidden></span>
-            </button>
-            <button type="button" id="navLogout" class="nav-logout" aria-label="Cerrar sesión" title="Cerrar sesión">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-            </button>
+            <p id="navShift" class="nav-shift" hidden><span class="nav-shift-dot" aria-hidden="true"></span><span id="navShiftText"></span></p>
+            <div class="nav-foot-links">
+                <button type="button" id="navUser" class="nav-foot-link" data-nav-id="profile">Mi cuenta</button>
+                <span aria-hidden="true">·</span>
+                <button type="button" id="navLogout" class="nav-foot-link">Cerrar sesión</button>
+            </div>
         </div>
     </aside>
     <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
@@ -284,6 +303,17 @@
     </div>
 
     <main style="display: none;">
+        <!-- Personal: ruta (Módulo › Sección), título, contexto y acciones de la página -->
+        <header id="pageHead" class="page-head" hidden>
+            <nav class="page-crumb" aria-label="Ruta"><ol id="pageCrumb" class="page-crumb-list"></ol></nav>
+            <div class="page-title-row">
+                <div class="page-titles">
+                    <h1 id="pageTitle" class="page-title"></h1>
+                    <p id="pageContext" class="page-context"></p>
+                </div>
+                <div id="pageActions" class="page-actions"></div>
+            </div>
+        </header>
         <div class="split">
             <section id="queuePanel" class="queue-panel" aria-labelledby="queueHeading">
                 <header class="queue-head">
@@ -616,15 +646,15 @@
             <section id="accountAvailability" class="account-section" data-account-tab="turno" aria-labelledby="accountAvailabilityTitle" hidden>
                 <h2 id="accountAvailabilityTitle" class="account-title">Disponibilidad</h2>
                 <p id="ownAvailabilityNow" class="availability-now"></p>
-                <p class="account-current">Es automática: Disponible dentro de su horario y Ausente fuera de él. Las vacaciones y las incapacidades empiezan solas el primer día del periodo.</p>
-                <h3 class="availability-subtitle">Vacaciones e incapacidades</h3>
+                <p class="account-current">Es automática: Disponible dentro de su horario y Ausente fuera de él. Las vacaciones y las ausencias empiezan solas el primer día del periodo.</p>
+                <h3 class="availability-subtitle">Vacaciones y ausencias</h3>
                 <ul id="ownPeriods" class="periods-list"></ul>
                 <form id="accountAvailabilityForm" class="profile-form period-form">
                     <div class="form-group">
                         <label for="ownPeriodKind">Tipo</label>
                         <select id="ownPeriodKind" required>
                             <option value="vacation">Vacaciones</option>
-                            <option value="incapacity">Incapacidad</option>
+                            <option value="incapacity">Ausencia</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1175,7 +1205,7 @@
     <!-- Vacaciones e incapacidades de otra persona (la disponibilidad en sí es automática) -->
     <dialog id="availabilityDialog" class="app-dialog" aria-labelledby="availabilityDialogTitle">
         <form id="availabilityForm" class="profile-form">
-            <h2 id="availabilityDialogTitle" class="modal-title">Vacaciones e incapacidades</h2>
+            <h2 id="availabilityDialogTitle" class="modal-title">Vacaciones y ausencias</h2>
             <p id="availabilityTarget" class="help-text"></p>
             <p id="availabilityNow" class="availability-now"></p>
             <ul id="availabilityPeriods" class="periods-list"></ul>
@@ -1183,7 +1213,7 @@
                 <label for="availabilityKind">Tipo</label>
                 <select id="availabilityKind" required>
                     <option value="vacation">Vacaciones</option>
-                    <option value="incapacity">Incapacidad</option>
+                    <option value="incapacity">Ausencia</option>
                 </select>
             </div>
             <div class="form-row">

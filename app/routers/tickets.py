@@ -69,7 +69,7 @@ def contact_fields(db_ticket: models.Ticket, current_user) -> tuple[Optional[str
 def unavailable_message(user: models.User, status: str, return_date) -> str:
     states = {
         "vacation": "está de vacaciones",
-        "incapacity": "tiene una incapacidad",
+        "incapacity": "tiene una ausencia",
         "away": "está fuera de su horario",
     }
     state = states.get(status, f"está {availability.LABELS.get(status, status).lower()}")

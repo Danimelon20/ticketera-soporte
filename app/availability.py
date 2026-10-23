@@ -15,9 +15,9 @@ from sqlalchemy.orm import Session
 from . import audit, config, models, schedules
 
 ROLES = ("technician", "coordinator")
-LABELS = {"available": "Disponible", "vacation": "Vacaciones", "incapacity": "Incapacidad", "away": "Ausente"}
+LABELS = {"available": "Disponible", "vacation": "Vacaciones", "incapacity": "Ausencia", "away": "Ausente"}
 NOT_STAFF = "La disponibilidad solo aplica a técnicos y coordinadores"
-BAD_KIND = "Elija Vacaciones o Incapacidad"
+BAD_KIND = "Elija Vacaciones o Ausencia"
 START_AFTER_END = "El primer día no puede ser posterior al último"
 END_IN_PAST = "El periodo ya terminó: el último día no puede ser anterior a hoy"
 OVERLAP = "Ya hay un periodo registrado en esas fechas"

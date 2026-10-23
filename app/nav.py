@@ -143,7 +143,7 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
 
     tickets = _open_tickets(db)
     due_soon, overdue = _due_counts(tickets, now)
-    return {
+    result = {
         "unassigned": _unassigned(db, now),
         "due_soon": due_soon,
         "overdue": overdue,
@@ -154,6 +154,10 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
         "cancelled": cancellations.count(db),
     }
+    if user.role == "coordinator":
+        # Su turno de hoy, para el menú ("En turno hasta 18:00")
+        result["shift"] = _shift(db, user, now)
+    return result
 
 
 def system_status(db: Session, now: datetime | None = None) -> dict:

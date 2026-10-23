@@ -12,7 +12,7 @@ FAR_AWAY = MONDAY_9AM + timedelta(days=30)
 
 # Reportes de cuentas e invitaciones son del administrador; el técnico ya no ve los tickets sin asignar
 COORDINATOR_KEYS = {
-    "unassigned", "due_soon", "overdue", "open", "resolved_today", "drafts_pending", "cancelled",
+    "unassigned", "due_soon", "overdue", "open", "resolved_today", "drafts_pending", "cancelled", "shift",
 }
 TECHNICIAN_KEYS = {
     "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "drafts_pending", "shift", "overdue",
@@ -181,6 +181,19 @@ def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkey
     assert set(body) == TECHNICIAN_KEYS
     for key in ("reports_open", "approvals_pending", "invitations_pending", "open", "unassigned"):
         assert key not in body
+
+
+def test_coordinator_gets_own_shift_and_admin_does_not(make_user, client):
+    coordinator = make_user("coordinator")
+    db = SessionLocal()
+    try:
+        db.add(models.TechnicianSchedule(user_id=coordinator["id"], weekday=0, start_time="08:00", end_time="18:00"))
+        db.commit()
+    finally:
+        db.close()
+    assert _counts(coordinator["id"])["shift"] == {"start": "08:00", "end": "18:00", "on_shift": True, "load": 0}
+    admin = client.get("/api/nav/counts", headers=make_user("admin")["headers"]).json()
+    assert "shift" not in admin
 
 
 def test_technician_without_shift_today(make_user):
