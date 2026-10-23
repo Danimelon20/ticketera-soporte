@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, cancellations, config, models, schedules
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, schedules
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -61,7 +61,7 @@ def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None) 
 
 
 def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = None) -> set[int]:
-    """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados (sin los cancelados)."""
+    """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados (sin cancelados ni fusionados)."""
     query = (
         db.query(models.History.ticket_id)
         .join(models.Ticket, models.Ticket.id == models.History.ticket_id)
@@ -71,6 +71,7 @@ def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = No
             models.History.changed_at >= _today_start(now),
             models.Ticket.status.in_(RESOLVED_STATUSES),
             models.Ticket.id.notin_(db.query(models.TicketCancellation.ticket_id)),
+            models.Ticket.id.notin_(grouping.merged_source_ids(db)),
         )
     )
     if assigned_to is not None:
@@ -206,7 +207,7 @@ def queue(
     now = now or _now()
     query = db.query(models.Ticket).options(
         joinedload(models.Ticket.ai_analysis), joinedload(models.Ticket.assigned_user)
-    )
+    ).filter(models.Ticket.id.notin_(grouping.merged_source_ids(db)))  # Los fusionados se ven desde su destino
     if view in _OPEN_VIEWS:
         query = query.filter(models.Ticket.status.in_(OPEN_STATUSES))
     if view == "unassigned":
@@ -271,6 +272,7 @@ def queue(
     creators = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(creator_ids)).all()} if creator_ids else {}
     reported = account_reports.reported_ids(db, creator_ids)
     cancelled = cancellations.cancelled_ids(db) if tickets else set()
+    incidents = grouping.incident_ids(db) if tickets else set()
     staff_ids = list({t.assigned_to for t in tickets if t.assigned_user and t.assigned_user.role in availability.ROLES})
     statuses = availability.statuses_for(db, staff_ids, now)
     shifts = schedules.for_users(db, staff_ids)
@@ -291,6 +293,7 @@ def queue(
             "reported": ticket.created_by in reported,
             "auto_assigned": auto_assign.is_auto_assigned(db, ticket),
             "cancelled": ticket.id in cancelled,
+            "incident": ticket.id in incidents,
             "due_at": due,
             "due_state": state,
             "remaining_seconds": int((due - now).total_seconds()) if due else None,

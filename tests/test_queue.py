@@ -169,6 +169,7 @@ def test_queue_response_has_no_personal_data(make_user, client):
     assert set(item) == {
         "id", "title", "requester_name", "level", "source", "status", "assigned_to", "assigned_name",
         "reported", "auto_assigned", "cancelled", "due_at", "due_state", "remaining_seconds", "consumed_pct", "assignee_note",
+        "incident",
     }
     text = response.text
     for secret in ("8888", "102340567", requester["email"], requester["phone"], requester["id_number"], "Llamar"):

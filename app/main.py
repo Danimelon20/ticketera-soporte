@@ -27,6 +27,7 @@ from .routers.reports import router as reports_router
 from .routers.nav import router as nav_router
 from .routers.overdue import router as overdue_router
 from .routers.attachments import router as attachments_router
+from .routers.grouping import router as grouping_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -91,7 +92,7 @@ def init_db():
 
 def start_warm_up() -> threading.Thread | None:
     """Carga el modelo en segundo plano: no frena el arranque y, si falla, no pasa nada."""
-    if not (config.CHATBOT_ENABLED or config.AI_ANALYSIS_ENABLED):
+    if not (config.CHATBOT_ENABLED or config.AI_ANALYSIS_ENABLED or config.GROUPING_ENABLED):
         return None
     thread = threading.Thread(target=chatbot.warm_up, name="ollama-warm-up", daemon=True)
     thread.start()
@@ -167,6 +168,7 @@ app.include_router(reports_router)
 app.include_router(nav_router)
 app.include_router(overdue_router)
 app.include_router(attachments_router)
+app.include_router(grouping_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

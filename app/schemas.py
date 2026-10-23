@@ -364,6 +364,33 @@ class RequesterFlags(BaseModel):
     reported: bool = False
 
 
+class GroupItem(BaseModel):
+    """Un ticket (o borrador) del grupo: solo número, título y estado, nunca textos ni datos del cliente."""
+    merge_id: Optional[int] = None
+    link_id: Optional[int] = None
+    ticket_id: Optional[int] = None
+    draft_id: Optional[int] = None
+    title: Optional[str] = None
+    status: Optional[str] = None
+    similarity: Optional[float] = None
+    can_separate: bool = False
+
+
+class GroupingRead(BaseModel):
+    """Solo el personal: fusiones y tickets relacionados (posible incidente)."""
+    merged_from: list[GroupItem] = []
+    merged_into: Optional[GroupItem] = None
+    principal: Optional[GroupItem] = None
+    related: list[GroupItem] = []
+    incident: bool = False
+
+
+class IncidentRead(BaseModel):
+    principal_id: int
+    title: str
+    clients: int
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
@@ -377,6 +404,9 @@ class TicketDetail(TicketRead):
     # Solo el personal: mismo cálculo de vencimiento que las alertas
     due_state: Optional[str] = None
     consumed_pct: Optional[int] = None
+    # Para todos: número del ticket al que se agregó; grouping solo para el personal
+    merged_into: Optional[int] = None
+    grouping: Optional[GroupingRead] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -538,6 +568,8 @@ class DraftRead(BaseModel):
     # Adjuntos del correo y lo que no se tomó (rechazados, más de 5, enlaces a la nube)
     attachments: list[AttachmentRead] = []
     attachment_notes: list[str] = []
+    # Se agregó a un ticket abierto del mismo cliente
+    merged_into: Optional[int] = None
 
 
 class DraftConfirm(BaseModel):
@@ -654,6 +686,7 @@ class QueueItem(BaseModel):
     remaining_seconds: Optional[int] = None
     consumed_pct: Optional[int] = None
     assignee_note: Optional[Literal["vacation", "incapacity", "away", "after_shift"]] = None
+    incident: bool = False
 
 
 class QueuePage(BaseModel):

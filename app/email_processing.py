@@ -305,6 +305,9 @@ def process_message(db: Session, msg) -> str:
         stored = email_attachments.save_to_draft(db, draft, email_attachments.extract(msg))
         _save_result(db, message_id, "draft_created")
         email_attachments.commit_or_cleanup(db, stored)
+        # Mismo cliente con el mismo problema abierto: se agrega a ese ticket (solo con la agrupación activa)
+        from . import grouping
+        grouping.after_draft_created(draft.id)
         return "draft_created"
 
     # f. Faltan datos: responder con la plantilla
@@ -358,6 +361,10 @@ def process_message(db: Session, msg) -> str:
     _save_result(db, message_id, "created")
     email_attachments.commit_or_cleanup(db, stored)
 
+    # Si se fusionó en su ticket abierto, ya le llegó ese aviso: ni "Recibimos su solicitud" ni asignación
+    from . import grouping
+    if grouping.after_ticket_created(ticket.id) == "merged":
+        return "created"
     send_ticket_created(ticket, user, category, priority)
     # Con la IA se asigna al terminar su análisis (analyze_pending); sin ella, ya mismo
     if not config.AI_ANALYSIS_ENABLED:

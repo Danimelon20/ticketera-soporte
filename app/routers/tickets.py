@@ -11,7 +11,7 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import cancellations, config, hacienda, mailer
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, attachments, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, identity, nav, portal
+from .. import account_reports, alerts, attachments, assignment_notice, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal
 
 AI_ROLES = ("technician", "coordinator", "admin")
 
@@ -187,6 +187,9 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     db.commit()
     db.refresh(db_ticket)
 
+    # Primero la agrupación: si se fusiona, el ticket queda cerrado y el análisis y la asignación lo saltan
+    if config.GROUPING_ENABLED:
+        background_tasks.add_task(grouping.after_ticket_created, db_ticket.id)
     # Mismo análisis que los tickets por correo, después de responder: no espera al modelo.
     # La asignación automática va después del análisis, para que el nivel ya exista.
     if config.AUTO_ASSIGN_ENABLED:
@@ -255,6 +258,8 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         .order_by(models.History.id.asc())
         .all()
     )
+    if current_user.role == "requester":
+        history = [h for h in history if h.field not in grouping.STAFF_HISTORY_FIELDS]
     comments_query = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id)
     if current_user.role == "requester":
         # El solicitante nunca recibe los comentarios internos
@@ -279,6 +284,10 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Dep
         if flags is not None:
             extra["requester_flags"] = flags
         extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
+        extra["grouping"] = grouping.staff_view(db, db_ticket, current_user)
+    merge = grouping.active_merge_of(db, db_ticket.id)
+    if merge is not None:
+        extra["merged_into"] = merge.target_ticket_id
     return TicketDetail(
         **ticket_read(db_ticket, current_user, portal.last_activity(db, [db_ticket])[db_ticket.id]).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
@@ -649,4 +658,17 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
             notified = (assignee.id,)
     if lines:
         notify_followers(db, background_tasks, db_ticket, current_user, subject, lines, exclude_ids=notified)
+
+    # Tickets relacionados (posible incidente): se resuelven y se asignan junto con el principal
+    if db_ticket.status == "resolved" and old_status != "resolved":
+        mails = grouping.resolve_related(db, db_ticket, current_user)
+        db.commit()
+        for to, mail_subject, body in mails:
+            background_tasks.add_task(mailer.send_email, to, mail_subject, body)
+    if db_ticket.assigned_to != old_assigned_to and db_ticket.assigned_to is not None:
+        assigned = grouping.propagate_assignment(db, db_ticket, current_user)
+        db.commit()
+        for related, related_assignee in assigned:
+            if assignment_notice.should_notify(related_assignee, current_user):
+                assignment_notice.schedule(background_tasks, related, related_assignee)
     return ticket_read(db_ticket, current_user)

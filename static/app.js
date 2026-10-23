@@ -2293,6 +2293,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else if (entry.field === 'reopened') {
             target.appendChild(document.createTextNode(' reabrió el ticket'));
+        } else if (entry.field === 'merged') {
+            target.appendChild(document.createTextNode(' agregó este ticket a '));
+            target.appendChild(makeEl('strong', '', `#${entry.new_value}`));
+        } else if (entry.field === 'merged_from') {
+            // new_value: "15" (ticket) o "borrador 3" (correo)
+            const fromDraft = (entry.new_value || '').startsWith('borrador');
+            target.appendChild(document.createTextNode(fromDraft ? ' agregó aquí un correo del cliente' : ' agregó aquí el ticket '));
+            if (!fromDraft) target.appendChild(makeEl('strong', '', `#${entry.new_value}`));
+        } else if (entry.field === 'unmerged') {
+            target.appendChild(document.createTextNode(' separó este ticket de '));
+            target.appendChild(makeEl('strong', '', `#${entry.old_value}`));
+        } else if (entry.field === 'unmerged_from') {
+            target.appendChild(document.createTextNode(' separó '));
+            target.appendChild(makeEl('strong', '', (entry.old_value || '').toLowerCase()));
+        } else if (entry.field === 'linked') {
+            target.appendChild(document.createTextNode(' relacionó este ticket con '));
+            target.appendChild(makeEl('strong', '', `#${entry.new_value}`));
+        } else if (entry.field === 'unlinked') {
+            target.appendChild(document.createTextNode(' separó este ticket de '));
+            target.appendChild(makeEl('strong', '', `#${entry.old_value}`));
         }
     }
 
@@ -3344,6 +3364,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Etiqueta de cada borrador: [texto, tono de ui-tag]
     function draftTag(draft) {
+        if (draft.merged_into) return [`Agregado a #${draft.merged_into}`, 'is-ok'];
         if (draft.status === 'error') return [DRAFT_STATUS_LABELS.error, 'is-danger'];
         if (draft.status === 'unclear') return ['Poco claro', 'is-warn'];
         if (draft.status === 'waiting_contact') return ['Esperando datos', 'is-info'];
@@ -4999,7 +5020,12 @@ document.addEventListener('DOMContentLoaded', () => {
         attachment_uploaded: 'Adjunto subido',
         attachment_downloaded: 'Adjunto descargado',
         email_attachments_received: 'Adjuntos recibidos por correo',
-        email_attachments_sent: 'Adjuntos enviados por correo'
+        email_attachments_sent: 'Adjuntos enviados por correo',
+        ticket_merged: 'Tickets fusionados',
+        ticket_merge_undone: 'Fusión separada',
+        ticket_linked: 'Tickets relacionados',
+        ticket_link_undone: 'Relación separada',
+        incident_marked: 'Posible incidente'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -6469,6 +6495,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (item.reported) meta.appendChild(makeEl('span', 'queue-flag-reported', 'Reportada'));
             if (item.auto_assigned) meta.appendChild(makeEl('span', 'queue-flag-auto', 'asignado automáticamente'));
+            if (item.incident) meta.appendChild(makeEl('span', 'ui-tag is-danger queue-flag-incident', 'Incidente'));
             subject.appendChild(meta);
 
             const level = queueCell('Nivel', 'col-level');
@@ -6657,6 +6684,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const homeAttention = document.getElementById('homeAttention');
     const homeTeam = document.getElementById('homeTeam');
     const homeTeamPanel = document.getElementById('homeTeamPanel');
+    const homeIncidents = document.getElementById('homeIncidents');
     let homeSeq = 0;
 
     function homeRow(className) {
@@ -6679,16 +6707,20 @@ document.addEventListener('DOMContentLoaded', () => {
         let dueSoon;
         let reports = [];
         let team = null;
+        let incidents = [];
         try {
-            [overdue, dueSoon, reports, team] = await Promise.all([
+            [overdue, dueSoon, reports, team, incidents] = await Promise.all([
                 // El servidor le da al técnico solo sus vencidos
                 apiFetch('/queue?view=overdue', { silent: true }),
                 apiFetch(`/queue?view=${technician ? 'mine_due_soon' : 'due_soon'}`, { silent: true }),
                 canManage ? apiFetch('/account-reports?status=open', { silent: true }) : Promise.resolve([]),
                 canManage ? apiFetch('/team', { silent: true }) : Promise.resolve(null),
+                // Si falla, Inicio sigue sin la franja
+                canManage ? apiFetch('/incidents', { silent: true }).catch(() => []) : Promise.resolve([]),
             ]);
         } catch (err) {
             if (seq !== homeSeq) return;
+            renderHomeIncidents([]);
             homeAttention.removeAttribute('aria-busy');
             homeAttention.replaceChildren(errorState(err, loadHomeLists));
             if (canManage) {
@@ -6701,7 +6733,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const seen = new Set();
         const urgent = [...overdue.items, ...dueSoon.items].filter(item => !seen.has(item.id) && seen.add(item.id));
         renderHomeAttention(urgent.slice(0, 6), reports.slice(0, 2));
+        renderHomeIncidents(incidents);
         if (canManage) renderHomeTeam(team);
+    }
+
+    // Posibles incidentes (coordinador y admin): varios clientes con la misma falla
+    function renderHomeIncidents(items) {
+        homeIncidents.replaceChildren();
+        homeIncidents.hidden = !items.length;
+        items.forEach(item => {
+            const row = makeEl('div', 'ui-notice is-danger home-incident');
+            row.appendChild(makeEl('span', '', `Posible incidente: ${item.clients} clientes reportan «${item.title}»`));
+            const open = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm home-incident-open', 'Ver');
+            open.type = 'button';
+            open.dataset.ticketId = String(item.principal_id);
+            row.appendChild(open);
+            homeIncidents.appendChild(row);
+        });
     }
 
     function renderHomeAttention(items, reports) {
@@ -6791,6 +6839,11 @@ document.addEventListener('DOMContentLoaded', () => {
             homeTeam.appendChild(li);
         });
     }
+
+    homeIncidents.addEventListener('click', (e) => {
+        const open = e.target.closest('.home-incident-open');
+        if (open) openTicketById(Number(open.dataset.ticketId));
+    });
 
     homeAttention.addEventListener('click', (e) => {
         const row = e.target.closest('.home-row');
@@ -7549,6 +7602,9 @@ document.addEventListener('DOMContentLoaded', () => {
             side.appendChild(notice);
         }
 
+        const groupCard = groupingCard(ticket.grouping);
+        if (groupCard) side.appendChild(groupCard);
+
         const props = makeEl('section', 'ui-card td-card');
         props.appendChild(makeEl('h2', 'ui-kicker', 'Propiedades'));
         const fields = makeEl('dl', 'td-props');
@@ -7606,8 +7662,69 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Fusiones y tickets relacionados. "Separar" solo sale si el servidor lo permite (can_separate)
+    function groupingCard(grouping) {
+        if (!grouping) return null;
+        const rows = [];
+        const groupRow = (label, item, kind) => {
+            const li = makeEl('li', 'td-group-row');
+            li.appendChild(document.createTextNode(label));
+            if (item.ticket_id) {
+                const open = makeEl('button', 'ticket-bar-link td-group-open', `#${item.ticket_id}`);
+                open.type = 'button';
+                open.dataset.ticketId = String(item.ticket_id);
+                li.appendChild(open);
+                if (item.title) li.appendChild(makeEl('span', 'td-group-title', item.title));
+            }
+            if (item.status) li.appendChild(makeEl('span', `state-tag state-${item.status}`, STATE_MAP[item.status] || item.status));
+            if (item.can_separate) {
+                const separate = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm td-group-separate', 'Separar');
+                separate.type = 'button';
+                separate.dataset.kind = kind;
+                separate.dataset.id = String(kind === 'merge' ? item.merge_id : item.link_id);
+                li.appendChild(separate);
+            }
+            rows.push(li);
+        };
+        if (grouping.merged_into) groupRow('Fusionado en ', grouping.merged_into, 'merge');
+        grouping.merged_from.forEach(item => groupRow(item.ticket_id ? 'Fusionado desde ' : 'Fusionado desde un correo del cliente', item, 'merge'));
+        if (grouping.principal) groupRow('Relacionado con ', grouping.principal, 'link');
+        grouping.related.forEach(item => groupRow('', item, 'link'));
+        if (!rows.length) return null;
+        const card = makeEl('section', `ui-card td-card td-group${grouping.incident ? ' is-incident' : ''}`);
+        const count = grouping.related.length;
+        const title = grouping.incident
+            ? `Incidente · ${count} tickets relacionados`
+            : (count ? `${count} ticket${count === 1 ? '' : 's'} relacionado${count === 1 ? '' : 's'}` : 'Agrupación');
+        card.appendChild(makeEl('h2', 'ui-kicker', title));
+        const list = makeEl('ul', 'td-group-list');
+        rows.forEach(li => list.appendChild(li));
+        card.appendChild(list);
+        return card;
+    }
+
     detailPanel.addEventListener('click', async (e) => {
         if (!selectedTicketId || !currentTicket || !isStaffShell()) return;
+
+        const groupOpen = e.target.closest('.td-group-open');
+        if (groupOpen) {
+            openTicketById(Number(groupOpen.dataset.ticketId));
+            return;
+        }
+        const separate = e.target.closest('.td-group-separate');
+        if (separate) {
+            separate.disabled = true;
+            const path = separate.dataset.kind === 'merge' ? 'merges' : 'links';
+            try {
+                await apiFetch(`/${path}/${separate.dataset.id}/undo`, { method: 'POST' });
+                toast('Tickets separados.');
+                reloadSelectedTicketAndList();
+                pollNavCounts(false);
+            } catch (err) {
+                separate.disabled = false; // apiFetch ya mostró el error
+            }
+            return;
+        }
 
         if (e.target.closest('.td-cancel')) {
             startCancel([currentTicket.id]);
@@ -8448,6 +8565,15 @@ document.addEventListener('DOMContentLoaded', () => {
         created.appendChild(timeTag(ticket.created_at));
         detailContent.appendChild(created);
         detailContent.appendChild(makeEl('h1', 'portal-detail-title', ticket.title));
+        if (ticket.merged_into) {
+            const notice = makeEl('div', 'ui-notice is-ok portal-merged');
+            notice.appendChild(makeEl('span', '', `Su mensaje se agregó a su solicitud #${ticket.merged_into}, que ya estamos atendiendo.`));
+            const open = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm portal-merged-open', `Ver #${ticket.merged_into}`);
+            open.type = 'button';
+            open.dataset.ticketId = String(ticket.merged_into);
+            notice.appendChild(open);
+            detailContent.appendChild(notice);
+        }
         detailContent.appendChild(renderPortalSteps(ticket.progress_step || 1));
         if (ticket.assigned_name) {
             detailContent.appendChild(makeEl('p', 'sd-muted portal-owner', `Le atiende: ${ticket.assigned_name}`));
@@ -8500,6 +8626,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     detailPanel.addEventListener('click', async (e) => {
+        const merged = e.target.closest('.portal-merged-open');
+        if (merged && isRequesterPortal()) {
+            openPortalTicket(Number(merged.dataset.ticketId));
+            return;
+        }
         const send = e.target.closest('.portal-send');
         if (!send || !selectedTicketId || !isRequesterPortal()) return;
         const textarea = document.getElementById('portalReply');

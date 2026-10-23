@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint, Index, text
+from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, Float, Text, ForeignKey, CheckConstraint, UniqueConstraint, Index, text
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -424,6 +424,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "attachment_uploaded", "attachment_downloaded",
     # Adjuntos que entran o salen por correo (solo la cantidad, nunca nombres)
     "email_attachments_received", "email_attachments_sent",
+    # Agrupación de tickets similares (target_label: "Ticket #15 → #12"; new_value: similitud y si fue automático)
+    "ticket_merged", "ticket_merge_undone", "ticket_linked", "ticket_link_undone", "incident_marked",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
 )
@@ -725,3 +727,60 @@ class OverdueCause(Base):
     recorded_at = Column(DateTime, nullable=False)
 
     user = relationship("User")
+
+
+class TicketEmbedding(Base):
+    """Vector del texto de un ticket (asunto + inicio del mensaje, enmascarado) para no recalcularlo."""
+    __tablename__ = "ticket_embeddings"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    model = Column(String(100), nullable=False)
+    text_hash = Column(String(64), nullable=False)
+    vector = Column(Text, nullable=False)  # JSON
+    created_at = Column(DateTime, nullable=False)
+
+
+class TicketMerge(Base):
+    """Caso A: un ticket (o un borrador) del mismo cliente agregado a su ticket abierto. undone_at: separado."""
+    __tablename__ = "ticket_merges"
+
+    id = Column(Integer, primary_key=True)
+    source_ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=True)
+    source_draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), index=True, nullable=True)
+    target_ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind = Column(String(10), nullable=False)  # "ticket" | "draft", validado en Python
+    similarity = Column(Float, nullable=True)
+    ai_reason = Column(String(300), nullable=True)
+    automatic = Column(Boolean, nullable=False, default=True)
+    # Comentario agregado al destino: Separar lo quita
+    copied_comment_id = Column(Integer, ForeignKey("comments.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    undone_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    undone_at = Column(DateTime, nullable=True)
+
+
+class TicketLink(Base):
+    """Caso B: ticket de otro cliente ligado al principal del grupo (posible incidente). undone_at: separado."""
+    __tablename__ = "ticket_links"
+
+    id = Column(Integer, primary_key=True)
+    principal_ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    related_ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    similarity = Column(Float, nullable=True)
+    ai_reason = Column(String(300), nullable=True)
+    automatic = Column(Boolean, nullable=False, default=True)
+    # El responsable se le puso por el principal: al separar vuelve a la cola sin responsable
+    assigned_by_link = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False)
+    undone_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    undone_at = Column(DateTime, nullable=True)
+
+
+class TicketIncident(Base):
+    """Principal marcado como posible incidente (varios clientes con la misma falla en poco tiempo)."""
+    __tablename__ = "ticket_incidents"
+
+    id = Column(Integer, primary_key=True)
+    principal_ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    marked_at = Column(DateTime, nullable=False)

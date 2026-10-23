@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, attachments, audit, auto_assign, config, email_analysis, email_attachments, identity, models
+from .. import account_reports, attachments, audit, auto_assign, config, email_analysis, email_attachments, grouping, identity, models
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import AttachmentRead, DraftConfirm, DraftRead
@@ -83,6 +83,9 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
         attachments=files,
         attachment_notes=notes,
     )
+    merge = grouping.active_draft_merge(db, draft.id)
+    if merge is not None:
+        data.merged_into = merge.target_ticket_id
     if viewer.role == "technician":
         # El técnico no ve datos personales completos (como en el detalle del ticket)
         data.body = _redact(data.body)
@@ -208,6 +211,10 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         db.refresh(obj)
 
     background_tasks.add_task(send_ticket_created, ticket, requester, category, priority)
+    # Solo el caso B (otros clientes): el mismo cliente ya se revisó al llegar el correo.
+    # Antes de asignar, para que herede el responsable del principal
+    if config.GROUPING_ENABLED:
+        background_tasks.add_task(grouping.after_ticket_created, ticket.id, ("link",))
     # El nivel ya existe (viene del análisis del borrador)
     background_tasks.add_task(auto_assign.assign_new, ticket.id)
     return _draft_read(db, draft, reviewer)

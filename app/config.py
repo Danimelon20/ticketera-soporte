@@ -40,6 +40,16 @@ AUTO_ASSIGN_ENABLED = os.getenv("AUTO_ASSIGN_ENABLED", "false").lower() == "true
 AUTO_ASSIGN_LOAD_MODE = os.getenv("AUTO_ASSIGN_LOAD_MODE", "levels").lower()
 AUTO_ASSIGN_CHECK_SECONDS = int(os.getenv("AUTO_ASSIGN_CHECK_SECONDS", "60"))
 
+# Agrupación de tickets similares (mismo cliente: se fusiona; varios clientes: incidente)
+GROUPING_ENABLED = os.getenv("GROUPING_ENABLED", "false").lower() == "true"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen3-embedding:0.6b")
+# Similitud mínima (coseno de los embeddings, 0 a 1). Altas a propósito: mejor no agrupar que agrupar mal
+GROUPING_MERGE_THRESHOLD = float(os.getenv("GROUPING_MERGE_THRESHOLD", "0.80"))
+GROUPING_INCIDENT_THRESHOLD = float(os.getenv("GROUPING_INCIDENT_THRESHOLD", "0.85"))
+GROUPING_INCIDENT_MIN = int(os.getenv("GROUPING_INCIDENT_MIN", "3"))
+GROUPING_INCIDENT_HOURS = int(os.getenv("GROUPING_INCIDENT_HOURS", "2"))
+GROUPING_TIMEOUT_SECONDS = float(os.getenv("GROUPING_TIMEOUT_SECONDS", "15"))
+
 # Carpeta de los adjuntos de los comentarios (dentro de data/, que ya persiste el volumen)
 ATTACHMENTS_DIR = os.getenv("ATTACHMENTS_DIR", "data/attachments")
 

@@ -1867,6 +1867,7 @@ body.staff-shell #detailPanel { padding: 16px; font-size: 13px; }
 .queue-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .queue-flag-reported { color: var(--overdue); font-weight: 600; margin-left: 6px; }
 .queue-flag-auto { margin-left: 6px; font-style: italic; }
+.queue-flag-incident { margin-left: 6px; }
 .queue-owner.is-unassigned, .is-unassigned { color: var(--due-soon); font-weight: 500; }
 .queue-note { font-size: 11px; color: var(--due-soon); margin-top: 2px; }
 .queue-empty { padding: 24px 16px; color: var(--muted); margin: 0; }
@@ -4106,6 +4107,17 @@ body.staff-shell.nav-collapsed .nav-search { display: none; }
 .td-cancelled-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .td-cancelled-by { font-size: 12px; }
 .td-cancelled-note { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+/* Agrupación: fusiones y tickets relacionados */
+.td-group.is-incident { border-color: #F1B8B0; }
+.td-group.is-incident .ui-kicker { color: var(--overdue); }
+.td-group-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.td-group-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.td-group-title { flex: 1 1 120px; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.td-group-separate { margin-left: auto; }
+.home-incidents { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.home-incidents[hidden] { display: none; }
+.home-incident > :first-child { overflow-wrap: anywhere; }
+.portal-merged { margin: 8px 0 12px; }
 @media (max-width: 767px) {
   .queue-bulk { flex-wrap: wrap; padding: 8px 12px; }
 }

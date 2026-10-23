@@ -29,7 +29,7 @@ TIMEOUT_SECONDS = 120
 # El modelo queda cargado entre peticiones (la carga en frío tarda ~9 s en CPU)
 KEEP_ALIVE = "24h"
 # Tope de tokens de la respuesta por tarea (en CPU se generan ~20 tokens/s)
-NUM_PREDICT = {"chat": 400, "ticket_analysis": 300, "draft_analysis": 300}
+NUM_PREDICT = {"chat": 400, "ticket_analysis": 300, "draft_analysis": 300, "group_check": 80}
 WARM_UP_TIMEOUT_SECONDS = 180
 COMMENT_CHARS = 300
 
@@ -275,19 +275,22 @@ def log_timing(task: str, data: dict) -> None:
 
 
 def warm_up() -> None:
-    """Carga el modelo en memoria sin generar nada. Si falla, solo queda en el log."""
-    try:
-        response = httpx.post(
-            f"{config.LLM_BASE_URL}/api/generate",
-            json={"model": config.LLM_MODEL, "keep_alive": KEEP_ALIVE},
-            timeout=WARM_UP_TIMEOUT_SECONDS,
-        )
-        if response.status_code == 200:
-            log_timing("warm_up", response.json())
-        else:
-            logging.warning("No se pudo precargar el modelo: Ollama respondió %s", response.status_code)
-    except Exception as exc:
-        logging.warning("No se pudo precargar el modelo: %s", type(exc).__name__)
+    """Carga el modelo (y el de embeddings, si la agrupación está activa) sin generar nada. Si falla, solo queda en el log."""
+    requests = [("warm_up", "/api/generate", {"model": config.LLM_MODEL, "keep_alive": KEEP_ALIVE})]
+    if config.GROUPING_ENABLED:
+        # Mismo num_ctx que similarity.embed: con otro, Ollama lo volvería a cargar
+        requests.append(("warm_up_embed", "/api/embed", {
+            "model": config.EMBEDDING_MODEL, "input": "", "keep_alive": KEEP_ALIVE, "options": {"num_ctx": 512},
+        }))
+    for task, path, body in requests:
+        try:
+            response = httpx.post(f"{config.LLM_BASE_URL}{path}", json=body, timeout=WARM_UP_TIMEOUT_SECONDS)
+            if response.status_code == 200:
+                log_timing(task, response.json())
+            else:
+                logging.warning("No se pudo precargar el modelo: Ollama respondió %s", response.status_code)
+        except Exception as exc:
+            logging.warning("No se pudo precargar el modelo: %s", type(exc).__name__)
 
 
 def _chat_messages(system_prompt: str, history: list, message: str) -> list[dict]:
@@ -320,10 +323,10 @@ def _check_status(status_code: int) -> None:
         raise ChatbotUnavailable()
 
 
-def post_chat(payload: dict, task: str = "chat") -> str:
+def post_chat(payload: dict, task: str = "chat", timeout: float | None = None) -> str:
     """Envía el payload a /api/chat de Ollama y devuelve el texto del mensaje."""
     try:
-        response = httpx.post(f"{config.LLM_BASE_URL}/api/chat", json=payload, timeout=TIMEOUT_SECONDS)
+        response = httpx.post(f"{config.LLM_BASE_URL}/api/chat", json=payload, timeout=timeout or TIMEOUT_SECONDS)
     except httpx.HTTPError as exc:
         logging.error("El asistente no pudo conectarse con Ollama: %s", type(exc).__name__)
         raise ChatbotUnavailable() from exc

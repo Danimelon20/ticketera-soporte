@@ -169,14 +169,16 @@ def commit_or_cleanup(db: Session, stored: list[str]) -> None:
         raise
 
 
-def move_to_ticket(db: Session, draft: models.EmailDraft, ticket: models.Ticket) -> None:
+def move_to_ticket(db: Session, draft: models.EmailDraft, ticket: models.Ticket,
+                   comment: models.Comment | None = None) -> None:
     """Al confirmar: los archivos del borrador pasan al primer mensaje del ticket (mismo archivo en disco).
 
+    comment: otro comentario que los lleva (un borrador agregado a un ticket abierto).
     Las notas quedan en una nota interna del Agente virtual. No hace commit.
     """
     rows = db.query(models.DraftAttachment).filter(models.DraftAttachment.draft_id == draft.id).order_by(models.DraftAttachment.id).all()
     if rows:
-        comment = first_message(db, ticket, draft.requester_id)
+        comment = comment or first_message(db, ticket, draft.requester_id)
         for row in rows:
             db.add(models.Attachment(
                 ticket_id=ticket.id, comment_id=comment.id, original_name=row.original_name,
