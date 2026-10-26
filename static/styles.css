@@ -1581,7 +1581,7 @@ section {
 }
 
 /* ===== Mesa de servicio: estructura del personal ===== */
-.tabular, .nav-count, .status-bar, .shift-data dd { font-variant-numeric: tabular-nums; }
+.tabular, .nav-count { font-variant-numeric: tabular-nums; }
 
 .topbar {
   min-height: 52px;
@@ -1641,36 +1641,6 @@ section {
 .topbar-availability.is-active { color: #86EFAC; }
 .topbar-availability[hidden] { display: none; }
 
-.global-search { position: relative; flex: 1 1 320px; max-width: 420px; margin-left: 12px; }
-.global-search[hidden] { display: none; }
-.global-search input {
-  width: 100%;
-  box-sizing: border-box;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #FFFFFF;
-  padding: 0 10px;
-  font: inherit;
-  font-size: 13px;
-}
-.global-search input::placeholder { color: rgba(255, 255, 255, 0.6); }
-.global-search input:focus { outline: 2px solid var(--blue); background: #FFFFFF; color: var(--ink); }
-.global-search-results {
-  position: absolute;
-  top: 36px;
-  left: 0;
-  right: 0;
-  margin: 0;
-  padding: 4px 0;
-  list-style: none;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  z-index: 60;
-}
-.global-search-results[hidden] { display: none; }
 .global-result {
   width: 100%;
   text-align: left;
@@ -1685,7 +1655,6 @@ section {
 
 /* El personal usa el menú lateral en lugar de las pestañas */
 body.staff-shell .topbar-nav { display: none; }
-body.staff-shell .topbar { height: 52px; flex-wrap: nowrap; }
 body.staff-shell .chat-fab { bottom: calc(var(--bar-h) + 14px); }
 body.staff-shell .chat-panel { bottom: calc(var(--bar-h) + 82px); }
 
@@ -1706,27 +1675,6 @@ body.staff-shell .chat-panel { bottom: calc(var(--bar-h) + 82px); }
 }
 .side-nav[hidden] { display: none; }
 .side-nav-groups { padding: 8px 0; }
-.nav-group + .nav-group { margin-top: 4px; }
-.nav-group-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border: none;
-  background: transparent;
-  padding: 8px 14px 4px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  cursor: pointer;
-}
-.nav-group-toggle::after { content: '▾'; font-size: 10px; }
-.nav-group-toggle[aria-expanded="false"]::after { content: '▸'; }
-.nav-group-items { list-style: none; margin: 0; padding: 0; }
-.nav-group-items[hidden] { display: none; }
 .nav-item {
   width: 100%;
   display: flex;
@@ -1749,60 +1697,21 @@ body.staff-shell .chat-panel { bottom: calc(var(--bar-h) + 82px); }
 .nav-count.is-alert { color: var(--overdue); font-weight: 600; }
 .nav-count.is-warn { color: var(--due-soon); font-weight: 600; }
 
-.shift-box { margin: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
-.shift-box[hidden] { display: none; }
-.shift-title { font-size: 12px; font-weight: 600; margin: 0 0 6px; border: none; padding: 0; }
-.shift-data { margin: 0 0 8px; }
-.shift-data div { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 2px 0; }
-.shift-data dt { color: var(--muted); }
-.shift-data dd { margin: 0; }
-.shift-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-.shift-box select { width: 100%; height: 30px; font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
 
 .side-nav-backdrop { display: none; }
 
-.status-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: var(--bar-h);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 12px;
-  background: var(--bg-side);
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--muted);
-  z-index: 40;
-  box-sizing: border-box;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.status-bar[hidden] { display: none; }
-.status-item { display: inline-flex; align-items: center; gap: 6px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #A0A4B8; }
-.status-item.is-on .status-dot { background: var(--on-shift); }
 .status-logo { height: 28px; width: auto; margin-left: auto; flex: 0 0 auto; }
 .status-logo[hidden] { display: none; }
 
-body.staff-shell main { margin-left: 220px; padding-bottom: var(--bar-h); }
-body.staff-shell .split { min-height: calc(100vh - 52px - var(--bar-h)); }
+body.staff-shell main { padding-bottom: var(--bar-h); }
 
 @media (max-width: 767px) {
   .nav-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
   .brand-name { display: none; }
-  .global-search { margin-left: 0; min-width: 0; }
   .topbar-user-text { display: none; }
   .topbar-action .btn-primary { font-size: 0; width: 32px; padding: 0; }
   .topbar-action .btn-primary::before { content: '+'; font-size: 18px; }
-  body.staff-shell main { margin-left: 0; }
-  body.staff-shell .side-nav { transform: translateX(-100%); transition: transform 0.15s ease; z-index: 70; }
-  body.staff-shell.nav-open .side-nav { transform: none; }
-  body.staff-shell.nav-open .side-nav-backdrop { display: block; position: fixed; inset: 52px 0 0 0; background: rgba(16, 19, 46, 0.35); z-index: 65; }
-  .status-item .status-text { display: none; }
-  #statusShift { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   body.staff-shell .side-nav { transition: none; }
@@ -2790,10 +2699,6 @@ body.staff-shell .side-nav {
   z-index: 50;
 }
 /* Del menú viejo: quedan en la página hasta la limpieza (N5), pero no se muestran */
-body.staff-shell .nav-brand,
-body.staff-shell .nav-search,
-body.staff-shell .nav-search-icon,
-body.staff-shell .side-nav .status-bar { display: none !important; }
 body.staff-shell .side-nav-groups { flex: 1 1 auto; min-height: 0; padding: 0; }
 .nav-modules-title { margin: 0; padding: 0 10px 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #8A90A8; }
 .nav-modules, .nav-sections { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -2849,7 +2754,6 @@ body.staff-shell #queueHeading,
 body.staff-shell #queueTitle,
 body.staff-shell .queue-sort,
 body.staff-shell #queueNewTicket,
-body.staff-shell .home-heading,
 body.staff-shell #draftsTitle,
 body.staff-shell #accountsTitle,
 body.staff-shell #adminTitle,
@@ -2868,7 +2772,7 @@ body.staff-shell #reportsTitle { display: none; }
   body.staff-shell .brand-text { display: none; }
   body.staff-shell .top-search { flex: 0 0 auto; width: 36px; padding: 0; justify-content: center; border-color: transparent; background: transparent; }
   body.staff-shell .top-search-text, body.staff-shell .top-search-kbd { display: none; }
-  body.staff-shell #openNewTicket { padding: 0 10px; font-size: 13px; }
+  body.staff-shell #openNewTicket { width: 36px; padding: 0; }
   body.staff-shell .top-profile-text { display: none; }
   body.staff-shell .side-nav { width: 264px; transform: translateX(-100%); transition: transform 0.15s ease; z-index: 70; }
   body.staff-shell.nav-open .side-nav { transform: none; }
@@ -2879,9 +2783,7 @@ body.staff-shell #reportsTitle { display: none; }
   .page-title { font-size: 20px; }
   body.staff-shell .bell-panel { left: 16px; right: 16px; width: auto; }
 }
-@media (max-width: 767px) and (prefers-reduced-motion: reduce) {
-  body.staff-shell .side-nav { transition: none; }
-}
+
 
 /* ----- Página del ticket ----- */
 .ticket-bar[hidden] { display: none; }
@@ -2957,10 +2859,6 @@ body.staff-shell.ticket-open #detailContent {
 /* ----- Inicio ----- */
 .home-view { display: flex; flex-direction: column; gap: 22px; padding: 28px 36px; }
 .home-view[hidden] { display: none; }
-.home-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
-.home-heading { display: flex; flex-direction: column; gap: var(--sp-1); }
-.home-date { margin: 0; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
-.home-title { margin: 0; font-size: var(--fs-3xl); font-weight: 600; letter-spacing: -0.02em; }
 .home-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .home-card {
   display: flex;
@@ -2983,7 +2881,6 @@ body.staff-shell.ticket-open #detailContent {
 }
 @media (max-width: 767px) {
   .home-view { padding: 20px 16px; }
-  .home-title { font-size: var(--fs-2xl); }
 }
 
 /* =====================================================================
@@ -3190,36 +3087,7 @@ body.staff-shell.ticket-open #detailContent {
 
 /* ----- Barra de estado compacta al pie de la barra lateral ----- */
 body.staff-shell { --bar-h: 0px; }
-body.staff-shell .status-bar {
-  position: static;
-  height: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin: 10px 0 0;
-  padding: 10px 10px 0;
-  list-style: none;
-  border: none;
-  border-top: 1px solid var(--navy-line);
-  background: none;
-  font-size: var(--fs-xs);
-  color: var(--navy-muted);
-  white-space: normal;
-  overflow: visible;
-}
-body.staff-shell .status-bar[hidden] { display: none; }
 body.staff-shell .status-dot { background: #6B74C9; }
-body.staff-shell .status-item.is-on .status-dot { background: #4ADE80; }
-body.staff-shell .status-item .status-text { display: inline; }
-body.staff-shell .status-shift { padding-left: 13px; }
-body.staff-shell.nav-collapsed .status-bar { align-items: center; padding: 10px 0 0; }
-body.staff-shell.nav-collapsed .status-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-body.staff-shell.nav-collapsed .status-shift { display: none; }
-@media (max-width: 767px) {
-  body.staff-shell.nav-collapsed .status-bar { align-items: stretch; padding: 10px 10px 0; }
-  body.staff-shell.nav-collapsed .status-text { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
-  body.staff-shell #statusShift { display: block; }
-}
 
 /* Logo de la empresa al pie del contenido del personal */
 .staff-footer { display: flex; justify-content: flex-end; padding: 8px 32px 20px; }
@@ -3984,27 +3852,6 @@ body.requester-portal .portal-footer { background: var(--surface); border-top: 1
 /* =====================================================================
    Fase 6 · Paleta de comandos, hoja de atajos y botón "Buscar…"
    ===================================================================== */
-.nav-search {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 34px;
-  margin: 0 0 12px;
-  padding: 0 10px;
-  border: 1px solid var(--navy-line);
-  border-radius: var(--r-md);
-  background: var(--navy-2);
-  color: var(--navy-muted);
-  font: inherit;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-.nav-search:hover { color: #FFFFFF; border-color: #3A3AB8; }
-.nav-search .global-search-kbd { position: static; }
-body.staff-shell.nav-collapsed .nav-search { display: none; }
-@media (max-width: 767px) {
-  body.staff-shell.nav-collapsed .nav-search { display: flex; }
-}
 
 .palette {
   width: min(560px, calc(100vw - 32px));
@@ -4069,7 +3916,6 @@ body.staff-shell.nav-collapsed .nav-search { display: none; }
 
 /* ----- Cancelar tickets ----- */
 .state-cancelled { background: var(--danger-soft); color: var(--overdue); }
-.nav-dot.is-muted { background: #8E9AE6; }
 .queue-bulk { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .queue-bulk[hidden] { display: none; }
 .queue-bulk-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -4215,8 +4061,7 @@ body.staff-shell.nav-collapsed .nav-search { display: none; }
 .drafts-filter select, .draft-reassign select { width: 100%; }
 .draft-reassign { max-width: 360px; margin: 0 0 16px; }
 .draft-not-yours { margin: 0 0 12px; }
-.home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2, 8px); }
-.draft-actions[hidden], .drafts-filter[hidden], .draft-reassign[hidden], .draft-not-yours[hidden], .home-actions .ui-btn[hidden] { display: none; }
+.draft-actions[hidden], .drafts-filter[hidden], .draft-reassign[hidden], .draft-not-yours[hidden] { display: none; }
 
 /* =====================================================================
    N2 · Técnico: Mi trabajo
@@ -4257,7 +4102,6 @@ body.staff-shell .ticket-bar-mark { display: none; }
    N3 · Coordinador: Inicio, Vencidos con causa, Incidentes, Carga y Disponibilidad
    ===================================================================== */
 /* El saludo y "Enviar resumen ahora" van en la cabecera de la página */
-body.staff-shell .home-head { display: none; }
 .home-team-load { min-width: 24px; text-align: right; font-size: 12px; color: #5B6078; }
 .home-row-tag { flex: 0 0 auto; }
 /* Columna Causa: solo en Vencidos del coordinador */

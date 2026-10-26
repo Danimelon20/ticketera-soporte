@@ -5868,41 +5868,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const sideNavGroups = document.getElementById('sideNavGroups');
     const sideNavBackdrop = document.getElementById('sideNavBackdrop');
     const navToggle = document.getElementById('navToggle');
-    const statusBar = document.getElementById('statusBar');
     const statusLogo = document.getElementById('statusLogo');
     const directoryRoleSelect = document.getElementById('directoryRole');
-    const ASSIGN_MODE_LABELS = { levels: 'por niveles', count: 'por cantidad' };
     let navPollTimer = null;
     let navCounts = {};
     let activeNavId = null;
 
-    // tone: 'alert' (rojo) o 'warn' (ámbar) cuando el contador es mayor que cero
-    function ticketItem(id, label, count, tone) {
-        return { id, label, count, tone, open: () => setQueueView(id, label) };
-    }
-
-    // Vista guardada de la cola: un punto de color en lugar del ícono
-    function savedView(id, label, count, dot, tone) {
-        return { ...ticketItem(id, label, count, tone), dot };
-    }
-
-    function openDirectory(role) {
-        directoryRoleSelect.value = role;
-        showView('directory');
-    }
-
-    // Íconos de la barra lateral (trazos de 24 × 24, los mismos del prototipo)
+    // Íconos de los módulos del menú (trazos de 24 × 24, los mismos del prototipo)
     const NAV_ICONS = {
         home: 'M3 10.5L12 3l9 7.5V21h-6v-6H9v6H3z',
         tickets: 'M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z',
         mail: 'M4 4h16v16H4zM4 7l8 6 8-6',
         accounts: 'M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M21 20v-1a4 4 0 0 0-3-3.87M16 4.13a3.5 3.5 0 0 1 0 6.75',
         team: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
-        flag: 'M5 21V4M5 4h11l-2 4 2 4H5',
-        invite: 'M15 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M16 11h6',
-        approvals: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
-        changes: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
-        health: 'M22 12h-4l-3 9L9 3l-3 9H2',
     };
 
     function navIcon(name) {
@@ -6649,42 +6627,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('navLogout').addEventListener('click', () => switchAccountBtn.click());
 
-    // ----- Menú contraído (solo íconos): se recuerda en este navegador -----
-    const NAV_COLLAPSED_KEY = 'ticketeraNavCollapsed';
-    const navCollapse = document.getElementById('navCollapse');
-
-    function readNavCollapsed() {
-        try {
-            return localStorage.getItem(NAV_COLLAPSED_KEY) === '1';
-        } catch (err) {
-            return false; // Sin almacenamiento: menú abierto
-        }
-    }
-
-    function setNavCollapsed(collapsed, save = true) {
-        document.body.classList.toggle('nav-collapsed', collapsed);
-        const label = collapsed ? 'Expandir menú' : 'Minimizar menú';
-        navCollapse.setAttribute('aria-label', label);
-        navCollapse.title = label;
-        navCollapse.textContent = collapsed ? '»' : '«';
-        if (save) {
-            try {
-                localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
-            } catch (err) {
-                // No se pudo guardar: vale solo para esta visita
-            }
-        }
-        applyFabPos(false);
-    }
-
-    navCollapse.addEventListener('click', () => {
-        setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
-    });
-
-    // "Buscar… Ctrl K" (y el ícono con el menú contraído) abre la paleta de comandos
-    document.getElementById('navSearch').addEventListener('click', () => openPalette());
-    document.getElementById('navSearchIcon').addEventListener('click', () => openPalette());
-
     navToggle.addEventListener('click', () => {
         const open = !document.body.classList.contains('nav-open');
         document.body.classList.toggle('nav-open', open);
@@ -6711,24 +6653,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return response.ok ? response.json() : null;
     }
 
-    function setStatusItem(id, active, extra) {
-        const item = document.getElementById(id);
-        item.classList.toggle('is-on', active);
-        item.querySelector('.status-dot').title = active ? 'Activo' : 'Inactivo';
-        const label = item.querySelector('.status-text');
-        const base = { statusEmail: 'Correo', statusAi: 'Análisis IA', statusAssign: 'Asignación automática' }[id];
-        label.textContent = `${base}${extra ? ` (${extra})` : ''}: ${active ? 'activo' : 'inactivo'}`;
-        // Con el menú contraído solo queda el punto: el texto sale al pasar el puntero
-        item.title = label.textContent;
-    }
-
+    // Estado de los servicios: abajo del menú del administrador y la carga del técnico (por niveles o cantidad)
     function renderStatusBar(status) {
         lastSystemStatus = status;
         renderNavShift();
-        setStatusItem('statusEmail', status.email);
-        setStatusItem('statusAi', status.ai_analysis);
-        setStatusItem('statusAssign', status.auto_assign, ASSIGN_MODE_LABELS[status.auto_assign_mode]);
-        document.getElementById('statusShift').textContent = `Técnicos en turno: ${status.technicians_on_shift}`;
     }
 
     // withQueue: el temporizador también actualiza la cola; tras un cambio solo hacen falta los contadores
@@ -6863,8 +6791,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const staff = Boolean(currentUser && STAFF_SHELL_ROLES.includes(currentUser.role));
         document.body.classList.toggle('staff-shell', staff);
         sideNav.hidden = !staff;
-        // La barra de estado vieja ya no se muestra: el estado va abajo del menú
-        statusBar.hidden = true;
         resetBell();
         document.getElementById('staffFooter').hidden = !staff;
         navToggle.hidden = !staff;
@@ -6883,20 +6809,17 @@ document.addEventListener('DOMContentLoaded', () => {
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
         // El técnico no crea tickets (igual que el botón de la barra superior)
         document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
-        // El menú por módulos no se contrae
-        document.body.classList.remove('nav-collapsed');
         renderSideNav();
         startNavPolling();
     }
 
     function teardownStaffShell() {
         stopNavPolling();
-        document.body.classList.remove('staff-shell', 'nav-open', 'nav-collapsed', 'ticket-open', 'newticket-open');
+        document.body.classList.remove('staff-shell', 'nav-open', 'ticket-open', 'newticket-open');
         cancelPendingAssignSilently();
         cancelPendingCancelSilently();
         ticketBar.hidden = true;
         sideNav.hidden = true;
-        statusBar.hidden = true;
         resetBell();
         document.getElementById('staffFooter').hidden = true;
         sideNavBackdrop.hidden = true;
@@ -7420,7 +7343,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('queueNewTicket').addEventListener('click', () => openNewTicket.click());
 
     // ----- Inicio: saludo y resumen con los mismos contadores del menú -----
-    const homeQueue = document.getElementById('homeQueue');
     const homeStats = document.getElementById('homeStats');
 
     function homeGreeting() {
@@ -7449,11 +7371,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderHome() {
         if (!currentUser) return;
-        const now = new Date();
-        const day = now.toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'short' });
-        const time = now.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', hour12: false });
-        document.getElementById('homeDate').textContent = `${day.replace('.', '')} · ${time}`.toUpperCase();
-        document.getElementById('homeTitle').textContent = homeTitleText();
         sendSummaryNowBtn.hidden = !OPERATION_ROLES.includes(currentUser.role);
         homeStats.replaceChildren();
         homeCards().forEach(([route, label, value, detail, tone]) => {
@@ -7683,11 +7600,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (card) goRoute(card.dataset.route);
     });
 
-    homeQueue.addEventListener('click', () => {
-        const view = currentUser.role === 'technician' ? 'mine_open' : 'open';
-        setSideNavActive(view);
-        setQueueView(view, currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos');
-    });
 
     queueBody.addEventListener('click', (e) => {
         // La casilla de Vencidos solo selecciona

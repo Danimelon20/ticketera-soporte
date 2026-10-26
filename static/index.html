@@ -260,29 +260,7 @@
 </header>
 
     <aside id="sideNav" class="side-nav" hidden aria-label="Menú">
-        <div class="nav-brand">
-            <span class="nav-brand-mark" aria-hidden="true">T</span>
-            <span class="nav-brand-text">
-                <span class="nav-brand-name">Soporte</span>
-                <span class="nav-brand-sub">American Data</span>
-            </span>
-            <button type="button" id="navCollapse" class="nav-collapse" aria-label="Minimizar menú" title="Minimizar menú">«</button>
-        </div>
-        <!-- Abre la paleta de comandos: pantallas, #número, búsqueda de tickets y clientes -->
-        <button type="button" id="navSearch" class="nav-search" aria-haspopup="dialog" aria-keyshortcuts="Control+K">
-            <span>Buscar…</span><kbd class="global-search-kbd" aria-hidden="true">Ctrl K</kbd>
-        </button>
-        <button type="button" id="navSearchIcon" class="nav-search-icon" aria-label="Buscar (Ctrl K)" title="Buscar (Ctrl K)" aria-haspopup="dialog">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"/></svg>
-        </button>
         <nav id="sideNavGroups" class="side-nav-groups" aria-label="Vistas"></nav>
-        <!-- Barra de estado compacta: correo, IA, asignación automática y técnicos en turno -->
-        <ul id="statusBar" class="status-bar" aria-label="Estado del sistema" hidden>
-            <li class="status-item" id="statusEmail"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Correo</span></li>
-            <li class="status-item" id="statusAi"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Análisis IA</span></li>
-            <li class="status-item" id="statusAssign"><span class="status-dot" aria-hidden="true"></span><span class="status-text">Asignación automática</span></li>
-            <li class="status-item status-shift" id="statusShift"></li>
-        </ul>
         <!-- Abajo: estado del turno (o del sistema, para el administrador) y Mi cuenta -->
         <div class="nav-foot">
             <p id="navShift" class="nav-shift" hidden><span class="nav-shift-dot" aria-hidden="true"></span><span id="navShiftText"></span></p>
@@ -311,7 +289,10 @@
                     <h1 id="pageTitle" class="page-title"></h1>
                     <p id="pageContext" class="page-context"></p>
                 </div>
-                <div id="pageActions" class="page-actions"></div>
+                <div id="pageActions" class="page-actions">
+                    <!-- Reporte de operación: solo el coordinador (la sección Inicio lo pone aquí) -->
+                    <button type="button" id="sendSummaryNow" class="ui-btn ui-btn-secondary" hidden>Enviar resumen ahora</button>
+                </div>
             </div>
         </header>
         <div class="split">
@@ -565,18 +546,7 @@
             </details>
         </section>
 
-        <section id="homeView" class="page-view home-view" hidden aria-labelledby="homeTitle">
-            <div class="home-head">
-                <div class="home-heading">
-                    <p id="homeDate" class="home-date"></p>
-                    <h1 id="homeTitle" class="home-title">Inicio</h1>
-                </div>
-                <div class="home-actions">
-                    <!-- Reporte de operación: solo el coordinador -->
-                    <button type="button" id="sendSummaryNow" class="ui-btn ui-btn-secondary" hidden>Enviar resumen ahora</button>
-                    <button type="button" id="homeQueue" class="ui-btn ui-btn-primary">Ir a la cola de tickets</button>
-                </div>
-            </div>
+        <section id="homeView" class="page-view home-view" hidden aria-labelledby="pageTitle">
             <div id="homeStats" class="home-stats"></div>
             <div id="homeIncidents" class="home-incidents" hidden></div>
             <div class="home-grid">
