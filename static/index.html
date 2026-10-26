@@ -326,6 +326,11 @@
                         <button type="button" id="queueNewTicket" class="ui-btn ui-btn-primary">Nuevo ticket</button>
                     </div>
                     <div id="queueViews" class="ui-tabs queue-views" role="tablist" aria-label="Vistas"></div>
+                    <!-- Mis tickets: los vencidos van en su propia sección -->
+                    <p id="queueOverdueNotice" class="ui-notice is-danger queue-overdue-notice" hidden>
+                        <span id="queueOverdueText"></span>
+                        <button type="button" id="queueOverdueLink" class="ticket-bar-link">Ver vencidos</button>
+                    </p>
                     <div class="queue-filters">
                         <label for="queueStatus" class="sr-only">Estado</label>
                         <select id="queueStatus" class="queue-chip">
@@ -445,8 +450,8 @@
                 <!-- Personal: el detalle es una página completa, sin barra lateral -->
                 <nav id="ticketBar" class="ticket-bar" aria-label="Navegación del ticket" hidden>
                     <span class="ticket-bar-mark" aria-hidden="true">T</span>
-                    <button type="button" id="ticketBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Tickets</button>
-                    <span class="ticket-bar-crumb">Tickets / <span id="ticketCrumb" class="ui-num"></span></span>
+                    <button type="button" id="ticketBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver</button>
+                    <span class="ticket-bar-crumb"><span id="ticketCrumbPath">Tickets</span> › <span id="ticketCrumb" class="ui-num"></span></span>
                     <button type="button" id="ticketHome" class="ticket-bar-link">Ir al inicio</button>
                     <span class="ticket-bar-steps">
                         <button type="button" id="ticketPrev" class="ui-btn ui-btn-secondary ui-btn-sm">← Anterior</button>
@@ -460,6 +465,19 @@
                     </div>
                 </div>
             </section>
+            <!-- Técnico › Mis tickets: su turno, su carga y sus borradores -->
+            <aside id="queueAside" class="queue-aside" aria-label="Mi turno y mis borradores" hidden>
+                <section class="ui-card queue-aside-card" aria-labelledby="asideShiftTitle">
+                    <h2 id="asideShiftTitle" class="ui-kicker">Mi turno hoy</h2>
+                    <p id="asideShiftTime" class="queue-aside-big"></p>
+                    <p id="asideShiftLoad" class="queue-aside-text"></p>
+                </section>
+                <section class="ui-card queue-aside-card" aria-labelledby="asideDraftsTitle">
+                    <h2 id="asideDraftsTitle" class="ui-kicker">Mis borradores</h2>
+                    <ul id="asideDrafts" class="queue-aside-list"></ul>
+                    <p class="queue-aside-note">Al confirmar un borrador, el ticket queda a su cargo.</p>
+                </section>
+            </aside>
         </div>
 
         <!-- Nuevo ticket / Nueva solicitud: página completa, sin barra lateral -->

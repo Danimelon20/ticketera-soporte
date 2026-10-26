@@ -4217,3 +4217,38 @@ body.staff-shell.nav-collapsed .nav-search { display: none; }
 .draft-not-yours { margin: 0 0 12px; }
 .home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2, 8px); }
 .draft-actions[hidden], .drafts-filter[hidden], .draft-reassign[hidden], .draft-not-yours[hidden], .home-actions .ui-btn[hidden] { display: none; }
+
+/* =====================================================================
+   N2 · Técnico: Mi trabajo
+   ===================================================================== */
+body.staff-shell .split.has-aside { grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+body.staff-shell.ticket-open .queue-aside { display: none; }
+.queue-aside { display: flex; flex-direction: column; gap: 14px; padding: 16px 32px 24px 0; }
+.queue-aside[hidden] { display: none; }
+.queue-aside-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.queue-aside-card .ui-kicker { margin: 0; }
+.queue-aside-big { margin: 0; font-size: 18px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.queue-aside-text, .queue-aside-note { margin: 0; color: #5B6078; font-size: 13px; }
+.queue-aside-note { font-size: 12px; }
+.queue-aside-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.queue-aside-list li + li { border-top: 1px solid var(--line-soft); }
+.queue-aside-draft {
+  width: 100%; padding: 10px 0; border: none; background: none; font: inherit; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.queue-aside-draft-title { font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.queue-aside-draft-meta { font-size: 12px; color: #5B6078; }
+.queue-aside-draft-go { font-size: 12px; font-weight: 500; color: var(--link); }
+.queue-aside-draft:hover .queue-aside-draft-go { text-decoration: underline; }
+.queue-aside-empty { padding: 8px 0; color: #5B6078; font-size: 13px; }
+.queue-overdue-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; }
+.queue-overdue-notice[hidden] { display: none; }
+.queue-views[hidden] { display: none; }
+.td-subtitle { margin: 2px 0 0; color: #5B6078; font-size: 13px; }
+.td-props-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); color: #5B6078; font-size: 12px; }
+/* La marca ya está en la barra superior */
+body.staff-shell .ticket-bar-mark { display: none; }
+@media (max-width: 860px) {
+  body.staff-shell .split.has-aside { grid-template-columns: minmax(0, 1fr); }
+  .queue-aside { padding: 0 16px 24px; }
+}

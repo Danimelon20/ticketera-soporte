@@ -2864,7 +2864,10 @@ document.addEventListener('DOMContentLoaded', () => {
             loadReports();
         }
         if (name === 'adminAccounts') loadAdminAccounts();
-        if (isStaffShell()) renderPageHead();
+        if (isStaffShell()) {
+            renderPageHead();
+            renderMyWork();
+        }
     }
 
     navDirectory.addEventListener('click', () => showView('directory'));
@@ -5920,7 +5923,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id: 'work', label: 'Mi trabajo', icon: 'tickets', sections: [
                     queueSection('mine_open', 'Mis tickets', 'mi-trabajo/tickets', {
                         count: 'mine_open', aliases: ['mine_resolved_today', 'following'],
-                        context: 'Abiertos a su cargo · ordenados por vencimiento',
+                        tabs: [
+                            ['mine_open', 'Abiertos', 'mine_open', ''],
+                            ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
+                            ['mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', ''],
+                        ],
+                        context: () => {
+                            const open = navCounts.mine_open;
+                            const head = typeof open === 'number' ? `${open} ${open === 1 ? 'abierto' : 'abiertos'} a su cargo` : 'Abiertos a su cargo';
+                            return `${head} · ordenados por vencimiento`;
+                        },
                     }),
                     draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
                         count: 'drafts_pending', context: 'Correos que le asignaron. Al confirmar uno, el ticket queda a su cargo.',
@@ -5969,6 +5981,12 @@ document.addEventListener('DOMContentLoaded', () => {
             { id: 'tickets', label: 'Tickets', icon: 'tickets', sections: [
                 queueSection('open', 'Todos', 'tickets/todos', {
                     title: 'Todos los tickets', count: 'open', aliases: ['due_soon', 'resolved_today', 'cancelled', 'all'],
+                    tabs: [
+                        ['open', 'Abiertos', 'open', ''],
+                        ['due_soon', 'Por vencer', 'due_soon', 'warn'],
+                        ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
+                        ['cancelled', 'Cancelados', 'cancelled', ''],
+                    ],
                     context: 'Abiertos · ordenados por vencimiento',
                 }),
                 queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
@@ -6194,6 +6212,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (section) pushRoute(section.route);
         renderPageHead();
+        renderQueueViews();
+        renderMyWork();
     }
 
     function renderNavCounts() {
@@ -6205,6 +6225,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         renderNavShift();
         renderQueueViews();
+        renderPageHead();
+        renderMyWork();
         if (!homeView.hidden) renderHome();
     }
 
@@ -6273,6 +6295,71 @@ document.addEventListener('DOMContentLoaded', () => {
         contextEl.textContent = context;
         contextEl.hidden = !context;
     }
+
+    // ----- Técnico › Mis tickets: aviso de vencidos, su turno, su carga y sus borradores -----
+    const queueAside = document.getElementById('queueAside');
+    const queueOverdueNotice = document.getElementById('queueOverdueNotice');
+    const asideDrafts = document.getElementById('asideDrafts');
+    let asideSeq = 0;
+
+    function renderMyWork() {
+        const mine = isStaffShell() && currentUser.role === 'technician' && currentViewName === 'tickets'
+            && Boolean(activeSection && activeSection.id === 'mine_open') && !queueSearch;
+        const overdue = navCounts.overdue;
+        queueOverdueNotice.hidden = !(mine && overdue > 0);
+        if (!queueOverdueNotice.hidden) {
+            document.getElementById('queueOverdueText').textContent =
+                `Tiene ${overdue} ${overdue === 1 ? 'ticket vencido' : 'tickets vencidos'}. `
+                + 'Los vencidos no aparecen en esta lista: se atienden en su propia sección.';
+        }
+        queueAside.hidden = !mine;
+        splitView.classList.toggle('has-aside', mine);
+        if (!mine) return;
+        const shift = navCounts.shift;
+        document.getElementById('asideShiftTime').textContent = shift && shift.start
+            ? `${shift.start} – ${shift.end}${shift.on_shift ? '' : ' · fuera de turno'}` : 'Sin turno hoy';
+        // La misma carga que usa la asignación automática (tickets abiertos y borradores pendientes)
+        const byLevels = lastSystemStatus && lastSystemStatus.auto_assign_mode === 'levels';
+        document.getElementById('asideShiftLoad').textContent = shift
+            ? `Carga actual: ${shift.load}${byLevels ? ' (suma de niveles)' : ''}` : '';
+        loadAsideDrafts();
+    }
+
+    async function loadAsideDrafts() {
+        const seq = ++asideSeq;
+        let list = null;
+        try {
+            list = await silentGet('/drafts');
+        } catch (err) {
+            return; // Se reintenta con la siguiente actualización
+        }
+        if (seq !== asideSeq || !list) return;
+        document.getElementById('asideDraftsTitle').textContent = `Mis borradores · ${list.length}`;
+        asideDrafts.replaceChildren();
+        if (!list.length) {
+            asideDrafts.appendChild(makeEl('li', 'queue-aside-empty', 'No tiene borradores pendientes.'));
+            return;
+        }
+        list.slice(0, 4).forEach(draft => {
+            const li = document.createElement('li');
+            const button = makeEl('button', 'queue-aside-draft');
+            button.type = 'button';
+            button.dataset.draftId = String(draft.id);
+            button.appendChild(makeEl('span', 'queue-aside-draft-title', `«${draft.title || draft.subject || 'Sin asunto'}»`));
+            const meta = makeEl('span', 'queue-aside-draft-meta', `Correo de ${draft.requester_name} · `);
+            meta.appendChild(timeTag(draft.created_at));
+            button.appendChild(meta);
+            button.appendChild(makeEl('span', 'queue-aside-draft-go', 'Revisar y confirmar →'));
+            li.appendChild(button);
+            asideDrafts.appendChild(li);
+        });
+    }
+
+    asideDrafts.addEventListener('click', (e) => {
+        const button = e.target.closest('.queue-aside-draft');
+        if (button) openDraftById(Number(button.dataset.draftId));
+    });
+    document.getElementById('queueOverdueLink').addEventListener('click', () => goRoute('mi-trabajo/vencidos'));
 
     function closeSideNav() {
         document.body.classList.remove('nav-open');
@@ -6677,25 +6764,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Pestañas de vista de la cola: [vista, título, contador de /nav/counts, tono del contador]
+    // Pestañas de la sección del menú (Mis tickets, Todos); las demás secciones no tienen
     function queueViewTabs() {
-        if (currentUser.role === 'technician') {
-            return [
-                ['mine_open', 'Mis abiertos', 'mine_open', ''],
-                ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
-                ['overdue', 'Vencidos', 'overdue', 'alert'],
-                ['following', 'Siguiendo', 'following_open', ''],
-                ['mine_resolved_today', 'Resueltos hoy', 'mine_resolved_today', ''],
-                ['unassigned', 'Sin asignar', 'unassigned', 'warn'],
-            ];
-        }
-        return [
-            ['open', 'Todos abiertos', 'open', ''],
-            ['unassigned', 'Sin asignar', 'unassigned', 'warn'],
-            ['due_soon', 'Por vencer', 'due_soon', 'warn'],
-            ['overdue', 'Vencidos', 'overdue', 'alert'],
-            ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
-            ['cancelled', 'Cancelados', 'cancelled', ''],
-        ];
+        return (activeSection && activeSection.tabs) || [];
     }
 
     const queueViewsBox = document.getElementById('queueViews');
@@ -6703,6 +6774,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderQueueViews() {
         if (!isStaffShell()) return;
         queueViewsBox.replaceChildren();
+        queueViewsBox.hidden = !queueViewTabs().length;
         queueViewTabs().forEach(([view, label, countKey, tone]) => {
             // Con búsqueda o filtro de cliente ninguna pestaña queda marcada
             const selected = view === queueView && !queueSearch && !queueRequester;
@@ -6724,7 +6796,7 @@ document.addEventListener('DOMContentLoaded', () => {
     queueViewsBox.addEventListener('click', (e) => {
         const tab = e.target.closest('[data-view]');
         if (!tab) return;
-        setSideNavActive(tab.dataset.view);
+        // La pestaña cambia la vista dentro de la misma sección del menú
         setQueueView(tab.dataset.view, tab.dataset.label);
     });
 
@@ -7041,6 +7113,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ticketBar.hidden = false;
         composerMode = 'reply';
         document.getElementById('ticketCrumb').textContent = `#${ticketId}`;
+        // Mi trabajo › Mis tickets › #198 (o la sección desde donde se abrió)
+        const section = activeSection;
+        const module = section ? moduleOf(section) : null;
+        document.getElementById('ticketCrumbPath').textContent = section
+            ? (module && module.sections.length > 1 ? `${module.label} › ${section.label}` : section.label) : 'Tickets';
         setDocumentTitle(`Ticket #${ticketId}`);
         renderTicketSteps();
         closeSideNav();
@@ -7429,7 +7506,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = ticket.assigned_to !== null ? (userMap[ticket.assigned_to] || 'Sin nombre') : null;
         const canAssign = OPERATION_ROLES.includes(currentUser.role) && ticket.status !== 'closed';
         if (!canAssign) {
-            const text = makeEl('span', name ? '' : 'is-unassigned', name || 'Sin asignar');
+            // El técnico ve "Usted" en sus tickets
+            const own = currentUser.role === 'technician' && ticket.assigned_to === currentUser.id;
+            const text = makeEl('span', name ? '' : 'is-unassigned', own ? 'Usted' : (name || 'Sin asignar'));
             if (name && ticket.auto_assigned) text.textContent = `${name} · asignado automáticamente`;
             return text;
         }
@@ -8002,6 +8081,10 @@ document.addEventListener('DOMContentLoaded', () => {
             titleRow.appendChild(cancel);
         }
         head.appendChild(titleRow);
+        // Ticket #198 · a su cargo (técnico) o · solo lectura
+        const own = currentUser.role === 'technician' && ticket.assigned_to === currentUser.id;
+        head.appendChild(makeEl('p', 'td-subtitle',
+            `Ticket #${ticket.id}${own ? ' · a su cargo' : (readOnly ? ' · solo lectura' : '')}`));
 
         const tags = makeEl('p', 'td-tags');
         const stateKey = ticket.cancellation ? 'cancelled' : ticket.status;
@@ -8090,6 +8173,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ticket.contact_phone) staffField(fields, 'Teléfono', ticket.contact_phone);
         if (ticket.contact_id_number) staffField(fields, 'Cédula', ticket.contact_id_number);
         props.appendChild(fields);
+        // El técnico no reasigna: se lo pide a su coordinador (el servidor tampoco lo permite)
+        if (currentUser.role === 'technician' && !readOnly && !isClosed) {
+            props.appendChild(makeEl('p', 'td-props-note', 'Para cambiar de responsable, pídaselo a su coordinador.'));
+        }
         side.appendChild(props);
 
         const suggestionSlot = makeEl('div', 'sd-suggestion-slot');
