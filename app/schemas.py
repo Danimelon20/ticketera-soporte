@@ -710,6 +710,8 @@ class QueueItem(BaseModel):
     consumed_pct: Optional[int] = None
     assignee_note: Optional[Literal["vacation", "incapacity", "away", "after_shift"]] = None
     incident: bool = False
+    # Causa registrada del vencimiento (su etiqueta), si la tiene
+    overdue_cause: Optional[str] = None
 
 
 class QueuePage(BaseModel):
@@ -786,6 +788,8 @@ class TeamMember(BaseModel):
     schedule_today: Optional[str] = None
     on_shift: Optional[bool] = None
     periods: list[AvailabilityPeriodRead] = []
+    # Solo para el coordinador: carga de la asignación automática (tickets abiertos y borradores pendientes)
+    load: Optional[int] = None
 
 
 class AccountListRow(BaseModel):

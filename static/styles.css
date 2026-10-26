@@ -4252,3 +4252,47 @@ body.staff-shell .ticket-bar-mark { display: none; }
   body.staff-shell .split.has-aside { grid-template-columns: minmax(0, 1fr); }
   .queue-aside { padding: 0 16px 24px; }
 }
+
+/* =====================================================================
+   N3 · Coordinador: Inicio, Vencidos con causa, Incidentes, Carga y Disponibilidad
+   ===================================================================== */
+/* El saludo y "Enviar resumen ahora" van en la cabecera de la página */
+body.staff-shell .home-head { display: none; }
+.home-team-load { min-width: 24px; text-align: right; font-size: 12px; color: #5B6078; }
+.home-row-tag { flex: 0 0 auto; }
+/* Columna Causa: solo en Vencidos del coordinador */
+.queue-table:not(.with-cause) .col-cause { display: none; }
+#queuePanel col.col-cause { width: 190px; }
+.col-cause .ui-tag { margin-right: 6px; }
+.queue-report-link { font-size: 12px; white-space: nowrap; }
+@media (max-width: 767px) {
+  .queue-table.with-cause .col-cause { display: block; grid-column: 2; }
+}
+.aa-quick[hidden], #aaInvite[hidden] { display: none; }
+
+.list-view { padding: 16px 32px 32px; display: flex; flex-direction: column; gap: 12px; }
+.list-view[hidden] { display: none; }
+.list-view-card { padding: 0; overflow: hidden; }
+.list-view-note { margin: 0; color: #5B6078; font-size: 12px; }
+.list-rows { list-style: none; margin: 0; padding: 0; }
+.list-row { display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-top: 1px solid var(--line-soft); }
+.list-row:first-child { border-top: none; }
+.list-row-button {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0; border: none; background: none;
+  font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+}
+.list-row-button:hover .list-row-title { text-decoration: underline; }
+.list-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.list-row-title { font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.list-row-sub { font-size: 12px; color: #5B6078; }
+.list-row-go { color: var(--link); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.list-member { flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.list-load-bar { flex: 1 1 160px; max-width: 260px; }
+.list-load-numbers { flex: 0 0 120px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.list-load-numbers b { font-size: 16px; }
+.list-periods { flex: 2 1 260px; display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 767px) {
+  .list-view { padding: 12px 16px 24px; }
+  .list-row { flex-wrap: wrap; padding: 12px 14px; }
+  .list-load-numbers { flex: 0 0 auto; align-items: flex-start; }
+}

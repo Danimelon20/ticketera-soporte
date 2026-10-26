@@ -172,7 +172,7 @@ def test_queue_response_has_no_personal_data(make_user, client):
     assert set(item) == {
         "id", "title", "requester_name", "level", "source", "status", "assigned_to", "assigned_name",
         "reported", "auto_assigned", "cancelled", "due_at", "due_state", "remaining_seconds", "consumed_pct", "assignee_note",
-        "incident",
+        "incident", "overdue_cause",
     }
     text = response.text
     for secret in ("8888", "102340567", requester["email"], requester["phone"], requester["id_number"], "Llamar"):
@@ -246,3 +246,20 @@ def test_detail_due_state_only_for_staff(make_user, make_ticket, client):
     assert "due_state" in staff and "consumed_pct" in staff
     own = client.get(f"/api/tickets/{ticket_id}", headers=requester["headers"]).json()
     assert "due_state" not in own and "consumed_pct" not in own
+
+
+def test_overdue_rows_bring_the_recorded_cause(make_user, client):
+    coordinator = make_user("coordinator")
+    requester = make_user("requester")
+    with_cause = _ticket(requester, due_at=MONDAY_8AM + timedelta(minutes=30))
+    without = _ticket(requester, due_at=MONDAY_8AM + timedelta(minutes=30))
+    db = SessionLocal()
+    try:
+        db.add(models.OverdueCause(ticket_id=with_cause, cause="off_hours", note="Llegó de noche",
+                                   recorded_by=coordinator["id"], recorded_at=MONDAY_9AM))
+        db.commit()
+    finally:
+        db.close()
+    causes = {item["id"]: item["overdue_cause"] for item in _queue(coordinator, view="overdue")["items"]}
+    # Solo la etiqueta: la nota se queda en el reporte de vencimiento
+    assert causes == {with_cause: "Fuera de horario", without: None}

@@ -281,6 +281,12 @@ def queue(
     reported = account_reports.reported_ids(db, creator_ids)
     cancelled = cancellations.cancelled_ids(db) if tickets else set()
     incidents = grouping.incident_ids(db) if tickets else set()
+    # Causa registrada del vencimiento: solo la etiqueta (la nota se ve en el reporte)
+    causes = dict(
+        db.query(models.OverdueCause.ticket_id, models.OverdueCause.cause)
+        .filter(models.OverdueCause.ticket_id.in_([t.id for t in tickets]))
+        .all()
+    ) if tickets else {}
     staff_ids = list({t.assigned_to for t in tickets if t.assigned_user and t.assigned_user.role in availability.ROLES})
     statuses = availability.statuses_for(db, staff_ids, now)
     shifts = schedules.for_users(db, staff_ids)
@@ -302,6 +308,7 @@ def queue(
             "auto_assigned": auto_assign.is_auto_assigned(db, ticket),
             "cancelled": ticket.id in cancelled,
             "incident": ticket.id in incidents,
+            "overdue_cause": models.OVERDUE_CAUSES.get(causes[ticket.id], causes[ticket.id]) if ticket.id in causes else None,
             "due_at": due,
             "due_state": state,
             "remaining_seconds": int((due - now).total_seconds()) if due else None,

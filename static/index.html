@@ -327,6 +327,8 @@
                     </div>
                     <div id="queueViews" class="ui-tabs queue-views" role="tablist" aria-label="Vistas"></div>
                     <!-- Mis tickets: los vencidos van en su propia sección -->
+                    <!-- Coordinador › Vencidos: cuántos de esta página no tienen causa registrada -->
+                    <p id="queueCauseNotice" class="ui-notice is-warn queue-overdue-notice" hidden></p>
                     <p id="queueOverdueNotice" class="ui-notice is-danger queue-overdue-notice" hidden>
                         <span id="queueOverdueText"></span>
                         <button type="button" id="queueOverdueLink" class="ticket-bar-link">Ver vencidos</button>
@@ -380,13 +382,14 @@
                         <button type="button" id="queueBulkCancel" class="ui-btn ui-btn-danger ui-btn-sm" disabled>Cancelar seleccionados</button>
                     </div>
                     <div class="queue-table-wrap">
-                        <table class="queue-table">
+                        <table id="queueTable" class="queue-table">
                             <colgroup>
                                 <col class="col-num">
                                 <col class="col-subject">
                                 <col class="col-level">
                                 <col class="col-owner">
                                 <col class="col-due">
+                                <col class="col-cause">
                             </colgroup>
                             <thead>
                                 <tr>
@@ -395,6 +398,7 @@
                                     <th scope="col" class="col-level">Nivel</th>
                                     <th scope="col" class="col-owner">Responsable</th>
                                     <th scope="col" class="col-due">Vence</th>
+                                    <th scope="col" class="col-cause">Causa</th>
                                 </tr>
                             </thead>
                             <tbody id="queueBody"></tbody>
@@ -753,6 +757,12 @@
             </section>
             </div>
           </div>
+        </section>
+
+        <!-- Coordinador: Tickets › Incidentes, Equipo › Carga y Equipo › Disponibilidad (el título está en la cabecera) -->
+        <section id="listView" class="page-view list-view" hidden aria-labelledby="pageTitle">
+            <div id="listViewBody" class="ui-card list-view-card"></div>
+            <p id="listViewNote" class="view-note list-view-note"></p>
         </section>
 
         <section id="directoryView" class="page-view" hidden aria-labelledby="directoryTitle">

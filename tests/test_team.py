@@ -32,3 +32,35 @@ def test_team_only_for_coordinator_and_admin(make_user, client):
     for role in ("technician", "requester"):
         user = make_user(role)
         assert client.get("/api/team", headers=user["headers"]).status_code == 403
+
+
+def test_only_the_coordinator_gets_the_load(make_user, make_ticket, client):
+    """Carga = la de la asignación automática (tickets abiertos y borradores pendientes); solo el coordinador."""
+    from app import auto_assign, config, models
+    from app.database import SessionLocal
+
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    requester = make_user("requester")
+    db = SessionLocal()
+    try:
+        ticket = models.Ticket(title="Carga", description="Abierto", category_id=1, priority_id=1, status="new",
+                               created_by=requester["id"], assigned_to=technician["id"], source="web")
+        draft = models.EmailDraft(message_id=f"<carga-{technician['id']}@test>", requester_id=requester["id"],
+                                  status="pending_review", subject="Borrador", body="Texto", ai_level=1)
+        db.add_all([ticket, draft])
+        db.flush()
+        db.add(models.DraftAssignment(draft_id=draft.id, status="assigned", user_id=technician["id"],
+                                      notify=False, created_at=draft.created_at))
+        db.commit()
+        expected = auto_assign.loads(db, [technician["id"]])[technician["id"]]
+    finally:
+        db.close()
+    # El borrador pendiente también cuenta
+    assert expected == (3 if config.AUTO_ASSIGN_LOAD_MODE != "count" else 2)
+
+    rows = client.get("/api/team", headers=coordinator["headers"]).json()
+    assert next(r for r in rows if r["id"] == technician["id"])["load"] == expected
+    admin_rows = client.get("/api/team", headers=make_user("admin")["headers"]).json()
+    assert all("load" not in r for r in admin_rows)
+    assert client.get("/api/team", headers=technician["headers"]).status_code == 403

@@ -121,24 +121,31 @@ def get_directory(
 TEAM_ROLES = ("technician", "coordinator", "admin")
 
 
-@router.get("/team", response_model=list[TeamMember])
+# exclude_unset: load solo va en la respuesta del coordinador
+@router.get("/team", response_model=list[TeamMember], response_model_exclude_unset=True)
 def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Personal (sin solicitantes) para Equipo / Horarios: correo enmascarado y sin teléfono ni cédula."""
+    """Personal (sin solicitantes) para Equipo / Horarios: correo enmascarado y sin teléfono ni cédula.
+
+    El coordinador recibe además la carga (la misma de la asignación automática), para Equipo › Carga."""
     if current_user.role not in ("coordinator", "admin"):
         raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
     order = {role: i for i, role in enumerate(TEAM_ROLES)}
     users = db.query(models.User).filter(models.User.role.in_(TEAM_ROLES)).order_by(models.User.name).all()
     users.sort(key=lambda u: order[u.role])
     periods = availability.periods_for(db, availability.ids_with_status(users))
-    return [
-        TeamMember(
+    loads = auto_assign.loads(db, [u.id for u in users]) if current_user.role == "coordinator" else None
+    members = []
+    for row in _directory_rows(db, users):
+        member = TeamMember(
             id=row.id, name=row.name or "Sin nombre", email=mask_email(row.email), role=row.role,
             is_active=row.is_active, tickets_assigned_open=row.tickets_assigned_open, login_locked=row.login_locked,
             availability=row.availability, return_date=row.return_date, schedule=row.schedule,
             schedule_today=row.schedule_today, on_shift=row.on_shift, periods=periods.get(row.id, []),
         )
-        for row in _directory_rows(db, users)
-    ]
+        if loads is not None:
+            member.load = loads[row.id]
+        members.append(member)
+    return members
 
 
 @router.patch("/admin/users/{user_id}", response_model=DirectoryUser)

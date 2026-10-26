@@ -2770,6 +2770,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const navAdmin = document.getElementById('navAdmin');
     const splitView = document.querySelector('main .split');
     const directoryView = document.getElementById('directoryView');
+    const listView = document.getElementById('listView');
     const navAccounts = document.getElementById('navAccounts');
     const accountsView = document.getElementById('accountsView');
     const adminView = document.getElementById('adminView');
@@ -2789,6 +2790,7 @@ document.addEventListener('DOMContentLoaded', () => {
         home: 'Inicio', directory: 'Directorio', drafts: 'Borradores de correo', profile: 'Mi cuenta',
         reports: 'Reportes de cuentas', adminAccounts: 'Cuentas', accounts: 'Cuentas', admin: 'Administración',
         newTicket: 'Nuevo ticket', invites: 'Invitaciones', overdueReport: 'Reporte de vencimiento',
+        list: 'Equipo',
     };
 
     function setDocumentTitle(text) {
@@ -2832,6 +2834,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Nuevo ticket: página propia, con la barra superior y el menú
         document.body.classList.toggle('newticket-open', name === 'newTicket');
         directoryView.hidden = name !== 'directory';
+        listView.hidden = name !== 'list';
         accountsView.hidden = name !== 'accounts';
         adminView.hidden = name !== 'admin';
         draftsView.hidden = name !== 'drafts';
@@ -3368,6 +3371,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     draftsFilter.addEventListener('change', () => {
         selectedDraftId = null;
+        // Todos y Sin revisor tienen su sección en el menú; "Mis borradores" queda en la misma página
+        const routes = { all: 'borradores/todos', none: 'borradores/sin-revisor' };
+        if (routes[draftsFilter.value]) {
+            goRoute(routes[draftsFilter.value]);
+            return;
+        }
         loadDrafts();
     });
 
@@ -4862,8 +4871,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const myRequestsEmpty = document.getElementById('myRequestsEmpty');
 
     function loadAccountsView() {
-        // "Mis solicitudes" no se muestra en ninguna opción del menú
-        loadTeam();
+        // "Mis solicitudes" (coordinador) se abre desde Equipo › Personas
+        if (!document.getElementById('accountsMyRequests').hidden) loadMyRequests();
+        else loadTeam();
     }
 
     // Personal (técnicos, coordinadores y administradores), con acciones en "Horario" y en el menú "⋯".
@@ -5976,7 +5986,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return [
             { id: 'home', label: 'Inicio', icon: 'home', sections: [
-                navSection('home', 'Inicio', 'inicio', () => showView('home'), { title: homeTitleText, context: homeContextText }),
+                navSection('home', 'Inicio', 'inicio', () => showView('home'), {
+                    title: homeTitleText, context: homeContextText, actions: () => [sendSummaryNowBtn],
+                }),
             ] },
             { id: 'tickets', label: 'Tickets', icon: 'tickets', sections: [
                 queueSection('open', 'Todos', 'tickets/todos', {
@@ -5995,6 +6007,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
                     count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
                 }),
+                navSection('incidents', 'Incidentes', 'tickets/incidentes', () => showListPage('incidents'), {
+                    title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla: se atienden desde el ticket principal',
+                }),
                 // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
                 navSection('clients', 'Clientes', 'tickets/clientes', () => openAccounts('clients'), {
                     aliases: ['accounts'], context: 'Fichas de los clientes, en solo lectura',
@@ -6006,19 +6021,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     context: 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
                 }),
                 draftsSection('drafts_none', 'Sin revisor', 'borradores/sin-revisor', 'none', {
-                    title: 'Borradores sin revisor', context: 'Llegaron sin nadie en turno: se asignan solos al entrar alguien, o puede repartirlos',
+                    title: 'Borradores sin revisor', count: 'drafts_unassigned', tone: 'warn', context: 'Llegaron sin nadie en turno: se asignan solos al entrar alguien, o puede repartirlos',
                 }),
             ] },
             { id: 'team', label: 'Equipo', icon: 'team', sections: [
                 navSection('team', 'Turnos', 'equipo/turnos', () => showAccountsSection('team'), {
                     title: 'Turnos de la semana', context: 'Horarios, vacaciones y ausencias del equipo',
                 }),
-                navSection('people', 'Personas', 'equipo/personas', () => openAccounts('staff'), {
-                    context: 'Técnicos: turnos, vacaciones y ausencias, y cambios de rol',
+                navSection('load', 'Carga', 'equipo/carga', () => showListPage('load'), {
+                    title: 'Carga del equipo', context: 'La misma carga que usa la asignación automática para elegir técnico',
                 }),
-            ] },
+                navSection('availability', 'Disponibilidad', 'equipo/disponibilidad', () => showListPage('availability'), {
+                    context: 'Quién está disponible hoy, y vacaciones y ausencias registradas',
+                }),
+                peopleSection,
+            ], extraSections: [requestsSection] },
         ];
     }
+
+    // Equipo › Personas, con "Mis solicitudes" (los cambios de rol que pidió) como subpágina
+    const myRequestsButton = makeEl('button', 'ui-btn ui-btn-secondary', 'Mis solicitudes');
+    myRequestsButton.type = 'button';
+    const peopleSection = navSection('people', 'Personas', 'equipo/personas', () => openAccounts('staff'), {
+        context: 'Técnicos: turnos, vacaciones y ausencias, y cambios de rol',
+        actions: () => [myRequestsButton],
+    });
+    const requestsSection = navSection('requests', 'Mis solicitudes', 'equipo/personas/solicitudes',
+        () => showAccountsSection('requests'), { parent: peopleSection, context: 'Cambios que pidió al administrador' });
+    myRequestsButton.addEventListener('click', () => goRoute(requestsSection.route));
 
     // Mi cuenta: no está en el menú de módulos (se abre desde el perfil y desde abajo del menú)
     const PROFILE_SECTION = navSection('profile', 'Mi cuenta', 'mi-cuenta', () => {
@@ -6037,11 +6067,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function allSections() {
         const extra = canCreateTicket() ? [PROFILE_SECTION, NEW_TICKET_SECTION] : [PROFILE_SECTION];
-        return [...navModules.flatMap(module => module.sections), ...extra];
+        return [...navModules.flatMap(module => [...module.sections, ...(module.extraSections || [])]), ...extra];
     }
 
+    // Una subpágina (parent) pertenece al módulo de su sección
     function moduleOf(section) {
-        return navModules.find(module => module.sections.includes(section)) || null;
+        const own = section && section.parent ? section.parent : section;
+        return navModules.find(module => module.sections.includes(own)) || null;
     }
 
     function sectionById(id) {
@@ -6192,7 +6224,8 @@ document.addEventListener('DOMContentLoaded', () => {
         activeNavId = id;
         const section = sectionById(id);
         activeSection = section;
-        const activeId = section ? section.id : id;
+        // Una subpágina marca su sección en el menú
+        const activeId = section ? (section.parent ? section.parent.id : section.id) : id;
         sideNav.querySelectorAll('[data-nav-id]').forEach(button => {
             const active = button.dataset.navId === activeId;
             button.classList.toggle('active', active);
@@ -6274,6 +6307,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (section) {
             const module = moduleOf(section);
             if (module && module.sections.length > 1) crumbs.push(module.label);
+            if (section.parent) crumbs.push(section.parent.label);
             crumbs.push(section.label);
             title = typeof section.title === 'function' ? section.title() : (section.title || section.label);
             context = typeof section.context === 'function' ? section.context() : (section.context || '');
@@ -6291,10 +6325,178 @@ document.addEventListener('DOMContentLoaded', () => {
             return li;
         }));
         document.getElementById('pageTitle').textContent = title;
+        // Acciones de la sección (los botones son los de siempre: se mueven aquí con sus eventos)
+        const actions = section && typeof section.actions === 'function' ? section.actions() : [];
+        pageActions.replaceChildren(...actions);
         const contextEl = document.getElementById('pageContext');
         contextEl.textContent = context;
         contextEl.hidden = !context;
     }
+
+    // ----- Coordinador: páginas de lista (Incidentes, Carga, Disponibilidad) con datos que ya existen -----
+    const listViewBody = document.getElementById('listViewBody');
+    const listViewNote = document.getElementById('listViewNote');
+    let listKind = null;
+    let listSeq = 0;
+
+    function showListPage(kind) {
+        listKind = kind;
+        showView('list');
+        loadListPage();
+    }
+
+    async function loadListPage() {
+        const seq = ++listSeq;
+        const kind = listKind;
+        showSkeleton(listViewBody, { rows: 4 });
+        listViewNote.textContent = '';
+        let data;
+        try {
+            data = await apiFetch(kind === 'incidents' ? '/incidents' : '/team', { silent: true });
+        } catch (err) {
+            if (seq !== listSeq) return;
+            clearSkeleton(listViewBody);
+            listViewBody.replaceChildren(errorState(err, loadListPage));
+            return;
+        }
+        if (seq !== listSeq) return;
+        clearSkeleton(listViewBody);
+        if (kind === 'incidents') renderIncidentsPage(data);
+        else if (kind === 'load') renderLoadPage(data);
+        else renderAvailabilityPage(data);
+    }
+
+    function listRow(className = '') {
+        const li = makeEl('li', `list-row ${className}`.trim());
+        return li;
+    }
+
+    function renderIncidentsPage(items) {
+        listViewBody.replaceChildren();
+        listViewNote.textContent = 'Al resolver el ticket principal se resuelven también los relacionados, y cada cliente recibe el aviso.';
+        if (!items.length) {
+            listViewBody.appendChild(emptyState({
+                title: 'No hay posibles incidentes', text: 'Aparecen cuando varios clientes reportan lo mismo en poco tiempo.',
+            }));
+            return;
+        }
+        const list = makeEl('ul', 'list-rows');
+        items.forEach(item => {
+            const li = listRow();
+            const button = makeEl('button', 'list-row-button list-incident');
+            button.type = 'button';
+            button.dataset.ticketId = String(item.principal_id);
+            button.appendChild(makeEl('span', 'ui-tag is-danger', 'Incidente'));
+            const text = makeEl('span', 'list-row-text');
+            text.appendChild(makeEl('span', 'list-row-title', `${item.clients} clientes reportan «${item.title}»`));
+            text.appendChild(makeEl('span', 'list-row-sub', `Principal #${item.principal_id}`));
+            button.appendChild(text);
+            button.appendChild(makeEl('span', 'list-row-go', 'Ver ›'));
+            li.appendChild(button);
+            list.appendChild(li);
+        });
+        listViewBody.appendChild(list);
+    }
+
+    // Disponible, de vacaciones o con una ausencia, y el turno de hoy
+    function memberStateText(member) {
+        if (member.availability === 'vacation' || member.availability === 'incapacity') {
+            return AVAILABILITY_LABELS[member.availability]
+                + (member.return_date ? ` · regresa el ${formatPlainDate(member.return_date)}` : '');
+        }
+        if (member.on_shift) return member.schedule_today ? `En turno · ${member.schedule_today}` : 'En turno';
+        return member.schedule_today ? `Fuera de turno · hoy ${member.schedule_today}` : 'Sin turno hoy';
+    }
+
+    function memberHead(member) {
+        const head = makeEl('span', 'list-member');
+        const avatar = makeEl('span', 'owner-avatar', getInitials(member.name));
+        avatar.setAttribute('aria-hidden', 'true');
+        const text = makeEl('span', 'list-row-text');
+        text.appendChild(makeEl('span', 'list-row-title', member.name));
+        text.appendChild(makeEl('span', 'list-row-sub', memberStateText(member)));
+        head.append(avatar, text);
+        return head;
+    }
+
+    function renderLoadPage(team) {
+        listViewBody.replaceChildren();
+        const technicians = team.filter(member => member.role === 'technician' && member.is_active);
+        const byLevels = lastSystemStatus && lastSystemStatus.auto_assign_mode === 'levels';
+        listViewNote.textContent = byLevels
+            ? 'Carga = suma de los niveles de sus tickets abiertos y borradores pendientes (sin nivel cuenta 2).'
+            : 'Carga = tickets abiertos y borradores pendientes a su cargo.';
+        if (!technicians.length) {
+            listViewBody.appendChild(emptyState({ title: 'Todavía no hay técnicos', text: 'El administrador los invita desde Invitaciones.' }));
+            return;
+        }
+        const loadOf = (member) => (typeof member.load === 'number' ? member.load : member.tickets_assigned_open);
+        technicians.sort((a, b) => loadOf(b) - loadOf(a) || a.name.localeCompare(b.name));
+        const maxLoad = Math.max(1, ...technicians.map(loadOf));
+        const list = makeEl('ul', 'list-rows');
+        technicians.forEach(member => {
+            const li = listRow('list-load');
+            li.appendChild(memberHead(member));
+            const load = loadOf(member);
+            const bar = makeEl('span', `ui-bar list-load-bar${load / maxLoad >= 0.75 ? ' is-soon' : ''}`);
+            bar.setAttribute('aria-hidden', 'true');
+            const fill = makeEl('span');
+            fill.style.width = `${Math.round((load / maxLoad) * 100)}%`;
+            bar.appendChild(fill);
+            li.appendChild(bar);
+            const numbers = makeEl('span', 'list-load-numbers');
+            numbers.appendChild(makeEl('b', 'ui-num', String(load)));
+            numbers.appendChild(makeEl('span', 'list-row-sub',
+                `${member.tickets_assigned_open} ${member.tickets_assigned_open === 1 ? 'ticket abierto' : 'tickets abiertos'}`));
+            li.appendChild(numbers);
+            list.appendChild(li);
+        });
+        listViewBody.appendChild(list);
+    }
+
+    function renderAvailabilityPage(team) {
+        listViewBody.replaceChildren();
+        listViewNote.textContent = 'Es automática: Disponible dentro del horario y Ausente fuera de él. Las vacaciones y las ausencias empiezan solas el primer día.';
+        // Los mismos que puede gestionar quien mira (MANAGE_RULES): el coordinador, técnicos
+        const members = team.filter(member => member.is_active && ['technician', 'coordinator'].includes(member.role));
+        if (!members.length) {
+            listViewBody.appendChild(emptyState({ title: 'No hay personal', text: '' }));
+            return;
+        }
+        const list = makeEl('ul', 'list-rows');
+        members.forEach(member => {
+            const li = listRow('list-availability');
+            li.appendChild(memberHead(member));
+            const periods = makeEl('span', 'list-periods');
+            if (!(member.periods || []).length) {
+                periods.appendChild(makeEl('span', 'list-row-sub', 'Sin vacaciones ni ausencias registradas'));
+            }
+            (member.periods || []).forEach(period => {
+                periods.appendChild(makeEl('span', 'ui-tag', `${PERIOD_KINDS[period.kind] || period.kind} · `
+                    + `${formatPlainDate(period.start_date)} al ${formatPlainDate(period.end_date)}`));
+            });
+            li.appendChild(periods);
+            if (canManage(member, 'availability')) {
+                const edit = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm list-availability-edit', 'Vacaciones y ausencias');
+                edit.type = 'button';
+                edit.dataset.userId = String(member.id);
+                edit.dataset.userName = member.name;
+                li.appendChild(edit);
+            }
+            list.appendChild(li);
+        });
+        listViewBody.appendChild(list);
+    }
+
+    listViewBody.addEventListener('click', async (e) => {
+        const incident = e.target.closest('.list-incident');
+        if (incident) {
+            openTicketById(Number(incident.dataset.ticketId));
+            return;
+        }
+        const edit = e.target.closest('.list-availability-edit');
+        if (edit && await openAvailabilityDialog(Number(edit.dataset.userId), edit.dataset.userName)) loadListPage();
+    });
 
     // ----- Técnico › Mis tickets: aviso de vencidos, su turno, su carga y sus borradores -----
     const queueAside = document.getElementById('queueAside');
@@ -6512,10 +6714,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.visibilityState !== 'visible' || !authToken || !currentUser) return;
         if (!STAFF_SHELL_ROLES.includes(currentUser.role)) return;
         try {
-            const [counts, status, notices] = await Promise.all([
+            const coordinator = OPERATION_ROLES.includes(currentUser.role);
+            const [counts, status, notices, unassignedDrafts] = await Promise.all([
                 silentGet('/nav/counts'), silentGet('/system/status'), silentGet('/notifications/overdue'),
+                // Borradores › Sin revisor: el contador sale de la misma lista que ve el coordinador
+                coordinator ? silentGet('/drafts?assigned=none') : Promise.resolve(null),
             ]);
             if (counts) {
+                if (unassignedDrafts) counts.drafts_unassigned = unassignedDrafts.length;
                 navCounts = counts;
                 renderNavCounts();
             }
@@ -6995,7 +7201,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return { overdue: 'is-overdue', due_soon: 'is-soon' }[state] || '';
     }
 
+    // Vencidos del coordinador: columna con la causa registrada (o "Pendiente de causa") y su reporte
+    function queueShowsCause() {
+        return queueView === 'overdue' && OPERATION_ROLES.includes(currentUser.role) && !queueSearch;
+    }
+
     function renderQueue(items) {
+        const withCause = queueShowsCause();
+        document.getElementById('queueTable').classList.toggle('with-cause', withCause);
+        const causeNotice = document.getElementById('queueCauseNotice');
+        const missing = withCause ? items.filter(item => !item.overdue_cause).length : 0;
+        causeNotice.hidden = !missing;
+        causeNotice.textContent = missing
+            ? `${missing} ${missing === 1 ? 'vencido sin causa registrada' : 'vencidos sin causa registrada'}. `
+              + 'Registrarla ayuda a ver qué falla más seguido: falta de turnos, carga alta, fuera de horario…'
+            : '';
         queueBody.replaceChildren();
         queueEmpty.hidden = items.length > 0;
         if (!items.length) queueEmpty.replaceChildren(queueEmptyState());
@@ -7062,7 +7282,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 due.appendChild(bar);
             }
 
-            tr.append(num, subject, level, owner, due);
+            const cause = queueCell('Causa', 'col-cause');
+            if (withCause) {
+                cause.appendChild(makeEl('span', `ui-tag ${item.overdue_cause ? '' : 'is-warn'}`,
+                    item.overdue_cause || 'Pendiente de causa'));
+                const report = makeEl('button', 'ticket-bar-link queue-report-link', 'Ver reporte ›');
+                report.type = 'button';
+                report.dataset.ticketId = String(item.id);
+                cause.appendChild(report);
+            }
+
+            tr.append(num, subject, level, owner, due, cause);
             queueBody.appendChild(tr);
         });
         renderQueueBulk();
@@ -7178,26 +7408,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'Buenas noches';
     }
 
-    // Tarjetas del Inicio: [vista de la cola, título de la cola, texto, valor, detalle, tono]
+    // Inicio del coordinador. Se completan al cargar las listas: vencidos sin causa y técnicos en turno
+    let homeOverdueNoCause = null;
+    let homeOnShift = null;
+
+    // Tarjetas del Inicio: [ruta, texto, valor, detalle, tono]
     function homeCards() {
         const value = (key) => (typeof navCounts[key] === 'number' ? navCounts[key] : null);
-        if (currentUser.role === 'technician') {
-            return [
-                ['mine_open', 'Mis abiertos', 'Mis abiertos', value('mine_open'), '', ''],
-                ['mine_due_soon', 'Por vencer', 'Por vencer', value('mine_due_soon'), '', 'warn'],
-                ['mine_resolved_today', 'Resueltos hoy', 'Resueltos hoy', value('mine_resolved_today'), '', 'ok'],
-            ];
-        }
         const overdue = value('overdue');
-        const dueSoon = value('due_soon');
-        const risk = overdue === null || dueSoon === null ? null : overdue + dueSoon;
         return [
-            ['open', 'Todos abiertos', 'Abiertos', value('open'), '', ''],
-            ['unassigned', 'Sin asignar', 'Sin asignar', value('unassigned'), '', 'warn'],
-            // "En riesgo" suma vencidos y por vencer; la tarjeta abre los vencidos
-            ['overdue', 'Vencidos', 'En riesgo', risk,
-             risk === null ? '' : `${overdue} ${overdue === 1 ? 'vencido' : 'vencidos'} · ${dueSoon} por vencer`, 'alert'],
-            ['resolved_today', 'Resueltos hoy', 'Resueltos hoy', value('resolved_today'), '', 'ok'],
+            ['tickets/todos', 'Abiertos', value('open'), '', ''],
+            ['tickets/sin-asignar', 'Sin asignar', value('unassigned'), homeOnShift === 0 ? 'nadie en turno' : '', 'warn'],
+            ['tickets/vencidos', 'Vencidos', overdue,
+             overdue && homeOverdueNoCause ? `${homeOverdueNoCause} sin causa registrada` : '', 'alert'],
+            ['borradores/sin-revisor', 'Borradores sin revisor', value('drafts_unassigned'), '', 'warn'],
         ];
     }
 
@@ -7207,15 +7431,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const day = now.toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'short' });
         const time = now.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', hour12: false });
         document.getElementById('homeDate').textContent = `${day.replace('.', '')} · ${time}`.toUpperCase();
-        const firstName = (currentUser.name || '').split(' ')[0];
-        document.getElementById('homeTitle').textContent = firstName ? `${homeGreeting()}, ${firstName}` : homeGreeting();
+        document.getElementById('homeTitle').textContent = homeTitleText();
         sendSummaryNowBtn.hidden = !OPERATION_ROLES.includes(currentUser.role);
         homeStats.replaceChildren();
-        homeCards().forEach(([view, queueLabel, label, value, detail, tone]) => {
+        homeCards().forEach(([route, label, value, detail, tone]) => {
             const card = makeEl('button', 'ui-card home-card');
             card.type = 'button';
-            card.dataset.view = view;
-            card.dataset.label = queueLabel;
+            card.dataset.route = route;
             card.appendChild(makeEl('span', 'ui-stat-label', label));
             const valueRow = makeEl('span', 'home-card-value');
             const number = makeEl('b', `ui-stat-value${tone && value ? ` is-${tone}` : ''}`, value === null ? '—' : String(value));
@@ -7254,8 +7476,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let reports = [];
         let team = null;
         let incidents = [];
+        let drafts = [];
         try {
-            [overdue, dueSoon, reports, team, incidents] = await Promise.all([
+            [overdue, dueSoon, reports, team, incidents, drafts] = await Promise.all([
                 // El servidor le da al técnico solo sus vencidos
                 apiFetch('/queue?view=overdue', { silent: true }),
                 apiFetch(`/queue?view=${technician ? 'mine_due_soon' : 'due_soon'}`, { silent: true }),
@@ -7264,6 +7487,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 canManage ? apiFetch('/team', { silent: true }) : Promise.resolve(null),
                 // Si falla, Inicio sigue sin la franja
                 canManage ? apiFetch('/incidents', { silent: true }).catch(() => []) : Promise.resolve([]),
+                // Borradores que llegaron sin nadie en turno
+                canManage ? apiFetch('/drafts?assigned=none', { silent: true }).catch(() => []) : Promise.resolve([]),
             ]);
         } catch (err) {
             if (seq !== homeSeq) return;
@@ -7279,9 +7504,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (seq !== homeSeq) return;
         const seen = new Set();
         const urgent = [...overdue.items, ...dueSoon.items].filter(item => !seen.has(item.id) && seen.add(item.id));
-        renderHomeAttention(urgent.slice(0, 6), reports.slice(0, 2));
+        renderHomeAttention(urgent.slice(0, 6), reports.slice(0, 2), drafts.slice(0, 2));
         renderHomeIncidents(incidents);
         if (canManage) renderHomeTeam(team);
+        // Detalle de las tarjetas: vencidos sin causa y si hay técnicos en turno
+        homeOverdueNoCause = overdue.items.filter(item => !item.overdue_cause).length;
+        homeOnShift = canManage ? (team || []).filter(m => m.role === 'technician' && m.is_active && m.on_shift).length : null;
+        renderHome();
     }
 
     // Posibles incidentes (coordinador y admin): varios clientes con la misma falla
@@ -7299,10 +7528,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderHomeAttention(items, reports) {
+    function renderHomeAttention(items, reports, drafts = []) {
         homeAttention.removeAttribute('aria-busy');
         homeAttention.replaceChildren();
-        if (!items.length && !reports.length) {
+        if (!items.length && !reports.length && !drafts.length) {
             const li = makeEl('li');
             li.appendChild(emptyState({
                 title: 'Nada urgente por ahora',
@@ -7325,6 +7554,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 dueText(item.due_state, item.remaining_seconds));
             if (item.due_at) tag.title = `Vence el ${exactDateTime(item.due_at)}`;
             button.appendChild(tag);
+            homeAttention.appendChild(li);
+        });
+        drafts.forEach(draft => {
+            const [li, button] = homeRow();
+            button.dataset.draftId = String(draft.id);
+            button.appendChild(makeEl('span', 'ui-tag is-warn home-row-tag', 'Sin revisor'));
+            const text = makeEl('span', 'home-row-text');
+            text.appendChild(makeEl('span', 'home-row-title', `Borrador · «${draft.title || draft.subject || 'Sin asunto'}»`));
+            const sub = makeEl('span', 'home-row-sub', `${draft.requester_name} · llegó `);
+            sub.appendChild(timeTag(draft.created_at));
+            text.appendChild(sub);
+            button.appendChild(text);
             homeAttention.appendChild(li);
         });
         reports.forEach(report => {
@@ -7354,7 +7595,9 @@ document.addEventListener('DOMContentLoaded', () => {
             homeTeam.appendChild(li);
             return;
         }
-        const maxLoad = Math.max(1, ...technicians.map(member => member.tickets_assigned_open));
+        // Carga de la asignación automática (tickets y borradores); sin ese dato, los tickets abiertos
+        const loadOf = (member) => (typeof member.load === 'number' ? member.load : member.tickets_assigned_open);
+        const maxLoad = Math.max(1, ...technicians.map(loadOf));
         technicians.forEach(member => {
             const li = makeEl('li', 'home-team-row');
             // Vacaciones o incapacidad: atenuado. Fuera de turno (Ausente automático) es lo normal fuera de horario
@@ -7375,13 +7618,15 @@ document.addEventListener('DOMContentLoaded', () => {
             text.appendChild(makeEl('span', `home-row-sub${away ? ' is-warn' : ''}`, sub));
             li.append(avatar, text);
             if (!away) {
-                const bar = makeEl('span', `ui-bar home-load${member.tickets_assigned_open / maxLoad >= 0.75 ? ' is-soon' : ''}`);
-                bar.title = `${member.tickets_assigned_open} tickets abiertos asignados`;
+                const load = loadOf(member);
+                const bar = makeEl('span', `ui-bar home-load${load / maxLoad >= 0.75 ? ' is-soon' : ''}`);
+                bar.title = `Carga ${load}`;
                 const fill = makeEl('span');
-                fill.style.width = `${Math.round((member.tickets_assigned_open / maxLoad) * 100)}%`;
+                fill.style.width = `${Math.round((load / maxLoad) * 100)}%`;
                 bar.appendChild(fill);
                 li.appendChild(bar);
-                li.appendChild(makeEl('span', 'sr-only', `${member.tickets_assigned_open} tickets abiertos asignados`));
+                li.appendChild(makeEl('span', 'home-team-load ui-num', String(load)));
+                li.appendChild(makeEl('span', 'sr-only', ` de carga (${member.tickets_assigned_open} tickets abiertos)`));
             }
             homeTeam.appendChild(li);
         });
@@ -7399,24 +7644,21 @@ document.addEventListener('DOMContentLoaded', () => {
             openTicketById(Number(row.dataset.ticketId));
             return;
         }
+        if (row.dataset.draftId) {
+            openDraftById(Number(row.dataset.draftId));
+            return;
+        }
         if (row.dataset.reportAccount) {
             setSideNavActive('reports');
             openReportsForAccount(Number(row.dataset.reportAccount), row.dataset.reportName);
         }
     });
 
-    document.getElementById('homeAttentionAll').addEventListener('click', () => {
-        const technician = currentUser.role === 'technician';
-        const view = technician ? 'mine_due_soon' : 'overdue';
-        setSideNavActive(view);
-        setQueueView(view, technician ? 'Por vencer' : 'Vencidos');
-    });
+    document.getElementById('homeAttentionAll').addEventListener('click', () => goRoute('tickets/vencidos'));
 
     homeStats.addEventListener('click', (e) => {
         const card = e.target.closest('.home-card');
-        if (!card) return;
-        setSideNavActive(card.dataset.view);
-        setQueueView(card.dataset.view, card.dataset.label);
+        if (card) goRoute(card.dataset.route);
     });
 
     homeQueue.addEventListener('click', () => {
@@ -7428,12 +7670,17 @@ document.addEventListener('DOMContentLoaded', () => {
     queueBody.addEventListener('click', (e) => {
         // La casilla de Vencidos solo selecciona
         if (e.target.closest('.queue-check')) return;
+        const report = e.target.closest('.queue-report-link');
+        if (report) {
+            openOverdueReport(Number(report.dataset.ticketId));
+            return;
+        }
         const row = e.target.closest('.queue-row');
         if (row) openQueueTicket(Number(row.dataset.id));
     });
     queueBody.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
-        if (e.target.closest('.queue-check')) return;
+        if (e.target.closest('.queue-check, .queue-report-link')) return;
         const row = e.target.closest('.queue-row');
         if (!row) return;
         e.preventDefault();
@@ -8485,6 +8732,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Abre Cuentas con un filtro rápido y una búsqueda (desde el menú o desde la búsqueda global)
     function openAccounts(filter = 'all', search = '') {
+        // Coordinador: Tickets › Clientes o Equipo › Personas ya eligen el filtro; invitar es del administrador
+        aaQuick.hidden = OPERATION_ROLES.includes(currentUser.role);
+        document.getElementById('aaInvite').hidden = currentUser.role !== 'admin';
         aaFilter = filter;
         aaSearch.value = search;
         aaSelected = null;
@@ -9229,7 +9479,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===== Una sola sección por opción del menú =====
-    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos' };
+    const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };
     const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
 
     function showAccountsSection(section) {
@@ -9264,7 +9514,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!accountsView.hidden) {
             const shown = [...accountsView.querySelectorAll('[data-account-section]')].filter(el => !el.hidden);
             if (shown.length !== 1) problems.push(`${shown.length} secciones visibles en Cuentas`);
-            if (shown.some(el => el.dataset.accountSection === 'requests')) problems.push('Mis solicitudes visible para el personal');
+            if (shown.some(el => el.dataset.accountSection === 'requests') && currentUser.role !== 'coordinator') {
+                problems.push('Mis solicitudes visible para quien no las crea');
+            }
         }
         if (!adminView.hidden) {
             const kinds = new Set([...adminView.querySelectorAll('[data-admin-section]')]
