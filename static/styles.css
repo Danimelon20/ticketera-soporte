@@ -4296,3 +4296,12 @@ body.staff-shell .home-head { display: none; }
   .list-row { flex-wrap: wrap; padding: 12px 14px; }
   .list-load-numbers { flex: 0 0 auto; align-items: flex-start; }
 }
+
+/* =====================================================================
+   N4 · Administración
+   ===================================================================== */
+.aa-section-note { margin: 0 0 8px; padding: 0 16px; color: #5B6078; font-size: 12px; }
+.aa-ticket-go { margin-left: auto; color: var(--link); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.aa-ticket:hover .aa-ticket-go { text-decoration: underline; }
+.changes-quick { margin: 0 0 12px; }
+.changes-note { margin-top: 12px; font-size: 12px; }

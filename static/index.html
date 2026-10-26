@@ -1102,6 +1102,11 @@
                     <div class="admin-card-head">
                         <h2>Registro de cambios</h2>
                     </div>
+                    <div id="changesQuick" class="aa-quick changes-quick" role="group" aria-label="Filtros rápidos">
+                        <button type="button" class="aa-quick-btn" data-action="" aria-pressed="true">Todo</button>
+                        <button type="button" class="aa-quick-btn" data-action="conversation_viewed" aria-pressed="false">Accesos a conversaciones</button>
+                        <button type="button" class="aa-quick-btn" data-action="attachment_downloaded" aria-pressed="false">Adjuntos descargados</button>
+                    </div>
                     <div class="directory-filters">
                         <label for="changesAccount" class="sr-only">Filtrar por cuenta</label>
                         <input type="search" id="changesAccount" placeholder="Cuenta: nombre o correo" maxlength="150">
@@ -1112,6 +1117,7 @@
                     </div>
                     <ul id="changesList" class="changes-list"></ul>
                     <p id="changesEmpty" class="admin-text" hidden>No hay cambios con esos filtros.</p>
+                    <p class="admin-text changes-note">Cada vez que el administrador abre una conversación queda aquí, con su motivo. Así el acceso existe para casos justificados y siempre se puede revisar.</p>
                     <div class="changes-pager">
                         <button type="button" id="changesPrev" class="btn-secondary">Anterior</button>
                         <span id="changesPage" aria-live="polite"></span>
@@ -1201,17 +1207,17 @@
     <dialog id="conversationDialog" class="app-dialog" aria-labelledby="conversationDialogTitle">
         <form id="conversationForm" class="profile-form">
             <h2 id="conversationDialogTitle" class="modal-title">Ver conversación</h2>
-            <p id="conversationDialogTarget" class="help-text"></p>
+            <p class="help-text">Como administrador, usted no participa en los tickets. Puede leer esta conversación en solo lectura si tiene un motivo.</p>
             <div class="form-group">
-                <label for="conversationReason">Motivo</label>
+                <label for="conversationReason">Motivo (obligatorio)</label>
                 <input type="text" id="conversationReason" minlength="5" maxlength="150" required
                        placeholder="Por ejemplo: revisión de una queja del cliente">
             </div>
-            <small class="help-text">Es solo lectura. Su nombre, el ticket, el motivo y la fecha quedan en el Registro de cambios.</small>
+            <small class="help-text">Este acceso quedará en el Registro de cambios con su nombre, el ticket, el motivo y la hora. Podrá descargar los adjuntos durante 1 hora.</small>
             <p id="conversationError" class="dialog-error" role="alert" hidden></p>
             <div class="dialog-actions">
                 <button type="button" id="conversationCancel" class="btn-secondary">Cancelar</button>
-                <button type="submit" class="btn-submit">Ver conversación</button>
+                <button type="submit" class="btn-submit">Ver en solo lectura</button>
             </div>
         </form>
     </dialog>

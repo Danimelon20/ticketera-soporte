@@ -5138,7 +5138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ticket_linked: 'Tickets relacionados',
         ticket_link_undone: 'Relación separada',
         incident_marked: 'Posible incidente',
-        conversation_viewed: 'Ver conversación (motivo)'
+        conversation_viewed: 'Ver conversación'
     };
     const changesAccount = document.getElementById('changesAccount');
     const changesAction = document.getElementById('changesAction');
@@ -5181,7 +5181,10 @@ document.addEventListener('DOMContentLoaded', () => {
         when.textContent = formatDateTime(item.created_at);
         head.append(action, when);
         li.append(head, changeLine('Cuenta: ', item.account), changeLine('Por: ', item.actor));
-        if (item.old_value || item.new_value) {
+        // "Ver conversación": el ticket va en Cuenta y el motivo, aparte
+        if (item.action === 'conversation_viewed') {
+            li.appendChild(changeLine('Motivo: ', `«${item.new_value || ''}»`));
+        } else if (item.old_value || item.new_value) {
             li.appendChild(changeLine('Cambio: ', `${item.old_value || '—'} → ${item.new_value || '—'}`));
         }
         return li;
@@ -5216,7 +5219,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 300);
     });
 
+    // Filtros rápidos: la misma acción que el selector
+    const changesQuick = document.getElementById('changesQuick');
+
+    function renderChangesQuick() {
+        changesQuick.querySelectorAll('.aa-quick-btn').forEach(button => {
+            button.setAttribute('aria-pressed', button.dataset.action === changesAction.value ? 'true' : 'false');
+        });
+    }
+
+    changesQuick.addEventListener('click', (e) => {
+        const button = e.target.closest('.aa-quick-btn');
+        if (!button) return;
+        changesAction.value = button.dataset.action;
+        renderChangesQuick();
+        changesPage = 1;
+        loadAccountChanges();
+    });
+
     changesAction.addEventListener('change', () => {
+        renderChangesQuick();
         changesPage = 1;
         loadAccountChanges();
     });
@@ -6797,7 +6819,7 @@ document.addEventListener('DOMContentLoaded', () => {
             conversationDone = resolve;
             conversationForm.reset();
             conversationError.hidden = true;
-            document.getElementById('conversationDialogTarget').textContent = `Ticket #${ticketId}`;
+            document.getElementById('conversationDialogTitle').textContent = `Ver la conversación del ticket #${ticketId}`;
             conversationDialog.showModal();
             conversationReason.focus();
         });
@@ -8947,14 +8969,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const section = makeEl('section', 'ui-card aa-section');
         const sectionHead = makeEl('div', 'ui-card-head');
+        const admin = currentUser.role === 'admin';
         if (d.role === 'requester') {
-            sectionHead.appendChild(makeEl('h3', 'ui-card-title', 'Tickets del cliente'));
+            sectionHead.appendChild(makeEl('h3', 'ui-card-title', admin ? 'Tickets de esta cuenta' : 'Tickets del cliente'));
             if (d.actions.includes('view-tickets')) {
                 const all = makeEl('button', 'ticket-bar-link aa-view-queue', 'Ver en la cola →');
                 all.type = 'button';
                 sectionHead.appendChild(all);
             }
             section.appendChild(sectionHead);
+            if (admin) {
+                section.appendChild(makeEl('p', 'aa-section-note',
+                    'Las conversaciones son del equipo de soporte. Para abrir una necesita indicar el motivo.'));
+            }
             if (d.recent_tickets.length === 0) {
                 section.appendChild(emptyState({ title: 'Todavía no tiene tickets' }));
             } else {
@@ -8967,6 +8994,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     link.append(makeEl('span', 'home-row-id ui-num', `#${ticket.id}`),
                         makeEl('span', 'home-row-title home-row-text', ticket.title),
                         makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
+                    // El administrador abre la conversación con motivo (queda en el Registro de cambios)
+                    if (admin) link.appendChild(makeEl('span', 'aa-ticket-go', `Ver conversación del #${ticket.id}…`));
                     li.appendChild(link);
                     list.appendChild(li);
                 });
@@ -9235,7 +9264,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const ticket = e.target.closest('.aa-ticket');
         if (ticket) {
-            setSideNavActive(null);
+            // La sección (Cuentas o Clientes) queda marcada: la ruta del ticket cuelga de ella
             openTicketById(parseInt(ticket.dataset.ticketId, 10));
             return;
         }
