@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from . import audit, hacienda, models
+from . import audit, hacienda, models, suspicion
 
 ID_IN_USE = "No es posible usar esta cédula. Si le pertenece, contacte a soporte."
 ID_IN_USE_REASON = "cédula en uso por otra cuenta"
@@ -94,11 +94,12 @@ def hacienda_codes(db: Session, user_ids: list[int]) -> dict[int, str]:
     return {uid: found.get(uid, "unverified") for uid in user_ids}
 
 
-def save_hacienda_result(db: Session, user: models.User, name: str, id_number: str) -> None:
-    """Guarda si el nombre coincide con Hacienda (nunca el nombre de Hacienda). No hace commit."""
+def save_hacienda_result(db: Session, user: models.User, name: str, id_number: str) -> str:
+    """Guarda si el nombre coincide con Hacienda (nunca el nombre de Hacienda) y lo devuelve. No hace commit."""
     row = _get_or_create(db, user)
     row.hacienda_result = hacienda.identity_result(id_number, name)
     row.checked_at = _now()
+    return row.hacienda_result
 
 
 def check_id_number(db: Session, user: models.User, id_number: str) -> str | None:
@@ -115,7 +116,9 @@ def apply_contact_from_email(
 
     El teléfono siempre se guarda. Devuelve el motivo si la cédula pertenece a otra cuenta.
     actor_id: quién confirma el cambio en el registro (sin indicar, el Agente virtual).
+    Sin actor_id los datos vienen directo del correo del cliente: sus señales sospechosas se reportan.
     """
+    from_client = actor_id is None
     if actor_id is None:
         actor_id = audit.agent_id(db)
     if phone and phone != user.phone:
@@ -128,6 +131,7 @@ def apply_contact_from_email(
     if not id_number or id_number == user.id_number:
         return None
     if id_number_taken(db, id_number, user.id):
+        suspicion.id_number_conflict(db, user, id_number, "email", actor_id=actor_id)
         return ID_IN_USE_REASON
     if user.id_number and is_locked(db, user):
         # Ya quedó fija: se conserva la del perfil
@@ -138,5 +142,6 @@ def apply_contact_from_email(
     )
     user.id_number = id_number
     if (user.name or "").strip():
-        save_hacienda_result(db, user, user.name, id_number)
+        if save_hacienda_result(db, user, user.name, id_number) == "mismatch" and from_client:
+            suspicion.name_mismatch(db, user, "email")
     return None

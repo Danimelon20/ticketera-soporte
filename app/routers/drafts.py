@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, email_analysis, email_attachments, grouping, identity, models
+from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, email_analysis, email_attachments, grouping, identity, models, suspicion
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import AttachmentRead, DraftAssign, DraftConfirm, DraftRead
@@ -193,9 +193,15 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     # Hacienda solo para una cédula nueva escrita por quien confirma
     if contact_id_number != stored_id:
         if identity.id_number_taken(db, contact_id_number, requester.id):
+            # La escribió quien confirma: solo queda en el registro
+            suspicion.id_number_conflict(db, requester, contact_id_number, "staff", actor_id=reviewer.id, report=False)
+            db.commit()
             raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
         verify_id_number(contact_id_number)
     elif contact_id_number != requester.id_number and identity.id_number_taken(db, contact_id_number, requester.id):
+        # El intento del cliente ya se contó cuando llegó su correo: aquí solo queda en el registro
+        suspicion.id_number_conflict(db, requester, contact_id_number, "draft", actor_id=reviewer.id, report=False)
+        db.commit()
         raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
 
     # Responsable: el técnico que confirma; si confirma un coordinador, el revisor del borrador.

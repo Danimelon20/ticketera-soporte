@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, availability, config, schedules, hacienda, identity, mailer, models, throttle
+from .. import accounts, audit, availability, config, schedules, hacienda, identity, mailer, models, suspicion, throttle
 from ..schemas import (
     AccountRequestCreate, AccountRequestRead, AvailabilityPeriodCreate, AvailabilityPeriodRead, RejectRequest,
     ScheduleUpdate, SignupStarted,
@@ -216,6 +216,8 @@ def create_request(
             if new_value == user.id_number:
                 raise HTTPException(status_code=400, detail="Esa ya es la cédula de la cuenta")
             if identity.id_number_taken(db, new_value, user.id):
+                suspicion.id_number_conflict(db, user, new_value, "staff", actor_id=current_user.id, report=False)
+                db.commit()
                 raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
             old_value = mask_last4(user.id_number)
 
@@ -298,6 +300,8 @@ def _apply(db: Session, admin: models.User, row: models.AccountRequest) -> None:
         return
     id_number = _normalized_id(row.new_value)
     if identity.id_number_taken(db, id_number, user.id):
+        suspicion.id_number_conflict(db, user, id_number, "staff", actor_id=admin.id, report=False)
+        db.commit()
         raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
     # Modo tolerante: si Hacienda no la encuentra o no responde, se acepta igual
     error = hacienda.check_id_number(id_number, tolerant=True)

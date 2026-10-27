@@ -4582,6 +4582,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Reportes automáticos: intentos sumados y si probó varias cédulas ajenas distintas
+    function reportAttemptsText(item) {
+        if (!item.attempts || item.attempts < 2) return '';
+        return `${item.attempts} intentos · último ${relativeTime(item.last_attempt_at)}`;
+    }
+
+    function reportStrongText(item) {
+        return item.strong_signal ? `Probó ${item.distinct_id_numbers} cédulas distintas` : '';
+    }
+
     function renderReportItem(item) {
         const li = makeEl('li', 'ui-card report-item');
         const head = makeEl('div', 'report-item-head');
@@ -4595,6 +4605,8 @@ document.addEventListener('DOMContentLoaded', () => {
         head.appendChild(makeEl('span', `ui-tag ${tone}`, REPORT_STATUS[item.status] || item.status));
         li.appendChild(head);
         if (needsMyReview(item)) li.appendChild(makeTag('Requiere su revisión', 'tag-review'));
+        if (reportStrongText(item)) li.appendChild(makeEl('span', 'ui-tag is-danger', reportStrongText(item)));
+        if (reportAttemptsText(item)) li.appendChild(makeEl('p', 'report-item-meta', reportAttemptsText(item)));
         if (item.comment) li.appendChild(makeEl('p', 'report-item-comment', item.comment));
         if (item.status !== 'open') {
             let state = REPORT_STATUS[item.status] || item.status;
@@ -4685,6 +4697,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const by = document.getElementById('reportReviewBy');
         by.replaceChildren(document.createTextNode('Reportado por '), makeEl('b', '', item.reporter),
             document.createTextNode(` (${ROLE_MAP[item.reporter_role] || item.reporter_role})`));
+        if (reportAttemptsText(item)) by.appendChild(document.createTextNode(` · ${reportAttemptsText(item)}`));
+        if (reportStrongText(item)) by.append(' ', makeEl('span', 'ui-tag is-danger', reportStrongText(item)));
         document.getElementById('reportReviewComment').textContent = item.comment || 'Quien reportó no dejó comentario.';
         setDocumentTitle(`Reporte de ${item.target_name}`);
         // Al reportante solo le queda retirar su reporte
@@ -5219,6 +5233,7 @@ document.addEventListener('DOMContentLoaded', () => {
         microsoft_login: 'Ingreso con Microsoft',
         microsoft_login_rejected: 'Ingreso con Microsoft rechazado',
         emergency_access: 'Acceso de emergencia',
+        id_number_conflict: 'Cédula de otra cuenta',
         login_locked: 'Bloqueo por intentos',
         password_reset: 'Contraseña restablecida',
         access_reset_sent: 'Código de acceso enviado',
@@ -7623,7 +7638,9 @@ document.addEventListener('DOMContentLoaded', () => {
             button.appendChild(makeEl('span', 'home-row-id ui-num is-report', 'RPT'));
             const text = makeEl('span', 'home-row-text');
             text.appendChild(makeEl('span', 'home-row-title', `Cuenta reportada · ${report.target_name}`));
-            text.appendChild(makeEl('span', 'home-row-sub', `${report.reason_label} · reportado por ${report.reporter}`));
+            const attempts = reportAttemptsText(report);
+            text.appendChild(makeEl('span', 'home-row-sub',
+                `${report.reason_label} · reportado por ${report.reporter}${attempts ? ` · ${attempts}` : ''}`));
             button.appendChild(text);
             button.appendChild(makeEl('span', 'ui-tag is-info', 'Revisar'));
             homeAttention.appendChild(li);

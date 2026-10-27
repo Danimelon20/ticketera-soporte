@@ -5,7 +5,7 @@ from email.header import decode_header, make_header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, email_attachments, hacienda, identity, mailer, models
+from . import config, email_attachments, hacienda, identity, mailer, models, suspicion
 from .email_parser import extract_sender, get_plain_body, parse_ticket_email, strip_quoted
 from .notifications import display_name, notify_followers
 
@@ -284,6 +284,7 @@ def process_message(db: Session, msg) -> str:
         # Cédula de otra cuenta: no se usa (se queda la del perfil, si tiene)
         id_taken = identity.id_number_taken(db, parsed["id_number"], user.id)
         if id_taken:
+            suspicion.id_number_conflict(db, user, parsed["id_number"], "email")
             id_number = user.id_number
             errors.append(identity.ID_IN_USE)
     if parsed["id_number"] and not id_taken:

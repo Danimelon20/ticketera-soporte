@@ -433,6 +433,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
+    # Intento de usar una cédula de otra cuenta (new_value: cédula enmascarada y origen)
+    "id_number_conflict",
 )
 SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
 
@@ -600,6 +602,9 @@ class AccountReport(Base):
     target = relationship("User", foreign_keys=[target_user_id])
     reporter = relationship("User", foreign_keys=[reporter_id])
     resolver = relationship("User", foreign_keys=[resolved_by])
+    # Solo los reportes automáticos (suspicion.py) tienen intentos sumados
+    activity = relationship("AutoReportActivity", uselist=False)
+    id_owners = relationship("AutoReportIdOwner")
 
 
 class TechnicianSchedule(Base):
@@ -860,3 +865,28 @@ class MicrosoftLoginHandoff(Base):
     browser_hash = Column(String(64), nullable=False)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
+
+
+class AutoReportActivity(Base):
+    """Intentos sumados a un reporte automático abierto, en vez de abrir uno nuevo por cada intento.
+
+    Tabla aparte para no agregar columnas a account_reports (create_all no altera tablas).
+    """
+    __tablename__ = "auto_report_activity"
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("account_reports.id", ondelete="CASCADE"), unique=True, nullable=False)
+    attempts = Column(Integer, nullable=False, default=1)
+    last_attempt_at = Column(DateTime, nullable=False)
+
+
+class AutoReportIdOwner(Base):
+    """Cuentas dueñas de las cédulas ajenas que probó la cuenta reportada: cuántas cédulas distintas
+    intentó usar, sin guardar ninguna cédula."""
+    __tablename__ = "auto_report_id_owners"
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("account_reports.id", ondelete="CASCADE"), index=True, nullable=False)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    __table_args__ = (UniqueConstraint("report_id", "owner_user_id", name="uq_auto_report_id_owner"),)

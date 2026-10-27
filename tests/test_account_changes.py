@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app import identity, models
+from app import hacienda, identity, models
 from app.database import SessionLocal
 from conftest import code_from
 
@@ -93,7 +93,9 @@ def test_name_and_id_number_changes(client, make_user):
     assert "102340567" not in text and "109870654" not in text
 
 
-def test_contact_from_email_is_recorded_masked(client, make_user):
+def test_contact_from_email_is_recorded_masked(client, make_user, monkeypatch):
+    # Nombre reconocido por Hacienda: sin el reporte automático de "El nombre no coincide" (test_suspicion.py)
+    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "01", "name_tokens": hacienda.name_tokens("Ana Mora Vargas")})
     user = make_user("requester", "Ana Mora Vargas", profile=False)
     db = SessionLocal()
     try:

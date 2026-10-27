@@ -661,6 +661,11 @@ class AccountReportRead(BaseModel):
     resolved_at: Optional[datetime] = None
     # Solo en la lista de coordinador y admin: otros reportes abiertos sobre la misma cuenta
     other_open: Optional[int] = None
+    # Reportes automáticos: intentos sumados, el último y cuántas cédulas ajenas distintas probó
+    attempts: Optional[int] = None
+    last_attempt_at: Optional[datetime] = None
+    distinct_id_numbers: Optional[int] = None
+    strong_signal: bool = False
 
 
 class AccountReportCount(BaseModel):

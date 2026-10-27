@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import audit, models
+from .. import audit, models, suspicion
 from ..schemas import AccountReportCount, AccountReportCreate, AccountReportRead, AccountReportResolve
 from ..security import get_current_user, mask_email
 
@@ -46,7 +46,13 @@ def _name(user: models.User | None) -> Optional[str]:
 
 
 def _read(row: models.AccountReport) -> AccountReportRead:
+    activity = row.activity
+    distinct = len(row.id_owners) if activity is not None else None
     return AccountReportRead(
+        attempts=activity.attempts if activity is not None else None,
+        last_attempt_at=activity.last_attempt_at if activity is not None else None,
+        distinct_id_numbers=distinct,
+        strong_signal=bool(distinct and distinct >= suspicion.STRONG_DISTINCT_IDS),
         id=row.id,
         target_user_id=row.target_user_id,
         target_name=row.target.name or "Sin nombre",

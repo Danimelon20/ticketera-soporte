@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, availability, identity, models
+from .. import audit, availability, identity, models, suspicion
 from ..schemas import MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
 from ..security import get_current_user
 from .auth import me_read
@@ -69,6 +69,9 @@ def update_profile(data: ProfileUpdate, db: Session = Depends(get_db), current_u
     if data.id_number != current_user.id_number:
         error = identity.check_id_number(db, current_user, data.id_number)
         if error:
+            if error == identity.ID_IN_USE:
+                suspicion.id_number_conflict(db, current_user, data.id_number, "profile", actor_id=current_user.id)
+                db.commit()
             raise HTTPException(status_code=400, detail=error)
 
     if data.phone != current_user.phone:
@@ -87,7 +90,8 @@ def update_profile(data: ProfileUpdate, db: Session = Depends(get_db), current_u
             )
         current_user.name = data.name
         current_user.id_number = data.id_number
-        identity.save_hacienda_result(db, current_user, data.name, data.id_number)
+        if identity.save_hacienda_result(db, current_user, data.name, data.id_number) == "mismatch":
+            suspicion.name_mismatch(db, current_user, "profile")
     db.commit()
     db.refresh(current_user)
     return me_read(db, current_user)
