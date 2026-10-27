@@ -16,6 +16,10 @@ MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024
 def send_email(to: str, subject: str, body: str, attachments=None) -> bool:
     """attachments: [(nombre, contenido, Content-Type)]. Nunca se registran sus nombres ni su contenido."""
     body = f"{body.rstrip()}\n\n{SIGNATURE}\n"
+    # .invalid nunca existe (RFC 2606): son las cuentas de prueba de scripts.demo_data
+    if to.strip().lower().endswith(".invalid"):
+        logging.info("Correo no enviado (dominio .invalid): %s", subject)
+        return False
     if not config.EMAIL_ENABLED:
         if attachments:
             logging.info("Correo no enviado (EMAIL_ENABLED=false): %s (con %d adjuntos)", subject, len(attachments))
