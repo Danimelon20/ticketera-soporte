@@ -206,6 +206,10 @@ nunca se sube a Git.
 | `SUPPORT_MAILBOX` | Buzón que lee el Agente y desde el que responde; es la cuenta con la que se ejecuta `app.ms_login` |
 | `MAIL_FOLDER` | Carpeta del buzón donde llegan los correos de soporte (por defecto `Ticketera`; `inbox` usa la bandeja de entrada) |
 | `EMAIL_POLL_SECONDS` | Cada cuántos segundos se revisa la carpeta (por defecto 60) |
+| `MS_LOGIN_ENABLED` | `true`: técnicos, coordinadores y administradores entran con su cuenta Microsoft (el administrador además tiene "Acceso de emergencia" con contraseña y código). `false`: todos entran con contraseña |
+| `MS_LOGIN_TENANT_ID` / `MS_LOGIN_CLIENT_ID` | Id. de directorio y de aplicación del mismo registro que usa el buzón |
+| `MS_LOGIN_CLIENT_SECRET` | Secreto de cliente propio del inicio de sesión. Vence: renovarlo en Azure antes de la fecha |
+| `MS_LOGIN_REDIRECT_URI` | URI de redirección registrada en Azure (tipo Web), por defecto `http://localhost:8000/auth/microsoft/callback` |
 | `HACIENDA_CHECK` | `true`: verifica la cédula con la API pública de Hacienda. `false`: no consulta (útil sin internet) |
 | `HACIENDA_STRICT` | `true`: rechaza las cédulas que Hacienda no encuentra. `false`: las acepta igual |
 | `CHATBOT_ENABLED` | `true`: el asistente de la página responde. `false`: responde que no está disponible |

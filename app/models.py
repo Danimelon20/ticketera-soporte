@@ -430,6 +430,9 @@ ACCOUNT_CHANGE_ACTIONS = (
     "conversation_viewed",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed",
+    # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
+    # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
+    "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
 )
 SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
 
@@ -816,3 +819,44 @@ class TicketIncident(Base):
     id = Column(Integer, primary_key=True)
     principal_ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
     marked_at = Column(DateTime, nullable=False)
+
+
+class UserMicrosoftLink(Base):
+    """Cuenta del personal enlazada a su cuenta Microsoft (oid de Entra ID). Después del primer ingreso
+    se entra por el oid, aunque cambie el correo."""
+    __tablename__ = "user_microsoft_links"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    oid = Column(String(64), unique=True, nullable=False)
+    linked_at = Column(DateTime, nullable=False)
+
+
+class MicrosoftLoginFlow(Base):
+    """Ida a Microsoft en curso: un solo uso y 10 minutos. Solo hashes del state y de la cookie del navegador.
+
+    purpose (validado en Python): "login" o "activate" (con invitation_id).
+    """
+    __tablename__ = "microsoft_login_flows"
+
+    id = Column(Integer, primary_key=True)
+    state_hash = Column(String(64), unique=True, nullable=False)
+    browser_hash = Column(String(64), nullable=False)
+    # Datos de MSAL (state, nonce y code_verifier) para validar la vuelta
+    flow_json = Column(Text, nullable=False)
+    purpose = Column(String(20), nullable=False)
+    portal = Column(String(20), nullable=True)
+    invitation_id = Column(Integer, ForeignKey("staff_invitations.id", ondelete="CASCADE"), nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class MicrosoftLoginHandoff(Base):
+    """Código de un solo uso (60 s) con el que la página canjea la vuelta de Microsoft por la sesión."""
+    __tablename__ = "microsoft_login_handoffs"
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    browser_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)

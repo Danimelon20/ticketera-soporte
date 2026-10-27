@@ -289,6 +289,31 @@ document.addEventListener('DOMContentLoaded', () => {
         requester: { title: 'Cliente', link: { href: '#crear-cuenta', question: '¿No tiene cuenta?', text: 'Crear una cuenta' } }
     };
     const LOGIN_PORTAL_KEY = 'ticketeraLoginPortal';
+
+    // Personal y administración entran con Microsoft cuando el servidor lo tiene encendido (MS_LOGIN_ENABLED).
+    // Vuelta de Microsoft: #microsoft?code=... (código de un solo uso) o #microsoft?error=clave
+    const MICROSOFT_ROUTE = '#microsoft';
+    const MICROSOFT_PORTALS = ['staff', 'admin'];
+    const MICROSOFT_ERRORS = {
+        state: 'El inicio de sesión con Microsoft venció o no es válido. Intente de nuevo.',
+        failed: 'Microsoft no confirmó su identidad. Intente de nuevo.',
+        unavailable: 'No se pudo conectar con Microsoft. Intente más tarde.',
+        tenant: 'Esa cuenta Microsoft no pertenece a la organización.',
+        not_staff: 'Esa cuenta Microsoft no corresponde a nadie del personal. Si es nuevo, active su invitación.',
+        requester: 'Esa es una cuenta de cliente: entre por la pestaña Cliente.',
+        inactive: 'Su cuenta está desactivada. Comuníquese con el administrador.',
+        wrong_portal: 'Esta cuenta no entra por esta opción. Pruebe con la otra pestaña.',
+        already_linked: 'Su cuenta ya está enlazada a otra cuenta Microsoft. Comuníquese con el administrador.',
+        invitation: 'La invitación no es válida o venció. Pida una nueva al administrador.',
+        invitation_email: 'Entre con la cuenta Microsoft del correo al que llegó la invitación.'
+    };
+    const MICROSOFT_AUTH_HOST = 'https://login.microsoftonline.com/';
+    const microsoftLoginBox = document.getElementById('microsoftLogin');
+    const microsoftLoginBtn = document.getElementById('microsoftLoginBtn');
+    const emergencyAccessLink = document.getElementById('emergencyAccessLink');
+    let microsoftLogin = false;
+    // Administración: el formulario de contraseña y código solo después de "Acceso de emergencia"
+    let emergencyAccess = false;
     const loginTabs = document.getElementById('loginTabs');
     const loginExtra = document.getElementById('loginExtra');
     const loginExtraLink = document.getElementById('loginExtraLink');
@@ -297,6 +322,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let forgotMode = false;
 
     function showAuthPanel() {
+        if (window.location.hash.startsWith(MICROSOFT_ROUTE)) {
+            finishMicrosoftLogin();
+            return;
+        }
         if (window.location.hash.startsWith(RESET_ROUTE)) {
             openResetLink();
             return;
@@ -340,6 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (selected) loginForm.setAttribute('aria-labelledby', tab.id);
         });
         document.getElementById('loginAdminNotice').hidden = portal !== 'admin';
+        applyMicrosoftLogin();
         loginExtra.hidden = !info.link;
         if (info.link) {
             document.getElementById('loginExtraText').textContent = info.link.question;
@@ -355,12 +385,67 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openPortal(portal, focusEmail = true) {
         if (!PORTALS[portal]) return;
+        emergencyAccess = false;
         applyPortal(portal);
         // El correo escrito se conserva al cambiar de pestaña; la contraseña no
         document.getElementById('loginPassword').value = '';
         clearHash();
         showAuthPanel();
         if (focusEmail) document.getElementById('loginEmail').focus();
+    }
+
+    // Muestra el botón de Microsoft o el formulario según la pestaña elegida
+    function applyMicrosoftLogin() {
+        const useMicrosoft = microsoftLogin && MICROSOFT_PORTALS.includes(loginPortal);
+        microsoftLoginBox.hidden = !useMicrosoft;
+        if (useMicrosoft) microsoftLoginBtn.href = `/auth/microsoft/login?portal=${loginPortal}`;
+        emergencyAccessLink.hidden = !(useMicrosoft && loginPortal === 'admin' && !emergencyAccess);
+        loginForm.hidden = useMicrosoft && !(loginPortal === 'admin' && emergencyAccess);
+        document.getElementById('activateSubmit').textContent = microsoftLogin ? 'Activar con Microsoft' : 'Activar cuenta';
+    }
+
+    async function loadMicrosoftLogin() {
+        try {
+            const response = await fetch(`${API_BASE}/auth/microsoft/config`, { headers: { 'Accept': 'application/json' } });
+            const data = response.ok ? await response.json() : {};
+            microsoftLogin = Boolean(data.enabled);
+        } catch (err) {
+            microsoftLogin = false;
+        }
+        applyMicrosoftLogin();
+    }
+
+    emergencyAccessLink.addEventListener('click', () => {
+        emergencyAccess = true;
+        applyMicrosoftLogin();
+        document.getElementById('loginEmail').focus();
+    });
+
+    // Vuelta de Microsoft: se quita el código de la barra de direcciones antes de canjearlo
+    function finishMicrosoftLogin() {
+        const params = new URLSearchParams(window.location.hash.slice(MICROSOFT_ROUTE.length).replace(/^\?/, ''));
+        clearHash();
+        const portal = params.get('portal');
+        if (PORTALS[portal]) applyPortal(portal);
+        showAuthPanel();
+        const code = params.get('code');
+        if (code) exchangeMicrosoftCode(code);
+        else showError(MICROSOFT_ERRORS[params.get('error')] || MICROSOFT_ERRORS.failed);
+    }
+
+    async function exchangeMicrosoftCode(code) {
+        let result;
+        try {
+            result = await postAuth('/auth/microsoft/exchange', { code });
+        } catch (err) {
+            showError('No se pudo conectar con el servidor');
+            return;
+        }
+        if (!result.ok) {
+            showError(getErrorMessage(result.data));
+            return;
+        }
+        completeLogin(result.data);
     }
 
     loginTabs.addEventListener('click', (e) => {
@@ -496,13 +581,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let result;
         try {
-            result = await postAuth('/auth/activate', { email, code });
+            result = await postAuth(microsoftLogin ? '/auth/activate/microsoft' : '/auth/activate', { email, code });
         } catch (err) {
             showError('No se pudo conectar con el servidor');
             return;
         }
         if (!result.ok) {
             showError(getErrorMessage(result.data));
+            return;
+        }
+        if (microsoftLogin) {
+            // Sigue en Microsoft; a la vuelta la cuenta queda activada y con la sesión iniciada
+            if (typeof result.data.auth_url !== 'string' || !result.data.auth_url.startsWith(MICROSOFT_AUTH_HOST)) {
+                showError('No se pudo conectar con Microsoft. Intente más tarde.');
+                return;
+            }
+            window.location.assign(result.data.auth_url);
             return;
         }
         activateForm.reset();
@@ -2911,11 +3005,13 @@ document.addEventListener('DOMContentLoaded', () => {
             accountAvailability: technician,
             accountSchedule: technician,
             accountEmail: !required,
-            accountPassword: !required,
+            // Con Microsoft, técnicos y coordinadores no tienen contraseña (el servidor responde 403)
+            accountPassword: !required && !staffUsesMicrosoft(currentUser),
         };
         Object.entries(allowed).forEach(([id, ok]) => { document.getElementById(id).dataset.allowed = ok ? '1' : ''; });
         // Disponibilidad y horario propios: técnicos y coordinadores (el servidor no los da a otros roles)
         document.getElementById('accountTabTurno').hidden = !technician;
+        document.getElementById('accountTabSeguridad').hidden = staffUsesMicrosoft(currentUser);
         document.getElementById('accountTabs').hidden = required;
         document.getElementById('accountHome').hidden = required;
         document.getElementById('accountAvatar').textContent = getInitials(currentUser.name);
@@ -2923,7 +3019,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('accountWhoRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
         document.getElementById('accountStaffName').textContent = currentUser.name || '—';
         document.getElementById('accountStaffRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
-        if (required || (profileTab === 'turno' && !technician)) profileTab = 'perfil';
+        if (required || (profileTab === 'turno' && !technician)
+            || (profileTab === 'seguridad' && staffUsesMicrosoft(currentUser))) profileTab = 'perfil';
         applyProfileTab();
         fillAccountSections();
         profileCancel.hidden = required;
@@ -3875,6 +3972,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function canManage(user, kind) {
+        // Igual que el servidor: con Microsoft no se restablece la contraseña de técnicos y coordinadores
+        if (kind === 'reset' && staffUsesMicrosoft(user)) return false;
         const rules = currentUser ? MANAGE_RULES[currentUser.role] : null;
         return Boolean(rules && user.id !== currentUser.id && rules[kind].includes(user.role));
     }
@@ -4008,6 +4107,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Disponibilidad automática (técnicos y coordinadores) -----
     const AVAILABILITY_ROLES = ['technician', 'coordinator'];
     const PERIOD_KINDS = { vacation: 'Vacaciones', incapacity: 'Ausencia' };
+
+    // Técnicos y coordinadores entran con Microsoft: sin contraseña propia
+    function staffUsesMicrosoft(user) {
+        return microsoftLogin && Boolean(user) && ['technician', 'coordinator'].includes(user.role);
+    }
 
     function hasAvailability(user) {
         return Boolean(user && AVAILABILITY_ROLES.includes(user.role));
@@ -5111,6 +5215,10 @@ document.addEventListener('DOMContentLoaded', () => {
         account_deactivated: 'Cuenta desactivada',
         invitation_sent: 'Invitación enviada',
         invitation_used: 'Invitación usada',
+        microsoft_linked: 'Cuenta Microsoft enlazada',
+        microsoft_login: 'Ingreso con Microsoft',
+        microsoft_login_rejected: 'Ingreso con Microsoft rechazado',
+        emergency_access: 'Acceso de emergencia',
         login_locked: 'Bloqueo por intentos',
         password_reset: 'Contraseña restablecida',
         access_reset_sent: 'Código de acceso enviado',
@@ -5692,6 +5800,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize session / app on load
     async function initApp() {
+        loadMicrosoftLogin();
         if (!authToken) {
             showAuthScreen();
             return;

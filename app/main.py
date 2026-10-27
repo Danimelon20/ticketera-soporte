@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, models
+from . import auto_assign, chatbot, config, entra_login, models
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -28,6 +28,7 @@ from .routers.nav import router as nav_router
 from .routers.overdue import router as overdue_router
 from .routers.attachments import router as attachments_router
 from .routers.grouping import router as grouping_router
+from .routers.microsoft_auth import router as microsoft_auth_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -47,6 +48,8 @@ def setup_file_logging() -> None:
 
 
 setup_file_logging()
+# La vuelta de Microsoft trae el code y el state en la URL: el registro de accesos no los anota
+entra_login.install_log_filter()
 
 
 def init_db():
@@ -112,6 +115,12 @@ async def lifespan(app: FastAPI):
         else:
             logging.warning("EMAIL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
 
+    if config.MS_LOGIN_ENABLED and not (
+        config.MS_LOGIN_TENANT_ID and config.MS_LOGIN_CLIENT_ID and config.MS_LOGIN_CLIENT_SECRET
+    ):
+        logging.warning("MS_LOGIN_ENABLED=true pero faltan MS_LOGIN_TENANT_ID, MS_LOGIN_CLIENT_ID o "
+                        "MS_LOGIN_CLIENT_SECRET en .env: el personal no podrá entrar con Microsoft")
+
     summary = None
     if config.DAILY_SUMMARY_ENABLED:
         if config.EMAIL_ENABLED:
@@ -169,6 +178,7 @@ app.include_router(nav_router)
 app.include_router(overdue_router)
 app.include_router(attachments_router)
 app.include_router(grouping_router)
+app.include_router(microsoft_auth_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

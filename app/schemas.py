@@ -437,6 +437,18 @@ class AuthResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MicrosoftLoginConfig(BaseModel):
+    enabled: bool
+
+
+class MicrosoftExchange(BaseModel):
+    code: str = Field(min_length=1, max_length=200)
+
+
+class MicrosoftStart(BaseModel):
+    auth_url: str
+
+
 class LoginChallengeResponse(BaseModel):
     requires_code: bool = True
     challenge_id: str

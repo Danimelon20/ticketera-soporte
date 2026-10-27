@@ -78,6 +78,19 @@
                         <button type="button" class="login-tab" role="tab" id="loginTabStaff" data-portal="staff" aria-controls="loginForm" aria-selected="true">Personal</button>
                         <button type="button" class="login-tab" role="tab" id="loginTabAdmin" data-portal="admin" aria-controls="loginForm" aria-selected="false" tabindex="-1">Administración</button>
                     </div>
+                    <!-- Personal y Administración con MS_LOGIN_ENABLED: cuenta Microsoft (botón con la marca oficial) -->
+                    <div id="microsoftLogin" class="ms-login" hidden>
+                        <a id="microsoftLoginBtn" class="ms-signin" href="/auth/microsoft/login?portal=staff">
+                            <svg class="ms-signin-logo" xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 21 21" aria-hidden="true" focusable="false">
+                                <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+                                <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                                <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+                                <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+                            </svg>
+                            <span>Entrar con Microsoft</span>
+                        </a>
+                        <button type="button" id="emergencyAccessLink" class="auth-link auth-link-btn auth-link-small ms-emergency" hidden>Acceso de emergencia</button>
+                    </div>
                     <form id="loginForm" class="auth-form" role="tabpanel" aria-labelledby="loginTabStaff">
                         <div class="form-group">
                             <label for="loginEmail">Correo</label>
@@ -581,7 +594,7 @@
                 <nav id="accountTabs" class="account-tabs" aria-label="Mi cuenta">
                     <button type="button" class="account-tab" data-account-tab="perfil">Perfil</button>
                     <button type="button" class="account-tab" data-account-tab="correo">Correo</button>
-                    <button type="button" class="account-tab" data-account-tab="seguridad">Seguridad</button>
+                    <button type="button" id="accountTabSeguridad" class="account-tab" data-account-tab="seguridad">Seguridad</button>
                     <button type="button" class="account-tab" data-account-tab="turno" id="accountTabTurno">Disponibilidad y horario</button>
                 </nav>
                 <button type="button" id="accountHome" class="ticket-bar-link account-home">← Volver al inicio</button>

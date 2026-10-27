@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import accounts, audit, availability, config, identity, mailer, models, schedules, throttle
+from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, schedules, throttle
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
@@ -45,6 +45,14 @@ CONFIRM_EMAIL = "Confirme su correo para iniciar sesión"
 ACTIVATE_PATH = "/#activar-cuenta"
 # Abre directo el paso de escribir el código (el correo va en el fragmento: no llega al servidor)
 RESET_PATH = "/#restablecer"
+# Con MS_LOGIN_ENABLED, técnicos y coordinadores no usan contraseña
+STAFF_USE_MICROSOFT = accounts.STAFF_USE_MICROSOFT
+
+
+def check_staff_password_allowed(portal: str | None) -> None:
+    """403 en la opción Personal cuando el personal entra con Microsoft (sin revisar el correo: no revela nada)."""
+    if config.MS_LOGIN_ENABLED and portal == "staff":
+        raise HTTPException(status_code=403, detail=STAFF_USE_MICROSOFT)
 
 
 def _now() -> datetime:
@@ -247,23 +255,34 @@ def send_invitation(invitation: models.StaffInvitation) -> bool:
         "",
         f"Código: {code}",
         "",
-        f"El código vence en {INVITE_HOURS} horas. Al activarla verá su contraseña una sola vez.",
+        f"El código vence en {INVITE_HOURS} horas. "
+        + ("Al activarla entrará con su cuenta Microsoft." if config.MS_LOGIN_ENABLED
+           else "Al activarla verá su contraseña una sola vez."),
     ])
     return send_code_email(invitation.email, "Active su cuenta de la Ticketera", body, code)
 
 
-@router.post("/auth/activate", response_model=ActivationResult)
-def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Depends(get_db)):
-    email = normalize_email(data.email)
+def valid_invitation(db: Session, email: str, code: str) -> models.StaffInvitation:
+    """Invitación vigente con ese código (400 si no; un código incorrecto suma un intento). No la gasta."""
     invitation = _active_invitation(db, email)
     if invitation is None or invitation.expires_at <= _now() or invitation.attempts >= MAX_CODE_ATTEMPTS:
         raise HTTPException(status_code=400, detail=CODE_INVALID)
-    if not _code_matches(data.code, invitation.code_hash):
+    if not _code_matches(code, invitation.code_hash):
         invitation.attempts += 1
         db.commit()
         raise HTTPException(status_code=400, detail=CODE_INVALID)
     if _find_user(db, email) is not None:
         raise HTTPException(status_code=400, detail=CODE_INVALID)
+    return invitation
+
+
+@router.post("/auth/activate", response_model=ActivationResult)
+def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Depends(get_db)):
+    # Con Microsoft la invitación se activa en /auth/activate/microsoft, sin contraseña
+    if config.MS_LOGIN_ENABLED:
+        raise HTTPException(status_code=403, detail=STAFF_USE_MICROSOFT)
+    email = normalize_email(data.email)
+    invitation = valid_invitation(db, email, data.code)
 
     password = generate_password()
     user = models.User(name=invitation.name, email=email, role=invitation.role, password_hash=hash_password(password))
@@ -347,6 +366,7 @@ RESET_SENT = "Si el correo tiene una cuenta activa, le enviamos un código."
 
 @router.post("/auth/password-reset", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
 def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get_db)):
+    check_staff_password_allowed(data.portal)
     # Misma respuesta exista o no la cuenta
     email = normalize_email(data.email)
     user = _reset_user(db, email, data.portal)
@@ -358,6 +378,7 @@ def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get
 
 @router.post("/auth/password-reset/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
 def resend_password_reset(data: PasswordResetRequest, db: Session = Depends(get_db)):
+    check_staff_password_allowed(data.portal)
     email = normalize_email(data.email)
     user = _reset_user(db, email, data.portal)
     reset = _reset_row(db, user)
@@ -369,6 +390,7 @@ def resend_password_reset(data: PasswordResetRequest, db: Session = Depends(get_
 
 @router.post("/auth/password-reset/confirm", response_model=ActivationResult)
 def confirm_password_reset(data: PasswordResetConfirm, response: Response, db: Session = Depends(get_db)):
+    check_staff_password_allowed(data.portal)
     email = normalize_email(data.email)
     if throttle.is_locked(db, email):
         raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
@@ -407,6 +429,7 @@ def confirm_password_reset(data: PasswordResetConfirm, response: Response, db: S
 
 @router.post("/auth/login", response_model=AuthResponse | LoginChallengeResponse)
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
+    check_staff_password_allowed(credentials.portal)
     email = credentials.email.strip().lower()
     # Bloqueado: ni se revisa la contraseña, ni se crea reto, ni se envían correos
     if throttle.is_locked(db, email):
@@ -464,6 +487,9 @@ def verify_code(data: VerifyCodeRequest, db: Session = Depends(get_db)):
 
     challenge.used = True
     throttle.reset(db, email)
+    # Con Microsoft, la contraseña y el código del administrador son el acceso de emergencia
+    if config.MS_LOGIN_ENABLED and user.role == "admin":
+        entra_login.record_emergency_access(db, user)
     db.commit()
     return _create_session(db, user)
 

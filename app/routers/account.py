@@ -5,14 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import audit, availability, mailer, models, throttle
+from .. import audit, availability, config, mailer, models, throttle
 from ..schemas import AvailabilityPeriodCreate, CodeRequest, EmailChangeRequest, MeRead, PasswordChange, PhoneUpdate, SignupStarted
 from ..security import (
     generate_login_code, get_current_session, get_current_user, hash_code, hash_password,
     mask_email, password_min, verify_password,
 )
 from .auth import (
-    CODE_INVALID, CONFIRM_MINUTES, MAX_CODE_ATTEMPTS, _can_resend, _code_matches, _find_user, _now,
+    CODE_INVALID, CONFIRM_MINUTES, MAX_CODE_ATTEMPTS, STAFF_USE_MICROSOFT, _can_resend, _code_matches, _find_user, _now,
     me_read, normalize_email, send_code_email,
 )
 
@@ -46,6 +46,8 @@ def change_password(
     current_user: models.User = Depends(get_current_user),
     current_session: models.Session = Depends(get_current_session),
 ):
+    if config.MS_LOGIN_ENABLED and current_user.role in ("technician", "coordinator"):
+        raise HTTPException(status_code=403, detail=STAFF_USE_MICROSOFT)
     _check_password(db, current_user, data.current_password)
     minimum = password_min(current_user.role)
     if len(data.new_password) < minimum:

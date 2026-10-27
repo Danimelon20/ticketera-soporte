@@ -3018,6 +3018,30 @@ body.staff-shell.ticket-open #detailContent {
 #authScreen :focus-visible { outline: 2px solid #5EEAE4; outline-offset: 2px; }
 #authScreen .auth-links { margin-top: 18px; padding-top: 14px; border-top-color: rgba(159, 179, 230, 0.2); }
 .login-extra { margin: 14px 0 0; font-size: 14px; text-align: center; color: #9FB3E6; }
+
+/* Botón "Entrar con Microsoft": colores, logo y letra de la guía de marca de Microsoft (tema claro) */
+.ms-login { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.ms-login[hidden] { display: none; }
+.ms-signin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 41px;
+  padding: 0 12px;
+  border: 1px solid #8C8C8C;
+  border-radius: 0;
+  background: #FFFFFF;
+  color: #5E5E5E;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ms-signin:hover { background: #F3F3F3; color: #5E5E5E; }
+.ms-signin-logo { flex: none; }
+#authScreen .ms-emergency { align-self: center; color: #9FB3E6; font-size: 13px; }
+#authScreen .ms-emergency[hidden] { display: none; }
 .login-extra[hidden] { display: none; }
 
 /* Avisos y contraseña generada */

@@ -18,6 +18,7 @@ APP_ENV_VARS = (
     "GROUPING_INCIDENT_MIN", "GROUPING_INCIDENT_HOURS", "GROUPING_TIMEOUT_SECONDS",
     "ATTACHMENTS_DIR", "HACIENDA_CHECK", "HACIENDA_STRICT", "SESSION_IDLE_MINUTES", "SESSION_MAX_HOURS",
     "DATABASE_URL",
+    "MS_LOGIN_ENABLED", "MS_LOGIN_TENANT_ID", "MS_LOGIN_CLIENT_ID", "MS_LOGIN_CLIENT_SECRET", "MS_LOGIN_REDIRECT_URI",
 )
 for _name in APP_ENV_VARS:
     os.environ.pop(_name, None)
@@ -33,6 +34,8 @@ TEST_ENV = {
     "AUTO_ASSIGN_ENABLED": "false",
     "ALERTS_ENABLED": "false",
     "DAILY_SUMMARY_ENABLED": "false",
+    # Inicio de sesión con Microsoft apagado: las pruebas que lo usan lo encienden con monkeypatch
+    "MS_LOGIN_ENABLED": "false",
     "LLM_BASE_URL": UNREACHABLE_OLLAMA,
     "MS_TOKEN_CACHE": f"{_tmp_dir}/ms_token_cache.json",
     "ATTACHMENTS_DIR": f"{_tmp_dir}/attachments",

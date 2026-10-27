@@ -10,6 +10,14 @@ MS_TOKEN_CACHE = os.getenv("MS_TOKEN_CACHE", "data/ms_token_cache.json")
 EMAIL_POLL_SECONDS = int(os.getenv("EMAIL_POLL_SECONDS", "60"))
 APP_URL = os.getenv("APP_URL", "http://localhost:8000")
 
+# Inicio de sesión del personal con Microsoft (Entra ID). Mismo registro de app que el buzón, pero
+# con su propio secreto y sus propias variables: nunca usa MS_TENANT_ID, MS_CLIENT_ID ni MS_TOKEN_CACHE
+MS_LOGIN_ENABLED = os.getenv("MS_LOGIN_ENABLED", "false").lower() == "true"
+MS_LOGIN_TENANT_ID = os.getenv("MS_LOGIN_TENANT_ID", "")
+MS_LOGIN_CLIENT_ID = os.getenv("MS_LOGIN_CLIENT_ID", "")
+MS_LOGIN_CLIENT_SECRET = os.getenv("MS_LOGIN_CLIENT_SECRET", "")
+MS_LOGIN_REDIRECT_URI = os.getenv("MS_LOGIN_REDIRECT_URI", "http://localhost:8000/auth/microsoft/callback")
+
 # Asistente de la página (modelo local servido por Ollama)
 CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "false").lower() == "true"
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://ollama:11434").rstrip("/")
