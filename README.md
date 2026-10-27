@@ -1,395 +1,399 @@
 # Ticketera de Soporte
 
-Sistema web para registrar, asignar y dar seguimiento a tickets de
-soporte técnico. Proyecto de pasantía desarrollado por tareas con
-asistentes de programación (primero OpenCode y después Claude Code)
-y validado manualmente en cada paso.
+Sistema web para recibir, asignar y dar seguimiento a las solicitudes de soporte técnico.
+Los clientes piden ayuda desde la página o por correo; el Agente virtual convierte los correos en
+tickets o borradores, la IA local sugiere el nivel y el tiempo meta, y el sistema asigna cada ticket
+al técnico disponible con menos carga. Coordinadores y técnicos atienden, avisan de los vencimientos y
+dejan registro de todo; el administrador cuida las cuentas y la seguridad.
 
-## Funcionalidades
+Guías por rol: [docs/guia-por-rol.md](docs/guia-por-rol.md) · Lo que falta: [docs/pendientes.md](docs/pendientes.md) ·
+Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [docs/bitacora-ia.md](docs/bitacora-ia.md)
 
-- Crear tickets con título, descripción, categoría, prioridad,
-  teléfono y cédula de contacto.
-- Cambiar el estado: Nuevo → En proceso → Resuelto → Cerrado,
-  con la opción de reabrir un ticket resuelto.
-- Asignar tickets a técnicos o coordinadores.
-- Agregar comentarios y dar seguimiento a un ticket para recibir
-  avisos por correo.
-- Listar, buscar y filtrar por estado, categoría, prioridad y texto.
-- Consultar el historial de cambios de cada ticket.
-- Inicio de sesión con tres opciones (Administrador, Coordinador /
-  Técnico y Solicitante): cada cuenta solo entra por la de su rol.
-  Cuentas de cliente confirmadas por correo, personal activado por
-  invitación y código por correo para el administrador.
-- Perfil del cliente con cédula única que queda fija desde su primer
-  ticket.
-- "Mi cuenta" para todos los roles: cambiar contraseña (mínimo 8
-  caracteres para solicitantes y 12 para el personal), teléfono y
-  correo (con código al correo nuevo y aviso al anterior). Al
-  cambiar contraseña o correo se cierran las demás sesiones.
-- Bloqueo de 15 minutos tras 5 contraseñas o códigos incorrectos
-  seguidos para un mismo correo, exista o no la cuenta.
-- Sesiones que vencen por inactividad o por tiempo total, y
-  "Cerrar sesión" que invalida el token en el servidor.
-- Registro de cambios de cuentas en el panel del Administrador, con
-  valores enmascarados y sin contraseñas ni códigos.
-- Tickets por correo atendidos por el Agente virtual (Microsoft 365).
-- Directorio de usuarios y panel de Administración.
-- Asistente de la página con un modelo local (Qwen3 con Ollama).
-- Interfaz con lista a la izquierda y detalle a la derecha,
-  adaptable a celular.
+## Contenido
 
-## Tecnologías
+1. [Requisitos](#requisitos)
+2. [Instalación desde cero](#instalación-desde-cero)
+3. [Variables del archivo .env](#variables-del-archivo-env)
+4. [Operación diaria](#operación-diaria)
+5. [Respaldo y restauración](#respaldo-y-restauración)
+6. [Microsoft: buzón e inicio de sesión del personal](#microsoft-buzón-e-inicio-de-sesión-del-personal)
+7. [Tickets por correo](#tickets-por-correo)
+8. [Datos de prueba](#datos-de-prueba)
+9. [Pruebas automáticas](#pruebas-automáticas)
+10. [Seguridad](#seguridad)
+11. [Problemas comunes](#problemas-comunes)
+12. [Tecnologías y decisiones](#tecnologías-y-decisiones)
 
-| Parte | Tecnología |
-|---|---|
-| Backend | Python 3.12 + FastAPI |
-| Base de datos | SQLite con SQLAlchemy |
-| Frontend | HTML, CSS y JavaScript sin frameworks |
-| Pruebas | pytest + TestClient de FastAPI |
-| Entorno | Docker y Docker Compose dentro de WSL |
-| Correo | Microsoft Graph con permisos delegados (msal + httpx) |
-| Asistente de la página | Ollama con el modelo Qwen3 (servicio `ollama`) |
-| Asistentes de desarrollo | OpenCode y Claude Code |
+## Requisitos
 
-## Requisitos previos
+- Windows con **WSL2** y Ubuntu. Todos los comandos de este documento se escriben en la terminal de Ubuntu.
+- **Docker Engine instalado dentro de WSL** (con el complemento `docker compose`). No se usa Docker Desktop.
+- **Git**.
+- Memoria: el modelo de IA local ocupa alrededor de 2,4 GB. Con menos de 8 GB de RAM en la PC, la IA y las
+  pruebas van lentas (ver [Problemas comunes](#problemas-comunes)).
 
-- Windows con WSL2 y Ubuntu.
-- Docker Engine instalado **dentro de WSL** (no se usa Docker Desktop).
-- Git.
+## Instalación desde cero
 
-## Instalación y ejecución
+1. Clone el repositorio y entre a la carpeta:
 
-Todos los comandos se ejecutan en la terminal de Ubuntu (WSL).
+   ```bash
+   git clone git@github.com:Danimelon20/ticketera-soporte.git
+   cd ticketera-soporte
+   ```
 
-```bash
-git clone https://github.com/Danimelon20/ticketera-soporte.git
-cd ticketera-soporte
-cp .env.example .env
-docker compose up --build -d
-```
+2. Cree su archivo de configuración a partir del ejemplo y complételo (vea la
+   [tabla de variables](#variables-del-archivo-env)). Para empezar a probar, los valores del ejemplo sirven tal cual:
 
-Abrir en el navegador:
+   ```bash
+   cp .env.example .env
+   ```
 
-- Pantalla de la ticketera: http://localhost:8000
-- Documentación interactiva de la API: http://localhost:8000/docs
+3. Construya y encienda los contenedores (`app` y `ollama`):
 
-Para detener el sistema:
+   ```bash
+   docker compose up -d --build
+   ```
 
-```bash
-docker compose down
-```
+4. Descargue los modelos de IA (una sola vez; quedan guardados en el volumen de Ollama):
 
-Los datos se guardan en `data/tickets.db` y se conservan al
-detener y volver a encender el contenedor. En `data/` también
-quedan el registro del servidor (`app.log`) y la sesión de
-Microsoft; esa carpeta nunca se sube a Git.
+   ```bash
+   docker compose exec ollama ollama pull qwen3:1.7b
+   docker compose exec ollama ollama pull qwen3-embedding:0.6b
+   ```
 
-## Roles
+   El primero es para el asistente y el análisis de correos; el segundo, para la agrupación de tickets similares.
 
-| Rol | Cómo obtiene la cuenta | Cómo entra | Qué puede hacer |
-|---|---|---|---|
-| Solicitante | "Crear cuenta de cliente": correo, contraseña y código de 6 dígitos que llega al correo (vence en 15 minutos). En su primer ingreso completa nombre, cédula y teléfono | Correo y contraseña | Crear tickets (en la página o por correo), ver y comentar solo los suyos, dar seguimiento y usar el asistente |
-| Técnico | Lo invita un coordinador o el Administrador; activa la cuenta en "Activar cuenta de personal" y recibe una contraseña generada | Correo y contraseña | Ver todos los tickets, cambiar estado, prioridad y categoría, asignarse tickets libres y comentar. No crea tickets. Del ticket que tiene asignado ve el teléfono completo y la cédula enmascarada |
-| Coordinador | Lo invita el Administrador; activa la cuenta como el técnico | Correo y contraseña | Crear tickets (también a nombre de un solicitante), ver todos los tickets con los datos de contacto completos, cambiar estado, prioridad y categoría, asignar a técnicos o coordinadores, comentar, invitar técnicos y ver el Directorio |
-| Agente virtual | Se crea solo al arrancar el sistema | No inicia sesión | Lee el buzón de soporte, crea tickets a partir de correos de solicitantes registrados y responde por correo |
-| Administrador | Se crea con el comando `python -m app.create_admin` | Correo, contraseña y código de 6 dígitos por correo | Todo lo del coordinador, invitar coordinadores, cambiar roles, activar o desactivar cuentas en el Directorio y usar el panel de Administración |
-
-Las reglas se validan en el backend; una acción no permitida
-responde `403`. La pantalla además oculta los botones que el rol
-actual no puede usar. Una cuenta desactivada pierde sus sesiones
-abiertas y no puede volver a entrar hasta que la activen.
-
-## Primer uso
-
-La base de datos empieza sin personas. Al arrancar se crean solas
-las categorías (Hardware, Software, Red, Accesos), las prioridades
-(Baja, Media, Alta, Urgente) y el usuario del Agente virtual.
-
-1. Crear el Administrador (pide nombre, correo y contraseña de al
-   menos 8 caracteres):
+5. Cree el primer administrador. Pide nombre, correo y contraseña (mínimo 8 caracteres):
 
    ```bash
    docker compose exec -it app python -m app.create_admin
    ```
 
-2. Entrar en la página con ese correo y contraseña. Llega un código
-   de 6 dígitos al correo; vence en 10 minutos. Con
-   `EMAIL_ENABLED=false` el código no se envía y aparece en el
-   registro del servidor marcado como `[SOLO DESARROLLO]`:
+   El rol de administrador **nunca** se obtiene registrándose ni con una invitación: solo con este comando.
+
+6. Entre a **http://localhost:8000**, pestaña **Administración**. Después de la contraseña se pide un código
+   de 6 dígitos que llega al correo. Mientras `EMAIL_ENABLED=false`, el código no se envía y aparece en el
+   registro del servidor:
 
    ```bash
    docker compose logs app | grep "SOLO DESARROLLO"
    ```
 
-3. En la pestaña "Usuarios", invitar al personal con su correo,
-   nombre y rol (coordinador solo el Administrador). El sistema envía
-   un correo con un código de 6 dígitos (vence en 72 horas, máximo 5
-   intentos, se puede reenviar cada minuto) y el enlace a "Activar
-   cuenta de personal". Al activarla, la página muestra una sola vez
-   una contraseña generada; nunca se envía por correo.
-4. Los clientes crean su cuenta en "Crear cuenta de cliente" y la
-   confirman con el código que les llega al correo.
+   La documentación interactiva de la API está en http://localhost:8000/docs.
 
-### Cuentas de administrador
+7. Desde **Administración › Invitaciones**, invite al personal (técnicos y coordinadores). Los clientes crean su
+   propia cuenta en la pestaña **Cliente** de la pantalla de inicio.
 
-Desde la página nadie actúa sobre un administrador (tampoco sobre sí
-mismo). Para desactivar, reactivar o quitar el rol a un administrador
-se usa este comando en el servidor:
+## Variables del archivo .env
+
+Copie `.env.example` como `.env`. En la tabla, **Desarrollo** es la laptop donde se programa y se prueba, y
+**PC con correo** es la única máquina que atiende el buzón real (ver [Seguridad](#seguridad)). Nunca escriba en
+este documento, en un ticket ni en un chat los valores reales de su `.env`.
+
+| Variable | Para qué sirve | Desarrollo | PC con correo |
+|---|---|---|---|
+| `EMAIL_ENABLED` | Lee el buzón y envía correos (respuestas, avisos, códigos). Con `false` solo lo anota en el registro | `false` | `true` |
+| `MS_TENANT_ID` | Id. de directorio (inquilino) del registro de la app en Microsoft Entra ID, para el buzón | el del ejemplo | el id. de su organización |
+| `MS_CLIENT_ID` | Id. de aplicación (cliente) del mismo registro, para el buzón | el del ejemplo | el id. del registro |
+| `SUPPORT_MAILBOX` | Buzón de soporte que lee el Agente virtual y desde el que responde | el del ejemplo | el buzón de soporte |
+| `MAIL_FOLDER` | Carpeta del buzón donde llegan los correos de soporte (`inbox` usa la bandeja de entrada) | `Ticketera` | `Ticketera` |
+| `EMAIL_POLL_SECONDS` | Cada cuántos segundos se revisa la carpeta | `60` | `60` |
+| `MS_LOGIN_ENABLED` | El personal entra con su cuenta Microsoft; el admin además tiene "Acceso de emergencia" | `false` | `true` |
+| `MS_LOGIN_TENANT_ID` | Id. de directorio para el inicio de sesión (el mismo registro del buzón) | vacío | el mismo id. de directorio |
+| `MS_LOGIN_CLIENT_ID` | Id. de aplicación para el inicio de sesión (el mismo registro) | vacío | el mismo id. de aplicación |
+| `MS_LOGIN_CLIENT_SECRET` | Secreto de cliente propio del inicio de sesión. **Vence**: anote la fecha | vacío | el secreto vigente |
+| `MS_LOGIN_REDIRECT_URI` | Dirección de vuelta registrada en Azure | `http://localhost:8000/auth/microsoft/callback` | la registrada en Azure |
+| `HACIENDA_CHECK` | Verifica la cédula con la API pública de Hacienda | `false` (sin internet) o `true` | `true` |
+| `HACIENDA_STRICT` | Rechaza las cédulas que Hacienda no encuentra | `false` | `false` |
+| `CHATBOT_ENABLED` | Asistente de la página con el modelo local | `false` | `true` |
+| `LLM_BASE_URL` | Dirección de Ollama dentro de Docker Compose | `http://ollama:11434` | `http://ollama:11434` |
+| `LLM_MODEL` | Modelo del asistente y del análisis (debe estar descargado) | `qwen3:1.7b` | `qwen3:1.7b` |
+| `AI_ANALYSIS_ENABLED` | Nivel, categoría, resumen y tiempo meta sugeridos por la IA. Necesita `EMAIL_ENABLED=true` | `false` | `true` |
+| `OFFICE_DAYS` | Días hábiles (`1-5` = lunes a viernes) para los tiempos meta | `1-5` | `1-5` |
+| `OFFICE_START` / `OFFICE_END` | Horario de oficina | `08:00` / `17:00` | el de la oficina |
+| `OFFICE_TZ` | Zona horaria de la oficina | `America/Costa_Rica` | `America/Costa_Rica` |
+| `OFFICE_HOLIDAYS` | Feriados que no cuentan (`AAAA-MM-DD` separados por coma) | vacío | los del año |
+| `DAILY_SUMMARY_ENABLED` | Resumen diario por correo a coordinadores y admins. Necesita `EMAIL_ENABLED=true` | `false` | `true` |
+| `DAILY_SUMMARY_HOUR` | Hora local del resumen (0 a 23) | `8` | `8` |
+| `ALERTS_ENABLED` | Alertas por correo: crítico, por vencer y vencido. Necesita `EMAIL_ENABLED=true` | `false` | `true` |
+| `ALERT_WARN_PERCENT` | Porcentaje del tiempo meta a partir del cual un ticket está "por vencer" | `75` | `75` |
+| `ALERTS_CHECK_SECONDS` | Cada cuántos segundos se revisan las alertas | `120` | `120` |
+| `AUTO_ASSIGN_ENABLED` | Asignación automática al técnico disponible, en turno y con menos carga | `false` | `true` |
+| `AUTO_ASSIGN_LOAD_MODE` | `levels` (suma de niveles) o `count` (cantidad de tickets) | `levels` | `levels` |
+| `AUTO_ASSIGN_CHECK_SECONDS` | Cada cuántos segundos se reintentan los que quedaron sin técnico | `60` | `60` |
+| `SESSION_IDLE_MINUTES` | Minutos sin uso tras los que vence una sesión | `240` | `240` |
+| `SESSION_MAX_HOURS` | Horas máximas de una sesión aunque se use | `12` | `12` |
+| `ATTACHMENTS_DIR` | Carpeta de los adjuntos (debe quedar dentro de `data/`) | `data/attachments` | `data/attachments` |
+| `GROUPING_ENABLED` | Agrupación de tickets similares (fusión del mismo cliente y posibles incidentes) | `false` | `true` |
+| `EMBEDDING_MODEL` | Modelo de la agrupación (debe estar descargado) | `qwen3-embedding:0.6b` | `qwen3-embedding:0.6b` |
+| `GROUPING_MERGE_THRESHOLD` | Similitud mínima para fusionar tickets del mismo cliente | `0.80` | `0.80` |
+| `GROUPING_INCIDENT_THRESHOLD` | Similitud mínima para ligar tickets de clientes distintos | `0.85` | `0.85` |
+| `GROUPING_INCIDENT_MIN` | Tickets relacionados para marcar "Posible incidente" | `3` | `3` |
+| `GROUPING_INCIDENT_HOURS` | Ventana de horas para contar el incidente | `2` | `2` |
+| `GROUPING_TIMEOUT_SECONDS` | Tiempo máximo de la búsqueda por ticket | `15` | `15` |
+
+Variable que la app lee pero que **no está en `.env.example`**: `APP_URL`, el enlace a la página que va en los
+correos (por defecto `http://localhost:8000`). En la PC con correo, agréguela a su `.env` con la dirección con la
+que el personal y los clientes entran a la página.
+
+## Operación diaria
+
+| Para | Comando |
+|---|---|
+| Encender | `docker compose up -d` |
+| Apagar | `docker compose down` |
+| Ver qué está corriendo | `docker compose ps` |
+| Ver el registro en vivo | `docker compose logs -f app` |
+| Ver las últimas líneas (si no arranca) | `docker compose logs --tail 30 app` |
+
+Los datos quedan en la carpeta `data/` (base de datos, adjuntos, registro y sesión del buzón) y se conservan al
+apagar y encender. El administrador también ve el estado y las últimas líneas del registro en
+**Administración › Estado del sistema**.
+
+**Después de `git pull`.** El código se copia dentro de la imagen, así que después de cualquier actualización
+hay que reconstruir:
 
 ```bash
-docker compose exec -it app python -m scripts.admin_tools deactivate --email persona@empresa.com
-docker compose exec -it app python -m scripts.admin_tools reactivate --email persona@empresa.com
-docker compose exec -it app python -m scripts.admin_tools demote --email persona@empresa.com --to coordinator
+docker compose up -d --build
 ```
 
-Pide escribir el correo para confirmar, no deja el sistema sin un
-administrador activo y cierra las sesiones de la cuenta. En el
-Registro de cambios aparece hecho por "Servidor". `--to` solo aplica a
-`demote` (coordinator, technician o requester; por defecto coordinator).
+Use `--force-recreate` cuando lo que cambió fue el `.env` (y no el código), o cuando un contenedor quedó en un
+estado raro: crea los contenedores de nuevo y así leen el `.env` otra vez. `docker compose restart` **no** vuelve
+a leer el `.env`.
+
+```bash
+docker compose up -d --force-recreate
+```
+
+Si una actualización agrega o cambia columnas de una tabla existente, el mensaje del commit lo avisa: la base
+no se actualiza sola (las tablas nuevas sí se crean solas). En ese caso, haga un respaldo antes de seguir.
+
+## Respaldo y restauración
+
+**Qué respaldar:** `data/tickets.db` (la base) y `data/attachments/` (los adjuntos). Contienen datos personales:
+guarde el respaldo en un lugar seguro y nunca en GitHub.
+
+**Respaldo desde la página:** **Administración › Estado del sistema › Copia de seguridad › Descargar copia**.
+Descarga una copia completa de la base, hecha con la app encendida. No incluye los adjuntos.
+
+**Respaldo completo desde la terminal** (base y adjuntos, con la app detenida un momento):
+
+```bash
+docker compose stop app
+sudo tar czf respaldo-$(date +%F).tar.gz data/tickets.db data/attachments
+docker compose start app
+```
+
+**Restaurar:**
+
+```bash
+docker compose stop app
+sudo tar xzf respaldo-AAAA-MM-DD.tar.gz
+docker compose start app
+```
+
+Para restaurar solo una copia descargada desde la página, deténgala igual y reemplace `data/tickets.db` por el
+archivo descargado (con el nombre `tickets.db`).
+
+**Qué NO borrar:** `data/ms_token_cache.json` es la sesión del buzón de soporte. Si se borra, el Agente virtual
+deja de leer y enviar correos hasta que alguien vuelva a iniciar sesión con
+`docker compose exec -it app python -m app.ms_login`. Tampoco lo copie a otra máquina ni lo incluya en respaldos
+que salgan de la PC: contiene la sesión de Microsoft.
+
+## Microsoft: buzón e inicio de sesión del personal
+
+Los dos usan **el mismo registro de aplicación** en Microsoft Entra ID (portal de Azure), pero son independientes:
+el inicio de sesión del personal nunca toca la sesión del buzón.
+
+### Buzón de soporte (Agente virtual)
+
+- Registro de la app con permisos **delegados** de Microsoft Graph `Mail.ReadWrite` y `Mail.Send`.
+- En **Autenticación**, la opción **Permitir flujos de cliente público** queda activada: el buzón inicia sesión
+  con un código de dispositivo.
+- En el `.env`: `MS_TENANT_ID`, `MS_CLIENT_ID`, `SUPPORT_MAILBOX` y `MAIL_FOLDER`, y `EMAIL_ENABLED=true`.
+- Inicio de sesión (una vez, y otra vez si la sesión vence, por ejemplo al cambiar la contraseña del buzón).
+  Siga las instrucciones en pantalla e inicie sesión **con la cuenta del buzón de soporte**:
+
+  ```bash
+  docker compose exec -it app python -m app.ms_login
+  ```
+
+### Inicio de sesión del personal
+
+- En el mismo registro, **Autenticación › Agregar una plataforma › Web**, con la URI de redirección
+  `http://localhost:8000/auth/microsoft/callback` (debe ser idéntica a `MS_LOGIN_REDIRECT_URI`).
+- **Certificados y secretos**: un secreto de cliente propio para el inicio de sesión (`MS_LOGIN_CLIENT_SECRET`).
+- Solo pide `openid`, `profile`, `email` y `User.Read`; nunca permisos de correo.
+- En el `.env`: `MS_LOGIN_ENABLED=true`, `MS_LOGIN_TENANT_ID`, `MS_LOGIN_CLIENT_ID`, `MS_LOGIN_CLIENT_SECRET` y
+  `MS_LOGIN_REDIRECT_URI`. Después: `docker compose up -d --force-recreate`.
+- Solo entra el personal que ya tiene cuenta activa (técnico, coordinador o administrador). La primera vez se
+  enlaza por correo; después, por la cuenta Microsoft. El personal nuevo sigue entrando por invitación
+  ("Activar con Microsoft"). Los clientes siguen con correo y contraseña.
+- Con `MS_LOGIN_ENABLED=true`, técnicos y coordinadores ya no usan contraseña.
+
+**Renovar el secreto antes de que venza.** Anote la fecha de vencimiento al crearlo. Unos días antes:
+
+1. En Azure, **Certificados y secretos › Nuevo secreto de cliente**, y copie el valor (solo se muestra una vez).
+2. Póngalo en `MS_LOGIN_CLIENT_SECRET` de su `.env`.
+3. `docker compose up -d --force-recreate` y pruebe a entrar con una cuenta del personal.
+4. Borre el secreto viejo en Azure.
+
+El buzón no usa este secreto: renovarlo no lo afecta.
+
+**Acceso de emergencia del administrador.** Si Microsoft no responde o el secreto venció, en la pestaña
+**Administración** use el enlace **Acceso de emergencia**: correo, contraseña y el código por correo, como antes.
+Cada uso queda en el Registro de cambios y avisa por correo a los demás administradores.
+
+**El día que la página use HTTPS:** la URI de redirección pasa a `https://<su dominio>/auth/microsoft/callback`,
+hay que registrarla igual en Azure y actualizar `MS_LOGIN_REDIRECT_URI`. Azure solo acepta `http` para
+`localhost`: para entrar desde otra PC de la red hace falta HTTPS.
 
 ## Tickets por correo
 
-El Agente virtual revisa la carpeta `MAIL_FOLDER` del buzón de
-soporte y procesa los correos no leídos. El asunto se convierte en
-el título del ticket (se quitan `RE:`, `RV:`, `FW:` y `[Soporte]`).
-El cuerpo usa este formato:
+El Agente virtual revisa la carpeta `MAIL_FOLDER` del buzón y procesa los correos no leídos de clientes
+registrados. Un correo con esta plantilla crea el ticket directamente:
 
 ```
 Asunto: [Soporte] <título corto del problema>
-Categoría: <una de: Hardware, Software, Red, Accesos>
-Prioridad: <una de: Baja, Media, Alta, Urgente; si no la pones queda Media>
+Categoría: <Hardware, Software, Red o Accesos>
+Prioridad: <Baja, Media, Alta o Urgente; si falta queda Media>
 Teléfono: <8 dígitos>
 Cédula: <9 dígitos, o 11 o 12 si es DIMEX>
-Descripción: <qué pasa, desde cuándo y qué intentaste>
+Descripción: <qué pasa, desde cuándo y qué intentó>
 ```
 
-- **Obligatorio:** Categoría y Descripción. La descripción puede
-  ocupar varias líneas y termina en una línea con `--`.
-- **Teléfono y Cédula:** obligatorios si no están ya en el perfil
-  del solicitante. La cédula se verifica con Hacienda.
-- **Prioridad:** opcional; si falta o no se reconoce queda Media.
+Un correo escrito con sus propias palabras (sin la plantilla) se convierte en un **borrador** que la IA analiza
+y que confirma una persona del equipo. Si faltan datos, el Agente responde pidiéndolos. Los correos de
+remitentes no registrados reciben una invitación a crear su cuenta.
 
-Qué responde el Agente:
+## Datos de prueba
 
-- **Ticket creado:** "[Ticket #N] Recibimos tu solicitud" con el
-  título, la categoría, la prioridad y el estado. El solicitante
-  queda como seguidor del ticket.
-- **Faltan datos:** "Faltan datos para crear tu ticket" con la
-  lista de errores y la plantilla de arriba.
-- **Remitente no registrado:** "No pudimos crear tu ticket" y una
-  invitación a registrarse con ese mismo correo.
-
-Solo se aceptan solicitantes registrados y activos; un correo de un
-técnico, coordinador o administrador se trata como no registrado.
-No se responden los correos del propio buzón, las respuestas
-automáticas (`Auto-Submitted`, `Precedence: bulk/junk/auto_reply`)
-ni los duplicados (mismo `Message-ID`). Cada correo procesado se
-marca como leído.
-
-Para conectar el buzón, iniciar sesión una vez con la cuenta de
-soporte:
+Para probar sin usar la página, el comando `scripts.demo_data` crea escenarios marcados con **[DEMO]** y cuentas
+`@demo.invalid` (un dominio que no existe: nunca sale un correo real). Mientras corre no envía correos ni usa la
+IA, la agrupación ni la asignación automática, y no cambia su `.env`.
 
 ```bash
-docker compose exec -it app python -m app.ms_login
+docker compose exec app python -m scripts.demo_data cargar
+docker compose exec app python -m scripts.demo_data verificar
+docker compose exec app python -m scripts.demo_data limpiar
 ```
 
-## Configuración
+- **cargar**: 3 técnicos (uno de vacaciones), 1 coordinador, clientes, tickets agrupados, vencimientos,
+  borradores y un intento de suplantación. Al final imprime cada cuenta, su contraseña y qué probar con ella.
+- **verificar**: revisa cada escenario por la API iniciando sesión con cada cuenta DEMO e imprime
+  `N de M correctos`. Con `MS_LOGIN_ENABLED=true` avisa y no sigue (el personal DEMO no puede entrar con
+  contraseña). No cambia nada.
+- **limpiar**: borra solo lo DEMO y sus adjuntos.
 
-Copiar `.env.example` como `.env` y completar los valores. `.env`
-nunca se sube a Git.
-
-| Variable | Qué hace |
-|---|---|
-| `EMAIL_ENABLED` | `true`: el Agente virtual revisa la carpeta y envía correos (respuestas, avisos a seguidores y códigos de verificación). `false`: no lee ni envía nada, solo lo anota en el registro |
-| `MS_TENANT_ID` | Id. de directorio (inquilino) del registro de la aplicación en Microsoft Entra ID |
-| `MS_CLIENT_ID` | Id. de aplicación (cliente) del mismo registro |
-| `SUPPORT_MAILBOX` | Buzón que lee el Agente y desde el que responde; es la cuenta con la que se ejecuta `app.ms_login` |
-| `MAIL_FOLDER` | Carpeta del buzón donde llegan los correos de soporte (por defecto `Ticketera`; `inbox` usa la bandeja de entrada) |
-| `EMAIL_POLL_SECONDS` | Cada cuántos segundos se revisa la carpeta (por defecto 60) |
-| `MS_LOGIN_ENABLED` | `true`: técnicos, coordinadores y administradores entran con su cuenta Microsoft (el administrador además tiene "Acceso de emergencia" con contraseña y código). `false`: todos entran con contraseña |
-| `MS_LOGIN_TENANT_ID` / `MS_LOGIN_CLIENT_ID` | Id. de directorio y de aplicación del mismo registro que usa el buzón |
-| `MS_LOGIN_CLIENT_SECRET` | Secreto de cliente propio del inicio de sesión. Vence: renovarlo en Azure antes de la fecha |
-| `MS_LOGIN_REDIRECT_URI` | URI de redirección registrada en Azure (tipo Web), por defecto `http://localhost:8000/auth/microsoft/callback` |
-| `HACIENDA_CHECK` | `true`: verifica la cédula con la API pública de Hacienda. `false`: no consulta (útil sin internet) |
-| `HACIENDA_STRICT` | `true`: rechaza las cédulas que Hacienda no encuentra. `false`: las acepta igual |
-| `CHATBOT_ENABLED` | `true`: el asistente de la página responde. `false`: responde que no está disponible |
-| `LLM_BASE_URL` | Dirección de Ollama dentro de la red de Docker Compose (`http://ollama:11434`) |
-| `LLM_MODEL` | Modelo que usa el asistente (`qwen3:1.7b`) |
-| `SESSION_IDLE_MINUTES` | Minutos sin uso tras los que vence una sesión (por defecto 240) |
-| `SESSION_MAX_HOURS` | Horas desde que se abrió tras las que vence una sesión, aunque se use (por defecto 12) |
-
-`APP_URL` (por defecto `http://localhost:8000`) es el enlace a la
-página que aparece en los correos. Con `EMAIL_ENABLED=true` y sin
-`MS_TENANT_ID`, `MS_CLIENT_ID` o `SUPPORT_MAILBOX`, el servidor
-avisa en el registro y no revisa el buzón.
-
-## Asistente
-
-Botón flotante abajo a la derecha, visible solo con la sesión
-iniciada. Usa un modelo local (Qwen3) servido por Ollama en el
-contenedor `ollama`, que no publica su puerto: solo lo usa la app.
-Antes de encenderlo hay que descargar el modelo:
-
-```bash
-docker compose exec ollama ollama pull qwen3:1.7b
-```
-
-Qué recibe el modelo, según el rol de quien pregunta:
-
-- **Solicitante:** sus 10 tickets más recientes (número, título,
-  estado, prioridad, categoría, asignado) con sus 3 últimos
-  comentarios.
-- **Técnico:** sus tickets asignados sin cerrar (hasta 15) con el
-  último comentario, y cuántos tickets nuevos sin asignar hay
-  (hasta 10 de ellos).
-- **Coordinador y Administrador:** tickets por estado, abiertos por
-  prioridad, sin asignar, abiertos por técnico y los 10 abiertos
-  más antiguos con sus días abiertos.
-
-Nunca recibe datos personales: ni correos, ni teléfonos, ni
-cédulas, ni contraseñas, ni códigos. De las personas solo van los
-nombres, y los correos o números largos que alguien haya escrito
-en un título o comentario se reemplazan por `[correo oculto]` o
-`[dato oculto]`. El asistente no cambia tickets, responde en
-español y permite 20 mensajes cada 10 minutos por usuario. La
-conversación vive solo en la página: se borra al recargar o al
-cambiar de cuenta. El servidor registra únicamente el usuario y el
-largo del mensaje.
+Úselo solo en la laptop de desarrollo, nunca en la PC con correo.
 
 ## Pruebas automáticas
 
+Después de cualquier cambio (también en `tests/` o `static/`), reconstruya y espere unos segundos antes de probar:
+
 ```bash
+docker compose up -d --build
 docker compose exec app pytest -q
 ```
 
-Usan una base de datos temporal, por lo que nunca modifican
-`data/tickets.db`, y nunca se conectan a Microsoft Graph, Hacienda
-ni Ollama: esas llamadas se simulan.
+Solo un archivo, o solo las pruebas cuyo nombre contiene una palabra:
 
-## Decisiones de diseño
+```bash
+docker compose exec app pytest -q tests/test_auth.py
+docker compose exec app pytest -q -k microsoft
+```
 
-- **Sesión con token.** Cada persona inicia sesión con correo y
-  contraseña; el token se guarda en la pestaña del navegador y la
-  base solo guarda su hash SHA-256. La sesión vence tras
-  `SESSION_IDLE_MINUTES` sin uso o `SESSION_MAX_HOURS` desde que se
-  abrió; la página vuelve al inicio con "Su sesión venció. Inicie
-  sesión de nuevo."
-- **Bloqueo por intentos.** Contraseñas incorrectas, códigos del
-  administrador y códigos de cambio de correo suman a un mismo
-  contador por correo. Con 5 seguidos el correo queda bloqueado 15
-  minutos ("Demasiados intentos. Intente de nuevo en unos minutos."),
-  aun con la contraseña correcta. Un inicio de sesión completo lo
-  reinicia.
-- **Registro de cambios de cuentas.** Quién, a qué cuenta, qué
-  acción, cuándo y el valor anterior y nuevo: teléfono y cédula con
-  los últimos 4 dígitos y correos enmascarados. Solo lo ve el
-  Administrador.
-- **Estado cerrado es final.** Un ticket cerrado no se modifica ni
-  se comenta.
-- **Historial y comentarios separados.** El historial registra
-  cambios de estado, asignación, prioridad y categoría (quién,
-  cuándo, valor anterior y nuevo). Los comentarios no van al
-  historial.
-- **Horas en UTC.** El servidor guarda las fechas en UTC y la
-  pantalla las muestra en la hora local del navegador.
-- **Versiones fijadas.** `requirements.txt` fija la versión de
-  cada librería, para que la instalación sea igual en cualquier
-  computadora.
+Revisión del JavaScript de la página:
 
-El diseño completo y las decisiones de la versión 2 están en
-`docs/diseno.md`.
+```bash
+docker run --rm -v "$PWD/static:/s" node:20-alpine node --check /s/app.js
+```
 
-## API
+Las pruebas usan una base temporal (nunca `data/tickets.db`) y nunca se conectan a Microsoft, Hacienda ni Ollama:
+esas llamadas se simulan y cualquier intento de salir a la red hace fallar la prueba. La suite completa tarda
+varios minutos.
 
-Salvo `health`, `register`, `login`, `verify-code` y `resend-code`,
-todas las rutas exigen el encabezado `Authorization: Bearer <token>`.
+## Seguridad
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | /api/health | Estado del servidor |
-| POST | /api/auth/register | Registrar usuario (con código de invitación opcional) |
-| POST | /api/auth/login | Iniciar sesión; coordinador y administrador reciben `requires_code` |
-| POST | /api/auth/verify-code | Confirmar el código de 6 dígitos y obtener la sesión |
-| POST | /api/auth/resend-code | Enviar un código nuevo (una vez por minuto) |
-| GET | /api/auth/me | Obtener usuario actual |
-| POST | /api/auth/logout | Cerrar sesión (borra la sesión en el servidor) |
-| PUT | /api/account/password | Cambiar contraseña con la actual; cierra las demás sesiones |
-| PUT | /api/account/phone | Cambiar teléfono |
-| POST | /api/account/email | Pedir cambio de correo con la contraseña actual; envía un código al correo nuevo |
-| POST | /api/account/email/resend | Reenviar el código (una vez por minuto) |
-| POST | /api/account/email/verify | Confirmar el código; cambia el correo, avisa al anterior y cierra las demás sesiones |
-| POST | /api/invites | Generar un código de invitación (coordinador y administrador) |
-| GET | /api/invites | Listar códigos generados, sin el código |
-| GET | /api/users | Usuarios activos |
-| GET | /api/requesters | Buscar solicitantes por nombre o correo (coordinador y administrador) |
-| GET | /api/categories | Categorías |
-| GET | /api/priorities | Prioridades ordenadas por nivel |
-| GET | /api/tickets | Listar con filtros |
-| POST | /api/tickets | Crear ticket |
-| GET | /api/tickets/{id} | Detalle con historial, comentarios y `following` |
-| PATCH | /api/tickets/{id} | Cambiar estado, asignación, prioridad o categoría |
-| POST | /api/tickets/{id}/comments | Agregar comentario |
-| POST | /api/tickets/{id}/follow | Dar seguimiento al ticket |
-| DELETE | /api/tickets/{id}/follow | Dejar de dar seguimiento |
-| GET | /api/directory | Directorio de usuarios con filtros `role` y `q` (coordinador y administrador) |
-| PATCH | /api/admin/users/{id} | Cambiar rol o activar/desactivar una cuenta (administrador) |
-| GET | /api/admin/health | Estado de la base de datos, el correo y el asistente, y conteos (administrador) |
-| GET | /api/admin/backup | Descargar una copia de la base de datos (administrador) |
-| GET | /api/admin/logs | Últimas 200 líneas del registro del servidor (administrador) |
-| GET | /api/admin/account-changes | Registro de cambios de cuentas con filtros `account`, `action` y `page` (administrador) |
-| POST | /api/chat | Preguntar al asistente |
+- **Nunca se sube a GitHub:** `.env`, la carpeta `data/` (base, adjuntos, registro y `ms_token_cache.json`) ni
+  archivos `.db`. Ya están en `.gitignore`; revise `git status` antes de cada commit.
+- **Solo una máquina con `EMAIL_ENABLED=true`:** si dos PCs leen el mismo buzón, los correos se procesan dos veces
+  y los clientes reciben respuestas repetidas. En desarrollo, siempre `false`.
+- **Cédula y teléfono** son datos personales (Ley 8968): en el Registro de cambios y en los reportes quedan
+  enmascarados (últimos 4 dígitos), no van a los registros del servidor ni a la IA, y solo los ve completos quien
+  tiene permiso.
+- Contraseñas, códigos de invitación y códigos de verificación se guardan solo como hash.
+- Al asistente nunca se le envían cédulas, teléfonos, correos ni contraseñas.
+- Sin HTTPS, los datos viajan sin cifrar por la red: mientras tanto, use la página solo en la PC o en una red
+  de confianza.
 
-## Uso de asistentes de desarrollo
+## Problemas comunes
 
-El proyecto se construyó por tareas pequeñas: cada tarea se pidió
-con un prompt específico, se verificó con `git diff`, `grep`,
-pruebas automáticas y pruebas en el navegador, y se guardó en su
-propio commit. La primera versión se hizo con OpenCode y la
-versión 2 continuó con Claude Code (ver `docs/bitacora-ia.md`).
+**Una variable del `.env` no llega al contenedor** (por ejemplo, el inicio de sesión con Microsoft sigue sin
+funcionar después de completar el `.env`).
+- `docker compose restart` no vuelve a leer el `.env`. Use `docker compose up -d --force-recreate`.
+- Revise que el nombre esté escrito exactamente como en `.env.example` y sin espacios alrededor del `=`.
+- Para comprobar si una variable llegó, sin mostrar su valor:
 
-Errores de la herramienta detectados durante la validación:
+  ```bash
+  docker compose exec app sh -c 'test -n "$MS_LOGIN_TENANT_ID" && echo definida || echo vacía'
+  ```
 
-- Diseño inicial sin la tabla de historial, pese a pedirla.
-- Versión inexistente de una librería (`httpx==0.27.3`).
-- Rutas de la API distintas a las del diseño.
-- Pruebas que escribían en la base de datos real.
-- Uso de `innerHTML` con datos del usuario (riesgo de inyección),
-  aunque el resumen afirmaba lo contrario.
-- Tareas que quedaron a medias o en las que el modelo se
-  descompuso y generó texto sin sentido.
+**"No se pudo conectar con Microsoft" al entrar con Microsoft.**
+- Revise el registro: `docker compose logs app | grep -i microsoft`. Si dice que faltan `MS_LOGIN_TENANT_ID`,
+  `MS_LOGIN_CLIENT_ID` o `MS_LOGIN_CLIENT_SECRET`, complételos y recree el contenedor (punto anterior).
+- Si el secreto venció, renuévelo (ver [Microsoft](#microsoft-buzón-e-inicio-de-sesión-del-personal)) y, mientras
+  tanto, el administrador usa el Acceso de emergencia.
+- Si Microsoft muestra un error de URI de redirección, la de Azure y `MS_LOGIN_REDIRECT_URI` no son idénticas.
 
-Lecciones aplicadas: pedir una tarea pequeña por prompt, abrir una
-sesión nueva cuando el modelo se enreda, indicar explícitamente lo
-que no debe tocar y verificar siempre los archivos, no el resumen
-de la herramienta.
+**El buzón dejó de leer correos.** Si el registro dice "Falta iniciar sesión en Microsoft", vuelva a ejecutar
+`docker compose exec -it app python -m app.ms_login` con la cuenta del buzón.
 
-Con OpenCode se usó el modelo gratuito Nemotron 3.5 Lightning y, al
-agotarse su límite, otro modelo disponible en OpenCode.
+**Las pruebas tardan mucho o se cortan.**
+- La suite completa tarda varios minutos. Mientras corre, no reinicie los contenedores: la corrida se corta.
+- Con poca memoria, detenga Ollama mientras prueba (las pruebas no lo usan) y enciéndalo después:
 
-## Limitaciones
+  ```bash
+  docker compose stop ollama
+  docker compose start ollama
+  ```
 
-- El remitente de un correo se puede falsificar: no se revisan SPF
-  ni DKIM.
-- El buzón se revisa cada minuto (`EMAIL_POLL_SECONDS`), no al
-  instante.
-- Microsoft 365 limita cuántos correos se pueden enviar; si se
-  superan, las respuestas y avisos no salen.
-- La sesión de Microsoft guardada puede vencer (por ejemplo, al
-  cambiar la contraseña del buzón) y hay que repetir
-  `docker compose exec -it app python -m app.ms_login`.
-- Los adjuntos de los correos se ignoran.
-- Responder un correo del Agente no agrega un comentario al ticket.
-- La API de Hacienda solo conoce a los contribuyentes inscritos; si
-  no responde, la cédula se acepta sin verificar.
-- El asistente usa un modelo local (Qwen3 con Ollama) que responde
-  lento en computadoras sin tarjeta gráfica.
-- Sin HTTPS los datos (contraseñas incluidas) viajan sin cifrar.
-- El Administrador no modifica código desde la página: los cambios
-  al código se hacen con Git y GitHub.
-- No hay recuperación de contraseña.
-- La sesión dura mientras la pestaña esté abierta y no haya
-  vencido.
-- La pantalla no tiene pruebas automáticas; se verifica a mano en
-  el navegador.
-- Las pruebas muestran advertencias de librerías externas
-  (starlette y httpx) que dependen de sus versiones.
+- Mientras trabaja en algo puntual, corra solo el archivo de pruebas de ese tema.
+- WSL usa por defecto una parte de la RAM de Windows; si se queda corto, se puede ampliar en el archivo
+  `.wslconfig` de su usuario de Windows y reiniciar WSL con `wsl --shutdown` (desde Windows).
+
+**La IA responde lento.**
+- Sin tarjeta gráfica, el modelo corre en el procesador. La primera respuesta después de encender tarda más
+  porque el modelo se carga en memoria; las siguientes son más rápidas.
+- Compruebe que los modelos estén descargados y cuáles están cargados:
+
+  ```bash
+  docker compose exec ollama ollama list
+  docker compose exec ollama ollama ps
+  ```
+
+- Si falta uno, descárguelo (paso 4 de la instalación). Si la PC tiene poca memoria, apague lo que no use:
+  `CHATBOT_ENABLED` o `GROUPING_ENABLED` en `false`.
+
+**El contenedor no arranca.** Mire las últimas líneas: `docker compose logs --tail 30 app`.
+
+## Tecnologías y decisiones
+
+| Parte | Tecnología |
+|---|---|
+| Backend | Python 3.12 + FastAPI |
+| Base de datos | SQLite con SQLAlchemy |
+| Página | HTML, CSS y JavaScript sin frameworks |
+| Pruebas | pytest + TestClient de FastAPI |
+| Entorno | Docker y Docker Compose dentro de WSL |
+| Correo e inicio de sesión | Microsoft Graph y Entra ID (msal + httpx) |
+| IA local | Ollama con Qwen3 (asistente, análisis de correos y agrupación) |
+
+- Cada rol solo ve y hace lo que le corresponde, y **el servidor lo verifica** (una acción no permitida responde
+  `403`); la página además oculta lo que no aplica. El detalle por rol está en
+  [docs/guia-por-rol.md](docs/guia-por-rol.md).
+- Las fechas se guardan en UTC y la página las muestra en la hora local.
+- `requirements.txt` fija la versión de cada librería para que la instalación sea igual en cualquier PC.
+- El diseño completo está en [docs/diseno.md](docs/diseno.md). El proyecto se construyó por tareas pequeñas con
+  asistentes de programación (OpenCode y después Claude Code), verificando cada paso con pruebas y en el
+  navegador; la historia está en [docs/bitacora-ia.md](docs/bitacora-ia.md).
