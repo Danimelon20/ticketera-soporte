@@ -174,3 +174,68 @@ def test_mailer_never_sends_to_invalid_domain(monkeypatch):
     monkeypatch.setattr(graph, "graph_request", _fail)
     assert mailer.send_email("tecnica.manana@demo.invalid", "Asunto", "Cuerpo") is False
     monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+
+
+# ----- verificar -----
+
+def _demo_sessions():
+    db = SessionLocal()
+    try:
+        return db.query(models.Session).join(models.User, models.User.id == models.Session.user_id).filter(
+            func.lower(models.User.email).like(DEMO)).count()
+    finally:
+        db.close()
+
+
+def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
+    demo_data.run("cargar")
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 0
+    out = capsys.readouterr().out
+    assert "13 de 13 correctos (2 omitidos)" in out
+    # La columna del resultado (el encabezado dice "OK/FALLA")
+    assert "| FALLA" not in out
+    assert out.count("OMITIDO") == 2
+    # Ni contraseñas ni tokens; y cierra las sesiones que abrió
+    assert demo_data.PASSWORD not in out and "Bearer" not in out
+    assert _demo_sessions() == 0
+    assert sent == []
+    demo_data.run("limpiar")
+
+
+def test_verify_reports_a_broken_scenario(client, capsys):
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        ids = demo_data._scenario_ids(db)
+        evening = ids["users"][demo_data.EVENING]
+        row = db.query(models.DraftAssignment).filter(models.DraftAssignment.draft_id == ids["draft_assigned"]).one()
+        # El borrador pasa al técnico de la tarde: la revisora de la mañana ya no lo ve y él sí puede confirmarlo
+        row.user_id = evening
+        db.commit()
+    finally:
+        db.close()
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 1
+    out = capsys.readouterr().out
+    assert out.count("| FALLA") == 2 and "11 de 13 correctos" in out
+    demo_data.run("limpiar")
+
+
+def test_verify_stops_when_microsoft_login_is_on(client, capsys, monkeypatch):
+    demo_data.run("cargar")
+    monkeypatch.setattr(config, "MS_LOGIN_ENABLED", True)
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 1
+    out = capsys.readouterr().out
+    assert "MS_LOGIN_ENABLED=true" in out and "No se verificó nada" in out
+    assert _demo_sessions() == 0
+    monkeypatch.setattr(config, "MS_LOGIN_ENABLED", False)
+    demo_data.run("limpiar")
+
+
+def test_verify_without_demo_data(client, capsys):
+    demo_data.run("limpiar")
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 1
+    assert "Ejecute primero" in capsys.readouterr().out
