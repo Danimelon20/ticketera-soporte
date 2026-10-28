@@ -30,6 +30,12 @@ body.staff-shell {
     --card-bg: var(--app-card-bg);
     --card-line: var(--app-card-line);
     --card-shadow: var(--app-card-shadow);
+    --table-head-bg: var(--app-table-head);
+    --bg-side: var(--app-hover);
+    /* Bordes, separadores y controles del personal */
+    --line: var(--app-card-line);
+    --line-soft: var(--app-divider);
+    --field-line: var(--app-control-line);
     /* Lo fijo arriba al desplazarse: barra superior y, en E3, la cabecera de la página */
     --sticky-top: calc(var(--top-h) + var(--page-head-h, 0px));
     background: var(--page-bg);
@@ -411,7 +417,7 @@ body.staff-shell .side-nav {
   justify-content: flex-start;
   gap: 2px;
   background: #FFFFFF;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--app-nav-line);
   color: var(--ink);
   overflow-y: auto;
   z-index: 50;
@@ -579,7 +585,7 @@ body.staff-shell .page-head {
 
 .page-crumb-item[aria-current="page"] { color: var(--muted); }
 
-.page-crumb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: #8A90A8; }
+.page-crumb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
 
 .page-crumb-item + .page-crumb-item::before { content: "›"; margin-right: 6px; }
 

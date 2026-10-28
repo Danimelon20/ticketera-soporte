@@ -430,7 +430,7 @@ body.staff-shell .queue-panel {
 #queuePanel .queue-table th {
   height: 38px;
   padding: 0 14px;
-  background: var(--surface);
+  background: var(--table-head-bg);
   border-bottom: 1px solid var(--line-soft);
   font-size: var(--fs-xs);
   font-weight: 500;
@@ -591,7 +591,7 @@ body.staff-shell.ticket-open .queue-aside { display: none; }
 .follow-btn {
   min-height: 44px;
   padding: 6px 16px;
-  border: 1px solid #D5D9E0;
+  border: 1px solid var(--field-line);
   border-radius: 8px;
   background: #FFFFFF;
   color: var(--ink);
@@ -735,8 +735,8 @@ body.staff-shell.ticket-open #detailPanel {
   flex-wrap: wrap;
   gap: var(--sp-2);
   padding: var(--sp-3) 28px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--card-line);
   font-size: var(--fs-sm);
   color: var(--muted);
 }
@@ -781,8 +781,8 @@ body.staff-shell.ticket-open #detailContent {
   flex-direction: column;
   gap: 10px;
   padding: 16px var(--page-gutter);
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--card-line);
 }
 
 .td-title-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -829,9 +829,9 @@ body.staff-shell.ticket-open #detailContent {
   flex-direction: column;
   gap: 6px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--card-line);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--card-bg);
 }
 
 .td-message.is-internal { background: var(--note-bg); border-color: var(--note-line); }

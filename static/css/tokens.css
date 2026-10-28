@@ -5,17 +5,35 @@
    ===================================================================== */
 
 :root {
-    /* ----- Fondo y tarjetas de la app del personal ----- */
-    /* Para cambiar el gris del fondo basta con esta línea */
-    --app-bg: #EEF0F4;
+    /* ----- Fondo y superficies de la app del personal ----- */
+    /* Para cambiar el fondo basta con esta línea */
+    --app-bg: #E3EAF6;
+    /* Todo lo blanco (tarjetas, tablas, paneles, modales): borde visible y sombra corta */
     --app-card-bg: #FFFFFF;
-    --app-card-line: #E3E6EC;
-    --app-card-shadow: 0 1px 2px rgba(14, 16, 48, 0.04), 0 1px 3px rgba(14, 16, 48, 0.04);
+    --app-card-line: #C5D0E4;
+    --app-card-shadow: 0 1px 3px rgba(8, 8, 111, 0.10);
+    /* Separadores dentro de lo blanco y encabezado de las tablas */
+    --app-divider: #DCE3F0;
+    --app-table-head: #F4F7FC;
+    /* Fila o botón bajo el mouse */
+    --app-hover: #F4F7FC;
+    /* Controles sobre blanco (campos, selectores, casillas, botones secundarios): 3,4:1 sobre blanco */
+    --app-control-line: #7D8BA8;
+    --app-control-line-hover: #5B6078;
+    --app-control-focus: #0041FF;
+    --app-control-ring: 0 0 0 3px rgba(0, 65, 255, 0.25);
+    /* Íconos sobre blanco y su recuadro */
+    --app-icon: #08086F;
+    --app-icon-box-bg: #E8EEFF;
+    --app-icon-box-line: #C9D6FF;
+    /* El menú de módulos conserva su borde original */
+    --app-nav-line: #E6E8EE;
     /* Valores por defecto (inicio de sesión y portal); el personal los cambia en layout.css */
     --page-bg: var(--bg-side);
     --card-bg: var(--surface);
     --card-line: var(--line);
     --card-shadow: none;
+    --table-head-bg: var(--card-bg);
 
     /* ----- Colores de marca (American Data) · docs/prototipo/LEEME.md ----- */
     --navy: #08086F;

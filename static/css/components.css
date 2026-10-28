@@ -317,6 +317,58 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .ui-field-error[hidden] { display: none; }
 
+/* Controles sobre blanco: borde con contraste 3:1, más oscuro al pasar el mouse y azul con anillo al enfocar */
+:where(body.staff-shell) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.palette-input), select, textarea) { border-color: var(--field-line); }
+
+:where(body.staff-shell) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.palette-input), select, textarea):hover:not(:focus):not(:disabled) { border-color: var(--app-control-line-hover); }
+
+:where(body.staff-shell) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.palette-input), select, textarea):focus {
+    border-color: var(--app-control-focus);
+    box-shadow: var(--app-control-ring);
+    outline: none;
+}
+
+/* Casillas con el mismo borde que los demás controles */
+:where(body.staff-shell) input[type="checkbox"] {
+    appearance: none;
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-content: center;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    border: 1px solid var(--field-line);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+}
+
+:where(body.staff-shell) input[type="checkbox"]::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    background: #FFFFFF;
+    clip-path: polygon(14% 52%, 0 66%, 38% 100%, 100% 22%, 86% 8%, 38% 72%);
+    transform: scale(0);
+}
+
+:where(body.staff-shell) input[type="checkbox"]:checked { border-color: var(--blue); background: var(--blue); }
+
+:where(body.staff-shell) input[type="checkbox"]:checked::before { transform: scale(1); }
+
+:where(body.staff-shell) input[type="checkbox"]:indeterminate { border-color: var(--blue); background: var(--blue); }
+
+:where(body.staff-shell) input[type="checkbox"]:hover:not(:disabled) { border-color: var(--app-control-line-hover); }
+
+:where(body.staff-shell) input[type="checkbox"]:focus-visible { border-color: var(--app-control-focus); box-shadow: var(--app-control-ring); outline: none; }
+
+:where(body.staff-shell) input[type="checkbox"]:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Botones secundarios: mismo borde que los campos */
+:where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn, .follow-btn):hover:not(:disabled) { border-color: var(--app-control-line-hover); }
+
+:where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn, .follow-btn):focus-visible { border-color: var(--app-control-focus); box-shadow: var(--app-control-ring); outline: none; }
+
 /* ----- Pestañas ----- */
 
 /* Segmentadas (vistas de la cola, periodo) */
@@ -569,6 +621,23 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .ui-stat-value.is-ok { color: var(--ok); }
 
+/* Íconos sobre blanco en azul marino; en Inicio y en los encabezados de sección van en un recuadro de 32 px */
+:where(body.staff-shell) :is(.ui-card, .td-card, .admin-card, .att-card) svg:not(:is(.ui-btn, .btn-submit, .btn-primary) svg) { color: var(--app-icon); }
+
+.ui-icon-box {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    box-sizing: border-box;
+    border: 1px solid var(--app-icon-box-line);
+    border-radius: var(--r-md);
+    background: var(--app-icon-box-bg);
+    color: var(--app-icon);
+}
+
 /* ----- Tablas ----- */
 
 .table-scroll { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--radius); box-shadow: var(--card-shadow); }
@@ -603,8 +672,8 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
     position: sticky;
     top: var(--sticky-top, 0px);
     z-index: 2;
-    background: var(--card-bg);
-    box-shadow: inset 0 -1px 0 var(--line);
+    background: var(--table-head-bg);
+    box-shadow: inset 0 -1px 0 var(--line-soft);
 }
 
 :where(body.staff-shell :is(.ui-table, .queue-table, .directory-table)) tbody tr:hover { background: var(--bg-side); }
@@ -789,6 +858,9 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 :where(body.staff-shell) .app-dialog .modal-title { font-size: 17px; font-weight: 600; }
 
 :where(body.staff-shell) .app-dialog .dialog-actions { margin-top: var(--sp-4); }
+
+/* Modales con el mismo contorno que lo blanco, más su sombra de elevación */
+:where(body.staff-shell) :is(.ui-modal, .app-dialog) { border: 1px solid var(--card-line); box-shadow: var(--card-shadow), var(--shadow-lg); }
 
 /* ----- Carga y estados vacíos ----- */
 

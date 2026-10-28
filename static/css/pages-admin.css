@@ -178,7 +178,7 @@
   padding: 11px 18px;
   border: none;
   border-bottom: 1px solid var(--line-soft);
-  background: var(--surface);
+  background: var(--card-bg);
   font: inherit;
   color: var(--ink);
   text-align: left;
@@ -501,7 +501,7 @@
   border: none;
   border-bottom: 1px solid var(--line-soft);
   border-radius: 0;
-  background: var(--surface);
+  background: var(--card-bg);
 }
 
 .drafts-view .draft-item:hover { background: var(--bg-side); border-color: var(--line-soft); }
@@ -548,7 +548,7 @@
 
 .drafts-view .draft-reason { margin: 0; }
 
-.drafts-view .draft-body { margin: 0; max-height: 320px; padding: 18px 20px; background: var(--surface); line-height: 1.6; color: var(--ink-2); font-size: var(--fs-base); }
+.drafts-view .draft-body { margin: 0; max-height: 320px; padding: 18px 20px; background: var(--card-bg); line-height: 1.6; color: var(--ink-2); font-size: var(--fs-base); }
 
 .draft-ai-box { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border: 1px solid var(--info-line); border-radius: var(--r-lg); background: var(--info-soft); }
 
@@ -1121,7 +1121,7 @@
 
 #directoryView .table-scroll { background: var(--card-bg); border: 1px solid var(--card-line); box-shadow: var(--card-shadow); border-radius: var(--r-lg); overflow-x: auto; }
 
-#directoryView .directory-table th { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--surface); }
+#directoryView .directory-table th { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--table-head-bg); }
 
 #directoryView .directory-table td { border-color: var(--line-soft); white-space: normal; overflow-wrap: anywhere; }
 
