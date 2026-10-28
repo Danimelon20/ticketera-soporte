@@ -1,19 +1,26 @@
-def comment(client, ticket_id, actor_id, content):
+def comment(client, ticket_id, actor, content):
     return client.post(
         f"/api/tickets/{ticket_id}/comments",
-        json={"actor_id": actor_id, "content": content},
+        json={"content": content},
+        headers=actor["headers"],
     )
 
 
 def detail(client, ticket_id, actor):
-    return client.get(f"/api/tickets/{ticket_id}", params={"actor_id": actor["id"]})
+    return client.get(f"/api/tickets/{ticket_id}", headers=actor["headers"])
 
 
-def close_ticket(client, ticket_id, actor_id):
+def close_ticket(client, ticket_id, actor):
+    client.patch(
+        f"/api/tickets/{ticket_id}",
+        json={"assigned_to": actor["id"]},
+        headers=actor["headers"],
+    )
     for status in ["in_progress", "resolved", "closed"]:
         client.patch(
             f"/api/tickets/{ticket_id}",
-            json={"actor_id": actor_id, "status": status},
+            json={"status": status},
+            headers=actor["headers"],
         )
 
 
@@ -22,7 +29,7 @@ def close_ticket(client, ticket_id, actor_id):
 def test_create_comment(client, make_user, make_ticket):
     user = make_user()
     ticket = make_ticket(user)
-    response = comment(client, ticket["id"], user["id"], "Revisé el cable")
+    response = comment(client, ticket["id"], user, "Revisé el cable")
     assert response.status_code == 200
     data = response.json()
     assert data["ticket_id"] == ticket["id"]
@@ -33,7 +40,7 @@ def test_create_comment(client, make_user, make_ticket):
 def test_comment_in_detail_not_in_history(client, make_user, make_ticket):
     user = make_user()
     ticket = make_ticket(user)
-    comment(client, ticket["id"], user["id"], "Nota de prueba")
+    comment(client, ticket["id"], user, "Nota de prueba")
     data = detail(client, ticket["id"], user).json()
     assert [c["content"] for c in data["comments"]] == ["Nota de prueba"]
     assert data["history"] == []
@@ -42,8 +49,8 @@ def test_comment_in_detail_not_in_history(client, make_user, make_ticket):
 def test_comments_oldest_first(client, make_user, make_ticket):
     user = make_user()
     ticket = make_ticket(user)
-    comment(client, ticket["id"], user["id"], "Primero")
-    comment(client, ticket["id"], user["id"], "Segundo")
+    comment(client, ticket["id"], user, "Primero")
+    comment(client, ticket["id"], user, "Segundo")
     data = detail(client, ticket["id"], user).json()
     assert [c["content"] for c in data["comments"]] == ["Primero", "Segundo"]
 
@@ -51,32 +58,35 @@ def test_comments_oldest_first(client, make_user, make_ticket):
 def test_empty_comment_rejected(client, make_user, make_ticket):
     user = make_user()
     ticket = make_ticket(user)
-    assert comment(client, ticket["id"], user["id"], "").status_code == 422
-    assert comment(client, ticket["id"], user["id"], "     ").status_code == 422
+    assert comment(client, ticket["id"], user, "").status_code == 422
+    assert comment(client, ticket["id"], user, "     ").status_code == 422
 
 
 def test_comment_is_trimmed(client, make_user, make_ticket):
     user = make_user()
     ticket = make_ticket(user)
-    response = comment(client, ticket["id"], user["id"], "   hola   ")
+    response = comment(client, ticket["id"], user, "   hola   ")
     assert response.json()["content"] == "hola"
 
 
 def test_comment_closed_ticket_rejected(client, make_user, make_ticket):
     coord = make_user("coordinator")
-    ticket = make_ticket(coord)
-    close_ticket(client, ticket["id"], coord["id"])
-    assert comment(client, ticket["id"], coord["id"], "Después de cerrar").status_code == 400
+    req = make_user("requester")
+    ticket = make_ticket(req)
+    close_ticket(client, ticket["id"], coord)
+    assert comment(client, ticket["id"], coord, "Después de cerrar").status_code == 400
 
 
 def test_comment_invalid_actor(client, make_user, make_ticket):
     ticket = make_ticket(make_user())
-    assert comment(client, ticket["id"], 999999, "Nadie").status_code == 400
+    response = client.post(f"/api/tickets/{ticket['id']}/comments", json={"content": "Nadie"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Inicia sesión para continuar"
 
 
 def test_comment_ticket_not_found(client, make_user):
     user = make_user()
-    assert comment(client, 999999, user["id"], "Sin ticket").status_code == 404
+    assert comment(client, 999999, user, "Sin ticket").status_code == 404
 
 
 # ---------- Pruebas nuevas de roles ----------
@@ -85,7 +95,7 @@ def test_requester_comments_own_ticket(client, make_user, make_ticket):
     # Regla 7: el solicitante sí comenta lo suyo
     solicitante = make_user("requester")
     ticket = make_ticket(solicitante)
-    assert comment(client, ticket["id"], solicitante["id"], "Sigue sin imprimir").status_code == 200
+    assert comment(client, ticket["id"], solicitante, "Sigue sin imprimir").status_code == 200
 
 
 def test_requester_cannot_comment_others_ticket(client, make_user, make_ticket):
@@ -93,14 +103,23 @@ def test_requester_cannot_comment_others_ticket(client, make_user, make_ticket):
     ana = make_user("requester")
     luis = make_user("requester")
     ticket_de_luis = make_ticket(luis)
-    assert comment(client, ticket_de_luis["id"], ana["id"], "Me meto").status_code == 403
+    assert comment(client, ticket_de_luis["id"], ana, "Me meto").status_code == 403
 
 
-def test_technician_comments_any_ticket(client, make_user, make_ticket):
-    # Cualquier rol comenta; el técnico, en tickets de otros
+def _assign(client, coordinator, ticket_id, user):
+    """Asigna el coordinador: el técnico ya no se asigna tickets."""
+    response = client.patch(f"/api/tickets/{ticket_id}", json={"assigned_to": user["id"]},
+                            headers=coordinator["headers"])
+    assert response.status_code == 200, response.text
+
+
+def test_technician_comments_only_assigned_ticket(client, make_user, make_ticket):
+    # El técnico solo comenta en el ticket que tiene asignado
     tecnico = make_user("technician")
     ticket = make_ticket(make_user("requester"))
-    assert comment(client, ticket["id"], tecnico["id"], "Lo reviso mañana").status_code == 200
+    assert comment(client, ticket["id"], tecnico, "Lo reviso mañana").status_code == 403
+    _assign(client, make_user("coordinator"), ticket["id"], tecnico)
+    assert comment(client, ticket["id"], tecnico, "Lo reviso mañana").status_code == 200
 
 
 def test_requester_cannot_open_others_ticket(client, make_user, make_ticket):
@@ -110,3 +129,42 @@ def test_requester_cannot_open_others_ticket(client, make_user, make_ticket):
     ticket_de_luis = make_ticket(luis)
     assert detail(client, ticket_de_luis["id"], ana).status_code == 403
     assert detail(client, ticket_de_luis["id"], luis).status_code == 200
+
+
+# ---------- Pruebas adicionales requeridas ----------
+
+def test_unassigned_technician_cannot_comment_ticket(client, make_user, make_ticket):
+    # Ya no ve los tickets de los demás: ni los abre ni comenta
+    requester = make_user("requester")
+    ticket = make_ticket(requester)
+    technician = make_user("technician")
+    response = comment(client, ticket["id"], technician, "Comentario de técnico no asignado")
+    assert response.status_code == 403
+    assert detail(client, ticket["id"], technician).status_code == 403
+
+
+def test_two_different_technicians_comment_ticket(client, make_user, make_ticket):
+    requester = make_user("requester")
+    ticket = make_ticket(requester)
+    tech1 = make_user("technician")
+    tech2 = make_user("technician")
+    coordinator = make_user("coordinator")
+    _assign(client, coordinator, ticket["id"], tech1)
+    res1 = comment(client, ticket["id"], tech1, "Comentario del técnico 1")
+    assert res1.status_code == 200
+    assert res1.json()["user_id"] == tech1["id"]
+
+    # Reasignado: el anterior solo lee; el nuevo comenta
+    _assign(client, coordinator, ticket["id"], tech2)
+    assert comment(client, ticket["id"], tech1, "Ya no me toca").status_code == 403
+    res2 = comment(client, ticket["id"], tech2, "Comentario del técnico 2")
+    assert res2.status_code == 200
+    assert res2.json()["user_id"] == tech2["id"]
+
+    detail_res = detail(client, ticket["id"], tech1)
+    comments = detail_res.json()["comments"]
+    assert len(comments) == 2
+    assert comments[0]["user_id"] == tech1["id"]
+    assert comments[0]["content"] == "Comentario del técnico 1"
+    assert comments[1]["user_id"] == tech2["id"]
+    assert comments[1]["content"] == "Comentario del técnico 2"

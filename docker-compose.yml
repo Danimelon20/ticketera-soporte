@@ -1,7 +1,23 @@
 services:
   app:
     build: .
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+  # Modelo local para el asistente. Sin puertos publicados: solo lo usa app por la red interna (http://ollama:11434)
+  ollama:
+    image: ollama/ollama
+    environment:
+      # Una petición a la vez; dos modelos cargados (chat y embeddings de la agrupación): ~2,4 GB de 3,7 GB
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=2
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

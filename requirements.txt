@@ -4,23 +4,37 @@ uvicorn==0.30.4
 sqlalchemy==2.0.32
 pytest==8.3.4
 httpx==0.27.2
+msal==1.39.0
+# PDF del reporte de vencimiento (sin paquetes del sistema)
+reportlab==4.2.5
+# Recibir archivos adjuntos (formularios multipart)
+python-multipart==0.0.9
 
 # Dependencias indirectas, fijadas para que la instalación sea igual
 # en cualquier computadora (obtenidas con pip freeze)
 annotated-types==0.8.0
 anyio==4.15.1
 certifi==2026.7.22
+cffi==2.1.1
+chardet==7.7.0
+charset-normalizer==3.5.2
 click==8.5.0
+cryptography==50.0.2
 greenlet==3.5.6
 h11==0.16.0
 httpcore==1.0.9
 idna==3.20
 iniconfig==2.3.1
 packaging==26.3
+pillow==11.0.0
 pluggy==1.6.0
+pycparser==3.11
 pydantic==2.14.0
 pydantic_core==2.50.0
+PyJWT==2.15.1
+requests==2.34.2
 sniffio==1.3.1
 starlette==0.36.3
 typing-inspection==0.4.4
 typing_extensions==4.16.0
+urllib3==2.8.0

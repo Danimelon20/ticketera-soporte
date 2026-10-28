@@ -9,7 +9,7 @@ def test_create_ticket(make_user, make_ticket):
 def test_get_ticket(client, make_user, make_ticket):
     user = make_user()
     ticket = make_ticket(user, title="Ticket para consultar")
-    response = client.get(f"/api/tickets/{ticket['id']}", params={"actor_id": user["id"]})
+    response = client.get(f"/api/tickets/{ticket['id']}", headers=user["headers"])
     assert response.status_code == 200
     assert response.json()["title"] == "Ticket para consultar"
 
@@ -21,9 +21,10 @@ def test_create_ticket_invalid_category(client, make_user):
         "description": "No debería crearse",
         "category_id": 99,
         "priority_id": 2,
-        "actor_id": user["id"],
+        "contact_phone": "8888-1234",
+        "contact_id_number": "1-0234-0567",
     }
-    response = client.post("/api/tickets", json=payload)
+    response = client.post("/api/tickets", json=payload, headers=user["headers"])
     assert response.status_code == 400
 
 
@@ -35,7 +36,8 @@ def test_create_ticket_without_actor(client):
         "priority_id": 1,
     }
     response = client.post("/api/tickets", json=payload)
-    assert response.status_code == 422
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Inicia sesión para continuar"
 
 
 def test_create_ticket_invalid_actor(client):
@@ -44,13 +46,13 @@ def test_create_ticket_invalid_actor(client):
         "description": "No debería crearse",
         "category_id": 1,
         "priority_id": 1,
-        "actor_id": 999999,
     }
     response = client.post("/api/tickets", json=payload)
-    assert response.status_code == 400
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Inicia sesión para continuar"
 
 
 def test_get_ticket_not_found(client, make_user):
     user = make_user()
-    response = client.get("/api/tickets/999999", params={"actor_id": user["id"]})
+    response = client.get("/api/tickets/999999", headers=user["headers"])
     assert response.status_code == 404

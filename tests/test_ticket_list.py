@@ -3,7 +3,7 @@ def ids(response):
 
 
 def list_as(client, actor, **filters):
-    return client.get("/api/tickets", params={"actor_id": actor["id"], **filters})
+    return client.get("/api/tickets", headers=actor["headers"], params=filters)
 
 
 def test_list_includes_created_ticket(client, make_user, make_ticket):
@@ -57,7 +57,9 @@ def test_newest_first(client, make_user, make_ticket):
 
 
 def test_list_without_actor(client):
-    assert client.get("/api/tickets").status_code == 422
+    response = client.get("/api/tickets")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Inicia sesión para continuar"
 
 
 def test_requester_sees_only_own_tickets(client, make_user, make_ticket):
@@ -70,8 +72,12 @@ def test_requester_sees_only_own_tickets(client, make_user, make_ticket):
     assert de_luis["id"] not in result
 
 
-def test_technician_sees_all_tickets(client, make_user, make_ticket):
+def test_technician_sees_only_own_tickets(client, make_user, make_ticket):
+    # Ya no ve los tickets de los demás: solo los asignados y los que tuvo antes
     tecnico = make_user("technician")
     solicitante = make_user("requester")
     ticket = make_ticket(solicitante, "Ticket visible ALL1")
+    assert ticket["id"] not in ids(list_as(client, tecnico))
+    coordinator = make_user("coordinator")
+    client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": tecnico["id"]}, headers=coordinator["headers"])
     assert ticket["id"] in ids(list_as(client, tecnico))

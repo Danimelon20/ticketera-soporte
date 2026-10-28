@@ -1,130 +1,1340 @@
 <!DOCTYPE html>
 <html lang="es">
+<!-- Ticketera de Soporte - Frontend -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ticketera de Soporte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <header class="top-bar">
-        <h1>Ticketera de Soporte</h1>
-        <div class="acting-as" id="actingAsDisplay">Sin usuario elegido</div>
-    </header>
-
-    <main>
-        <section id="users-section">
-        <h2>Usuarios</h2>
-        <div class="form-group">
-            <label for="userName">Nombre</label>
-            <input type="text" id="userName" name="name" required>
+    <section id="verifyScreen" hidden>
+        <div class="verify-column">
+            <svg class="verify-shield" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/>
+                <rect x="9" y="11" width="6" height="5" rx="1"/>
+                <path d="M10 11V9.5a2 2 0 0 1 4 0V11"/>
+            </svg>
+            <h1 id="verifyTitle" class="verify-title">Verificación de seguridad</h1>
+            <p id="verifyHint" class="verify-hint"></p>
+            <form id="verifyForm" class="verify-form" novalidate>
+                <div class="verify-digits" id="verifyDigits">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 1 de 6" autocomplete="one-time-code">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 2 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 3 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 4 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 5 de 6" autocomplete="off">
+                    <input type="text" class="code-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="Dígito 6 de 6" autocomplete="off">
+                </div>
+                <div id="verifyError" class="verify-error" role="alert" hidden></div>
+                <button type="submit" id="verifySubmit" class="verify-submit">Verificar</button>
+            </form>
+            <div id="verifySuccess" class="verify-success" hidden>
+                <div class="verify-check">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M5 12.5l4.5 4.5L19 7.5"/>
+                    </svg>
+                </div>
+                <p class="verify-success-text">Verificación completada</p>
+            </div>
+            <p id="verifyTimer" class="verify-timer">El código vence en 10:00</p>
+            <button type="button" id="resendCode" class="verify-link" disabled>Reenviar código en 60 s</button>
+            <p id="resendNotice" class="verify-notice" aria-live="polite"></p>
+            <button type="button" id="backToLogin" class="verify-link">Volver al inicio de sesión</button>
+            <button type="button" id="signupHaveAccount" class="verify-link" hidden>Ya tengo cuenta: iniciar sesión</button>
         </div>
-        <div class="form-group">
-            <label for="userEmail">Email</label>
-            <input type="email" id="userEmail" name="email" required>
-        </div>
-        <div class="form-group">
-            <label for="userRole">Rol</label>
-            <select id="userRole" name="userRole">
-                <option value="">Seleccionar</option>
-                <option value="requester">Solicitante</option>
-                <option value="technician">Técnico</option>
-                <option value="coordinator">Coordinador</option>
-            </select>
-        </div>
-        <button id="createUserBtn" class="btn-submit">Crear usuario</button>
-        <div class="form-group">
-            <label for="actingAs">Actuando como</label>
-            <select id="actingAs" name="actingAs"></select>
+    </section>
+    <section id="authScreen" class="auth-screen">
+        <section class="auth-panel">
+          <!-- Panal hexagonal suave detrás del logo (decorativo) -->
+          <svg class="auth-hex" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+            <defs>
+              <radialGradient id="authHexFade"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+              <mask id="authHexMask"><rect width="520" height="380" fill="url(#authHexFade)"/></mask>
+              <pattern id="authHexPattern" width="56" height="97" patternUnits="userSpaceOnUse">
+                <path d="M28 0 L56 16 L56 48 L28 64 L0 48 L0 16 Z M28 64 L28 97 M0 48 L0 81 L28 97 L56 81 L56 48" fill="#0B2A7A" fill-opacity="0.25" stroke="#1B3FA0" stroke-opacity="0.35" stroke-width="1"/>
+              </pattern>
+            </defs>
+            <rect width="520" height="380" fill="url(#authHexPattern)" mask="url(#authHexMask)"/>
+          </svg>
+          <img src="img/american-data.svg" alt="American Data Networks" class="auth-logo">
+          <p class="auth-kicker">TICKETERA DE SOPORTE</p>
+          <p class="auth-tagline">Soporte técnico, en orden.</p>
+        </section>
+        <div class="auth-card-container">
+            <div class="auth-card">
+                <p id="sessionNotice" class="auth-notice session-notice" role="status" hidden></p>
+                <div id="loginPanel" class="auth-form-panel">
+                    <div class="auth-head">
+                        <h1 id="loginTitle" class="auth-title">Iniciar sesión</h1>
+                        <p class="auth-subtitle">Elija cómo entra al sistema.</p>
+                    </div>
+                    <!-- Cada opción solo deja entrar a sus roles (lo verifica el servidor) -->
+                    <div id="loginTabs" class="login-tabs" role="tablist" aria-label="Tipo de acceso">
+                        <button type="button" class="login-tab" role="tab" id="loginTabRequester" data-portal="requester" aria-controls="loginForm" aria-selected="false" tabindex="-1">Cliente</button>
+                        <button type="button" class="login-tab" role="tab" id="loginTabStaff" data-portal="staff" aria-controls="loginForm" aria-selected="true">Personal</button>
+                        <button type="button" class="login-tab" role="tab" id="loginTabAdmin" data-portal="admin" aria-controls="loginForm" aria-selected="false" tabindex="-1">Administración</button>
+                    </div>
+                    <!-- Personal y Administración con MS_LOGIN_ENABLED: cuenta Microsoft (botón con la marca oficial) -->
+                    <div id="microsoftLogin" class="ms-login" hidden>
+                        <a id="microsoftLoginBtn" class="ms-signin" href="/auth/microsoft/login?portal=staff">
+                            <svg class="ms-signin-logo" xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 21 21" aria-hidden="true" focusable="false">
+                                <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+                                <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                                <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+                                <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+                            </svg>
+                            <span>Entrar con Microsoft</span>
+                        </a>
+                        <button type="button" id="emergencyAccessLink" class="auth-link auth-link-btn auth-link-small ms-emergency" hidden>Acceso de emergencia</button>
+                    </div>
+                    <form id="loginForm" class="auth-form" role="tabpanel" aria-labelledby="loginTabStaff">
+                        <div class="form-group">
+                            <label for="loginEmail">Correo</label>
+                            <input type="email" id="loginEmail" name="email" autocomplete="username" placeholder="usted@correo.com" required>
+                        </div>
+                        <div class="form-group">
+                            <div class="auth-label-row">
+                                <label for="loginPassword">Contraseña</label>
+                                <button type="button" id="forgotPasswordLink" class="auth-link auth-link-btn auth-link-small">¿La olvidó?</button>
+                            </div>
+                            <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
+                        </div>
+                        <p id="loginAdminNotice" class="auth-notice auth-info" hidden>Por seguridad, le enviaremos un código a su correo después de la contraseña.</p>
+                        <button type="submit" class="btn-submit">Entrar</button>
+                    </form>
+                    <div id="confirmEmailNotice" class="auth-notice" hidden>
+                        <p>Su cuenta todavía no está confirmada.</p>
+                        <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
+                    </div>
+                    <p id="loginExtra" class="login-extra" hidden>
+                        <span id="loginExtraText"></span>
+                        <a id="loginExtraLink" href="#crear-cuenta" class="auth-link auth-link-inline"></a>
+                    </p>
+                </div>
+                <div id="signupPanel" class="auth-form-panel" hidden>
+                    <h1 class="auth-title">Crear cuenta de cliente</h1>
+                    <p class="help-text">Le enviaremos un código de 6 dígitos para confirmar su correo.</p>
+                    <form id="signupForm">
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="signupEmail">Correo</label>
+                            <input type="email" id="signupEmail" name="email" autocomplete="email" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="signupPassword">Contraseña</label>
+                            <input type="password" id="signupPassword" name="password" minlength="8" autocomplete="new-password" required>
+                            <small class="help-text">Mínimo 8 caracteres</small>
+                        </div>
+                        <button type="submit" class="btn-submit">Crear cuenta</button>
+                    </form>
+                    <nav class="auth-links">
+                        <a href="#" class="auth-link">Volver al inicio de sesión</a>
+                    </nav>
+                </div>
+                <div id="forgotPanel" class="auth-form-panel" hidden>
+                    <h1 id="forgotTitle" class="auth-title">Olvidé mi contraseña</h1>
+                    <form id="forgotEmailForm">
+                        <p class="help-text">Escriba el correo de su cuenta. Le enviaremos un código de 6 dígitos.</p>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="forgotEmail">Correo</label>
+                            <input type="email" id="forgotEmail" name="email" autocomplete="email" required>
+                        </div>
+                        <button type="submit" class="btn-submit">Enviar código</button>
+                        <button type="button" id="forgotHaveCode" class="auth-link auth-link-btn">Ya tengo un código</button>
+                    </form>
+                    <form id="forgotCodeForm" hidden>
+                        <p id="forgotNotice" class="help-text" aria-live="polite"></p>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="forgotCodeEmail">Correo</label>
+                            <input type="email" id="forgotCodeEmail" name="email" autocomplete="email" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="forgotCode">Código</label>
+                            <input type="text" id="forgotCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
+                        </div>
+                        <div id="forgotPasswordFields">
+                            <div class="form-group" style="margin-bottom: 16px;">
+                                <label for="forgotNewPassword">Contraseña nueva</label>
+                                <input type="password" id="forgotNewPassword" minlength="8" autocomplete="new-password">
+                                <small class="help-text">Mínimo 8 caracteres</small>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="forgotConfirmPassword">Confirmar contraseña nueva</label>
+                                <input type="password" id="forgotConfirmPassword" minlength="8" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-submit">Restablecer contraseña</button>
+                        <button type="button" id="forgotResend" class="btn-secondary auth-secondary">Reenviar código</button>
+                    </form>
+                    <div id="forgotResult" class="password-reveal" hidden>
+                        <p class="password-reveal-title">Contraseña restablecida</p>
+                        <p>Esta es su contraseña nueva:</p>
+                        <code id="forgotPassword" class="password-value"></code>
+                        <button type="button" id="forgotCopyBtn" class="btn-secondary">Copiar</button>
+                        <p class="password-warning" role="alert">Guárdela ahora; no se volverá a mostrar.</p>
+                        <button type="button" id="forgotToLogin" class="btn-submit">Ir a iniciar sesión</button>
+                    </div>
+                    <nav id="forgotLinks" class="auth-links">
+                        <button type="button" id="forgotBack" class="auth-link auth-link-btn">Volver al inicio de sesión</button>
+                    </nav>
+                </div>
+                <div id="activatePanel" class="auth-form-panel" hidden>
+                    <h1 class="auth-title">Activar cuenta de personal</h1>
+                    <form id="activateForm">
+                        <p class="help-text">Escriba su correo y el código que le llegó en la invitación.</p>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="activateEmail">Correo</label>
+                            <input type="email" id="activateEmail" name="email" autocomplete="email" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="activateCode">Código</label>
+                            <input type="text" id="activateCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
+                        </div>
+                        <button type="submit" id="activateSubmit" class="btn-submit">Activar cuenta</button>
+                        <button type="button" id="activateResend" class="btn-secondary auth-secondary">Reenviar código</button>
+                        <p id="activateNotice" class="help-text" aria-live="polite"></p>
+                    </form>
+                    <div id="activateResult" class="password-reveal" hidden>
+                        <p class="password-reveal-title">Cuenta activada</p>
+                        <p>Esta es su contraseña:</p>
+                        <code id="activatePassword" class="password-value"></code>
+                        <button type="button" id="copyPasswordBtn" class="btn-secondary">Copiar</button>
+                        <p class="password-warning" role="alert">Guárdela ahora; no se volverá a mostrar.</p>
+                        <button type="button" id="activateToLogin" class="btn-submit">Ir a iniciar sesión</button>
+                    </div>
+                    <nav id="activateLinks" class="auth-links">
+                        <a href="#" class="auth-link">Volver al inicio de sesión</a>
+                    </nav>
+                </div>
+            </div>
         </div>
     </section>
 
-    <section id="ticket-form">
-        <h2>Nuevo ticket</h2>
-        <form id="ticketForm">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="title">Título</label>
-                    <input type="text" id="title" name="title" required>
-                </div>
-                <div class="form-group">
-                    <label for="description">Descripción</label>
-                    <textarea id="description" name="description" required></textarea>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="category">Categoría</label>
-                    <select id="category" name="category"></select>
-                </div>
-                <div class="form-group">
-                    <label for="priority">Prioridad</label>
-                    <select id="priority" name="priority"></select>
-                </div>
-            </div>
-            <button type="submit" class="btn-submit">Crear ticket</button>
-        </form>
-    </section>
+<header class="topbar">
+  <button type="button" id="navToggle" class="nav-toggle" aria-label="Abrir menú" aria-controls="sideNav" aria-expanded="false">☰</button>
+  <div class="topbar-brand">
+    <span class="brand-mark" aria-hidden="true">T</span>
+    <span class="brand-text">
+      <span class="brand-name" id="brandName">Mesa de Servicio</span>
+      <span class="brand-sub">American Data</span>
+    </span>
+  </div>
+  <!-- Personal: el buscador abre la paleta de comandos (Ctrl K) -->
+  <button type="button" id="topSearch" class="top-search" aria-haspopup="dialog" aria-keyshortcuts="Control+K" aria-label="Buscar tickets, clientes o número (Ctrl K)">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"/></svg>
+    <span class="top-search-text">Buscar tickets, clientes o #número…</span>
+    <kbd class="top-search-kbd" aria-hidden="true">Ctrl K</kbd>
+  </button>
+  <nav class="topbar-nav" aria-label="Secciones">
+    <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
+    <button type="button" id="navAssistant" class="topbar-tab" hidden>Asistente</button>
+    <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
+    <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
+    <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
+    <button type="button" id="navAccounts" class="topbar-tab" hidden>Cuentas</button>
+    <button type="button" id="navReports" class="topbar-tab" hidden>Reportes <span id="reportsBadge" class="tab-badge" hidden></span></button>
+    <button type="button" id="navAdmin" class="topbar-tab" hidden>Administración</button>
+    <button type="button" id="navProfile" class="topbar-tab" hidden>Mi cuenta</button>
+  </nav>
+  <div class="topbar-section topbar-action">
+    <button type="button" id="openNewTicket" class="btn-primary">+ Nuevo ticket</button>
+  </div>
+  <!-- Avisos de vencimiento y de borradores asignados -->
+  <button type="button" id="navBell" class="nav-bell" aria-haspopup="dialog" aria-expanded="false" aria-controls="bellPanel" aria-label="Avisos" title="Avisos">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    <span id="navBellCount" class="nav-bell-count" aria-hidden="true" hidden></span>
+  </button>
+  <!-- Perfil del personal: Mi cuenta y Cerrar sesión -->
+  <div class="top-profile-box">
+    <button type="button" id="topProfile" class="top-profile" aria-haspopup="menu" aria-expanded="false" aria-controls="profileMenu">
+      <span id="topProfileAvatar" class="top-profile-avatar" aria-hidden="true"></span>
+      <span class="top-profile-text">
+        <span id="topProfileName" class="top-profile-name"></span>
+        <span id="topProfileRole" class="top-profile-role"></span>
+      </span>
+    </button>
+    <div id="profileMenu" class="profile-menu" role="menu" aria-labelledby="topProfile" hidden>
+      <button type="button" id="profileMenuAccount" class="profile-menu-item" role="menuitem">Mi cuenta</button>
+      <button type="button" id="profileMenuLogout" class="profile-menu-item" role="menuitem">Cerrar sesión</button>
+    </div>
+  </div>
+  <div class="topbar-section topbar-user">
+    <span class="topbar-avatar" aria-hidden="true"></span>
+    <span class="topbar-user-text">
+      <span class="topbar-user-name" id="currentUserDisplay"></span>
+      <span class="topbar-user-role"></span>
+      <span id="topbarAvailability" class="topbar-availability" hidden></span>
+    </span>
+    <button type="button" id="switchAccount" class="btn-secondary">Cambiar cuenta</button>
+  </div>
+</header>
 
-    <section id="tickets-list">
-        <h2>Lista de tickets</h2>
-        <div class="filters">
-            <div class="form-group">
-                <label for="statusFilter">Estado</label>
-                <select id="statusFilter" name="status">
+    <aside id="sideNav" class="side-nav" hidden aria-label="Menú">
+        <nav id="sideNavGroups" class="side-nav-groups" aria-label="Vistas"></nav>
+        <!-- Abajo: estado del turno (o del sistema, para el administrador) y Mi cuenta -->
+        <div class="nav-foot">
+            <p id="navShift" class="nav-shift" hidden><span class="nav-shift-dot" aria-hidden="true"></span><span id="navShiftText"></span></p>
+            <div class="nav-foot-links">
+                <button type="button" id="navUser" class="nav-foot-link" data-nav-id="profile">Mi cuenta</button>
+                <span aria-hidden="true">·</span>
+                <button type="button" id="navLogout" class="nav-foot-link">Cerrar sesión</button>
+            </div>
+        </div>
+    </aside>
+    <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
+    <div id="bellPanel" class="bell-panel" role="dialog" aria-labelledby="bellTitle" hidden>
+        <div class="bell-head">
+            <h2 id="bellTitle" class="bell-title">Avisos</h2>
+            <button type="button" id="bellReadAll" class="link-btn bell-read-all">Marcar todas como leídas</button>
+        </div>
+        <ul id="bellList" class="bell-list"></ul>
+    </div>
+
+    <main style="display: none;">
+        <!-- Personal: ruta (Módulo › Sección), título, contexto y acciones de la página -->
+        <header id="pageHead" class="page-head" hidden>
+            <nav class="page-crumb" aria-label="Ruta"><ol id="pageCrumb" class="page-crumb-list"></ol></nav>
+            <div class="page-title-row">
+                <div class="page-titles">
+                    <h1 id="pageTitle" class="page-title"></h1>
+                    <p id="pageContext" class="page-context"></p>
+                </div>
+                <div id="pageActions" class="page-actions">
+                    <!-- Reporte de operación: solo el coordinador (la sección Inicio lo pone aquí) -->
+                    <button type="button" id="sendSummaryNow" class="ui-btn ui-btn-secondary" hidden>Enviar resumen ahora</button>
+                </div>
+            </div>
+        </header>
+        <div class="split">
+            <section id="queuePanel" class="queue-panel" aria-labelledby="queueHeading">
+                <header class="queue-head">
+                    <div class="queue-title-row">
+                        <h1 id="queueHeading" class="queue-heading">Tickets</h1>
+                        <!-- Vista actual (Vencidos, Búsqueda: …); el h1 siempre dice "Tickets" -->
+                        <span id="queueTitle" class="queue-title">Todos abiertos</span>
+                        <span class="queue-sort">· ordenados por vencimiento</span>
+                        <button type="button" id="queueHelp" class="ui-btn ui-btn-secondary ui-btn-icon queue-help" aria-label="Atajos de teclado" title="Atajos de teclado" aria-keyshortcuts="Shift+?">?</button>
+                        <button type="button" id="queueNewTicket" class="ui-btn ui-btn-primary">Nuevo ticket</button>
+                    </div>
+                    <div id="queueViews" class="ui-tabs queue-views" role="tablist" aria-label="Vistas"></div>
+                    <!-- Mis tickets: los vencidos van en su propia sección -->
+                    <!-- Coordinador › Vencidos: cuántos de esta página no tienen causa registrada -->
+                    <p id="queueCauseNotice" class="ui-notice is-warn queue-overdue-notice" hidden></p>
+                    <p id="queueOverdueNotice" class="ui-notice is-danger queue-overdue-notice" hidden>
+                        <span id="queueOverdueText"></span>
+                        <button type="button" id="queueOverdueLink" class="ticket-bar-link">Ver vencidos</button>
+                    </p>
+                    <div class="queue-filters">
+                        <label for="queueStatus" class="sr-only">Estado</label>
+                        <select id="queueStatus" class="queue-chip">
+                            <option value="">+ Estado</option>
+                            <option value="new">Estado: Nuevo</option>
+                            <option value="in_progress">Estado: En proceso</option>
+                            <option value="resolved">Estado: Resuelto</option>
+                            <option value="closed">Estado: Cerrado</option>
+                        </select>
+                        <label for="queueLevel" class="sr-only">Nivel</label>
+                        <select id="queueLevel" class="queue-chip">
+                            <option value="">+ Nivel</option>
+                            <option value="4">Nivel 4 · Crítico</option>
+                            <option value="3">Nivel 3 · Incidente</option>
+                            <option value="2">Nivel 2 · Solicitud estándar</option>
+                            <option value="1">Nivel 1 · Consulta</option>
+                            <option value="0">Nivel 0 · No es soporte</option>
+                            <option value="none">Sin nivel</option>
+                        </select>
+                        <label for="queueAssignee" class="sr-only">Responsable</label>
+                        <select id="queueAssignee" class="queue-chip">
+                            <option value="">+ Responsable</option>
+                            <option value="0">Sin asignar</option>
+                        </select>
+                        <label for="queueSource" class="sr-only">Canal</label>
+                        <select id="queueSource" class="queue-chip">
+                            <option value="">+ Canal</option>
+                            <option value="web">Canal: Web</option>
+                            <option value="email">Canal: Correo</option>
+                        </select>
+                        <div id="queueRequester" class="queue-requester" hidden>
+                            <span id="queueRequesterName"></span>
+                            <button type="button" id="queueRequesterClear" class="link-btn">Quitar filtro</button>
+                        </div>
+                        <span id="queueUpdated" class="queue-updated" aria-live="off"></span>
+                    </div>
+                    <div id="queueNewBanner" class="ui-notice queue-new-banner" role="status" hidden>
+                        <span id="queueNewText"></span>
+                        <button type="button" id="queueNewShow" class="ui-btn ui-btn-primary ui-btn-sm">Mostrar</button>
+                    </div>
+                </header>
+                <section class="ui-card queue-card" aria-label="Lista de tickets">
+                    <!-- Vencidos (coordinador y administrador): cancelar varios con un solo motivo -->
+                    <div id="queueBulk" class="queue-bulk" hidden>
+                        <label class="queue-bulk-all"><input type="checkbox" id="queueSelectAll"> Seleccionar todos</label>
+                        <span id="queueBulkCount" class="queue-bulk-count" aria-live="polite"></span>
+                        <button type="button" id="queueBulkCancel" class="ui-btn ui-btn-danger ui-btn-sm" disabled>Cancelar seleccionados</button>
+                    </div>
+                    <div class="queue-table-wrap">
+                        <table id="queueTable" class="queue-table">
+                            <colgroup>
+                                <col class="col-num">
+                                <col class="col-subject">
+                                <col class="col-level">
+                                <col class="col-owner">
+                                <col class="col-due">
+                                <col class="col-cause">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="col-num">ID</th>
+                                    <th scope="col">Asunto</th>
+                                    <th scope="col" class="col-level">Nivel</th>
+                                    <th scope="col" class="col-owner">Responsable</th>
+                                    <th scope="col" class="col-due">Vence</th>
+                                    <th scope="col" class="col-cause">Causa</th>
+                                </tr>
+                            </thead>
+                            <tbody id="queueBody"></tbody>
+                        </table>
+                        <div id="queueEmpty" class="queue-empty" hidden></div>
+                    </div>
+                    <div class="queue-pager">
+                        <span id="queueTotal" class="queue-total"></span>
+                        <span class="queue-pager-buttons">
+                            <button type="button" id="queuePrev" class="ui-btn ui-btn-secondary ui-btn-sm">Anterior</button>
+                            <span id="queuePage" class="queue-page"></span>
+                            <button type="button" id="queueNext" class="ui-btn ui-btn-secondary ui-btn-sm">Siguiente</button>
+                        </span>
+                    </div>
+                </section>
+            </section>
+            <section id="portalPanel" class="portal-panel" aria-labelledby="portalTitle">
+                <header class="portal-head">
+                    <h1 id="portalTitle" class="portal-title">Mis solicitudes</h1>
+                    <span id="portalTotal" class="portal-total"></span>
+                </header>
+                <ul id="portalList" class="portal-list"></ul>
+                <div id="portalEmpty" class="portal-empty" hidden></div>
+            </section>
+            <section id="listPanel" aria-label="Lista de tickets">
+                <div class="list-filters">
+                    <div class="search-wrapper">
+                        <label for="search" class="sr-only">Buscar tickets</label>
+                        <input type="text" id="search" name="search" placeholder="Buscar tickets">
+                        <button type="button" id="toggleMoreFilters" class="toggle-filters-btn" aria-expanded="false">Más filtros</button>
+                    </div>
+                    <div class="status-pills" role="group" aria-label="Filtrar por estado">
+                        <button type="button" class="pill-btn active" data-status="" aria-pressed="true">Todos</button>
+                        <button type="button" class="pill-btn" data-status="new" aria-pressed="false">Nuevo</button>
+                        <button type="button" class="pill-btn" data-status="in_progress" aria-pressed="false">En proceso</button>
+                        <button type="button" class="pill-btn" data-status="resolved" aria-pressed="false">Resuelto</button>
+                        <button type="button" class="pill-btn" data-status="closed" aria-pressed="false">Cerrado</button>
+                    </div>
+                    <div id="moreFiltersBlock" class="more-filters" style="display: none;">
+                        <div class="form-group">
+                            <label for="categoryFilter">Categoría</label>
+                            <select id="categoryFilter" name="category"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="priorityFilter">Prioridad</label>
+                            <select id="priorityFilter" name="priority"></select>
+                        </div>
+                    </div>
+                </div>
+                <ul id="ticketList" class="ticket-list"></ul>
+            </section>
+            <section id="detailPanel" aria-label="Detalle del ticket">
+                <!-- Personal: el detalle es una página completa, sin barra lateral -->
+                <nav id="ticketBar" class="ticket-bar" aria-label="Navegación del ticket" hidden>
+                    <span class="ticket-bar-mark" aria-hidden="true">T</span>
+                    <button type="button" id="ticketBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver</button>
+                    <span class="ticket-bar-crumb"><span id="ticketCrumbPath">Tickets</span> › <span id="ticketCrumb" class="ui-num"></span></span>
+                    <button type="button" id="ticketHome" class="ticket-bar-link">Ir al inicio</button>
+                    <span class="ticket-bar-steps">
+                        <button type="button" id="ticketPrev" class="ui-btn ui-btn-secondary ui-btn-sm">← Anterior</button>
+                        <button type="button" id="ticketNext" class="ui-btn ui-btn-secondary ui-btn-sm">Siguiente →</button>
+                    </span>
+                </nav>
+                <button type="button" id="backToList">← Volver a la lista</button>
+                <div id="detailContent">
+                    <div class="detail-placeholder">
+                        <p>Selecciona un ticket para ver el detalle</p>
+                    </div>
+                </div>
+            </section>
+            <!-- Técnico › Mis tickets: su turno, su carga y sus borradores -->
+            <aside id="queueAside" class="queue-aside" aria-label="Mi turno y mis borradores" hidden>
+                <section class="ui-card queue-aside-card" aria-labelledby="asideShiftTitle">
+                    <h2 id="asideShiftTitle" class="ui-kicker">Mi turno hoy</h2>
+                    <p id="asideShiftTime" class="queue-aside-big"></p>
+                    <p id="asideShiftLoad" class="queue-aside-text"></p>
+                </section>
+                <section class="ui-card queue-aside-card" aria-labelledby="asideDraftsTitle">
+                    <h2 id="asideDraftsTitle" class="ui-kicker">Mis borradores</h2>
+                    <ul id="asideDrafts" class="queue-aside-list"></ul>
+                    <p class="queue-aside-note">Al confirmar un borrador, el ticket queda a su cargo.</p>
+                </section>
+            </aside>
+        </div>
+
+        <!-- Nuevo ticket / Nueva solicitud: página completa, sin barra lateral -->
+        <section id="newTicketView" class="page-view new-ticket-view" hidden aria-labelledby="newTicketTitle">
+            <nav class="ticket-bar new-ticket-bar" aria-label="Navegación">
+                <span class="ticket-bar-mark" aria-hidden="true">T</span>
+                <button type="button" id="newTicketBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Tickets</button>
+                <span class="ticket-bar-crumb"><span id="newTicketCrumbBase">Tickets</span> / <b id="newTicketCrumb">Nuevo ticket</b></span>
+            </nav>
+            <div class="new-ticket-layout">
+                <form id="ticketForm" class="ui-card new-ticket-form">
+                    <div class="new-ticket-head">
+                        <h1 id="newTicketTitle" class="new-ticket-title">Nuevo ticket</h1>
+                        <p id="newTicketIntro" class="new-ticket-intro">Para registrar un caso que llegó por teléfono o en persona.</p>
+                    </div>
+                    <div id="requesterGroup" class="ui-field requester-group" hidden>
+                        <label for="requesterSearch">Cliente</label>
+                        <div class="requester-row">
+                            <input type="text" id="requesterSearch" class="ui-input" list="requesterOptions" autocomplete="off" placeholder="Buscar por nombre o correo" aria-describedby="requesterHint">
+                            <button type="button" id="forMeBtn" class="ui-btn ui-btn-secondary">Para mí</button>
+                        </div>
+                        <span id="requesterHint" class="ui-help">Escriba al menos 2 letras y elija de la lista. Sin cliente, el ticket queda a su nombre.</span>
+                        <datalist id="requesterOptions"></datalist>
+                    </div>
+                    <div class="new-ticket-row">
+                        <div class="ui-field">
+                            <label for="contactName">Nombre</label>
+                            <input type="text" id="contactName" name="contactName" class="ui-input" autocomplete="name" readonly>
+                        </div>
+                        <div class="ui-field">
+                            <label for="contactEmail">Correo</label>
+                            <input type="email" id="contactEmail" name="contactEmail" class="ui-input" autocomplete="email" readonly>
+                        </div>
+                    </div>
+                    <div class="ui-field">
+                        <label for="contactPhone">Teléfono de contacto</label>
+                        <input type="tel" id="contactPhone" name="contactPhone" class="ui-input" autocomplete="tel" placeholder="8888-1234" maxlength="16" inputmode="numeric" required aria-describedby="contactPhoneHint">
+                        <span id="contactPhoneHint" class="ui-help">El ticket queda a nombre del perfil; la cédula sale del perfil.</span>
+                    </div>
+                    <div class="ui-field">
+                        <label for="title">Asunto</label>
+                        <input type="text" id="title" name="title" class="ui-input" placeholder="Resuma el problema en una línea" required>
+                    </div>
+                    <div class="ui-field">
+                        <label for="description">Descripción</label>
+                        <textarea id="description" name="description" class="ui-input" rows="5" placeholder="Qué pasa, desde cuándo y qué ya se intentó" required></textarea>
+                    </div>
+                    <div class="new-ticket-row">
+                        <div class="ui-field">
+                            <label for="category">Categoría</label>
+                            <select id="category" name="category" class="ui-input"></select>
+                        </div>
+                        <div class="ui-field">
+                            <label for="priority">Prioridad</label>
+                            <select id="priority" name="priority" class="ui-input"></select>
+                        </div>
+                    </div>
+                    <div class="new-ticket-actions">
+                        <button type="button" id="newTicketCancel" class="ui-btn ui-btn-secondary">Cancelar</button>
+                        <button type="submit" id="newTicketSubmit" class="ui-btn ui-btn-primary">Crear ticket</button>
+                    </div>
+                </form>
+                <aside id="newTicketAside" class="new-ticket-aside" hidden>
+                    <section class="ui-card new-ticket-open" aria-labelledby="newTicketOpenTitle">
+                        <h2 id="newTicketOpenTitle" class="ui-kicker new-ticket-open-title">Tickets abiertos</h2>
+                        <ul id="newTicketOpenList" class="home-list"></ul>
+                    </section>
+                    <p class="new-ticket-advice">Revise que el caso no esté ya abierto. Si lo está, mejor agregue un comentario a ese ticket en vez de crear otro.</p>
+                    <button type="button" id="newTicketClientLink" class="ticket-bar-link new-ticket-client-link">Ver ficha del cliente →</button>
+                </aside>
+            </div>
+        </section>
+
+        <section id="invitesView" class="page-view invites-view" hidden aria-labelledby="invitesTitle">
+            <h1 id="invitesTitle" class="view-title">Invitaciones</h1>
+            <p class="view-note invites-intro">Invite personal nuevo y revise las invitaciones que ya envió. Las cuentas se gestionan en Cuentas.</p>
+            <div id="invitesHost" class="invites-host"></div>
+            <details class="ui-card users-details">
+                <summary class="users-summary">Usuarios existentes</summary>
+                <ul id="usersList" class="users-list"></ul>
+            </details>
+        </section>
+
+        <section id="homeView" class="page-view home-view" hidden aria-labelledby="pageTitle">
+            <div id="homeStats" class="home-stats"></div>
+            <div id="homeIncidents" class="home-incidents" hidden></div>
+            <div class="home-grid">
+                <section class="ui-card home-panel" aria-labelledby="homeAttentionTitle">
+                    <div class="ui-card-head">
+                        <h2 id="homeAttentionTitle" class="ui-card-title">Requieren su atención</h2>
+                        <button type="button" id="homeAttentionAll" class="ticket-bar-link">Ver todos →</button>
+                    </div>
+                    <ul id="homeAttention" class="home-list"></ul>
+                </section>
+                <section id="homeTeamPanel" class="ui-card home-panel" aria-labelledby="homeTeamTitle" hidden>
+                    <div class="ui-card-head">
+                        <h2 id="homeTeamTitle" class="ui-card-title">Equipo ahora</h2>
+                        <span id="homeTeamCount" class="home-team-count"></span>
+                    </div>
+                    <ul id="homeTeam" class="home-list home-team"></ul>
+                    <p class="home-panel-foot">La barra es la carga de cada técnico (tickets abiertos asignados).</p>
+                </section>
+            </div>
+        </section>
+
+        <section id="profileView" class="page-view account-view" hidden aria-labelledby="profileTitle">
+          <div class="account-layout">
+            <aside id="accountAside" class="account-aside" aria-label="Secciones de Mi cuenta">
+                <div class="account-who">
+                    <span id="accountAvatar" class="aa-avatar account-avatar" aria-hidden="true"></span>
+                    <span class="account-who-text">
+                        <span id="accountWhoName" class="account-who-name"></span>
+                        <span id="accountWhoRole" class="account-who-role"></span>
+                    </span>
+                </div>
+                <nav id="accountTabs" class="account-tabs" aria-label="Mi cuenta">
+                    <button type="button" class="account-tab" data-account-tab="perfil">Perfil</button>
+                    <button type="button" class="account-tab" data-account-tab="correo">Correo</button>
+                    <button type="button" id="accountTabSeguridad" class="account-tab" data-account-tab="seguridad">Seguridad</button>
+                    <button type="button" class="account-tab" data-account-tab="turno" id="accountTabTurno">Disponibilidad y horario</button>
+                </nav>
+                <button type="button" id="accountHome" class="ticket-bar-link account-home">← Volver al inicio</button>
+                <button type="button" id="accountLogout" class="ui-btn ui-btn-secondary account-logout">Cerrar sesión</button>
+            </aside>
+            <div class="account-main">
+            <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
+            <p id="profileIntro" class="view-note">Antes de crear tickets necesitamos su nombre completo, cédula y teléfono.</p>
+            <section id="accountStaffProfile" class="account-section" data-account-tab="perfil" aria-labelledby="accountStaffProfileTitle" hidden>
+                <h2 id="accountStaffProfileTitle" class="account-title">Perfil</h2>
+                <p class="account-current">Así lo ve el resto del equipo.</p>
+                <dl class="td-props account-facts">
+                    <dt>Nombre</dt><dd id="accountStaffName"></dd>
+                    <dt>Rol</dt><dd id="accountStaffRole"></dd>
+                </dl>
+            </section>
+            <section id="accountPersonal" class="account-section" data-account-tab="perfil" aria-labelledby="accountPersonalTitle">
+            <h2 id="accountPersonalTitle" class="account-title">Datos personales</h2>
+            <form id="profileForm" class="profile-form">
+                <div class="form-group">
+                    <label for="profileName">Nombre completo</label>
+                    <input type="text" id="profileName" maxlength="100" autocomplete="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="profileIdNumber">Cédula</label>
+                    <input type="text" id="profileIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
+                    <small class="help-text">9 dígitos, o 11 o 12 si es DIMEX</small>
+                </div>
+                <div class="form-group">
+                    <label for="profilePhone">Teléfono</label>
+                    <input type="tel" id="profilePhone" placeholder="8888-1234" maxlength="16" inputmode="numeric" autocomplete="tel" required>
+                </div>
+                <p id="profileLockedNote" class="help-text" hidden>El nombre y la cédula quedaron fijos al crear su primer ticket. Si hay un error, contacte a soporte.</p>
+                <div class="profile-actions">
+                    <button type="submit" class="btn-submit">Guardar</button>
+                    <button type="button" id="profileCancel" class="btn-secondary" hidden>Cancelar</button>
+                </div>
+            </form>
+            </section>
+
+            <section id="accountPhone" class="account-section" data-account-tab="perfil" aria-labelledby="accountPhoneTitle" hidden>
+                <h2 id="accountPhoneTitle" class="account-title">Teléfono</h2>
+                <form id="accountPhoneForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="accountPhoneInput">Teléfono</label>
+                        <input type="tel" id="accountPhoneInput" placeholder="8888-1234" maxlength="16" inputmode="numeric" autocomplete="tel" required>
+                    </div>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Guardar teléfono</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="accountAvailability" class="account-section" data-account-tab="turno" aria-labelledby="accountAvailabilityTitle" hidden>
+                <h2 id="accountAvailabilityTitle" class="account-title">Disponibilidad</h2>
+                <p id="ownAvailabilityNow" class="availability-now"></p>
+                <p class="account-current">Es automática: Disponible dentro de su horario y Ausente fuera de él. Las vacaciones y las ausencias empiezan solas el primer día del periodo.</p>
+                <h3 class="availability-subtitle">Vacaciones y ausencias</h3>
+                <ul id="ownPeriods" class="periods-list"></ul>
+                <form id="accountAvailabilityForm" class="profile-form period-form">
+                    <div class="form-group">
+                        <label for="ownPeriodKind">Tipo</label>
+                        <select id="ownPeriodKind" required>
+                            <option value="vacation">Vacaciones</option>
+                            <option value="incapacity">Ausencia</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ownPeriodStart">Primer día</label>
+                        <input type="date" id="ownPeriodStart" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ownPeriodEnd">Último día</label>
+                        <input type="date" id="ownPeriodEnd" required>
+                    </div>
+                    <small class="help-text">Mientras dure, las alertas de sus tickets van a los coordinadores y no recibe asignaciones automáticas.</small>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Registrar</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="accountSchedule" class="account-section" data-account-tab="turno" aria-labelledby="accountScheduleTitle" hidden>
+                <h2 id="accountScheduleTitle" class="account-title">Horario</h2>
+                <p id="accountScheduleSummary" class="account-current"></p>
+                <ul id="accountScheduleDays" class="schedule-view"></ul>
+                <small class="help-text">Lo definen el coordinador o el administrador. Fuera de su horario no recibe tickets automáticamente.</small>
+            </section>
+
+            <section id="accountEmail" class="account-section" data-account-tab="correo" aria-labelledby="accountEmailTitle">
+                <h2 id="accountEmailTitle" class="account-title">Correo</h2>
+                <p class="account-current">Correo actual: <strong id="accountCurrentEmail"></strong></p>
+                <form id="emailChangeForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="emailChangeNew">Correo nuevo</label>
+                        <input type="email" id="emailChangeNew" maxlength="150" autocomplete="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="emailChangePassword">Contraseña actual</label>
+                        <input type="password" id="emailChangePassword" autocomplete="current-password" required>
+                    </div>
+                    <small class="help-text">Le enviaremos un código al correo nuevo. El cambio se aplica al confirmarlo.</small>
+                    <p id="emailChangeError" class="form-error" role="alert" hidden></p>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Enviar código</button>
+                    </div>
+                </form>
+                <form id="emailCodeForm" class="profile-form" hidden>
+                    <p id="emailCodeNotice" class="help-text" aria-live="polite"></p>
+                    <div class="form-group">
+                        <label for="emailCodeInput">Código de 6 dígitos</label>
+                        <input type="text" id="emailCodeInput" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                    </div>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Confirmar correo</button>
+                        <button type="button" id="emailCodeResend" class="btn-secondary" disabled>Reenviar código</button>
+                        <button type="button" id="emailCodeCancel" class="btn-secondary">Cancelar</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="accountPassword" class="account-section" data-account-tab="seguridad" aria-labelledby="accountPasswordTitle">
+                <h2 id="accountPasswordTitle" class="account-title">Contraseña</h2>
+                <form id="passwordForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="passwordCurrent">Contraseña actual</label>
+                        <input type="password" id="passwordCurrent" autocomplete="current-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="passwordNew">Contraseña nueva</label>
+                        <input type="password" id="passwordNew" autocomplete="new-password" required>
+                        <small id="passwordHint" class="help-text"></small>
+                    </div>
+                    <div class="form-group">
+                        <label for="passwordConfirm">Confirmar contraseña nueva</label>
+                        <input type="password" id="passwordConfirm" autocomplete="new-password" required>
+                    </div>
+                    <small class="help-text">Al cambiarla se cierran sus sesiones en otros dispositivos.</small>
+                    <div class="profile-actions">
+                        <button type="submit" class="btn-submit">Cambiar contraseña</button>
+                    </div>
+                </form>
+            </section>
+            </div>
+          </div>
+        </section>
+
+        <!-- Coordinador: Tickets › Incidentes, Equipo › Carga y Equipo › Disponibilidad (el título está en la cabecera) -->
+        <section id="listView" class="page-view list-view" hidden aria-labelledby="pageTitle">
+            <div id="listViewBody" class="ui-card list-view-card"></div>
+            <p id="listViewNote" class="view-note list-view-note"></p>
+        </section>
+
+        <section id="directoryView" class="page-view" hidden aria-labelledby="directoryTitle">
+            <h1 id="directoryTitle" class="view-title">Directorio</h1>
+            <div class="directory-filters">
+                <label for="directorySearch" class="sr-only">Buscar por nombre o correo</label>
+                <input type="search" id="directorySearch" placeholder="Buscar por nombre o correo">
+                <label for="directoryRole" class="sr-only">Filtrar por rol</label>
+                <select id="directoryRole">
                     <option value="">Todos</option>
-                    <option value="new">Nuevo</option>
-                    <option value="in_progress">En proceso</option>
-                    <option value="resolved">Resuelto</option>
-                    <option value="closed">Cerrado</option>
+                    <option value="requester">Solicitantes</option>
+                    <option value="technician">Técnicos</option>
+                    <option value="coordinator">Coordinadores</option>
+                    <option value="admin">Administradores</option>
+                </select>
+                <label for="directoryState" class="sr-only">Filtrar por estado</label>
+                <select id="directoryState">
+                    <option value="">Todos los estados</option>
+                    <option value="active">Activas</option>
+                    <option value="inactive">Desactivadas</option>
+                </select>
+            </div>
+            <div class="table-scroll">
+                <table class="directory-table">
+                    <thead>
+                        <tr id="directoryHead">
+                            <th scope="col">Nombre</th>
+                            <th scope="col">Correo</th>
+                            <th scope="col">Rol</th>
+                            <th scope="col">Teléfono</th>
+                            <th scope="col">Cédula</th>
+                            <th scope="col">Tickets creados</th>
+                            <th scope="col">Abiertos asignados</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col" class="admin-only-col">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="directoryBody"></tbody>
+                </table>
+            </div>
+            <p id="directoryEmpty" class="view-note" hidden>No hay usuarios con esos filtros.</p>
+        </section>
+
+        <section id="accountsView" class="page-view" hidden aria-labelledby="accountsTitle">
+            <h1 id="accountsTitle" class="view-title">Cuentas</h1>
+            <section id="accountsTeam" class="account-section team-week-section" data-account-section="team" aria-labelledby="accountsTitle">
+                <div class="team-week-head">
+                    <p id="teamWeekLabel" class="team-week-label"></p>
+                    <div class="team-week-nav">
+                        <button type="button" id="teamPrevWeek" class="ui-btn ui-btn-secondary ui-btn-sm">← Semana anterior</button>
+                        <button type="button" id="teamNextWeek" class="ui-btn ui-btn-secondary ui-btn-sm">Semana siguiente →</button>
+                        <button type="button" id="teamInvite" class="ui-btn ui-btn-primary ui-btn-sm">Invitar personal</button>
+                    </div>
+                </div>
+                <!-- Contenedor de la cuadrícula y del resumen: los botones de acciones se manejan aquí -->
+                <div id="teamBody" class="team-body">
+                    <section class="ui-card team-week" aria-label="Horario semanal">
+                        <div id="teamWeekGrid" class="team-week-grid" role="table" aria-label="Horario de la semana"></div>
+                    </section>
+                    <section id="teamSelected" class="ui-card team-selected" aria-live="polite" hidden></section>
+                </div>
+                <p class="team-week-note">Haga clic en una persona para ver su resumen. Los turnos de coordinadores son informativos y no reciben asignación automática. Al desactivar un técnico, sus tickets abiertos quedan sin asignar.</p>
+                <p id="teamEmpty" class="view-note" hidden>No hay personal.</p>
+            </section>
+            <!-- Solicitudes de cambio del coordinador: hoy no se muestran en ninguna opción del menú -->
+            <section id="accountsMyRequests" class="account-section" data-account-section="requests" aria-labelledby="myRequestsTitle" hidden>
+                <h2 id="myRequestsTitle" class="account-title">Mis solicitudes</h2>
+                <ul id="myRequestsList" class="changes-list"></ul>
+                <p id="myRequestsEmpty" class="view-note" hidden>Todavía no ha creado solicitudes.</p>
+            </section>
+        </section>
+
+        <section id="reportsView" class="page-view reports-view" hidden aria-labelledby="reportsTitle">
+            <div id="reportsListPane" class="reports-pane">
+                <h1 id="reportsTitle" class="view-title">Reportes de cuentas</h1>
+                <p class="view-note reports-intro">Cuentas de solicitante reportadas por el personal. El reporte solo marca la cuenta; para bloquearla use Desactivar.</p>
+                <div class="directory-filters reports-filters">
+                    <label for="reportsStatus" class="sr-only">Filtrar por estado</label>
+                    <select id="reportsStatus" class="ui-input">
+                        <option value="open">Abiertos</option>
+                        <option value="confirmed">Confirmados</option>
+                        <option value="dismissed">Descartados</option>
+                        <option value="">Todos</option>
+                    </select>
+                    <div id="reportsAccountFilter" class="reports-account-filter" hidden>
+                        <span id="reportsAccountName"></span>
+                        <button type="button" id="reportsAccountClear" class="link-btn">Quitar filtro</button>
+                    </div>
+                </div>
+                <ul id="reportsList" class="reports-list"></ul>
+                <div id="reportsEmpty" class="reports-empty" hidden></div>
+            </div>
+            <!-- Revisión de un reporte (P-Reporte) -->
+            <div id="reportReview" class="report-review" hidden>
+                <nav class="ticket-bar report-review-bar" aria-label="Navegación">
+                    <button type="button" id="reportReviewBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Reportes de cuentas</button>
+                    <span class="ticket-bar-crumb">Reportes de cuentas / <b id="reportReviewCrumb"></b></span>
+                </nav>
+                <div class="report-review-layout">
+                    <div class="report-review-main">
+                        <div class="report-review-head">
+                            <p id="reportReviewKicker" class="report-review-kicker"></p>
+                            <h1 id="reportReviewTitle" class="report-review-title"></h1>
+                            <p id="reportReviewBy" class="report-review-by"></p>
+                        </div>
+                        <section class="ui-card td-card" aria-labelledby="reportReviewCommentTitle">
+                            <h2 id="reportReviewCommentTitle" class="ui-kicker">Comentario de quien reporta</h2>
+                            <p id="reportReviewComment" class="report-review-text"></p>
+                        </section>
+                        <section class="ui-card td-card" aria-labelledby="reportReviewFactsTitle">
+                            <h2 id="reportReviewFactsTitle" class="ui-kicker">Lo que sabe el sistema</h2>
+                            <dl id="reportReviewFacts" class="draft-ai-facts"></dl>
+                        </section>
+                        <section class="ui-card report-review-history" aria-labelledby="reportReviewHistoryTitle">
+                            <h2 id="reportReviewHistoryTitle" class="ui-kicker report-review-history-title">Historial de la cuenta</h2>
+                            <ul id="reportReviewHistory" class="home-list"></ul>
+                        </section>
+                    </div>
+                    <form id="reportDecisionForm" class="ui-card report-decision" aria-labelledby="reportDecisionTitle">
+                        <h2 id="reportDecisionTitle" class="report-decision-title">Su decisión</h2>
+                        <div id="reportDecisionChoices" class="report-decision-choices" role="radiogroup" aria-label="Decisión">
+                            <button type="button" class="report-choice" role="radio" data-decision="confirm" aria-checked="true">Confirmar</button>
+                            <button type="button" class="report-choice" role="radio" data-decision="dismiss" aria-checked="false" tabindex="-1">Descartar</button>
+                        </div>
+                        <p id="reportDecisionOwn" class="ui-notice is-warn" hidden>Usted hizo este reporte: puede retirarlo, pero la confirmación la da otra persona.</p>
+                        <div class="ui-field">
+                            <label for="reportDecisionNote">Nota (obligatoria)</label>
+                            <textarea id="reportDecisionNote" class="ui-input" rows="3" maxlength="500" placeholder="Por qué tomó esta decisión…" required></textarea>
+                        </div>
+                        <label id="reportDeactivateRow" class="report-deactivate" hidden>
+                            <input type="checkbox" id="reportDeactivate">
+                            <span>Desactivar también la cuenta<br><small>Cierra sus sesiones. Se puede reactivar.</small></span>
+                        </label>
+                        <button type="submit" id="reportDecisionSubmit" class="ui-btn ui-btn-danger">Confirmar reporte</button>
+                        <p class="report-decision-foot">El cliente no recibe ningún aviso. La decisión queda en el registro de cambios.</p>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <section id="draftsView" class="page-view drafts-view" hidden aria-labelledby="draftsTitle">
+            <div class="drafts-layout">
+                <section class="drafts-side" aria-labelledby="draftsTitle">
+                    <div class="drafts-side-head">
+                        <h1 id="draftsTitle" class="drafts-title">Borradores de correo</h1>
+                        <p id="draftsIntro" class="drafts-intro">La IA leyó estos correos. Usted decide si se vuelven ticket.</p>
+                        <div id="draftsFilterField" class="ui-field drafts-filter" hidden>
+                            <label for="draftsFilter">Mostrar</label>
+                            <select id="draftsFilter" class="ui-input">
+                                <option value="all">Todos</option>
+                                <option value="mine">Mis borradores</option>
+                                <option value="none">Sin revisor</option>
+                            </select>
+                        </div>
+                    </div>
+                    <ul id="draftsList" class="drafts-list" aria-label="Borradores"></ul>
+                </section>
+                <div id="draftDetail" class="draft-detail">
+                    <div id="draftPlaceholder" class="draft-placeholder"></div>
+                    <div id="draftContent" class="draft-content" hidden>
+                        <div class="draft-head">
+                            <div class="draft-head-text">
+                                <p id="draftNumber" class="draft-number"></p>
+                                <h2 id="draftSubject" class="draft-subject"></h2>
+                                <p id="draftMeta" class="draft-meta"></p>
+                                <p id="draftAssignee" class="draft-assignee"></p>
+                            </div>
+                            <span id="draftTag" class="ui-tag"></span>
+                        </div>
+                        <div id="draftFlags" class="requester-tags draft-flags" hidden>
+                            <span id="draftFlagTags" class="requester-tag-list"></span>
+                            <button type="button" id="draftReportBtn" class="ticket-bar-link">Reportar cuenta</button>
+                        </div>
+                        <p id="draftReason" class="ui-notice is-warn draft-reason" hidden></p>
+                        <div id="draftReassignField" class="ui-field draft-reassign" hidden>
+                            <label for="draftReassign">Reasignar a</label>
+                            <select id="draftReassign" class="ui-input"></select>
+                        </div>
+                        <h3 class="sr-only">Correo original</h3>
+                        <pre id="draftBody" class="ui-card draft-body" tabindex="0"></pre>
+                        <div id="draftAttachments" class="draft-attachments" aria-label="Adjuntos del correo" hidden></div>
+                        <section class="draft-ai-box" aria-labelledby="draftAiTitle">
+                            <h3 id="draftAiTitle" class="draft-ai-title">LO QUE PROPONE LA IA</h3>
+                            <div id="draftAi" class="draft-ai"></div>
+                        </section>
+                        <form id="draftForm" class="ui-card draft-form">
+                            <h3 class="draft-form-title">Datos del ticket</h3>
+                            <div class="ui-field">
+                                <label for="draftTitle">Título</label>
+                                <input type="text" id="draftTitle" class="ui-input" maxlength="200" required>
+                            </div>
+                            <div class="new-ticket-row">
+                                <div class="ui-field">
+                                    <label for="draftCategory">Categoría</label>
+                                    <select id="draftCategory" class="ui-input" required></select>
+                                </div>
+                                <div class="ui-field">
+                                    <label for="draftPriority">Prioridad</label>
+                                    <select id="draftPriority" class="ui-input" required></select>
+                                </div>
+                            </div>
+                            <div class="ui-field">
+                                <label for="draftDescription">Descripción</label>
+                                <textarea id="draftDescription" class="ui-input" rows="5" required></textarea>
+                            </div>
+                            <div class="new-ticket-row">
+                                <div class="ui-field">
+                                    <label for="draftPhone">Teléfono</label>
+                                    <input type="tel" id="draftPhone" class="ui-input" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
+                                </div>
+                                <div class="ui-field">
+                                    <label for="draftIdNumber">Cédula</label>
+                                    <input type="text" id="draftIdNumber" class="ui-input" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
+                                </div>
+                            </div>
+                            <p id="draftNotYours" class="ui-notice draft-not-yours" hidden>Solo su revisor o un coordinador puede crear el ticket o descartar este borrador.</p>
+                            <div id="draftActions" class="draft-actions">
+                                <button type="submit" id="draftConfirmBtn" class="ui-btn ui-btn-primary">Crear ticket</button>
+                                <button type="button" id="draftDetailsBtn" class="ui-btn ui-btn-secondary">Pedir más detalles</button>
+                                <button type="button" id="draftDiscardBtn" class="ui-btn ui-btn-quiet-danger">Descartar</button>
+                                <span id="draftDetailsHint" class="draft-actions-hint">"Pedir más detalles" le escribe al remitente y deja el correo aquí hasta que responda.</span>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="adminAccountsView" class="page-view admin-accounts-view" hidden aria-labelledby="adminAccountsTitle">
+            <div class="aa-main">
+                <div class="aa-head">
+                    <h1 id="adminAccountsTitle" class="view-title">Cuentas</h1>
+                    <label for="aaSearch" class="sr-only">Nombre o correo</label>
+                    <input type="search" id="aaSearch" class="ui-input aa-search" placeholder="Nombre o correo" maxlength="150">
+                    <button type="button" id="aaInvite" class="ui-btn ui-btn-primary ui-btn-sm">Invitar personal</button>
+                </div>
+                <div id="aaQuick" class="aa-quick" role="group" aria-label="Filtros rápidos">
+                    <button type="button" class="aa-quick-btn" data-filter="all" aria-pressed="true">Todas <span class="aa-quick-count" data-count="all"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="staff" aria-pressed="false">Personal <span class="aa-quick-count" data-count="staff"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="clients" aria-pressed="false">Clientes <span class="aa-quick-count" data-count="clients"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="locked" aria-pressed="false">Bloqueadas <span class="aa-quick-count" data-count="locked" data-tone="warn"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="reported" aria-pressed="false">Reportadas <span class="aa-quick-count" data-count="reported" data-tone="alert"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="unverified" aria-pressed="false">Sin verificar <span class="aa-quick-count" data-count="unverified"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="invitations" aria-pressed="false">Invitaciones <span class="aa-quick-count" data-count="invitations"></span></button>
+                </div>
+                <div class="aa-filters">
+                    <label class="aa-schedule-toggle">
+                        <input type="checkbox" id="aaScheduleOn"> Filtrar por horario
+                    </label>
+                </div>
+                <div id="aaScheduleFields" class="aa-schedule-fields" hidden>
+                    <label for="aaDay">Día</label>
+                    <select id="aaDay">
+                        <option value="0">Lunes</option>
+                        <option value="1">Martes</option>
+                        <option value="2">Miércoles</option>
+                        <option value="3">Jueves</option>
+                        <option value="4">Viernes</option>
+                        <option value="5">Sábado</option>
+                        <option value="6">Domingo</option>
+                    </select>
+                    <label for="aaStart">Entrada</label>
+                    <input type="time" id="aaStart" value="08:00" step="60" required>
+                    <label for="aaEnd">Salida</label>
+                    <input type="time" id="aaEnd" value="17:00" step="60" required>
+                    <label for="aaMatch">Coincidencia</label>
+                    <select id="aaMatch">
+                        <option value="covers">Cubre todo el rango</option>
+                        <option value="overlaps">Coincide en parte</option>
+                    </select>
+                    <p class="aa-schedule-note">Solo técnicos y coordinadores con horario ese día.</p>
+                </div>
+                <ul id="aaBody" class="aa-list" aria-label="Cuentas"></ul>
+                <div id="aaEmpty" class="aa-empty" hidden></div>
+            </div>
+            <aside id="aaPanel" class="aa-panel" aria-label="Detalle de la cuenta">
+                <button type="button" id="aaBack" class="link-btn aa-back">← Volver a la lista</button>
+                <div id="aaDetail">
+                    <p class="sd-muted">Elija una cuenta para ver el detalle.</p>
+                </div>
+            </aside>
+        </section>
+
+        <!-- Reporte de vencimiento: página completa, sin barra lateral -->
+        <section id="overdueReportView" class="page-view od-view" hidden aria-labelledby="odTitle">
+            <nav class="ticket-bar od-bar" aria-label="Navegación">
+                <span class="ticket-bar-mark" aria-hidden="true">T</span>
+                <button type="button" id="odBack" class="ui-btn ui-btn-navy ui-btn-sm">← Volver a Vencidos</button>
+                <span class="ticket-bar-crumb">Vencidos / <b id="odCrumb"></b></span>
+            </nav>
+            <div id="odContent" class="od-content"></div>
+        </section>
+
+        <section id="adminView" class="page-view" hidden aria-labelledby="adminTitle">
+            <h1 id="adminTitle" class="view-title">Administración</h1>
+            <div class="admin-grid">
+                <article class="admin-card" data-admin-section="health">
+                    <h2>Estado del sistema</h2>
+                    <dl id="adminStatus" class="admin-status"></dl>
+                </article>
+                <article class="admin-card" data-admin-section="health">
+                    <h2>Usuarios por rol</h2>
+                    <ul id="adminUsersByRole" class="count-list"></ul>
+                </article>
+                <article class="admin-card" data-admin-section="health">
+                    <h2>Tickets por estado</h2>
+                    <ul id="adminTicketsByStatus" class="count-list"></ul>
+                </article>
+                <article class="admin-card" data-admin-section="health">
+                    <h2>IA de correos</h2>
+                    <ul id="adminAiAnalysis" class="count-list"></ul>
+                    <p id="adminAiAccuracy" class="admin-ai-accuracy"></p>
+                    <button type="button" id="analyzeMissing" class="btn-secondary">Analizar tickets sin nivel</button>
+                </article>
+                <article class="admin-card" data-admin-section="health">
+                    <h2>Copia de seguridad</h2>
+                    <p class="admin-text">Descarga una copia completa de la base de datos. Guárdala en un lugar seguro: contiene datos personales.</p>
+                    <button type="button" id="downloadBackup" class="btn-secondary">Descargar copia</button>
+                </article>
+                <article class="admin-card" data-admin-section="health">
+                    <h2>Resumen diario</h2>
+                    <p id="summaryStatus" class="admin-text"></p>
+                    <p class="admin-text">Es un reporte de operación: lo envía un coordinador desde su Inicio.</p>
+                </article>
+                <article class="admin-card" data-admin-section="health">
+                    <h2>Alertas</h2>
+                    <p id="alertsStatus" class="admin-text"></p>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="approvals">
+                    <div class="admin-card-head">
+                        <h2>Solicitudes pendientes</h2>
+                    </div>
+                    <ul id="pendingRequestsList" class="changes-list"></ul>
+                    <p id="pendingRequestsEmpty" class="admin-text" hidden>No hay solicitudes pendientes.</p>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="changes">
+                    <div class="admin-card-head">
+                        <h2>Registro de cambios</h2>
+                    </div>
+                    <div id="changesQuick" class="aa-quick changes-quick" role="group" aria-label="Filtros rápidos">
+                        <button type="button" class="aa-quick-btn" data-action="" aria-pressed="true">Todo</button>
+                        <button type="button" class="aa-quick-btn" data-action="conversation_viewed" aria-pressed="false">Accesos a conversaciones</button>
+                        <button type="button" class="aa-quick-btn" data-action="attachment_downloaded" aria-pressed="false">Adjuntos descargados</button>
+                    </div>
+                    <div class="directory-filters">
+                        <label for="changesAccount" class="sr-only">Filtrar por cuenta</label>
+                        <input type="search" id="changesAccount" placeholder="Cuenta: nombre o correo" maxlength="150">
+                        <label for="changesAction" class="sr-only">Filtrar por acción</label>
+                        <select id="changesAction">
+                            <option value="">Todas las acciones</option>
+                        </select>
+                    </div>
+                    <ul id="changesList" class="changes-list"></ul>
+                    <p id="changesEmpty" class="admin-text" hidden>No hay cambios con esos filtros.</p>
+                    <p class="admin-text changes-note">Cada vez que el administrador abre una conversación queda aquí, con su motivo. Así el acceso existe para casos justificados y siempre se puede revisar.</p>
+                    <div class="changes-pager">
+                        <button type="button" id="changesPrev" class="btn-secondary">Anterior</button>
+                        <span id="changesPage" aria-live="polite"></span>
+                        <button type="button" id="changesNext" class="btn-secondary">Siguiente</button>
+                    </div>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="health">
+                    <div class="admin-card-head">
+                        <h2>Registros del servidor</h2>
+                        <button type="button" id="refreshLogs" class="btn-secondary">Actualizar</button>
+                    </div>
+                    <pre id="adminLogs" class="admin-logs" tabindex="0"></pre>
+                </article>
+            </div>
+            <p class="view-note" data-admin-section="health">Los cambios al código fuente se hacen con Git y GitHub, no desde esta página.</p>
+        </section>
+        <footer id="staffFooter" class="staff-footer" hidden>
+            <img id="statusLogo" class="staff-logo" src="img/american-data.svg" alt="American Data Networks" height="26">
+        </footer>
+    </main>
+
+    <footer id="portalFooter" class="portal-footer" hidden>
+        <span>Centro de Soporte</span>
+        <img id="portalLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
+    </footer>
+
+
+    <div id="errorMessage" class="error" role="alert"></div>
+    <div id="successMessage" class="success"></div>
+    <!-- Avisos breves abajo (toast); cada aviso puede llevar un botón, por ejemplo "Deshacer" -->
+    <div id="toastRegion" class="ui-toast-region" aria-live="polite"></div>
+
+    <!-- Paleta de comandos (Ctrl K) -->
+    <dialog id="paletteDialog" class="ui-modal palette" aria-label="Paleta de comandos">
+        <div class="palette-head">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"/></svg>
+            <label for="paletteInput" class="sr-only">Comando o búsqueda</label>
+            <input type="text" id="paletteInput" class="palette-input" placeholder="Escriba un comando, un cliente o #número" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="paletteList" aria-autocomplete="list">
+            <button type="button" id="paletteClose" class="palette-esc" aria-label="Cerrar">Esc</button>
+        </div>
+        <div id="paletteList" class="palette-list" role="listbox" aria-label="Resultados"></div>
+        <p class="palette-foot" aria-hidden="true">↑ ↓ PARA MOVERSE · ENTER PARA ABRIR · ESC PARA CERRAR</p>
+    </dialog>
+
+    <!-- Hoja de ayuda de atajos (?) -->
+    <dialog id="shortcutsDialog" class="ui-modal shortcuts" aria-labelledby="shortcutsTitle">
+        <div class="shortcuts-head">
+            <h2 id="shortcutsTitle" class="ui-modal-title">Atajos de teclado</h2>
+            <button type="button" id="shortcutsClose" class="ui-btn ui-btn-secondary ui-btn-sm">Cerrar</button>
+        </div>
+        <dl id="shortcutsList" class="shortcuts-list"></dl>
+        <p class="shortcuts-foot">Los atajos no funcionan mientras escribe en un cuadro de texto.</p>
+    </dialog>
+
+    <dialog id="reportDialog" class="app-dialog" aria-labelledby="reportDialogTitle">
+        <form id="reportForm" class="profile-form">
+            <h2 id="reportDialogTitle" class="modal-title">Reportar cuenta</h2>
+            <p id="reportDialogTarget" class="help-text"></p>
+            <div id="reportExisting" class="report-existing" role="status" hidden>
+                <p id="reportExistingText"></p>
+                <button type="button" id="reportExistingLink" class="link-btn">Ver en Reportes</button>
+            </div>
+            <div class="form-group">
+                <label for="reportReason">Motivo</label>
+                <select id="reportReason" required>
+                    <option value="foreign_id">Cédula ajena</option>
+                    <option value="name_mismatch">El nombre no coincide</option>
+                    <option value="repeated_tickets">Tickets repetidos o masivos</option>
+                    <option value="fake_data">Datos falsos</option>
+                    <option value="other">Otro</option>
                 </select>
             </div>
             <div class="form-group">
-                <label for="categoryFilter">Categoría</label>
-                <select id="categoryFilter" name="category"></select>
+                <label for="reportComment" id="reportCommentLabel">Comentario (opcional)</label>
+                <textarea id="reportComment" maxlength="500" rows="3"></textarea>
             </div>
+            <small class="help-text">El solicitante no verá este reporte y su cuenta sigue activa.</small>
+            <p id="reportError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="reportCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Enviar reporte</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <dialog id="conversationDialog" class="app-dialog" aria-labelledby="conversationDialogTitle">
+        <form id="conversationForm" class="profile-form">
+            <h2 id="conversationDialogTitle" class="modal-title">Ver conversación</h2>
+            <p class="help-text">Como administrador, usted no participa en los tickets. Puede leer esta conversación en solo lectura si tiene un motivo.</p>
             <div class="form-group">
-                <label for="priorityFilter">Prioridad</label>
-                <select id="priorityFilter" name="priority"></select>
+                <label for="conversationReason">Motivo (obligatorio)</label>
+                <input type="text" id="conversationReason" minlength="5" maxlength="150" required
+                       placeholder="Por ejemplo: revisión de una queja del cliente">
             </div>
+            <small class="help-text">Este acceso quedará en el Registro de cambios con su nombre, el ticket, el motivo y la hora. Podrá descargar los adjuntos durante 1 hora.</small>
+            <p id="conversationError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="conversationCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Ver en solo lectura</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="scheduleDialog" class="app-dialog" aria-labelledby="scheduleDialogTitle">
+        <form id="scheduleForm" class="profile-form">
+            <h2 id="scheduleDialogTitle" class="modal-title">Horario</h2>
+            <p id="scheduleTarget" class="help-text"></p>
+            <div id="scheduleRows" class="schedule-rows"></div>
+            <small class="help-text">Hora de la oficina. Un día sin marcar es un día que no trabaja.</small>
+            <p id="scheduleError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="scheduleCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar horario</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Vacaciones e incapacidades de otra persona (la disponibilidad en sí es automática) -->
+    <dialog id="availabilityDialog" class="app-dialog" aria-labelledby="availabilityDialogTitle">
+        <form id="availabilityForm" class="profile-form">
+            <h2 id="availabilityDialogTitle" class="modal-title">Vacaciones y ausencias</h2>
+            <p id="availabilityTarget" class="help-text"></p>
+            <p id="availabilityNow" class="availability-now"></p>
+            <ul id="availabilityPeriods" class="periods-list"></ul>
             <div class="form-group">
-                <label for="search">Búsqueda</label>
-                <input type="text" id="search" name="search" placeholder="Buscar título o descripción">
+                <label for="availabilityKind">Tipo</label>
+                <select id="availabilityKind" required>
+                    <option value="vacation">Vacaciones</option>
+                    <option value="incapacity">Ausencia</option>
+                </select>
             </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="availabilityStart">Primer día</label>
+                    <input type="date" id="availabilityStart" required>
+                </div>
+                <div class="form-group">
+                    <label for="availabilityEnd">Último día</label>
+                    <input type="date" id="availabilityEnd" required>
+                </div>
+            </div>
+            <p id="availabilityError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="availabilityCancel" class="btn-secondary">Cerrar</button>
+                <button type="submit" class="btn-submit">Registrar periodo</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Menú "Más acciones" de la tabla de personal: uno solo, se ubica junto al botón que lo abre -->
+    <div id="rowMenu" class="row-menu" role="menu" aria-label="Más acciones" hidden></div>
+    <div id="accountMenu" class="row-menu account-menu" role="menu" aria-label="Acciones de la cuenta" hidden></div>
+
+    <dialog id="roleDialog" class="app-dialog" aria-labelledby="roleDialogTitle">
+        <form id="roleForm" class="profile-form">
+            <h2 id="roleDialogTitle" class="modal-title">Cambiar rol</h2>
+            <p id="roleTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="roleSelect">Rol nuevo</label>
+                <select id="roleSelect"></select>
+            </div>
+            <div id="roleReasonGroup" class="form-group" hidden>
+                <label for="roleReason">Motivo (obligatorio)</label>
+                <textarea id="roleReason" rows="3" maxlength="500"></textarea>
+                <small class="help-text">El administrador debe aprobar el cambio.</small>
+            </div>
+            <p id="roleError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="roleCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" id="roleSubmit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Cancelar uno o varios tickets con un solo motivo (coordinador y administrador) -->
+    <dialog id="attachmentDialog" class="app-dialog att-viewer" aria-labelledby="attachmentDialogTitle">
+        <div class="att-viewer-head">
+            <h2 id="attachmentDialogTitle" class="modal-title"></h2>
+            <button type="button" id="attachmentDialogClose" class="ui-btn ui-btn-secondary ui-btn-sm">Cerrar</button>
         </div>
-        <div class="table-wrapper">
-            <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Título</th>
-                    <th>Categoría</th>
-                    <th>Prioridad</th>
-                    <th>Asignado a</th>
-                    <th>Estado</th>
-                    <th>Creado</th>
-                </tr>
-            </thead>
-            <tbody id="ticketsBody"></tbody>
-            </table>
-        </div>
+        <img id="attachmentDialogImage" class="att-viewer-image" alt="">
+    </dialog>
+    <dialog id="cancelDialog" class="app-dialog" aria-labelledby="cancelDialogTitle">
+        <form id="cancelForm" class="profile-form">
+            <h2 id="cancelDialogTitle" class="modal-title">Cancelar ticket</h2>
+            <p class="help-text">No se borra nada: el ticket sale de las colas y se conserva con su historial. Se puede reabrir desde Cancelados.</p>
+            <fieldset class="cancel-reasons">
+                <legend>Motivo</legend>
+                <label><input type="radio" name="cancelReason" value="no_longer_applies" required> Ya no aplica</label>
+                <label><input type="radio" name="cancelReason" value="duplicate"> Duplicado</label>
+                <label><input type="radio" name="cancelReason" value="no_response"> Sin respuesta del cliente</label>
+                <label><input type="radio" name="cancelReason" value="test_spam"> Prueba o spam</label>
+            </fieldset>
+            <div class="form-group">
+                <label for="cancelNote">Nota (opcional)</label>
+                <textarea id="cancelNote" maxlength="500" rows="2"></textarea>
+                <small class="help-text">Solo la ve el equipo.</small>
+            </div>
+            <label class="cancel-notify"><input type="checkbox" id="cancelNotify" checked> Avisar al cliente por correo</label>
+            <div class="dialog-actions">
+                <button type="button" id="cancelDialogClose" class="btn-secondary">Volver</button>
+                <button type="submit" id="cancelDialogSubmit" class="ui-btn ui-btn-danger">Cancelar ticket</button>
+            </div>
+        </form>
+    </dialog>
+
+    <button type="button" id="chatToggle" class="chat-fab" aria-label="Abrir asistente" aria-expanded="false" aria-controls="chatPanel" hidden>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/>
+            <path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/>
+        </svg>
+    </button>
+    <section id="chatPanel" class="chat-panel" role="dialog" aria-labelledby="chatTitle" hidden>
+        <header class="chat-header">
+            <div>
+                <h2 id="chatTitle" class="chat-title">Asistente</h2>
+                <p id="chatRole" class="chat-role"></p>
+                <button type="button" id="chatResetPosition" class="chat-reset">Restablecer posición</button>
+            </div>
+            <button type="button" id="chatClose" class="chat-close" aria-label="Cerrar asistente">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12M18 6L6 18"/>
+                </svg>
+            </button>
+        </header>
+        <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+        <div id="chatSuggestions" class="chat-suggestions"></div>
+        <form id="chatForm" class="chat-form">
+            <label for="chatInput" class="sr-only">Escribe tu pregunta</label>
+            <textarea id="chatInput" rows="2" maxlength="1000" placeholder="Escribe tu pregunta"></textarea>
+            <button type="submit" id="chatSend" class="chat-send">Enviar</button>
+        </form>
     </section>
-</main>
-
-    <div id="errorMessage" class="error"></div>
-    <div id="successMessage" class="success"></div>
-
-    <!-- Modal -->
-    <div id="ticketModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <span class="modal-close-btn">✕</span>
-            <div class="modal-header">
-                <h2 class="modal-title">Detalle del ticket</h2>
-            </div>
-            <div id="modalError" class="error"></div>
-            <div class="modal-body"></div>
-        </div>
-    </div>
 
     <script src="app.js"></script>
 </body>

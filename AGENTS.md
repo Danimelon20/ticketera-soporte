@@ -19,7 +19,7 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
 - app/models.py     tablas
 - app/schemas.py    esquemas Pydantic (usar model_config = ConfigDict)
 - app/routers/      users.py, catalogs.py, tickets.py
-- static/           index.html, app.js, styles.css
+- static/           index.html (#listPanel, #detailPanel, newTicketModal, usersModal), app.js, styles.css
 - tests/            conftest.py (fábricas make_user y make_ticket) y pruebas
 - docs/             requisitos, diseño y bitácora
 
@@ -33,10 +33,23 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
   todos los routers.
 - Las rutas de la API no llevan barra final (/api/tickets, no
   /api/tickets/).
-- Roles: requester, technician, coordinator. Las reglas de permisos
-  se validan en el backend y responden 403.
-- Toda petición de tickets usa actor_id: listar, ver detalle,
-  crear, modificar y comentar.
+- Roles: requester, technician, coordinator, admin y agent (Agente
+  virtual, no inicia sesión). Las reglas de permisos se validan en
+  el backend y responden 403.
+- El rol admin nunca se obtiene registrándose ni con un código de
+  invitación: el primer administrador se crea con
+  `docker compose exec -it app python -m app.create_admin`.
+- Nunca subir a Git `.env`, la carpeta `data/` ni copias `.db` de
+  la base de datos.
+- Nunca enviar al chatbot cédulas, teléfonos, correos ni
+  contraseñas: el contexto se arma solo con nombres y datos de
+  tickets que el usuario ya puede ver.
+- Las pruebas nunca se conectan a Microsoft Graph, Hacienda ni
+  Ollama: se simulan con monkeypatch.
+- `mailer.send_email` nunca lanza excepciones: si falla, lo
+  registra y devuelve False.
+- Todas las rutas de tickets y usuarios usan get_current_user.
+- Nunca guardar contraseñas en texto plano ni devolver password_hash en una respuesta.
 - Cada cambio de status, assigned_to, priority_id o category_id se
   registra en history. Los comentarios no van a history.
 - Las pruebas usan la base temporal de conftest.py, nunca

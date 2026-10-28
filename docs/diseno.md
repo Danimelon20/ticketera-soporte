@@ -69,6 +69,12 @@ y prioridades (Baja=1, Media=2, Alta=3, Urgente=4) si no existen.
 
 ## Decisiones tomadas durante el desarrollo
 
+### Autenticación y seguridad
+- Contraseñas guardadas con `hashlib.pbkdf2_hmac` (sal aleatoria, 200 000 iteraciones, sin librerías nuevas).
+- Sesión por token aleatorio guardado en la tabla `sessions`.
+- Se eliminó `actor_id` para que nadie pueda actuar en nombre de otro.
+- Mismo mensaje de error para correo inexistente y contraseña incorrecta, para no revelar qué correos existen.
+
 ### Comentarios
 - No se puede comentar un ticket cerrado (400).
 - Los comentarios no se registran en la tabla history.
@@ -107,3 +113,41 @@ Reglas:
 9. "Actuando como" muestra el rol junto al nombre. Sin usuario
    elegido, la tabla no muestra tickets.
 10. El historial sigue registrando quién hizo cada cambio.
+
+### Versión 2
+
+- **Invitaciones de un solo uso.** Técnicos y coordinadores se
+  registran con un código de invitación (`TEC-` o `COO-`). El código
+  se guarda solo como hash SHA-256, vence en 7 días, sirve una sola
+  vez y se muestra únicamente al generarlo. El coordinador invita
+  técnicos; solo el administrador invita coordinadores. Sin código,
+  el registro siempre crea un solicitante.
+- **Verificación por correo.** Coordinadores y administradores, al
+  iniciar sesión (y el coordinador también al registrarse), reciben
+  un código de 6 dígitos por correo. El código se guarda como hash,
+  vence en 10 minutos y admite 5 intentos; se puede pedir uno nuevo
+  una vez por minuto. La sesión se crea solo al verificarlo.
+- **Cédula según quién mira.** La cédula completa la ven el dueño
+  del ticket, los coordinadores y el administrador. El técnico
+  asignado ve el teléfono completo y la cédula enmascarada
+  (asteriscos menos los últimos 3 dígitos); los demás técnicos no
+  ven ninguno de los dos.
+- **Hacienda flexible por defecto.** La cédula se verifica con la
+  API pública de Hacienda (persona física o DIMEX). Con
+  `HACIENDA_STRICT=false` una cédula que Hacienda no encuentra se
+  acepta igual, y si Hacienda no responde se acepta sin verificar.
+  Solo se guarda el tipo de identificación; el nombre que devuelve
+  Hacienda no se guarda ni se muestra.
+- **Agente virtual con reglas fijas.** Los correos se interpretan
+  con un formato de líneas fijo (Categoría, Prioridad, Teléfono,
+  Cédula, Descripción), sin inteligencia artificial. Solo crea
+  tickets de solicitantes registrados y activos; si faltan datos,
+  responde con la plantilla.
+- **El asistente solo ve lo que el usuario ya puede ver.** El
+  contexto que recibe el modelo se arma según el rol con las mismas
+  reglas de la página, sin correos, teléfonos, cédulas, contraseñas
+  ni códigos.
+- **Desactivar en vez de borrar.** El administrador desactiva
+  cuentas en lugar de borrarlas, para no perder tickets,
+  comentarios ni historial. Una cuenta desactivada pierde sus
+  sesiones y no puede volver a entrar hasta que la activen.

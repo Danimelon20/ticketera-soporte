@@ -1,10 +1,75 @@
+import itertools
 import os
+import socket
 import tempfile
 import uuid
 
-# Debe ir ANTES de importar la app: database.py lee esta variable al cargarse
+# ----- Entorno propio de las pruebas: nada del .env real (docker compose lo carga con env_file) -----
+# Debe ir ANTES de importar la app: config.py y database.py leen las variables al cargarse
 _tmp_dir = tempfile.mkdtemp()
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp_dir}/test.db"
+# Todas las variables que lee app/config.py: sin ellas cada una toma su valor por defecto
+APP_ENV_VARS = (
+    "EMAIL_ENABLED", "MS_TENANT_ID", "MS_CLIENT_ID", "SUPPORT_MAILBOX", "MAIL_FOLDER", "MS_TOKEN_CACHE",
+    "EMAIL_POLL_SECONDS", "APP_URL", "CHATBOT_ENABLED", "LLM_BASE_URL", "LLM_MODEL", "AI_ANALYSIS_ENABLED",
+    "OFFICE_DAYS", "OFFICE_START", "OFFICE_END", "OFFICE_TZ", "OFFICE_HOLIDAYS",
+    "DAILY_SUMMARY_ENABLED", "DAILY_SUMMARY_HOUR", "ALERTS_ENABLED", "ALERT_WARN_PERCENT", "ALERTS_CHECK_SECONDS",
+    "AUTO_ASSIGN_ENABLED", "AUTO_ASSIGN_LOAD_MODE", "AUTO_ASSIGN_CHECK_SECONDS",
+    "GROUPING_ENABLED", "EMBEDDING_MODEL", "GROUPING_MERGE_THRESHOLD", "GROUPING_INCIDENT_THRESHOLD",
+    "GROUPING_INCIDENT_MIN", "GROUPING_INCIDENT_HOURS", "GROUPING_TIMEOUT_SECONDS",
+    "ATTACHMENTS_DIR", "HACIENDA_CHECK", "HACIENDA_STRICT", "SESSION_IDLE_MINUTES", "SESSION_MAX_HOURS",
+    "DATABASE_URL",
+    "MS_LOGIN_ENABLED", "MS_LOGIN_TENANT_ID", "MS_LOGIN_CLIENT_ID", "MS_LOGIN_CLIENT_SECRET", "MS_LOGIN_REDIRECT_URI",
+)
+for _name in APP_ENV_VARS:
+    os.environ.pop(_name, None)
+# Ollama que no existe: nada escucha en el puerto 9 (y la red además está bloqueada abajo)
+UNREACHABLE_OLLAMA = "http://127.0.0.1:9"
+TEST_ENV = {
+    "DATABASE_URL": f"sqlite:///{_tmp_dir}/test.db",
+    "EMAIL_ENABLED": "false",
+    # Sin chat, análisis ni agrupación tampoco hay precarga del modelo (main.start_warm_up)
+    "CHATBOT_ENABLED": "false",
+    "AI_ANALYSIS_ENABLED": "false",
+    "GROUPING_ENABLED": "false",
+    "AUTO_ASSIGN_ENABLED": "false",
+    "ALERTS_ENABLED": "false",
+    "DAILY_SUMMARY_ENABLED": "false",
+    # Inicio de sesión con Microsoft apagado: las pruebas que lo usan lo encienden con monkeypatch
+    "MS_LOGIN_ENABLED": "false",
+    "LLM_BASE_URL": UNREACHABLE_OLLAMA,
+    "MS_TOKEN_CACHE": f"{_tmp_dir}/ms_token_cache.json",
+    "ATTACHMENTS_DIR": f"{_tmp_dir}/attachments",
+}
+os.environ.update(TEST_ENV)
+
+# ----- Sin red real: ni Graph, ni Ollama, ni Hacienda -----
+# Se bloquea en el socket para cubrir httpx, requests (msal) y urllib. Cada intento queda anotado y
+# la prueba que lo hizo falla (no_real_network), aunque el código atrape el error.
+REAL_NETWORK_ATTEMPTS = []
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+_real_connect = socket.socket.connect
+_real_connect_ex = socket.socket.connect_ex
+_real_getaddrinfo = socket.getaddrinfo
+
+
+def _blocked(self, address, real):
+    if self.family in (socket.AF_INET, socket.AF_INET6):
+        REAL_NETWORK_ATTEMPTS.append(f"{address[0]}:{address[1]}")
+        raise ConnectionRefusedError(f"Pruebas: conexión de red bloqueada ({address[0]}:{address[1]})")
+    return real(self, address)
+
+
+def _blocked_getaddrinfo(host, *args, **kwargs):
+    # Una consulta DNS ya sale a la red
+    if host not in _LOOPBACK:
+        REAL_NETWORK_ATTEMPTS.append(f"dns:{host}")
+        raise socket.gaierror(socket.EAI_NONAME, f"Pruebas: consulta DNS bloqueada ({host})")
+    return _real_getaddrinfo(host, *args, **kwargs)
+
+
+socket.socket.connect = lambda self, address: _blocked(self, address, _real_connect)
+socket.socket.connect_ex = lambda self, address: _blocked(self, address, _real_connect_ex)
+socket.getaddrinfo = _blocked_getaddrinfo
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -14,37 +79,231 @@ from app.main import app  # noqa: E402
 
 @pytest.fixture(scope="session")
 def client():
-    with TestClient(app) as client:
-        yield client
+    with TestClient(app) as test_client:
+        class WrappedClient:
+            def __init__(self, c):
+                self.c = c
+
+            def _inject_auth(self, kwargs):
+                headers = kwargs.get("headers", {})
+                if "Authorization" in headers:
+                    return kwargs
+                
+                actor_id = None
+                params = kwargs.get("params")
+                if isinstance(params, dict) and "actor_id" in params:
+                    actor_id = params.pop("actor_id")
+                
+                json_data = kwargs.get("json")
+                if isinstance(json_data, dict) and "actor_id" in json_data:
+                    actor_id = json_data.pop("actor_id")
+
+                if actor_id is not None:
+                    from app.database import SessionLocal
+                    from app import models
+                    from app.security import hash_token, new_token
+                    db = SessionLocal()
+                    try:
+                        user = db.query(models.User).filter(models.User.id == actor_id).first()
+                        if user:
+                            # La base solo guarda el hash del token: cada vez una sesión nueva
+                            token = new_token()
+                            db.add(models.Session(user_id=actor_id, token=hash_token(token)))
+                            db.commit()
+                            headers["Authorization"] = f"Bearer {token}"
+                    finally:
+                        db.close()
+                kwargs["headers"] = headers
+                return kwargs
+
+            def get(self, url, **kwargs):
+                return self.c.get(url, **self._inject_auth(kwargs))
+            def post(self, url, **kwargs):
+                return self.c.post(url, **self._inject_auth(kwargs))
+            def patch(self, url, **kwargs):
+                return self.c.patch(url, **self._inject_auth(kwargs))
+            def put(self, url, **kwargs):
+                return self.c.put(url, **self._inject_auth(kwargs))
+            def delete(self, url, **kwargs):
+                return self.c.delete(url, **self._inject_auth(kwargs))
+            def __getattr__(self, name):
+                return getattr(self.c, name)
+
+        yield WrappedClient(test_client)
+
+
+_id_numbers = itertools.count(1)
+
+
+def unique_id_number() -> str:
+    """Cédula física de 9 dígitos distinta en cada llamada (una cédula no puede estar en dos cuentas)."""
+    return f"7{next(_id_numbers) + int(uuid.uuid4().int % 10**4) * 10**4:08d}"
 
 
 @pytest.fixture
 def make_user(client):
-    """Fábrica: crea un usuario con el rol indicado y un correo único."""
-    def _make(role="coordinator", name="Usuario de prueba"):
-        payload = {
-            "name": name,
-            "email": f"{role}-{uuid.uuid4().hex}@test.com",
-            "role": role,
-        }
-        response = client.post("/api/users", json=payload)
-        assert response.status_code == 200, response.text
-        return response.json()
+    """Fábrica: crea un usuario directamente en la base de datos de prueba.
+
+    Los solicitantes vienen con el perfil completo (nombre, teléfono y cédula única),
+    salvo con profile=False.
+    """
+    def _make(role="coordinator", name="Usuario de prueba", profile=True):
+        from app.database import SessionLocal
+        from app import models
+        from app.security import hash_password, hash_token, new_token
+        
+        db = SessionLocal()
+        try:
+            with_profile = role == "requester" and profile
+            user = models.User(
+                name=name,
+                email=f"{role}-{uuid.uuid4().hex}@test.com",
+                role=role,
+                password_hash=hash_password("clave-segura-123"),
+                phone="88881234" if with_profile else None,
+                id_number=unique_id_number() if with_profile else None,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+            token = new_token()
+            db_session = models.Session(token=hash_token(token), user_id=user.id)
+            db.add(db_session)
+            db.commit()
+
+            result = {
+                "id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "role": user.role,
+                "phone": user.phone,
+                "id_number": user.id_number,
+                "token": token,
+                "headers": {"Authorization": f"Bearer {token}"}
+            }
+            return result
+        finally:
+            db.close()
     return _make
 
 
 @pytest.fixture
 def make_ticket(client):
-    """Fábrica: crea un ticket a nombre del usuario indicado (actor)."""
+    """Fábrica: crea un ticket a nombre del usuario indicado (headers)."""
     def _make(actor, title="Ticket de prueba", priority_id=1, category_id=1):
         payload = {
             "title": title,
             "description": f"Descripción de {title}",
             "category_id": category_id,
             "priority_id": priority_id,
-            "actor_id": actor["id"],
+            "contact_phone": "8888-1234",
         }
-        response = client.post("/api/tickets", json=payload)
+        response = client.post("/api/tickets", json=payload, headers=actor["headers"])
         assert response.status_code == 200, response.text
         return response.json()
     return _make
+
+
+@pytest.fixture(autouse=True)
+def no_real_network():
+    """Falla la prueba que intente salir a la red. EMAIL_ENABLED solo se enciende con monkeypatch en la prueba."""
+    from app import config
+
+    assert config.EMAIL_ENABLED is False, "EMAIL_ENABLED llegó encendido a la prueba"
+    start = len(REAL_NETWORK_ATTEMPTS)
+    yield
+    attempts = REAL_NETWORK_ATTEMPTS[start:]
+    if attempts:
+        pytest.fail(f"La prueba intentó conectarse a la red real: {sorted(set(attempts))}")
+
+
+@pytest.fixture(autouse=True)
+def fake_hacienda(monkeypatch):
+    """Reemplaza la consulta a Hacienda: las pruebas nunca llaman a internet."""
+    from app import hacienda
+
+    def _fake_lookup(id_number):
+        # Sin nombre: la comparación da "mismatch" salvo que la prueba lo cambie
+        return {"tipo": "01" if len(id_number) == 9 else "03", "name_tokens": frozenset()}
+
+    monkeypatch.setattr(hacienda, "lookup_id", _fake_lookup)
+    # Que un .env real (cargado por docker compose) no cambie el resultado de las pruebas
+    monkeypatch.setenv("HACIENDA_CHECK", "true")
+    monkeypatch.delenv("HACIENDA_STRICT", raising=False)
+
+
+# Cédulas fijas que usan muchas pruebas para cuentas distintas
+SHARED_TEST_ID_NUMBERS = ("102340567", "109870654", "123456789012", "310123456")
+
+
+@pytest.fixture(autouse=True)
+def free_shared_id_numbers():
+    """Cada prueba empieza sin ninguna cuenta dueña de las cédulas fijas de las pruebas."""
+    from sqlalchemy import bindparam, text
+    from sqlalchemy.exc import OperationalError
+    from app.database import engine
+
+    statement = text("UPDATE users SET id_number = NULL WHERE id_number IN :ids").bindparams(
+        bindparam("ids", expanding=True)
+    )
+    try:
+        with engine.begin() as conn:
+            conn.execute(statement, {"ids": list(SHARED_TEST_ID_NUMBERS)})
+    except OperationalError:
+        # Todavía no existen las tablas (la app no ha arrancado)
+        pass
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Correos simulados: (destinatario, asunto, cuerpo). Nunca se conecta a Microsoft Graph.
+
+    Los adjuntos de cada correo quedan en sent.attachments (misma posición; None si no llevaba).
+    """
+    from app import mailer
+
+    class SentList(list):
+        attachments: list
+
+    calls = SentList()
+    calls.attachments = []
+
+    def _fake_send(to, subject, body, attachments=None):
+        calls.append((to, subject, body))
+        calls.attachments.append(attachments)
+        return True
+
+    monkeypatch.setattr(mailer, "send_email", _fake_send)
+    return calls
+
+
+def assign_draft_to(draft_id: int, user_id: int | None, notify: bool = False) -> None:
+    """Revisor del borrador (como lo dejaría la asignación automática). None: "Sin revisor"."""
+    from datetime import datetime, timezone
+    from app.database import SessionLocal
+    from app import models
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db = SessionLocal()
+    try:
+        row = db.query(models.DraftAssignment).filter(models.DraftAssignment.draft_id == draft_id).first()
+        if row is None:
+            row = models.DraftAssignment(draft_id=draft_id, created_at=now)
+            db.add(row)
+        row.user_id = user_id
+        row.status = "assigned" if user_id is not None else "waiting"
+        row.assigned_at = now if user_id is not None else None
+        row.notify = notify
+        row.seen_at = None
+        db.commit()
+    finally:
+        db.close()
+
+
+def code_from(body: str) -> str:
+    import re
+
+    match = re.search(r"\b(\d{6})\b", body)
+    assert match, "El correo no trae un código de 6 dígitos"
+    return match.group(1)
