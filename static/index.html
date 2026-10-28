@@ -1095,29 +1095,74 @@
                     <p id="pendingRequestsEmpty" class="admin-text" hidden>No hay solicitudes pendientes.</p>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="changes">
-                    <div class="admin-card-head">
-                        <h2>Registro de cambios</h2>
+                    <!-- Registro de cambios por persona: solo lectura y con los datos personales enmascarados -->
+                    <div id="peopleHome" class="people-home">
+                        <div class="people-search ui-field">
+                            <label for="peopleSearch">Buscar una persona</label>
+                            <div class="people-combo">
+                                <input type="search" id="peopleSearch" class="ui-input" role="combobox" aria-autocomplete="list"
+                                    aria-expanded="false" aria-controls="peopleSuggestions" autocomplete="off" maxlength="150"
+                                    placeholder="Nombre o correo" aria-describedby="peopleSearchHint">
+                                <ul id="peopleSuggestions" class="people-suggestions" role="listbox" aria-label="Personas" hidden></ul>
+                            </div>
+                            <span id="peopleSearchHint" class="ui-help">Técnicos, coordinadores y clientes. Abra su ficha para ver lo que hicieron o lo que cambió en su cuenta.</span>
+                        </div>
+                        <section class="people-block" aria-labelledby="convAccessTitle">
+                            <h2 id="convAccessTitle" class="people-block-title">Accesos a conversaciones</h2>
+                            <p class="admin-text changes-note">Cada vez que el administrador abre una conversación queda aquí, con su motivo. Así el acceso existe para casos justificados y siempre se puede revisar.</p>
+                            <ul id="convAccessList" class="changes-list"></ul>
+                            <p id="convAccessEmpty" class="admin-text" hidden>Ningún administrador ha abierto una conversación.</p>
+                            <button type="button" id="convAccessMore" class="ui-btn ui-btn-secondary ui-btn-sm people-more" hidden>Ver más</button>
+                        </section>
+                        <section class="people-block" aria-labelledby="recentChangesTitle">
+                            <h2 id="recentChangesTitle" class="people-block-title">Actividad reciente</h2>
+                            <p class="admin-text">Los últimos 20 cambios. Los ingresos de cada persona están en su ficha.</p>
+                            <ul id="changesList" class="changes-list"></ul>
+                            <p id="changesEmpty" class="admin-text" hidden>Todavía no hay cambios.</p>
+                        </section>
                     </div>
-                    <div id="changesQuick" class="aa-quick changes-quick" role="group" aria-label="Filtros rápidos">
-                        <button type="button" class="aa-quick-btn" data-action="" aria-pressed="true">Todo</button>
-                        <button type="button" class="aa-quick-btn" data-action="conversation_viewed" aria-pressed="false">Accesos a conversaciones</button>
-                        <button type="button" class="aa-quick-btn" data-action="attachment_downloaded" aria-pressed="false">Adjuntos descargados</button>
-                    </div>
-                    <div class="directory-filters">
-                        <label for="changesAccount" class="sr-only">Filtrar por cuenta</label>
-                        <input type="search" id="changesAccount" placeholder="Cuenta: nombre o correo" maxlength="150">
-                        <label for="changesAction" class="sr-only">Filtrar por acción</label>
-                        <select id="changesAction">
-                            <option value="">Todas las acciones</option>
-                        </select>
-                    </div>
-                    <ul id="changesList" class="changes-list"></ul>
-                    <p id="changesEmpty" class="admin-text" hidden>No hay cambios con esos filtros.</p>
-                    <p class="admin-text changes-note">Cada vez que el administrador abre una conversación queda aquí, con su motivo. Así el acceso existe para casos justificados y siempre se puede revisar.</p>
-                    <div class="changes-pager">
-                        <button type="button" id="changesPrev" class="btn-secondary">Anterior</button>
-                        <span id="changesPage" aria-live="polite"></span>
-                        <button type="button" id="changesNext" class="btn-secondary">Siguiente</button>
+                    <div id="personView" class="person-view" hidden>
+                        <button type="button" id="personBack" class="link-btn person-back">← Volver al registro</button>
+                        <header class="person-head">
+                            <h2 id="personName" class="person-name"></h2>
+                            <p id="personMeta" class="person-meta"></p>
+                            <dl id="personFacts" class="person-facts"></dl>
+                        </header>
+                        <section id="personSummary" class="person-summary" aria-labelledby="personSummaryTitle" hidden>
+                            <h3 id="personSummaryTitle" class="ui-kicker">Resumen del periodo</h3>
+                            <div id="personStats" class="person-stats"></div>
+                        </section>
+                        <div class="person-filters">
+                            <div id="personGroups" class="aa-quick" role="group" aria-label="Tipo de acción"></div>
+                            <div class="person-filter-row">
+                                <div class="ui-field">
+                                    <label for="personRange">Periodo</label>
+                                    <select id="personRange" class="ui-input">
+                                        <option value="7">Últimos 7 días</option>
+                                        <option value="30" selected>Últimos 30 días</option>
+                                        <option value="90">Últimos 90 días</option>
+                                        <option value="custom">Entre fechas</option>
+                                    </select>
+                                </div>
+                                <div id="personDates" class="person-dates" hidden>
+                                    <div class="ui-field">
+                                        <label for="personFrom">Desde</label>
+                                        <input type="date" id="personFrom" class="ui-input">
+                                    </div>
+                                    <div class="ui-field">
+                                        <label for="personTo">Hasta</label>
+                                        <input type="date" id="personTo" class="ui-input">
+                                    </div>
+                                </div>
+                                <div id="personTicketField" class="ui-field">
+                                    <label for="personTicket">Ticket</label>
+                                    <input type="number" id="personTicket" class="ui-input" min="1" inputmode="numeric" placeholder="Número">
+                                </div>
+                            </div>
+                        </div>
+                        <ol id="personTimeline" class="person-timeline" aria-live="polite"></ol>
+                        <p id="personEmpty" class="admin-text" hidden>No hay actividad con esos filtros.</p>
+                        <button type="button" id="personMore" class="ui-btn ui-btn-secondary people-more" hidden>Ver más</button>
                     </div>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="health">

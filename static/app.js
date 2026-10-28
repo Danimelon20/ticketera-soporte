@@ -4979,7 +4979,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // apiFetch ya mostró el error; la solicitud sigue pendiente
         }
         loadPendingRequests();
-        changesPage = 1;
         loadAccountChanges();
     });
 
@@ -5213,12 +5212,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadAdminPanel() {
         loadAdminHealth();
         loadAdminLogs();
-        changesPage = 1;
         loadAccountChanges();
         loadPendingRequests();
     }
 
-    // ----- Registro de cambios de cuentas (solo administrador) -----
+    // ----- Registro de cambios por persona (solo administrador, solo lectura) -----
     const CHANGE_ACTIONS = {
         password_changed: 'Contraseña cambiada',
         email_changed: 'Correo cambiado',
@@ -5235,6 +5233,8 @@ document.addEventListener('DOMContentLoaded', () => {
         microsoft_login_rejected: 'Ingreso con Microsoft rechazado',
         emergency_access: 'Acceso de emergencia',
         id_number_conflict: 'Cédula de otra cuenta',
+        login: 'Ingreso',
+        login_failed: 'Intento de ingreso fallido',
         login_locked: 'Bloqueo por intentos',
         password_reset: 'Contraseña restablecida',
         access_reset_sent: 'Código de acceso enviado',
@@ -5249,6 +5249,10 @@ document.addEventListener('DOMContentLoaded', () => {
         availability_changed: 'Disponibilidad cambiada',
         availability_period_added: 'Vacaciones o ausencia registrada',
         availability_period_removed: 'Vacaciones o ausencia quitada',
+        schedule_changed: 'Horario cambiado',
+        report_created: 'Cuenta reportada',
+        report_confirmed: 'Reporte confirmado',
+        report_dismissed: 'Reporte descartado',
         server_account_deactivated: 'Cuenta desactivada',
         server_account_activated: 'Cuenta activada',
         server_role_changed: 'Rol cambiado',
@@ -5264,24 +5268,13 @@ document.addEventListener('DOMContentLoaded', () => {
         incident_marked: 'Posible incidente',
         conversation_viewed: 'Ver conversación'
     };
-    const changesAccount = document.getElementById('changesAccount');
-    const changesAction = document.getElementById('changesAction');
     const changesList = document.getElementById('changesList');
     const changesEmpty = document.getElementById('changesEmpty');
-    const changesPrev = document.getElementById('changesPrev');
-    const changesNext = document.getElementById('changesNext');
-    const changesPageLabel = document.getElementById('changesPage');
-    let changesPage = 1;
-    let changesPages = 1;
-    let changesSearchTimer = null;
+    const convAccessList = document.getElementById('convAccessList');
+    const convAccessEmpty = document.getElementById('convAccessEmpty');
+    const convAccessMore = document.getElementById('convAccessMore');
+    let convAccessPage = 1;
     let changesSeq = 0;
-
-    Object.entries(CHANGE_ACTIONS).forEach(([value, label]) => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        changesAction.appendChild(option);
-    });
 
     function changeLine(labelText, value) {
         const line = document.createElement('span');
@@ -5314,72 +5307,353 @@ document.addEventListener('DOMContentLoaded', () => {
         return li;
     }
 
+    // Pantalla principal: accesos a conversaciones (con "Ver más") y los últimos 20 cambios
     async function loadAccountChanges() {
         const seq = ++changesSeq;
-        const params = new URLSearchParams({ page: String(changesPage) });
-        if (changesAccount.value.trim()) params.set('account', changesAccount.value.trim());
-        if (changesAction.value) params.set('action', changesAction.value);
-        let data;
+        convAccessPage = 1;
+        let recent;
+        let access;
         try {
-            data = await apiFetch(`/admin/account-changes?${params.toString()}`);
+            [recent, access] = await Promise.all([
+                apiFetch('/admin/account-changes?page=1&exclude_access=true'),
+                apiFetch('/admin/account-changes?page=1&action=conversation_viewed'),
+            ]);
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
         if (seq !== changesSeq) return;
-        changesPage = data.page;
-        changesPages = data.pages;
-        changesList.replaceChildren(...data.items.map(renderChange));
-        changesEmpty.hidden = data.items.length > 0;
-        changesPageLabel.textContent = `Página ${data.page} de ${data.pages}`;
-        changesPrev.disabled = data.page <= 1;
-        changesNext.disabled = data.page >= data.pages;
+        changesList.replaceChildren(...recent.items.map(renderChange));
+        changesEmpty.hidden = recent.items.length > 0;
+        convAccessList.replaceChildren(...access.items.map(renderChange));
+        convAccessEmpty.hidden = access.items.length > 0;
+        convAccessMore.hidden = access.page >= access.pages;
     }
 
-    changesAccount.addEventListener('input', () => {
-        clearTimeout(changesSearchTimer);
-        changesSearchTimer = setTimeout(() => {
-            changesPage = 1;
-            loadAccountChanges();
-        }, 300);
+    convAccessMore.addEventListener('click', async () => {
+        convAccessMore.disabled = true;
+        try {
+            const data = await apiFetch(`/admin/account-changes?page=${convAccessPage + 1}&action=conversation_viewed`);
+            convAccessPage = data.page;
+            convAccessList.append(...data.items.map(renderChange));
+            convAccessMore.hidden = data.page >= data.pages;
+        } catch (err) {
+            // apiFetch ya mostró el error
+        } finally {
+            convAccessMore.disabled = false;
+        }
     });
 
-    // Filtros rápidos: la misma acción que el selector
-    const changesQuick = document.getElementById('changesQuick');
+    // Buscador de personas con sugerencias (combobox)
+    const peopleHome = document.getElementById('peopleHome');
+    const peopleSearch = document.getElementById('peopleSearch');
+    const peopleSuggestions = document.getElementById('peopleSuggestions');
+    let peopleTimer = null;
+    let peopleSeq = 0;
+    let peopleActive = -1;
 
-    function renderChangesQuick() {
-        changesQuick.querySelectorAll('.aa-quick-btn').forEach(button => {
-            button.setAttribute('aria-pressed', button.dataset.action === changesAction.value ? 'true' : 'false');
-        });
+    function closePeopleSuggestions() {
+        peopleSuggestions.hidden = true;
+        peopleSuggestions.replaceChildren();
+        peopleSearch.setAttribute('aria-expanded', 'false');
+        peopleSearch.removeAttribute('aria-activedescendant');
+        peopleActive = -1;
     }
 
-    changesQuick.addEventListener('click', (e) => {
+    function setPeopleActive(index) {
+        const options = [...peopleSuggestions.querySelectorAll('[role="option"]')];
+        if (!options.length) return;
+        peopleActive = (index + options.length) % options.length;
+        options.forEach((option, i) => option.setAttribute('aria-selected', i === peopleActive ? 'true' : 'false'));
+        peopleSearch.setAttribute('aria-activedescendant', options[peopleActive].id);
+        options[peopleActive].scrollIntoView({ block: 'nearest' });
+    }
+
+    async function loadPeopleSuggestions() {
+        const query = peopleSearch.value.trim();
+        if (query.length < 2) {
+            closePeopleSuggestions();
+            return;
+        }
+        const seq = ++peopleSeq;
+        let hits;
+        try {
+            hits = await apiFetch(`/admin/people?query=${encodeURIComponent(query)}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        if (seq !== peopleSeq) return;
+        peopleActive = -1;
+        peopleSearch.removeAttribute('aria-activedescendant');
+        if (!hits.length) {
+            const empty = makeEl('li', 'people-suggestion-empty', 'Nadie coincide con esa búsqueda.');
+            empty.setAttribute('role', 'presentation');
+            peopleSuggestions.replaceChildren(empty);
+        } else {
+            peopleSuggestions.replaceChildren(...hits.map((hit, index) => {
+                const li = makeEl('li', 'people-suggestion');
+                li.id = `peopleOption-${hit.id}`;
+                li.setAttribute('role', 'option');
+                li.setAttribute('aria-selected', 'false');
+                li.dataset.personId = hit.id;
+                li.append(
+                    makeEl('span', 'people-suggestion-name', hit.name),
+                    makeEl('span', 'people-suggestion-meta', `${ACCOUNT_TYPE_LABELS[hit.role] || hit.role} · ${hit.email}`),
+                );
+                return li;
+            }));
+        }
+        peopleSuggestions.hidden = false;
+        peopleSearch.setAttribute('aria-expanded', 'true');
+    }
+
+    function openPersonFromSuggestion(option) {
+        if (!option) return;
+        const id = option.dataset.personId;
+        closePeopleSuggestions();
+        peopleSearch.value = '';
+        goRoute(`admin/registro/persona/${id}`);
+    }
+
+    peopleSearch.addEventListener('input', () => {
+        clearTimeout(peopleTimer);
+        peopleTimer = setTimeout(loadPeopleSuggestions, 250);
+    });
+
+    peopleSearch.addEventListener('keydown', (e) => {
+        const open = !peopleSuggestions.hidden;
+        if (e.key === 'ArrowDown' && open) {
+            e.preventDefault();
+            setPeopleActive(peopleActive + 1);
+        } else if (e.key === 'ArrowUp' && open) {
+            e.preventDefault();
+            setPeopleActive(peopleActive - 1);
+        } else if (e.key === 'Enter' && open) {
+            const options = peopleSuggestions.querySelectorAll('[role="option"]');
+            const option = options[peopleActive >= 0 ? peopleActive : 0];
+            if (option) {
+                e.preventDefault();
+                openPersonFromSuggestion(option);
+            }
+        } else if (e.key === 'Escape' && open) {
+            e.preventDefault();
+            closePeopleSuggestions();
+        }
+    });
+
+    // mousedown: elegir antes de que el campo pierda el foco y cierre la lista
+    peopleSuggestions.addEventListener('mousedown', (e) => {
+        const option = e.target.closest('[role="option"]');
+        if (!option) return;
+        e.preventDefault();
+        openPersonFromSuggestion(option);
+    });
+
+    peopleSearch.addEventListener('blur', closePeopleSuggestions);
+
+    // ----- Ficha de una persona -----
+    const personView = document.getElementById('personView');
+    const personGroups = document.getElementById('personGroups');
+    const personRange = document.getElementById('personRange');
+    const personDates = document.getElementById('personDates');
+    const personFrom = document.getElementById('personFrom');
+    const personTo = document.getElementById('personTo');
+    const personTicket = document.getElementById('personTicket');
+    const personTicketField = document.getElementById('personTicketField');
+    const personTimeline = document.getElementById('personTimeline');
+    const personEmpty = document.getElementById('personEmpty');
+    const personMore = document.getElementById('personMore');
+    const PERSON_GROUPS = {
+        staff: [['', 'Todo'], ['access', 'Acceso'], ['tickets', 'Tickets'], ['drafts', 'Borradores'], ['shifts', 'Turnos'], ['account', 'Cuenta']],
+        client: [['', 'Todo'], ['access', 'Acceso'], ['data', 'Datos'], ['reports', 'Reportes'], ['status', 'Estado']],
+    };
+    const PERSON_STATES = { active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada' };
+    const PERSON_STATS = [
+        ['assigned', 'Asignados'], ['resolved', 'Resueltos'], ['reassigned_received', 'Reasignados recibidos'],
+        ['reassigned_given', 'Reasignados dados'], ['overdue', 'Vencidos'], ['drafts_confirmed', 'Borradores confirmados'],
+        ['drafts_discarded', 'Borradores descartados'], ['logins', 'Ingresos'],
+    ];
+    let personId = null;
+    let personCrumb = '';
+    let personIsClient = false;
+    let personGroup = '';
+    let personCursor = null;
+    let personSeq = 0;
+    let personTicketTimer = null;
+
+    function localDateString(date) {
+        const pad = n => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function personParams(cursor) {
+        const params = new URLSearchParams();
+        if (personGroup) params.set('types', personGroup);
+        if (personRange.value === 'custom') {
+            if (personFrom.value) params.set('from', personFrom.value);
+            if (personTo.value) params.set('to', personTo.value);
+        } else {
+            const days = Number(personRange.value);
+            const from = new Date();
+            from.setDate(from.getDate() - days);
+            params.set('from', localDateString(from));
+            params.set('to', localDateString(new Date()));
+        }
+        const ticket = personTicket.value.trim();
+        if (!personIsClient && /^\d+$/.test(ticket)) params.set('ticket', ticket);
+        if (cursor) params.set('cursor', cursor);
+        return params;
+    }
+
+    function renderPersonGroups() {
+        const groups = PERSON_GROUPS[personIsClient ? 'client' : 'staff'];
+        personGroups.replaceChildren(...groups.map(([value, label]) => {
+            const button = makeEl('button', 'aa-quick-btn', label);
+            button.type = 'button';
+            button.dataset.group = value;
+            button.setAttribute('aria-pressed', value === personGroup ? 'true' : 'false');
+            return button;
+        }));
+    }
+
+    function personFact(term, value) {
+        const wrap = makeEl('div', 'person-fact');
+        wrap.append(makeEl('dt', '', term), makeEl('dd', '', value));
+        return wrap;
+    }
+
+    function renderPersonHead(person) {
+        document.getElementById('personName').textContent = person.name;
+        document.getElementById('personMeta').textContent = `${ACCOUNT_TYPE_LABELS[person.role] || person.role} · ${person.email}`;
+        const facts = [personFact('Cuenta', PERSON_STATES[person.state] || person.state)];
+        if (person.role === 'requester') {
+            facts.push(personFact('Teléfono', person.phone || '—'));
+            facts.push(personFact('Verificación con Hacienda', IDENTITY_LABELS[person.identity] || IDENTITY_LABELS.unverified));
+            if (person.reported) facts.push(personFact('Etiqueta', 'Reportada'));
+        } else {
+            facts.push(personFact('Turno hoy', person.schedule_today
+                ? `${person.schedule_today}${person.on_shift ? ' · en turno' : ''}` : 'Sin turno hoy'));
+            facts.push(personFact('Disponibilidad', AVAILABILITY_LABELS[person.availability] || '—'));
+            facts.push(personFact('Último acceso', person.last_access ? formatDateTime(person.last_access) : 'Sin registro'));
+            facts.push(personFact('Microsoft', person.microsoft ? 'Entra con Microsoft' : 'No enlazada'));
+        }
+        document.getElementById('personFacts').replaceChildren(...facts);
+    }
+
+    function renderPersonSummary(summary) {
+        const box = document.getElementById('personSummary');
+        box.hidden = !summary;
+        if (!summary) return;
+        document.getElementById('personStats').replaceChildren(...PERSON_STATS.map(([key, label]) => {
+            const stat = makeEl('div', 'ui-stat person-stat');
+            stat.append(makeEl('span', 'ui-stat-label', label), makeEl('span', 'ui-stat-value ui-num', String(summary[key])));
+            return stat;
+        }));
+    }
+
+    function renderPersonItem(item) {
+        const li = makeEl('li', `person-event is-${item.group}`);
+        const when = makeEl('time', 'person-event-time', formatDateTime(item.at));
+        when.dateTime = item.at;
+        const group = PERSON_GROUPS[personIsClient ? 'client' : 'staff'].find(([value]) => value === item.group);
+        li.append(when, makeEl('span', 'ui-tag person-event-group', group ? group[1] : item.group), makeEl('span', 'person-event-text', item.text));
+        return li;
+    }
+
+    async function loadPersonActivity(append = false) {
+        if (personId === null) return;
+        const seq = ++personSeq;
+        const params = personParams(append ? personCursor : null);
+        let data;
+        personMore.disabled = true;
+        try {
+            data = await apiFetch(`/admin/people/${personId}/activity?${params.toString()}`);
+        } catch (err) {
+            personMore.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        if (seq !== personSeq) return;
+        personMore.disabled = false;
+        if (!append) {
+            // Cliente: otros grupos y sin filtro por ticket (su ficha nunca trae tickets)
+            const client = data.person.role === 'requester';
+            if (client !== personIsClient) {
+                personIsClient = client;
+                personTicketField.hidden = client;
+                renderPersonGroups();
+            }
+            renderPersonHead(data.person);
+            personCrumb = data.person.name;
+            renderPageHead();
+            renderPersonSummary(data.summary);
+            personTimeline.replaceChildren();
+        }
+        personTimeline.append(...data.items.map(renderPersonItem));
+        personEmpty.hidden = personTimeline.children.length > 0;
+        personCursor = data.next_cursor;
+        personMore.hidden = !personCursor;
+    }
+
+    function openPerson(id) {
+        personId = id;
+        personCrumb = '';
+        personGroup = '';
+        personCursor = null;
+        personTicket.value = '';
+        personRange.value = '30';
+        personDates.hidden = true;
+        peopleHome.hidden = true;
+        personView.hidden = false;
+        personTimeline.replaceChildren();
+        personEmpty.hidden = true;
+        personMore.hidden = true;
+        document.getElementById('personName').textContent = '';
+        document.getElementById('personMeta').textContent = '';
+        document.getElementById('personFacts').replaceChildren();
+        document.getElementById('personSummary').hidden = true;
+        // El tipo de persona llega con la ficha; mientras tanto, los filtros del personal
+        personIsClient = false;
+        personTicketField.hidden = false;
+        renderPersonGroups();
+        loadPersonActivity();
+    }
+
+    function closePerson() {
+        personId = null;
+        personCrumb = '';
+        personSeq++;
+        personView.hidden = true;
+        peopleHome.hidden = false;
+    }
+
+    personGroups.addEventListener('click', (e) => {
         const button = e.target.closest('.aa-quick-btn');
         if (!button) return;
-        changesAction.value = button.dataset.action;
-        renderChangesQuick();
-        changesPage = 1;
-        loadAccountChanges();
+        personGroup = button.dataset.group;
+        renderPersonGroups();
+        loadPersonActivity();
     });
 
-    changesAction.addEventListener('change', () => {
-        renderChangesQuick();
-        changesPage = 1;
-        loadAccountChanges();
+    personRange.addEventListener('change', () => {
+        personDates.hidden = personRange.value !== 'custom';
+        if (personRange.value !== 'custom') loadPersonActivity();
     });
 
-    changesPrev.addEventListener('click', () => {
-        if (changesPage > 1) {
-            changesPage -= 1;
-            loadAccountChanges();
+    [personFrom, personTo].forEach(input => input.addEventListener('change', () => {
+        if (personFrom.value && personTo.value && personFrom.value > personTo.value) {
+            showError('La fecha "Desde" no puede ser posterior a "Hasta".');
+            return;
         }
+        loadPersonActivity();
+    }));
+
+    personTicket.addEventListener('input', () => {
+        clearTimeout(personTicketTimer);
+        personTicketTimer = setTimeout(() => loadPersonActivity(), 400);
     });
 
-    changesNext.addEventListener('click', () => {
-        if (changesPage < changesPages) {
-            changesPage += 1;
-            loadAccountChanges();
-        }
-    });
+    personMore.addEventListener('click', () => loadPersonActivity(true));
+
+    document.getElementById('personBack').addEventListener('click', () => goRoute('admin/registro'));
 
     refreshLogsBtn.addEventListener('click', loadAdminLogs);
 
@@ -6101,7 +6375,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
                         context: 'Horarios de la semana, vacaciones y ausencias',
                     }),
-                    navSection('changes', 'Registro de cambios', 'admin/registro', () => showAdminSection('changes'), {
+                    navSection('changes', 'Registro de cambios', 'admin/registro', () => {
+                        closePerson();
+                        showAdminSection('changes');
+                    }, {
                         context: 'Quién hizo qué y cuándo · los datos personales salen enmascarados',
                     }),
                     navSection('health', 'Estado del sistema', 'admin/estado', () => showAdminSection('health'), {
@@ -6224,6 +6501,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // "tickets/vencidos", "tickets/vencidos/176" o "tickets/vencidos/176/reporte". Desconocida: null
     function parseRoute(path) {
+        // Ficha de una persona en el Registro de cambios (solo administrador)
+        const person = path.match(/^(admin\/registro)\/persona\/(\d+)$/);
+        if (person) {
+            const section = allSections().find(s => s.route === person[1]);
+            return section ? { section, personId: Number(person[2]) } : null;
+        }
         const match = path.match(/^(.*?)(?:\/(\d+)(\/reporte)?)?$/);
         const section = allSections().find(s => s.route === match[1]);
         if (!section) return null;
@@ -6253,7 +6536,11 @@ document.addEventListener('DOMContentLoaded', () => {
             hideError();
             closeBellPanel();
             closeProfileMenu();
-            if (route.ticketId) {
+            if (route.personId) {
+                route.section.open();
+                setSideNavActive(route.section.id);
+                openPerson(route.personId);
+            } else if (route.ticketId) {
                 setSideNavActive(route.section.id);
                 if (route.report) openOverdueReport(route.ticketId);
                 else openTicketById(route.ticketId);
@@ -6457,6 +6744,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (module && module.sections.length > 1) crumbs.push({ label: module.label, route: module.sections[0].route });
             if (section.parent) crumbs.push({ label: section.parent.label, route: section.parent.route });
             crumbs.push({ label: section.label });
+            // Ficha de una persona: "Registro de cambios" lleva de vuelta a la búsqueda
+            if (section.id === 'changes' && personId !== null) {
+                crumbs[crumbs.length - 1].route = section.route;
+                crumbs.push({ label: personCrumb || 'Ficha' });
+            }
             title = typeof section.title === 'function' ? section.title() : (section.title || section.label);
             context = typeof section.context === 'function' ? section.context() : (section.context || '');
         } else if (currentViewName === 'tickets') {

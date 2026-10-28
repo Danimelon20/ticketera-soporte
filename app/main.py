@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, entra_login, models
+from . import auto_assign, chatbot, config, entra_login, models, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -56,6 +56,8 @@ def init_db():
     # Primero la carpeta donde vive la base de datos, después las tablas
     os.makedirs("data", exist_ok=True)
     models.Base.metadata.create_all(bind=engine)
+    # create_all no crea índices en tablas que ya existen: los del registro por persona van aparte
+    people_activity.ensure_indexes(engine)
 
     db = SessionLocal()
     try:

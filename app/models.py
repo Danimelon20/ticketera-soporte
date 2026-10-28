@@ -435,6 +435,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
     # Intento de usar una cédula de otra cuenta (new_value: cédula enmascarada y origen)
     "id_number_conflict",
+    # Ingreso con contraseña (y código, si el rol lo pide) e intento fallido de una cuenta existente
+    "login", "login_failed",
 )
 SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
 

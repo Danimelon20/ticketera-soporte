@@ -458,6 +458,7 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         return start_challenge(db, user)
 
     throttle.reset(db, email)
+    audit.record(db, user.id, "login", target=user)
     return _create_session(db, user)
 
 
@@ -490,6 +491,8 @@ def verify_code(data: VerifyCodeRequest, db: Session = Depends(get_db)):
     # Con Microsoft, la contraseña y el código del administrador son el acceso de emergencia
     if config.MS_LOGIN_ENABLED and user.role == "admin":
         entra_login.record_emergency_access(db, user)
+    else:
+        audit.record(db, user.id, "login", target=user)
     db.commit()
     return _create_session(db, user)
 

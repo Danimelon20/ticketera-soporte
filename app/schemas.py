@@ -244,6 +244,60 @@ class AccountChangePage(BaseModel):
     pages: int
 
 
+# ----- Registro de cambios por persona (solo administrador). Datos personales siempre enmascarados -----
+class PersonHit(BaseModel):
+    id: int
+    name: str
+    role: str
+    email: str
+
+
+class PersonHeader(BaseModel):
+    id: int
+    name: str
+    role: str
+    email: str
+    state: Literal["active", "locked", "inactive"]
+    # Personal
+    schedule_today: Optional[str] = None
+    on_shift: Optional[bool] = None
+    availability: Optional[str] = None
+    last_access: Optional[datetime] = None
+    microsoft: Optional[bool] = None
+    # Cliente
+    phone: Optional[str] = None
+    reported: Optional[bool] = None
+    identity: Optional[str] = None
+
+
+class ActivitySummary(BaseModel):
+    start: datetime
+    end: datetime
+    assigned: int
+    resolved: int
+    reassigned_given: int
+    reassigned_received: int
+    overdue: int
+    drafts_confirmed: int
+    drafts_discarded: int
+    logins: int
+
+
+class ActivityItem(BaseModel):
+    at: datetime
+    group: str
+    kind: str
+    text: str
+    ticket_id: Optional[int] = None
+
+
+class PersonActivityPage(BaseModel):
+    person: PersonHeader
+    summary: Optional[ActivitySummary] = None
+    items: list[ActivityItem]
+    next_cursor: Optional[str] = None
+
+
 class TicketCreate(BaseModel):
     # Nombre y cédula salen del perfil del dueño del ticket; el teléfono es opcional
     title: str

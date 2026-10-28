@@ -3,7 +3,7 @@ import os
 import sqlite3
 import tempfile
 from collections import deque
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -15,11 +15,12 @@ from starlette.background import BackgroundTask
 from ..database import engine, get_db
 from .. import (
     account_reports, accounts, alerts, auto_assign, availability, cancellations, config, daily_summary, email_analysis, email_poller,
-    identity, models, schedules, throttle,
+    identity, models, people_activity, schedules, throttle,
 )
 from ..schemas import (
     AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
-    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, TeamMember,
+    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, PersonActivityPage,
+    PersonHeader, PersonHit, TeamMember, ActivitySummary,
 )
 from ..security import get_current_user, mask_email, session_expired
 from ..validators import mask_id_number, mask_last4
@@ -206,6 +207,7 @@ def account_changes(
     account: Optional[str] = None,
     action: Optional[str] = None,
     page: int = 1,
+    exclude_access: bool = False,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
@@ -214,6 +216,9 @@ def account_changes(
     )
     if action:
         query = query.filter(models.AccountChange.action == action)
+    if exclude_access:
+        # "Actividad reciente": sin ingresos ni intentos, que están en la ficha de cada persona
+        query = query.filter(~models.AccountChange.action.in_(("login", "login_failed", "microsoft_login")))
     if account and account.strip():
         term = f"%{account.strip().lower()}%"
         query = query.filter(
@@ -233,6 +238,45 @@ def account_changes(
 
     items = [_change_read(row) for row in rows]
     return AccountChangePage(items=items, total=total, page=page, pages=pages)
+
+
+# ----- Registro de cambios por persona (solo lectura) -----
+@router.get("/admin/people", response_model=list[PersonHit])
+def search_people(query: str = "", db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return people_activity.search(db, query)
+
+
+@router.get("/admin/people/{user_id}/activity", response_model=PersonActivityPage)
+def person_activity(
+    user_id: int,
+    types: Optional[str] = None,
+    from_: Optional[date] = Query(default=None, alias="from"),
+    to: Optional[date] = None,
+    ticket: Optional[int] = None,
+    cursor: Optional[str] = None,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    user = people_activity.person(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="No existe esa persona")
+    if from_ and to and from_ > to:
+        raise HTTPException(status_code=400, detail="La fecha inicial no puede ser posterior a la final")
+    start, end = people_activity.date_range(from_, to)
+    groups = [g.strip() for g in types.split(",") if g.strip()] if types else None
+    try:
+        items, next_cursor = people_activity.timeline(db, user, groups, start, end, ticket, cursor)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="El cursor no es válido")
+    summary = None
+    if user.role in people_activity.STAFF_ROLES and not cursor:
+        summary = ActivitySummary(**people_activity.summary(db, user, start, end))
+    return PersonActivityPage(
+        person=PersonHeader(**people_activity.header(db, user)),
+        summary=summary,
+        items=items,
+        next_cursor=next_cursor,
+    )
 
 
 # ----- Admin › Cuentas -----
