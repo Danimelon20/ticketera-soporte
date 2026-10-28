@@ -1133,6 +1133,9 @@
 /* ----- Registro de cambios por persona ----- */
 .people-home { display: flex; flex-direction: column; gap: var(--sp-6); }
 
+/* La ficha es una pantalla aparte: la vista principal se oculta por completo */
+.people-home[hidden] { display: none; }
+
 .people-search { max-width: 560px; }
 
 .people-combo { position: relative; }
@@ -1180,8 +1183,6 @@
 
 .person-head { display: flex; flex-direction: column; gap: var(--sp-1); }
 
-.person-name { margin: 0; font-size: var(--fs-xl); font-weight: 600; border: none; padding: 0; overflow-wrap: anywhere; }
-
 .person-meta { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 
 .person-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--sp-3) var(--sp-6); margin: var(--sp-3) 0 0; }
@@ -1206,7 +1207,13 @@
 
 .person-dates[hidden], #personTicketField[hidden] { display: none; }
 
-.person-filter-row .ui-field { min-width: 160px; }
+.person-filter-row .ui-field { flex: 1 1 150px; min-width: 0; max-width: 240px; }
+
+.person-filter-row .person-dates { flex: 2 1 300px; }
+
+@media (max-width: 767px) {
+    .person-filter-row .ui-field { max-width: none; }
+}
 
 .person-timeline { list-style: none; margin: 0; padding: 0; }
 

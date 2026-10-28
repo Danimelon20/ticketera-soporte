@@ -5566,10 +5566,21 @@ document.addEventListener('DOMContentLoaded', () => {
         let data;
         personMore.disabled = true;
         try {
-            data = await apiFetch(`/admin/people/${personId}/activity?${params.toString()}`);
+            data = await apiFetch(`/admin/people/${personId}/activity?${params.toString()}`, { silent: true });
         } catch (err) {
             personMore.disabled = false;
-            return; // apiFetch ya mostró el error
+            if (seq !== personSeq) return;
+            if (!append && err.status === 404) {
+                // Persona inexistente o administrador: de vuelta a la vista principal, con aviso
+                history.replaceState(null, '', '#/admin/registro');
+                closePerson();
+                renderPageHead();
+                setDocumentTitle(ADMIN_SECTION_TITLES.changes);
+                showError('Esa persona no existe o no tiene ficha en el registro.');
+            } else if (err.message !== 'Unauthorized') {
+                showError(err.message || 'No se pudo cargar la ficha');
+            }
+            return;
         }
         if (seq !== personSeq) return;
         personMore.disabled = false;
@@ -5584,6 +5595,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderPersonHead(data.person);
             personCrumb = data.person.name;
             renderPageHead();
+            setDocumentTitle(data.person.name);
             renderPersonSummary(data.summary);
             personTimeline.replaceChildren();
         }
@@ -5614,6 +5626,8 @@ document.addEventListener('DOMContentLoaded', () => {
         personIsClient = false;
         personTicketField.hidden = false;
         renderPersonGroups();
+        // Pantalla aparte: empieza arriba
+        window.scrollTo(0, 0);
         loadPersonActivity();
     }
 
@@ -6748,6 +6762,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (section.id === 'changes' && personId !== null) {
                 crumbs[crumbs.length - 1].route = section.route;
                 crumbs.push({ label: personCrumb || 'Ficha' });
+                title = personCrumb || 'Ficha de la persona';
+                context = '';
             }
             title = typeof section.title === 'function' ? section.title() : (section.title || section.label);
             context = typeof section.context === 'function' ? section.context() : (section.context || '');
