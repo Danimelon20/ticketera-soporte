@@ -47,7 +47,12 @@ body.staff-shell main > .staff-footer {
 }
 
 @media (max-width: 767px) {
-    body.staff-shell { --nav-w: 0px; }
+    /* Celular: barra superior más baja y nada se sale a lo ancho */
+    body.staff-shell { --nav-w: 0px; --top-h: 52px; }
+
+    body.staff-shell main { overflow-x: clip; }
+
+    body.staff-shell :is(.page-view, .split, .page-head) { min-width: 0; }
 }
 
 body.staff-shell main { padding-bottom: var(--bar-h); margin-left: var(--nav-w); }

@@ -780,7 +780,7 @@ body.staff-shell.ticket-open #detailContent {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px 28px;
+  padding: 16px var(--page-gutter);
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
@@ -817,7 +817,7 @@ body.staff-shell.ticket-open #detailContent {
 
 .td-tags-meta { margin-right: -4px; }
 
-.td-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; padding: 20px 28px; align-items: start; }
+.td-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; padding: 20px var(--page-gutter); align-items: start; }
 
 .td-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
@@ -936,6 +936,22 @@ body.staff-shell.ticket-open #detailContent {
 #detailPanel .td-side .ai-card h2 { font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
 
 #detailPanel .td-side .ai-card p { color: var(--ink-2); }
+
+/* Detalle en dos columnas: la barra del ticket y la columna derecha (propiedades, cliente, IA)
+   quedan fijas al desplazarse. El panel no debe tener su propio desplazamiento para que funcionen. */
+body.staff-shell.ticket-open #detailPanel { overflow: visible; }
+
+body.staff-shell .ticket-bar { top: var(--top-h); padding-inline: var(--page-gutter); }
+
+@media (min-width: 901px) {
+    body.staff-shell .td-side {
+        position: sticky;
+        top: calc(var(--top-h) + var(--ticket-bar-h, 0px) + var(--sp-4));
+        max-height: calc(100vh - var(--top-h) - var(--ticket-bar-h, 0px) - var(--sp-8));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+}
 
 @media (max-width: 1100px) {
     .td-grid { grid-template-columns: minmax(0, 1fr) 280px; }

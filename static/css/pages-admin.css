@@ -31,7 +31,7 @@
 
 .aa-filters { margin: 4px 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.aa-filters input[type="search"] { height: 28px; border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; font-size: 12px; min-width: 200px; }
+.aa-filters input[type="search"] { flex: 1 1 200px; min-width: 0; height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); padding: 0 var(--sp-3); font: inherit; font-size: var(--fs-base); background: var(--surface); }
 
 .aa-panel-titles .aa-name { overflow-wrap: anywhere; }
 
@@ -927,7 +927,7 @@
 
 /* ----- Invitaciones, administración y directorio ----- */
 
-.directory-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.directory-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-4); }
 
 .directory-filters input,
 .directory-filters select {
@@ -1077,9 +1077,9 @@
 
 .change-label { color: var(--muted); }
 
-.changes-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.changes-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.changes-pager .btn-secondary { min-height: 44px; }
+.changes-pager .btn-secondary { min-height: 30px; padding: 0 var(--sp-3); font-size: var(--fs-sm); border-radius: 7px; }
 
 .invites-view, #adminView, #directoryView { background: var(--page-bg); }
 
@@ -1135,3 +1135,44 @@
 .changes-quick { margin: 0 0 12px; }
 
 .changes-note { margin-top: 12px; font-size: 12px; }
+
+/* ----- Celular: tablas como tarjetas ----- */
+@media (max-width: 767px) {
+    body.staff-shell :is(.directory-table, .invites-table) thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+
+    body.staff-shell :is(.directory-table, .invites-table),
+    body.staff-shell :is(.directory-table, .invites-table) :is(tbody, tr, td) { display: block; width: 100%; box-sizing: border-box; }
+
+    body.staff-shell :is(.directory-table, .invites-table) tr { padding: var(--sp-3) 14px; border-bottom: 1px solid var(--line-soft); }
+
+    body.staff-shell :is(.directory-table, .invites-table) tbody tr:last-child { border-bottom: none; }
+
+    body.staff-shell :is(.directory-table, .invites-table) td {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        padding: 3px 0;
+        border: none;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: right;
+    }
+
+    body.staff-shell :is(.directory-table, .invites-table) td[data-label]::before {
+        content: attr(data-label);
+        flex: 0 0 auto;
+        max-width: 45%;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+    }
+
+    body.staff-shell :is(.directory-table, .invites-table) td:empty { display: none; }
+
+    body.staff-shell :is(.directory-table, .invites-table) td:first-child { font-weight: 600; text-align: left; }
+
+    body.staff-shell :is(.directory-table, .invites-table) td:first-child::before { display: none; }
+}

@@ -3888,6 +3888,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             directoryBody.appendChild(row);
         });
+        labelTableCells(directoryBody.closest('table'));
     }
 
     async function updateDirectoryUser(userId, changes) {
@@ -5984,6 +5985,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(actions);
             tableBody.appendChild(row);
         });
+        labelTableCells(tableBody.closest('table'));
     }
 
     // ===== Mesa de servicio: menú lateral, contadores, buscador global y barra de estado =====
@@ -6433,6 +6435,11 @@ document.addEventListener('DOMContentLoaded', () => {
         new ResizeObserver(() => {
             document.body.style.setProperty('--page-head-h', `${pageHead.hidden ? 0 : pageHead.offsetHeight}px`);
         }).observe(pageHead);
+        // Igual con la barra del ticket: la columna derecha del detalle se queda debajo de ella
+        const ticketBarEl = document.getElementById('ticketBar');
+        new ResizeObserver(() => {
+            document.body.style.setProperty('--ticket-bar-h', `${ticketBarEl.hidden ? 0 : ticketBarEl.offsetHeight}px`);
+        }).observe(ticketBarEl);
     }
 
     function renderPageHead() {
@@ -7046,6 +7053,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (className) node.className = className;
         if (text !== undefined) node.textContent = text;
         return node;
+    }
+
+    // En el celular las tablas se ven como tarjetas: cada celda muestra el nombre de su columna
+    function labelTableCells(table) {
+        if (!table) return;
+        const heads = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+        table.querySelectorAll('tbody tr').forEach(row => {
+            [...row.children].forEach((cell, index) => {
+                if (heads[index]) cell.dataset.label = heads[index];
+            });
+        });
     }
 
     // ----- Errores de validación en línea (personal): el mensaje va debajo del campo, no en la burbuja -----
