@@ -19,7 +19,7 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
 - app/models.py     tablas
 - app/schemas.py    esquemas Pydantic (usar model_config = ConfigDict)
 - app/routers/      users.py, catalogs.py, tickets.py
-- static/           index.html (#listPanel, #detailPanel, newTicketModal, usersModal), app.js, styles.css
+- static/           index.html (#listPanel, #detailPanel, newTicketModal, usersModal), app.js, css/ (estilos por capas)
 - tests/            conftest.py (fábricas make_user y make_ticket) y pruebas
 - docs/             requisitos, diseño y bitácora
 

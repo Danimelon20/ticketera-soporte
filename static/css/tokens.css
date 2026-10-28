@@ -1,0 +1,113 @@
+/* =====================================================================
+   Tokens
+   Variables de diseño: colores, tipografía, espaciado, radios y sombras.
+   Ningún otro archivo define colores nuevos: todo sale de aquí.
+   ===================================================================== */
+
+:root {
+    /* ----- Fondo y tarjetas de la app del personal ----- */
+    /* Para cambiar el gris del fondo basta con esta línea */
+    --app-bg: #EEF0F4;
+    --app-card-bg: #FFFFFF;
+    --app-card-line: #E3E6EC;
+    --app-card-shadow: 0 1px 2px rgba(14, 16, 48, 0.04), 0 1px 3px rgba(14, 16, 48, 0.04);
+    /* Valores por defecto (inicio de sesión y portal); el personal los cambia en layout.css */
+    --page-bg: var(--bg-side);
+    --card-bg: var(--surface);
+    --card-line: var(--line);
+    --card-shadow: none;
+
+    /* ----- Colores de marca (American Data) · docs/prototipo/LEEME.md ----- */
+    --navy: #08086F;
+    --navy-2: #14147E;
+    --navy-line: #23239A;
+    --navy-text: #DDE2FF;
+    --navy-muted: #AEB8F5;
+    --blue: #0041FF;
+    --link: #0036D6;
+
+    /* ----- Superficies, líneas y texto ----- */
+    --bg-side: #F7F8FA;
+    --surface: #FFFFFF;
+    --line: #E6E8EE;
+    --line-soft: #F2F3F6;
+    --field-line: #D5D9E4;
+    --ink: #0E1030;
+    --ink-2: #2A2E4A;
+    --muted: #5B6078;
+    --selected: #EEF3FF;
+    --nav-active: #E8EEFF;
+
+    /* ----- Estados y urgencia ----- */
+    --overdue: #B42318;
+    --due-soon: #9A4A06;
+    --due-soon-bar: #F59E0B;
+    --on-shift: #16A34A;
+    /* Fondos suaves para etiquetas y avisos (texto oscuro del mismo tono encima) */
+    --ok: #146C34;
+    --ok-soft: #E7F5EC;
+    --warn-soft: #FEF3E2;
+    --danger-soft: #FDECEA;
+    --info-soft: #F3F6FF;
+    --info-line: #C9D6FF;
+    --note-bg: #FFF8EC;
+    --note-line: #F3D3A6;
+    --neutral-soft: #EEF0F4;
+    --neutral-ink: #3F4560;
+    --skeleton: #ECEEF3;
+    --exito: #15803d;
+    --error: #b91c1c;
+
+    /* ----- Tipografía ----- */
+    --font: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    --fs-xs: 11px;
+    --fs-sm: 12px;
+    --fs-base: 13px;
+    --fs-md: 14px;
+    --fs-lg: 16px;
+    --fs-xl: 20px;
+    --fs-2xl: 22px;
+    --fs-3xl: 26px;
+
+    /* ----- Espaciado (escala 4 · 8 · 12 · 16 · 24 · 32) ----- */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+
+    /* ----- Ancho del contenido del personal ----- */
+    --content-max: 1360px;
+    --page-gutter: var(--sp-8);
+
+    /* ----- Radios ----- */
+    --r-sm: 6px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-xl: 14px;
+    --r-pill: 99px;
+
+    /* ----- Sombras y foco ----- */
+    --shadow-sm: 0 1px 2px rgba(14, 16, 48, 0.08);
+    --shadow-md: 0 8px 24px rgba(14, 16, 48, 0.12);
+    --shadow-lg: 0 18px 48px rgba(14, 16, 48, 0.28);
+    --focus-ring: 0 0 0 3px rgba(0, 65, 255, 0.35);
+
+    /* ----- Alturas fijas ----- */
+    /* Barra de estado del personal y pie del portal (con el logo de 28 px) */
+    --bar-h: 38px;
+
+    /* ----- Nombres anteriores: apuntan a los nuevos para no romper estilos existentes ----- */
+    --bg: var(--bg-side);
+    --accent: var(--blue);
+    --accent-dark: var(--navy);
+    --accent-soft: var(--selected);
+    --radius: var(--r-sm);
+}
+
+@media (max-width: 767px) {
+    :root { --page-gutter: var(--sp-4); }
+}

@@ -1,0 +1,36 @@
+/* =====================================================================
+   Base
+   Elementos HTML sin clase y foco visible.
+   ===================================================================== */
+
+/* ----- Documento ----- */
+
+body {
+    font-family: var(--font);
+    margin: 0 auto;
+    color: var(--ink);
+    background: var(--bg);
+    font-size: 13px;
+}
+
+main {
+    padding-top: 0;
+}
+
+h2 {
+    margin-top: 0;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 8px;
+}
+
+section {
+    margin-bottom: 0;
+}
+
+/* ----- Foco ----- */
+
+/* Foco visible en todo control que no tenga uno propio */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+}
