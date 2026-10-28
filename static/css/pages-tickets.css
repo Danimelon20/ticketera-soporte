@@ -265,7 +265,7 @@ body.staff-shell #detailPanel { padding: 16px; font-size: 13px; }
 
 .queue-table th {
   position: sticky;
-  top: 0;
+  top: var(--sticky-top, 0px);
   background: var(--bg-side);
   text-align: left;
   font-size: 11px;
@@ -413,9 +413,9 @@ body.staff-shell .queue-panel {
 .queue-new-banner::before { content: ""; width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--blue); flex: 0 0 auto; }
 
 /* Tarjeta con la tabla */
-.queue-card { display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0; }
+.queue-card { display: flex; flex-direction: column; overflow: clip; flex: 1; min-height: 0; }
 
-#queuePanel .queue-table-wrap { overflow: auto; }
+#queuePanel .queue-table-wrap { overflow: clip; }
 
 #queuePanel .queue-table { table-layout: fixed; font-size: var(--fs-base); }
 

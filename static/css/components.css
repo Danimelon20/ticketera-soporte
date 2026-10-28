@@ -143,6 +143,51 @@
 
 .ticket-bar-link:hover { color: var(--navy); text-decoration: underline; }
 
+/* Botones heredados (.btn-*): en la app del personal se ven igual que .ui-btn.
+   :where() no suma especificidad, así las reglas de cada página siguen mandando. */
+:where(body.staff-shell) :is(.btn-submit, .btn-primary, .btn-action, .btn-assign, .btn-secondary) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    width: auto;
+    min-height: 36px;
+    padding: 0 var(--sp-4);
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    font: inherit;
+    font-size: var(--fs-base);
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+:where(body.staff-shell) :is(.btn-submit, .btn-primary, .btn-action, .btn-assign) { background: var(--blue); color: #FFFFFF; }
+
+:where(body.staff-shell) :is(.btn-submit, .btn-primary, .btn-action, .btn-assign):hover:not(:disabled) { background: var(--link); }
+
+:where(body.staff-shell) .btn-secondary { background: var(--surface); border-color: var(--field-line); color: var(--ink); }
+
+:where(body.staff-shell) .btn-small { min-height: 30px; padding: 0 var(--sp-3); font-size: var(--fs-sm); border-radius: 7px; }
+
+:where(body.staff-shell) :is(.btn-submit, .btn-primary, .btn-action, .btn-assign, .btn-secondary):disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Fila de acciones: principal a la derecha, secundarias a su izquierda y la acción delicada al otro extremo */
+:where(body.staff-shell) :is(.dialog-actions, .profile-actions, .new-ticket-actions, .draft-actions, .td-composer-actions) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+}
+
+:where(body.staff-shell) :is(.dialog-actions, .profile-actions, .new-ticket-actions, .draft-actions) > :is(.ui-btn-primary, .btn-submit, .btn-primary, .btn-action) { order: 2; }
+
+:where(body.staff-shell) :is(.dialog-actions, .profile-actions, .new-ticket-actions, .draft-actions) > :is(.ui-btn-quiet-danger, .ui-btn-danger) { order: -1; margin-right: auto; }
+
+:where(body.staff-shell) .draft-actions > .draft-actions-hint { order: 3; flex-basis: 100%; }
+
 /* ----- Campos y formularios ----- */
 
 .form-row {
@@ -249,6 +294,28 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 .ui-input::placeholder { color: #80859E; }
 
 .ui-help { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+
+/* Etiqueta arriba, ayuda debajo y error en línea junto al campo */
+:where(body.staff-shell) .ui-field > label { font-weight: 500; }
+
+/* Campo obligatorio: asterisco rojo junto a la etiqueta (el lector de pantalla ya anuncia "obligatorio") */
+:where(body.staff-shell) :is(.ui-field, .form-group):has(> :is(input, select, textarea):required) > label::after,
+:where(body.staff-shell) :is(.ui-field, .form-group):has(> * > :is(input, select, textarea):required) > label::after {
+    content: " *";
+    content: " *" / "";
+    color: var(--overdue);
+    font-weight: 600;
+}
+
+:where(body.staff-shell) :is(.form-group input, .form-group select, .form-group textarea)[aria-invalid="true"] { border-color: var(--overdue); }
+
+.ui-input[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.25); }
+
+.ui-field-error { display: flex; gap: 6px; margin: 2px 0 0; font-size: var(--fs-sm); font-weight: 500; color: var(--overdue); }
+
+.ui-field-error::before { content: "!"; flex: 0 0 auto; width: 14px; height: 14px; border-radius: var(--r-pill); background: var(--overdue); color: #FFFFFF; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; }
+
+.ui-field-error[hidden] { display: none; }
 
 /* ----- Pestañas ----- */
 
@@ -443,6 +510,35 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .state-cancelled { background: var(--danger-soft); color: var(--overdue); }
 
+/* Un solo estilo de etiqueta: las clases heredadas toman la forma y los colores de .ui-tag */
+:where(body.staff-shell) :is(.badge, .state-tag, .account-tag) {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    line-height: 16px;
+    white-space: nowrap;
+}
+
+:where(body.staff-shell) :is(.status-new, .tag-review, .tag-auto) { background: var(--nav-active); color: var(--link); }
+
+:where(body.staff-shell) :is(.status-in_progress, .tag-away, .tag-identity-not_found) { background: var(--warn-soft); color: var(--due-soon); }
+
+:where(body.staff-shell) :is(.status-resolved, .tag-identity-match, .tag-on-shift) { background: var(--ok-soft); color: var(--ok); }
+
+:where(body.staff-shell) :is(.status-closed, .tag-identity-unverified, .tag-off-shift) { background: var(--neutral-soft); color: var(--neutral-ink); }
+
+:where(body.staff-shell) :is(.tag-reported, .tag-identity-mismatch) { background: var(--danger-soft); color: var(--overdue); }
+
+/* Urgencia heredada: mismo texto y barra que .ui-due y .ui-bar */
+:where(body.staff-shell) :is(.due-text-overdue, .due-text-due_soon, .due-text-on_time, .due-text-none) { font-size: var(--fs-sm); }
+
+:where(body.staff-shell) .due-bar { height: 4px; border-radius: var(--r-pill); background: var(--neutral-soft); }
+
+:where(body.staff-shell) .due-fill.due-due_soon { background: var(--due-soon-bar); }
+
 /* ----- Tarjetas ----- */
 
 .ui-card { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-lg); box-shadow: var(--card-shadow); }
@@ -501,6 +597,36 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .ui-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
+/* Todas las tablas del personal: encabezado fijo bajo la barra (y la cabecera de la página),
+   fila resaltada al pasar el mouse y cifras alineadas */
+:where(body.staff-shell) :is(.ui-table, .queue-table, .directory-table) th {
+    position: sticky;
+    top: var(--sticky-top, 0px);
+    z-index: 2;
+    background: var(--card-bg);
+    box-shadow: inset 0 -1px 0 var(--line);
+}
+
+:where(body.staff-shell :is(.ui-table, .queue-table, .directory-table)) tbody tr:hover { background: var(--bg-side); }
+
+:where(body.staff-shell) :is(.ui-table, .queue-table, .directory-table) td { font-variant-numeric: tabular-nums; }
+
+:where(body.staff-shell) :is(.ui-table, .queue-table, .directory-table) :is(th, td):is(.num, .ui-num) { text-align: right; }
+
+/* Para que el encabezado quede fijo, los contenedores de tabla recortan sin crear su propio desplazamiento
+   (en el celular las tablas pasan a tarjetas) */
+@media (min-width: 768px) {
+    :where(body.staff-shell) :is(.table-scroll, .invites-table-wrap, .queue-table-wrap) { overflow: clip; }
+}
+
+/* Mismo vacío que .ui-empty en las tablas que solo tenían un párrafo */
+:where(body.staff-shell) :is(#directoryEmpty, #teamEmpty, #myRequestsEmpty) {
+    margin: 0;
+    padding: 40px var(--sp-5);
+    text-align: center;
+    color: var(--muted);
+}
+
 /* ----- Avisos ----- */
 
 .error {
@@ -547,9 +673,9 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .ui-notice.is-warn { border-color: var(--note-line); background: var(--note-bg); }
 
-.ui-notice.is-danger { border-color: #F1B8B0; background: var(--danger-soft); color: #7A1B12; }
+.ui-notice.is-danger { border-color: var(--danger-line); background: var(--danger-soft); color: #7A1B12; }
 
-.ui-notice.is-ok { border-color: #A7D8B5; background: var(--ok-soft); color: #0F4F26; }
+.ui-notice.is-ok { border-color: var(--ok-line); background: var(--ok-soft); color: #0F4F26; }
 
 .ui-notice[hidden] { display: none; }
 
@@ -564,11 +690,20 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
     font-weight: 600;
     padding: 10px 16px;
     background-color: var(--danger-soft);
-    border-color: #F1B8B0;
+    border-color: var(--danger-line);
     color: var(--overdue);
     border-radius: 10px;
     box-shadow: var(--shadow-md);
 }
+
+/* Avisos heredados con el mismo aspecto que .ui-notice */
+:where(body.staff-shell) :is(.error, .success) { padding: 11px 14px; border: 1px solid; border-radius: 10px; line-height: 1.45; }
+
+:where(body.staff-shell) .error { border-color: var(--danger-line); background: var(--danger-soft); color: #7A1B12; }
+
+:where(body.staff-shell) .success { border-color: var(--ok-line); background: var(--ok-soft); color: #0F4F26; }
+
+:where(body.staff-shell) #successMessage { padding: 10px 16px; font-weight: 600; box-shadow: var(--shadow-md); }
 
 /* ----- Modales y diálogos ----- */
 
@@ -647,6 +782,13 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 .cancel-reasons label, .cancel-notify { display: flex; align-items: center; gap: 8px; font-weight: 400; cursor: pointer; }
 
 .cancel-notify { margin: 4px 0 12px; }
+
+/* Un solo estilo de modal: los diálogos heredados toman el de .ui-modal */
+:where(body.staff-shell) .app-dialog { width: min(520px, calc(100vw - 32px)); padding: var(--sp-5) 22px; }
+
+:where(body.staff-shell) .app-dialog .modal-title { font-size: 17px; font-weight: 600; }
+
+:where(body.staff-shell) .app-dialog .dialog-actions { margin-top: var(--sp-4); }
 
 /* ----- Carga y estados vacíos ----- */
 

@@ -25,6 +25,8 @@ body.staff-shell {
     --card-bg: var(--app-card-bg);
     --card-line: var(--app-card-line);
     --card-shadow: var(--app-card-shadow);
+    /* Lo fijo arriba al desplazarse: barra superior y, en E3, la cabecera de la página */
+    --sticky-top: calc(var(--top-h) + var(--page-head-h, 0px));
     background: var(--page-bg);
 }
 

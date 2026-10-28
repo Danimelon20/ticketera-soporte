@@ -1123,7 +1123,7 @@
 
 #directoryView .directory-table th { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--surface); }
 
-#directoryView .directory-table td { border-color: var(--line-soft); }
+#directoryView .directory-table td { border-color: var(--line-soft); white-space: normal; overflow-wrap: anywhere; }
 
 #directoryView .directory-filters input, #directoryView .directory-filters select,
 #adminView .directory-filters input, #adminView .directory-filters select { min-height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); background: var(--surface); }

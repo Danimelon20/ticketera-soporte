@@ -6994,6 +6994,51 @@ document.addEventListener('DOMContentLoaded', () => {
         return node;
     }
 
+    // ----- Errores de validación en línea (personal): el mensaje va debajo del campo, no en la burbuja -----
+    function fieldErrorFor(field) {
+        const id = field.id ? `${field.id}-error` : '';
+        return id ? document.getElementById(id) : null;
+    }
+
+    function clearFieldError(field) {
+        const error = fieldErrorFor(field);
+        if (error) error.hidden = true;
+        field.removeAttribute('aria-invalid');
+    }
+
+    document.addEventListener('invalid', (e) => {
+        const field = e.target;
+        if (!isStaffShell() || !field.id || !(field instanceof HTMLElement)) return;
+        e.preventDefault();
+        let error = fieldErrorFor(field);
+        if (!error) {
+            error = makeEl('p', 'ui-field-error');
+            error.id = `${field.id}-error`;
+            error.setAttribute('aria-live', 'polite');
+            // Debajo del campo (o de su fila, si comparte línea con un botón)
+            const anchor = field.parentElement && field.parentElement.classList.contains('requester-row') ? field.parentElement : field;
+            anchor.after(error);
+            const described = (field.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+            field.setAttribute('aria-describedby', [...described, error.id].join(' '));
+        }
+        error.textContent = field.validationMessage;
+        error.hidden = false;
+        field.setAttribute('aria-invalid', 'true');
+        // El primer campo con error recibe el foco
+        const form = field.form;
+        if (form && !form.querySelector('[aria-invalid="true"]:focus')) {
+            const first = form.querySelector(':invalid');
+            if (first === field) field.focus();
+        }
+    }, true);
+
+    ['input', 'change'].forEach(type => document.addEventListener(type, (e) => {
+        const field = e.target;
+        if (field instanceof HTMLElement && field.getAttribute('aria-invalid') === 'true' && field.checkValidity && field.checkValidity()) {
+            clearFieldError(field);
+        }
+    }, true));
+
     function formatDuration(seconds) {
         const minutes = Math.max(0, Math.round(seconds / 60));
         const days = Math.floor(minutes / 1440);
