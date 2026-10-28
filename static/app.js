@@ -6294,6 +6294,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (single) button.dataset.navId = module.sections[0].id;
             button.appendChild(navIcon(module.icon));
             button.appendChild(makeEl('span', 'nav-item-label', module.label));
+            // Nombre visible como tooltip cuando el menú está contraído
+            button.dataset.tooltip = module.label;
             li.appendChild(button);
             if (single) {
                 navItems[module.sections[0].id] = module.sections[0];
@@ -6419,33 +6421,58 @@ document.addEventListener('DOMContentLoaded', () => {
     const pageActions = document.getElementById('pageActions');
     let currentViewName = null;
 
+    document.getElementById('pageCrumb').addEventListener('click', (e) => {
+        const link = e.target.closest('.page-crumb-link');
+        if (!link) return;
+        e.preventDefault();
+        goRoute(link.dataset.route);
+    });
+
+    // Altura de la cabecera fija: los encabezados de tabla se quedan justo debajo
+    if (window.ResizeObserver) {
+        new ResizeObserver(() => {
+            document.body.style.setProperty('--page-head-h', `${pageHead.hidden ? 0 : pageHead.offsetHeight}px`);
+        }).observe(pageHead);
+    }
+
     function renderPageHead() {
         if (!isStaffShell()) {
             pageHead.hidden = true;
             return;
         }
+        // Cada paso de la ruta lleva a su página: el módulo abre su primera sección
         const crumbs = [];
         let title = '';
         let context = '';
         const section = activeSection;
         if (section) {
             const module = moduleOf(section);
-            if (module && module.sections.length > 1) crumbs.push(module.label);
-            if (section.parent) crumbs.push(section.parent.label);
-            crumbs.push(section.label);
+            if (module && module.sections.length > 1) crumbs.push({ label: module.label, route: module.sections[0].route });
+            if (section.parent) crumbs.push({ label: section.parent.label, route: section.parent.route });
+            crumbs.push({ label: section.label });
             title = typeof section.title === 'function' ? section.title() : (section.title || section.label);
             context = typeof section.context === 'function' ? section.context() : (section.context || '');
         } else if (currentViewName === 'tickets') {
             // Búsqueda o tickets de un cliente: sin sección del menú
-            crumbs.push('Tickets', queueTitle.textContent);
+            const ticketsModule = navModules.find(m => m.id === 'tickets');
+            crumbs.push({ label: 'Tickets', route: ticketsModule ? ticketsModule.sections[0].route : null }, { label: queueTitle.textContent });
             title = queueTitle.textContent;
         }
         // Nuevo ticket y el reporte de vencimiento tienen su propia barra
         pageHead.hidden = !crumbs.length || ['newTicket', 'overdueReport'].includes(currentViewName);
         const list = document.getElementById('pageCrumb');
         list.replaceChildren(...crumbs.map((crumb, index) => {
-            const li = makeEl('li', 'page-crumb-item', crumb);
-            if (index === crumbs.length - 1) li.setAttribute('aria-current', 'page');
+            const last = index === crumbs.length - 1;
+            const li = makeEl('li', 'page-crumb-item');
+            if (last || !crumb.route) {
+                li.textContent = crumb.label;
+                if (last) li.setAttribute('aria-current', 'page');
+            } else {
+                const link = makeEl('a', 'page-crumb-link', crumb.label);
+                link.href = `#/${crumb.route}`;
+                link.dataset.route = crumb.route;
+                li.appendChild(link);
+            }
             return li;
         }));
         document.getElementById('pageTitle').textContent = title;
@@ -6705,6 +6732,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('navUser').addEventListener('click', () => goRoute(PROFILE_SECTION.route));
+
+    // ----- Menú contraíble a solo íconos; la preferencia queda en este navegador -----
+    const NAV_COLLAPSED_KEY = 'ticketera.navCollapsed';
+    const navCollapse = document.getElementById('navCollapse');
+
+    function applyNavCollapsed(collapsed) {
+        document.body.classList.toggle('nav-collapsed', collapsed);
+        navCollapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        navCollapse.querySelector('.nav-collapse-label').textContent = collapsed ? 'Expandir menú' : 'Contraer menú';
+        navCollapse.dataset.tooltip = 'Expandir menú';
+    }
+
+    try {
+        applyNavCollapsed(localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
+    } catch (err) {
+        applyNavCollapsed(false);
+    }
+
+    navCollapse.addEventListener('click', () => {
+        const collapsed = !document.body.classList.contains('nav-collapsed');
+        applyNavCollapsed(collapsed);
+        try {
+            localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
+        } catch (err) {
+            // Sin almacenamiento: el menú queda así solo en esta visita
+        }
+    });
 
     // ----- Perfil en la barra superior: Mi cuenta y Cerrar sesión -----
     const topProfile = document.getElementById('topProfile');

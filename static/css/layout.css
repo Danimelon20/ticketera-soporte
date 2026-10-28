@@ -19,6 +19,11 @@
 
 body.staff-shell { --nav-w: 236px; --top-h: 56px; }
 
+/* Menú contraído a solo íconos (se recuerda en el navegador; en el celular el menú es un panel) */
+@media (min-width: 768px) {
+    body.staff-shell.nav-collapsed { --nav-w: 64px; }
+}
+
 /* Fondo gris y tarjetas blancas: los valores están en tokens.css */
 body.staff-shell {
     --page-bg: var(--app-bg);
@@ -306,6 +311,8 @@ body.staff-shell .top-profile-box { display: block; position: relative; flex: 0 
 
 .profile-menu-item:hover, .profile-menu-item:focus-visible { background: #EEF3FF; color: var(--link); outline: none; }
 
+.profile-menu-item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
 body.staff-shell .topbar :focus-visible { outline: 2px solid #FFFFFF; outline-offset: 2px; }
 
 body.staff-shell .nav-toggle { display: none; }
@@ -469,10 +476,77 @@ body.staff-shell .nav-foot { margin-top: auto; padding-top: 12px; display: flex;
 
 .nav-foot-link:hover, .nav-foot-link.active { color: var(--link); text-decoration: underline; }
 
+/* Estado activo más claro: barra azul a la izquierda, fondo y texto en azul */
+body.staff-shell .nav-module.is-active,
+body.staff-shell .nav-module.active,
+body.staff-shell .nav-item.active {
+  background: var(--nav-active);
+  color: var(--link);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+body.staff-shell .nav-module.is-active .nav-icon { color: var(--blue); }
+
+/* Foco visible con el teclado en todo el menú */
+body.staff-shell .side-nav :focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
+/* Botón para contraer o expandir el menú */
+.nav-collapse {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px;
+  border: none; border-radius: var(--r-md); background: none; color: var(--muted);
+  font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
+}
+
+.nav-collapse:hover { background: #F2F4F8; color: var(--ink); }
+
+.nav-collapse-icon { flex: 0 0 auto; transition: transform 0.15s ease; }
+
+body.staff-shell.nav-collapsed .nav-collapse-icon { transform: scaleX(-1); }
+
+/* Contraído: solo íconos de los módulos, con el nombre en un tooltip */
+@media (min-width: 768px) {
+    body.staff-shell.nav-collapsed .side-nav { width: var(--nav-w); padding-inline: 10px; overflow: visible; }
+
+    body.staff-shell.nav-collapsed :is(.nav-modules-title, .nav-sections, .nav-module-caret, .nav-shift, .nav-foot-links, .nav-collapse-label) {
+      position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+    }
+
+    body.staff-shell.nav-collapsed .nav-module { justify-content: center; padding: 0; }
+
+    body.staff-shell.nav-collapsed .nav-module .nav-item-label {
+      position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+    }
+
+    body.staff-shell.nav-collapsed .nav-collapse { justify-content: center; padding: 0; }
+
+    body.staff-shell.nav-collapsed :is(.nav-module, .nav-collapse) { position: relative; }
+
+    body.staff-shell.nav-collapsed :is(.nav-module, .nav-collapse)[data-tooltip]:is(:hover, :focus-visible)::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: calc(100% + 10px);
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 80;
+      padding: 5px 9px;
+      border-radius: var(--r-sm);
+      background: var(--ink);
+      color: #FFFFFF;
+      font-size: var(--fs-sm);
+      font-weight: 500;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: var(--shadow-md);
+    }
+}
+
 @media (max-width: 767px) {
     body.staff-shell .side-nav { width: 264px; transform: translateX(-100%); transition: transform 0.15s ease; z-index: 70; }
 
     body.staff-shell.nav-open .side-nav { transform: none; }
+
+    .nav-collapse { display: none; }
 
     body.staff-shell.nav-open .side-nav-backdrop {
       display: block; position: fixed; inset: var(--top-h) 0 0 0; background: rgba(14, 16, 48, 0.45); z-index: 65;
@@ -484,6 +558,21 @@ body.staff-shell .nav-foot { margin-top: auto; padding-top: 12px; display: flex;
 .page-head { padding: 20px var(--page-gutter) 0; display: flex; flex-direction: column; gap: 4px; }
 
 .page-head[hidden] { display: none; }
+
+/* Cabecera fija al desplazarse, sobre el fondo de la página */
+body.staff-shell .page-head {
+    position: sticky;
+    top: var(--top-h);
+    z-index: 30;
+    padding-bottom: var(--sp-3);
+    background: var(--page-bg);
+}
+
+.page-crumb-link { color: inherit; text-decoration: none; border-radius: 4px; }
+
+.page-crumb-link:hover { color: var(--link); text-decoration: underline; }
+
+.page-crumb-item[aria-current="page"] { color: var(--muted); }
 
 .page-crumb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: #8A90A8; }
 
