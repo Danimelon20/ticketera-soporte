@@ -31,6 +31,10 @@ body.staff-shell {
     --card-line: var(--app-card-line);
     --card-shadow: var(--app-card-shadow);
     --table-head-bg: var(--app-table-head);
+    --table-head-ink: var(--app-table-head-ink);
+    --card-border-w: var(--app-card-border-w);
+    --control-border-w: var(--app-control-border-w);
+    --muted: var(--app-muted);
     --bg-side: var(--app-hover);
     /* Bordes, separadores y controles del personal */
     --line: var(--app-card-line);
@@ -426,7 +430,7 @@ body.staff-shell .side-nav {
 /* Del menú viejo: quedan en la página hasta la limpieza (N5), pero no se muestran */
 body.staff-shell .side-nav-groups { flex: 1 1 auto; min-height: 0; padding: 0; }
 
-.nav-modules-title { margin: 0; padding: 0 10px 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #8A90A8; }
+.nav-modules-title { margin: 0; padding: 0 10px 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--app-nav-muted); }
 
 .nav-modules, .nav-sections { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 
@@ -443,7 +447,7 @@ body.staff-shell .side-nav-groups { flex: 1 1 auto; min-height: 0; padding: 0; }
 
 .nav-module.is-active, .nav-module.active { background: #EEF3FF; color: var(--link); }
 
-.nav-module-caret { margin-left: auto; font-size: 11px; color: #8A90A8; }
+.nav-module-caret { margin-left: auto; font-size: 11px; color: var(--app-nav-muted); }
 
 body.staff-shell .nav-item {
   width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: none; border-radius: 8px;
@@ -458,7 +462,7 @@ body.staff-shell .nav-item.active { background: #EEF3FF; color: var(--link); fon
 
 .nav-item-label { flex: 1; min-width: 0; text-align: left; }
 
-body.staff-shell .nav-count { margin-left: auto; font-family: var(--mono); font-size: 12px; color: #8A90A8; }
+body.staff-shell .nav-count { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--app-nav-muted); }
 
 body.staff-shell .nav-count.is-warn { color: #9A4A06; font-weight: 600; }
 
@@ -491,13 +495,13 @@ body.staff-shell .nav-foot { margin-top: auto; padding-top: 12px; display: flex;
 body.staff-shell .nav-module.is-active,
 body.staff-shell .nav-module.active,
 body.staff-shell .nav-item.active {
-  background: var(--nav-active);
-  color: var(--link);
+  background: var(--app-nav-active-bg);
+  color: var(--app-nav-active-ink);
   font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--blue);
+  box-shadow: inset 3px 0 0 var(--app-nav-active-bar);
 }
 
-body.staff-shell .nav-module.is-active .nav-icon { color: var(--blue); }
+body.staff-shell .nav-module.is-active .nav-icon { color: var(--app-nav-active-ink); }
 
 /* Foco visible con el teclado en todo el menú */
 body.staff-shell .side-nav :focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
@@ -595,7 +599,7 @@ body.staff-shell .page-head {
 
 .page-title { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
 
-.page-context { margin: 0; color: #5B6078; }
+.page-context { margin: 0; color: var(--muted); }
 
 .page-context[hidden] { display: none; }
 

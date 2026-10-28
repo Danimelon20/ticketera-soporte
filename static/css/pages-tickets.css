@@ -103,7 +103,7 @@
 .home-incident > :first-child { overflow-wrap: anywhere; }
 
 /* El saludo y "Enviar resumen ahora" van en la cabecera de la página */
-.home-team-load { min-width: 24px; text-align: right; font-size: 12px; color: #5B6078; }
+.home-team-load { min-width: 24px; text-align: right; font-size: 12px; color: var(--muted); }
 
 .home-row-tag { flex: 0 0 auto; }
 
@@ -436,7 +436,7 @@ body.staff-shell .queue-panel {
   font-weight: 500;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--table-head-ink);
 }
 
 #queuePanel .queue-table td { height: 56px; padding: 8px 14px; vertical-align: middle; border-bottom: 1px solid var(--line-soft); }
@@ -519,7 +519,7 @@ body.staff-shell.ticket-open .queue-aside { display: none; }
 
 .queue-aside-big { margin: 0; font-size: 18px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 
-.queue-aside-text, .queue-aside-note { margin: 0; color: #5B6078; font-size: 13px; }
+.queue-aside-text, .queue-aside-note { margin: 0; color: var(--muted); font-size: 13px; }
 
 .queue-aside-note { font-size: 12px; }
 
@@ -534,13 +534,13 @@ body.staff-shell.ticket-open .queue-aside { display: none; }
 
 .queue-aside-draft-title { font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 
-.queue-aside-draft-meta { font-size: 12px; color: #5B6078; }
+.queue-aside-draft-meta { font-size: 12px; color: var(--muted); }
 
 .queue-aside-draft-go { font-size: 12px; font-weight: 500; color: var(--link); }
 
 .queue-aside-draft:hover .queue-aside-draft-go { text-decoration: underline; }
 
-.queue-aside-empty { padding: 8px 0; color: #5B6078; font-size: 13px; }
+.queue-aside-empty { padding: 8px 0; color: var(--muted); font-size: 13px; }
 
 .queue-overdue-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; }
 
@@ -625,7 +625,7 @@ body.staff-shell.ticket-open .queue-aside { display: none; }
 }
 
 /* Análisis de la IA en el detalle del ticket */
-.ai-card { background: var(--card-bg); border: 1px solid var(--card-line); box-shadow: var(--card-shadow); border-radius: 10px; padding: 16px; margin: 0 0 28px 0; display: grid; gap: 10px; }
+.ai-card { background: var(--card-bg); border: var(--card-border-w) solid var(--card-line); box-shadow: var(--card-shadow); border-radius: 10px; padding: 16px; margin: 0 0 28px 0; display: grid; gap: 10px; }
 
 .ai-card h2 { font-size: 15px; margin: 0; }
 
@@ -736,7 +736,7 @@ body.staff-shell.ticket-open #detailPanel {
   gap: var(--sp-2);
   padding: var(--sp-3) 28px;
   background: var(--card-bg);
-  border-bottom: 1px solid var(--card-line);
+  border-bottom: var(--card-border-w) solid var(--card-line);
   font-size: var(--fs-sm);
   color: var(--muted);
 }
@@ -782,7 +782,7 @@ body.staff-shell.ticket-open #detailContent {
   gap: 10px;
   padding: 16px var(--page-gutter);
   background: var(--card-bg);
-  border-bottom: 1px solid var(--card-line);
+  border-bottom: var(--card-border-w) solid var(--card-line);
 }
 
 .td-title-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -829,7 +829,7 @@ body.staff-shell.ticket-open #detailContent {
   flex-direction: column;
   gap: 6px;
   padding: 12px 14px;
-  border: 1px solid var(--card-line);
+  border: var(--card-border-w) solid var(--card-line);
   border-radius: 10px;
   background: var(--card-bg);
 }
@@ -995,9 +995,9 @@ body.staff-shell .ticket-bar { top: var(--top-h); padding-inline: var(--page-gut
 
 .td-group-separate { margin-left: auto; }
 
-.td-subtitle { margin: 2px 0 0; color: #5B6078; font-size: 13px; }
+.td-subtitle { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 
-.td-props-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); color: #5B6078; font-size: 12px; }
+.td-props-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
 
 /* La marca ya está en la barra superior */
 body.staff-shell .ticket-bar-mark { display: none; }
@@ -1150,7 +1150,7 @@ body:not(.staff-shell) .new-ticket-layout { grid-template-columns: minmax(0, 720
 
 .list-view-card { padding: 0; overflow: hidden; }
 
-.list-view-note { margin: 0; color: #5B6078; font-size: 12px; }
+.list-view-note { margin: 0; color: var(--muted); font-size: 12px; }
 
 .list-rows { list-style: none; margin: 0; padding: 0; }
 
@@ -1169,7 +1169,7 @@ body:not(.staff-shell) .new-ticket-layout { grid-template-columns: minmax(0, 720
 
 .list-row-title { font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 
-.list-row-sub { font-size: 12px; color: #5B6078; }
+.list-row-sub { font-size: 12px; color: var(--muted); }
 
 .list-row-go { color: var(--link); font-size: 12px; font-weight: 500; white-space: nowrap; }
 

@@ -293,6 +293,8 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .ui-input::placeholder { color: #80859E; }
 
+:where(body.staff-shell) :is(input, textarea)::placeholder { color: var(--app-placeholder); }
+
 .ui-help { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
 
 /* Etiqueta arriba, ayuda debajo y error en línea junto al campo */
@@ -318,7 +320,7 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 .ui-field-error[hidden] { display: none; }
 
 /* Controles sobre blanco: borde con contraste 3:1, más oscuro al pasar el mouse y azul con anillo al enfocar */
-:where(body.staff-shell) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.palette-input), select, textarea) { border-color: var(--field-line); }
+:where(body.staff-shell) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.palette-input), select, textarea) { border-color: var(--field-line); border-width: var(--control-border-w); }
 
 :where(body.staff-shell) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.palette-input), select, textarea):hover:not(:focus):not(:disabled) { border-color: var(--app-control-line-hover); }
 
@@ -337,7 +339,7 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
     width: 16px;
     height: 16px;
     margin: 0;
-    border: 1px solid var(--field-line);
+    border: var(--control-border-w) solid var(--field-line);
     border-radius: 4px;
     background: var(--surface);
     cursor: pointer;
@@ -365,6 +367,8 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 :where(body.staff-shell) input[type="checkbox"]:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Botones secundarios: mismo borde que los campos */
+:where(body.staff-shell) :is(.ui-btn, .btn-submit, .btn-primary, .btn-action, .btn-assign, .btn-secondary, .aa-quick-btn, .follow-btn) { border-width: var(--control-border-w); }
+
 :where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn, .follow-btn):hover:not(:disabled) { border-color: var(--app-control-line-hover); }
 
 :where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn, .follow-btn):focus-visible { border-color: var(--app-control-focus); box-shadow: var(--app-control-ring); outline: none; }
@@ -593,7 +597,7 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 /* ----- Tarjetas ----- */
 
-.ui-card { background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--r-lg); box-shadow: var(--card-shadow); }
+.ui-card { background: var(--card-bg); border: var(--card-border-w) solid var(--card-line); border-radius: var(--r-lg); box-shadow: var(--card-shadow); }
 
 .ui-card-head {
     display: flex;
@@ -632,7 +636,7 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
     width: 32px;
     height: 32px;
     box-sizing: border-box;
-    border: 1px solid var(--app-icon-box-line);
+    border: var(--card-border-w) solid var(--app-icon-box-line);
     border-radius: var(--r-md);
     background: var(--app-icon-box-bg);
     color: var(--app-icon);
@@ -640,7 +644,7 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 /* ----- Tablas ----- */
 
-.table-scroll { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--card-line); border-radius: var(--radius); box-shadow: var(--card-shadow); }
+.table-scroll { overflow-x: auto; background: var(--card-bg); border: var(--card-border-w) solid var(--card-line); border-radius: var(--radius); box-shadow: var(--card-shadow); }
 
 .ui-table { width: 100%; border-collapse: collapse; background: var(--card-bg); }
 
@@ -673,6 +677,8 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
     top: var(--sticky-top, 0px);
     z-index: 2;
     background: var(--table-head-bg);
+    color: var(--table-head-ink);
+    font-weight: 500;
     box-shadow: inset 0 -1px 0 var(--line-soft);
 }
 
@@ -860,7 +866,7 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 :where(body.staff-shell) .app-dialog .dialog-actions { margin-top: var(--sp-4); }
 
 /* Modales con el mismo contorno que lo blanco, más su sombra de elevación */
-:where(body.staff-shell) :is(.ui-modal, .app-dialog) { border: 1px solid var(--card-line); box-shadow: var(--card-shadow), var(--shadow-lg); }
+:where(body.staff-shell) :is(.ui-modal, .app-dialog) { border: var(--card-border-w) solid var(--card-line); box-shadow: var(--card-shadow), var(--shadow-lg); }
 
 /* ----- Carga y estados vacíos ----- */
 

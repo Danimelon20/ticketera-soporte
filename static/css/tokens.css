@@ -7,33 +7,46 @@
 :root {
     /* ----- Fondo y superficies de la app del personal ----- */
     /* Para cambiar el fondo basta con esta línea */
-    --app-bg: #E3EAF6;
-    /* Todo lo blanco (tarjetas, tablas, paneles, modales): borde visible y sombra corta */
+    --app-bg: #C9D5EA;
+    /* Todo lo blanco (tarjetas, tablas, paneles, modales): borde marcado y sombra */
     --app-card-bg: #FFFFFF;
-    --app-card-line: #C5D0E4;
-    --app-card-shadow: 0 1px 3px rgba(8, 8, 111, 0.10);
-    /* Separadores dentro de lo blanco y encabezado de las tablas */
-    --app-divider: #DCE3F0;
-    --app-table-head: #F4F7FC;
+    --app-card-line: #8FA0C2;
+    --app-card-border-w: 1.5px;
+    --app-card-shadow: 0 2px 6px rgba(8, 8, 111, 0.18);
+    /* Separadores entre filas y encabezado de las tablas */
+    --app-divider: #C9D3E6;
+    --app-table-head: #E6ECF8;
+    --app-table-head-ink: #2A3352;
     /* Fila o botón bajo el mouse */
     --app-hover: #F4F7FC;
-    /* Controles sobre blanco (campos, selectores, casillas, botones secundarios): 3,4:1 sobre blanco */
-    --app-control-line: #7D8BA8;
-    --app-control-line-hover: #5B6078;
+    /* Controles (campos, selectores, casillas, botones secundarios) */
+    --app-control-line: #5B6B8C;
+    --app-control-border-w: 1.5px;
+    --app-control-line-hover: #3F4766;
     --app-control-focus: #0041FF;
-    --app-control-ring: 0 0 0 3px rgba(0, 65, 255, 0.25);
+    --app-control-ring: 0 0 0 3px rgba(0, 65, 255, 0.30);
+    /* Texto secundario y de ayuda en los campos: 4,5:1 o más sobre el fondo y sobre blanco */
+    --app-muted: #3F4766;
+    --app-placeholder: #5B6078;
     /* Íconos sobre blanco y su recuadro */
     --app-icon: #08086F;
-    --app-icon-box-bg: #E8EEFF;
-    --app-icon-box-line: #C9D6FF;
-    /* El menú de módulos conserva su borde original */
+    --app-icon-box-bg: #D6E0FF;
+    --app-icon-box-line: #9DB2F5;
+    /* Menú de módulos: borde original, texto secundario legible y estado activo marcado */
     --app-nav-line: #E6E8EE;
+    --app-nav-muted: #5B6078;
+    --app-nav-active-bg: #D6E0FF;
+    --app-nav-active-ink: #08086F;
+    --app-nav-active-bar: #0041FF;
     /* Valores por defecto (inicio de sesión y portal); el personal los cambia en layout.css */
     --page-bg: var(--bg-side);
     --card-bg: var(--surface);
     --card-line: var(--line);
     --card-shadow: none;
     --table-head-bg: var(--card-bg);
+    --table-head-ink: var(--muted);
+    --card-border-w: 1px;
+    --control-border-w: 1px;
 
     /* ----- Colores de marca (American Data) · docs/prototipo/LEEME.md ----- */
     --navy: #08086F;
