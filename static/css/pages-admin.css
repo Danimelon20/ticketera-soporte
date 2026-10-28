@@ -31,7 +31,7 @@
 
 .aa-filters { margin: 4px 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.aa-filters input[type="search"] { flex: 1 1 200px; min-width: 0; height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); padding: 0 var(--sp-3); font: inherit; font-size: var(--fs-base); background: var(--surface); }
+.aa-filters input[type="search"] { flex: 1 1 200px; min-width: 0; height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); padding: 0 var(--sp-3); font: inherit; font-size: var(--fs-base); background: var(--field-bg); }
 
 .aa-panel-titles .aa-name { overflow-wrap: anywhere; }
 
@@ -96,7 +96,7 @@
   height: 28px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: var(--surface);
+  background: var(--field-bg);
   font: inherit;
   font-size: 12px;
   padding: 0 6px;
@@ -935,7 +935,7 @@
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--field-bg);
   font: inherit;
   box-sizing: border-box;
 }
@@ -955,7 +955,7 @@
 
 .directory-table .admin-only-col[hidden] { display: none; }
 
-.directory-table select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--surface); }
+.directory-table select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--field-bg); }
 
 .id-cell { display: flex; align-items: center; gap: 8px; }
 
@@ -967,7 +967,7 @@
 
 .account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.account-actions select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--surface); }
+.account-actions select { min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--field-bg); }
 
 #accountsView .account-section + .account-section { margin-top: 24px; }
 
@@ -1126,7 +1126,7 @@
 #directoryView .directory-table td { border-color: var(--line-soft); white-space: normal; overflow-wrap: anywhere; }
 
 #directoryView .directory-filters input, #directoryView .directory-filters select,
-#adminView .directory-filters input, #adminView .directory-filters select { min-height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); background: var(--surface); }
+#adminView .directory-filters input, #adminView .directory-filters select { min-height: 38px; border: 1px solid var(--field-line); border-radius: var(--r-md); background: var(--field-bg); }
 
 @media (max-width: 767px) {
     .invites-view .invites-section { padding: 16px; }

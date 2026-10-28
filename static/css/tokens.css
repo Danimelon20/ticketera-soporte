@@ -9,16 +9,20 @@
     /* Para cambiar el fondo basta con esta línea */
     --app-bg: #C9D5EA;
     /* Todo lo blanco (tarjetas, tablas, paneles, modales): borde marcado y sombra */
-    --app-card-bg: #FFFFFF;
+    /* Superficie opaca, no blanca: tarjetas, tablas, paneles, modales y menús desplegables */
+    --app-card-bg: #EEF2F9;
+    /* Campos de texto, selectores y área de respuesta: más claros que la tarjeta */
+    --app-field-bg: #F8FAFD;
     --app-card-line: #8FA0C2;
     --app-card-border-w: 1.5px;
     --app-card-shadow: 0 2px 6px rgba(8, 8, 111, 0.18);
     /* Separadores entre filas y encabezado de las tablas */
     --app-divider: #C9D3E6;
-    --app-table-head: #E6ECF8;
+    --app-table-head: #E1E8F4;
     --app-table-head-ink: #2A3352;
-    /* Fila o botón bajo el mouse */
-    --app-hover: #F4F7FC;
+    /* Fila o botón bajo el mouse y fila seleccionada */
+    --app-hover: #E4EAF5;
+    --app-selected: #DCE5F7;
     /* Controles (campos, selectores, casillas, botones secundarios) */
     --app-control-line: #5B6B8C;
     --app-control-border-w: 1.5px;
@@ -33,7 +37,9 @@
     --app-icon-box-bg: #D6E0FF;
     --app-icon-box-line: #9DB2F5;
     /* Menú de módulos: borde original, texto secundario legible y estado activo marcado */
-    --app-nav-line: #E6E8EE;
+    --app-nav-bg: #EAEFF7;
+    --app-nav-line: #8FA0C2;
+    --app-nav-hover: #DFE6F2;
     --app-nav-muted: #5B6078;
     --app-nav-active-bg: #D6E0FF;
     --app-nav-active-ink: #08086F;
@@ -44,6 +50,7 @@
     --card-line: var(--line);
     --card-shadow: none;
     --table-head-bg: var(--card-bg);
+    --field-bg: var(--surface);
     --table-head-ink: var(--muted);
     --card-border-w: 1px;
     --control-border-w: 1px;

@@ -36,6 +36,8 @@ body.staff-shell {
     --control-border-w: var(--app-control-border-w);
     --muted: var(--app-muted);
     --bg-side: var(--app-hover);
+    --selected: var(--app-selected);
+    --field-bg: var(--app-field-bg);
     /* Bordes, separadores y controles del personal */
     --line: var(--app-card-line);
     --line-soft: var(--app-divider);
@@ -313,7 +315,7 @@ body.staff-shell .top-profile-box { display: block; position: relative; flex: 0 
 
 .profile-menu {
   position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; padding: 6px; z-index: 90;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-md);
+  background: var(--card-bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-md);
   display: flex; flex-direction: column;
 }
 
@@ -420,7 +422,7 @@ body.staff-shell .side-nav {
   flex-direction: column;
   justify-content: flex-start;
   gap: 2px;
-  background: #FFFFFF;
+  background: var(--app-nav-bg);
   border-right: 1px solid var(--app-nav-line);
   color: var(--ink);
   overflow-y: auto;
@@ -443,7 +445,7 @@ body.staff-shell .side-nav-groups { flex: 1 1 auto; min-height: 0; padding: 0; }
   background: none; color: var(--ink); font: inherit; font-weight: 500; text-align: left; cursor: pointer;
 }
 
-.nav-module:hover { background: #F2F4F8; }
+.nav-module:hover { background: var(--app-nav-hover); }
 
 .nav-module.is-active, .nav-module.active { background: #EEF3FF; color: var(--link); }
 
@@ -454,7 +456,7 @@ body.staff-shell .nav-item {
   background: none; color: #5B6078; font: inherit; font-size: 13px; text-align: left; cursor: pointer; box-shadow: none;
 }
 
-body.staff-shell .nav-item:hover { background: #F2F4F8; color: var(--ink); }
+body.staff-shell .nav-item:hover { background: var(--app-nav-hover); color: var(--ink); }
 
 body.staff-shell .nav-item.active { background: #EEF3FF; color: var(--link); font-weight: 500; }
 
@@ -513,7 +515,7 @@ body.staff-shell .side-nav :focus-visible { outline: 2px solid var(--blue); outl
   font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
 }
 
-.nav-collapse:hover { background: #F2F4F8; color: var(--ink); }
+.nav-collapse:hover { background: var(--app-nav-hover); color: var(--ink); }
 
 .nav-collapse-icon { flex: 0 0 auto; transition: transform 0.15s ease; }
 
