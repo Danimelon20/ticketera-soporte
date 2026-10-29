@@ -57,3 +57,11 @@ Lo que quedó fuera de las fases ya entregadas, con lo que haría falta para cad
   versiones. Se resuelven al actualizar esas librerías (con su prueba completa).
 - **Tiempo de la agrupación con el Ollama real**: quedó por medir cuánto tarda la detección por ticket en la PC con
   correo (nota de `docs/PENDIENTE-agrupacion.md`, que por lo demás ya está terminada).
+
+## Áreas de atención y departamentos
+
+- **Chatbot y áreas**: el asistente no crea tickets y solo atiende a quien ya inició sesión, así que no tiene
+  remitentes "no reconocidos". Los puntos de áreas y contactos no reconocidos se aplican solo al correo entrante.
+  Si el chat llega a crear tickets, debe usar la misma sugerencia de área (`app/area_ai.py`) con confirmación.
+- **Borradores por área**: los borradores de correo todavía los ven todos los coordinadores (el área se decide al
+  confirmar). Decidir si cada coordinador ve solo los borradores cuya área sugerida es la suya.

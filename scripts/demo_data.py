@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 from sqlalchemy import delete, func, select, update
 
-from app import config, grouping, models, suspicion
+from app import config, grouping, models, routing, suspicion
 from app.business_hours import add_business_hours, business_hours_between
 from app.database import SessionLocal
 from app.main import init_db
@@ -49,6 +49,8 @@ OWNING_COLUMNS = {
     ("alerts_sent", "draft_id"),
 }
 ALERT_KINDS = ("critical", "due_soon", "overdue")
+# Tablas que son DEMO por su nombre (no tienen cuenta ni ticket DEMO de dueño)
+NAMED_TABLES = ("departments", "service_areas")
 
 # Cuentas y títulos de los escenarios (verificar los busca por aquí: los números cambian en cada base)
 MORNING, EVENING, AWAY, COORDINATOR = "tecnica.manana", "tecnico.tarde", "tecnico.vacaciones", "coordinadora"
@@ -61,6 +63,11 @@ OVERDUE = "No abre el sistema de planillas"
 OVERDUE_WITH_CAUSE = "Necesito acceso a la carpeta de Finanzas"
 DRAFT_ASSIGNED = "El monitor parpadea"
 DRAFT_UNASSIGNED = "El teclado no responde"
+# Áreas y departamentos
+UNPLACED, IT_COORDINATOR, INTERNAL = "tecnico.sindepto", "coordinador.ti", "empleado.interno"
+DEPT_N1, DEPT_NOC, DEPT_IT = "Soporte N1", "NOC", "Soporte TI"
+AREA_NET, AREA_IT = "Internet y conectividad", "Soporte interno (TI)"
+INTERNAL_TICKET = "La laptop no enciende"
 # Avisos de la campana que ya corresponden a cada estado (como los dejaría due_notices.sync)
 NOTICE_KINDS = {"due_soon": ("due_50", "due_80"), "overdue": ("due_50", "due_80", "overdue", "report")}
 
@@ -114,6 +121,12 @@ def collect(db) -> tuple[dict[str, set[int]], list[tuple]]:
     for table in tables:
         if table.name not in CORE_TABLES and "email" in table.c and "id" in table.c:
             found = set(db.scalars(select(table.c.id).where(func.lower(table.c.email).like(f"%@{DEMO_DOMAIN}"))))
+            if found:
+                ids.setdefault(table.name, set()).update(found)
+    # Departamentos y áreas DEMO: por el nombre
+    for table in tables:
+        if table.name in NAMED_TABLES:
+            found = set(db.scalars(select(table.c.id).where(table.c.name.like(f"{DEMO_TAG}%"))))
             if found:
                 ids.setdefault(table.name, set()).update(found)
     # Registro de cambios que solo nombra a lo DEMO por la etiqueta (agrupación, correo enmascarado)
@@ -226,9 +239,10 @@ class Builder:
         self.agent = db.query(models.User).filter(models.User.role == "agent").first()
         self.categories = {c.name: c.id for c in db.query(models.Category)}
         self.priorities = {p.level: p.id for p in db.query(models.Priority)}
+        self.default_route = None
 
     def ticket(self, owner, title, description, *, category="Software", level=2, created_at=None,
-               assigned=None, due_at=None, summary=None) -> models.Ticket:
+               assigned=None, due_at=None, summary=None, route=None) -> models.Ticket:
         db = self.db
         created_at = created_at or self.now - timedelta(hours=1)
         ticket = models.Ticket(
@@ -241,6 +255,9 @@ class Builder:
         )
         db.add(ticket)
         db.flush()
+        # Área y departamento DEMO (sin ruta: la de entrada de la internet DEMO)
+        area_id, department_id = route or self.default_route
+        db.add(models.TicketRouting(ticket_id=ticket.id, area_id=area_id, department_id=department_id))
         db.add(models.TicketFollower(ticket_id=ticket.id, user_id=owner.id))
         db.add(models.TicketAIAnalysis(
             ticket_id=ticket.id, status="done", ai_level=level, summary=summary or title[:300],
@@ -298,6 +315,30 @@ def load(db) -> list[dict]:
     db.add(models.AvailabilityPeriod(user_id=away.id, kind="vacation", start_date=today,
                                      end_date=today + timedelta(days=6), created_by=None, created_at=now))
     coordinator = _user(db, COORDINATOR, "Coordinadora Demo", "coordinator")
+    it_coordinator = _user(db, IT_COORDINATOR, "Coordinador TI", "coordinator")
+    unplaced = _user(db, UNPLACED, "Técnico Sin Departamento", "technician")
+    _schedule(db, unplaced, range(0, 7), "00:00", "23:59")
+
+    # Departamentos y áreas DEMO: Internet (N1 de entrada y NOC) e interna de TI. El técnico sin
+    # departamento queda fuera de todo (aparece en la alerta del administrador)
+    def dept(name):
+        row = models.Department(name=f"{DEMO_TAG} {name}", is_active=True)
+        db.add(row)
+        db.flush()
+        return row
+
+    n1, noc, it = dept(DEPT_N1), dept(DEPT_NOC), dept(DEPT_IT)
+    net_area = models.ServiceArea(name=f"{DEMO_TAG} {AREA_NET}", audience="external", coordinator_id=coordinator.id,
+                                  description="Internet caído, lentitud, VPN", entry_department_id=n1.id)
+    it_area = models.ServiceArea(name=f"{DEMO_TAG} {AREA_IT}", audience="internal", coordinator_id=it_coordinator.id,
+                                 description="Computadora, correo, accesos e impresoras de ADN", entry_department_id=it.id)
+    db.add_all([net_area, it_area])
+    db.flush()
+    for area, department in ((net_area, n1), (net_area, noc), (it_area, it)):
+        db.add(models.ServiceAreaDepartment(area_id=area.id, department_id=department.id))
+    for user, department, tier in ((morning, n1, 1), (evening, noc, 2), (away, n1, 1)):
+        db.add(models.StaffPlacement(user_id=user.id, department_id=department.id, tier=tier, updated_at=now))
+    b.default_route = (net_area.id, n1.id)
 
     # Clientes con perfil completo y uno sin cédula que intenta usar la de otro
     ids = _free_id_numbers(db, 3)
@@ -305,6 +346,9 @@ def load(db) -> list[dict]:
     beto = _user(db, BETO, "Beto Cliente Dos", "requester", "80000002", ids[1])
     carla = _user(db, CARLA, "Carla Cliente Tres", "requester", "80000003", ids[2])
     impostor = _user(db, IMPOSTOR, "Cliente Suplantador", "requester", "80000004")
+    # Empleado de ADN: ligado a la organización interna (solo ve las áreas internas)
+    internal = _user(db, INTERNAL, "Empleado Interno", "requester")
+    routing.link_internal(db, internal)
 
     # Agrupación A: el mismo cliente con el mismo problema en otras palabras (se fusiona)
     mail_1 = b.ticket(ana, MAIL_TARGET,
@@ -318,7 +362,7 @@ def load(db) -> list[dict]:
     # Agrupación B: tres clientes con la misma falla (se ligan al más antiguo)
     net = [
         b.ticket(beto, NETWORK[0], "No hay red en ninguna computadora del piso 2.",
-                 category="Red", level=3, created_at=now - timedelta(minutes=90)),
+                 category="Red", level=3, created_at=now - timedelta(minutes=90), route=(net_area.id, noc.id)),
         b.ticket(carla, NETWORK[1], "El navegador dice que no hay conexión.",
                  category="Red", level=3, created_at=now - timedelta(minutes=70)),
         b.ticket(ana, NETWORK[2], "Perdimos la conexión hace un rato.",
@@ -344,6 +388,10 @@ def load(db) -> list[dict]:
                                note=f"{DEMO_TAG} El responsable está de vacaciones.",
                                recorded_by=coordinator.id, recorded_at=now))
 
+    # Ticket interno del empleado de ADN (área interna: la Coordinadora Demo no lo ve)
+    b.ticket(internal, INTERNAL_TICKET, "No prende desde esta mañana.", category="Hardware",
+             route=(it_area.id, it.id))
+
     # Borradores del correo: uno con revisor y uno "Sin revisor"
     b.draft(carla, DRAFT_ASSIGNED, "Buenas, el monitor parpadea cada rato y se apaga.", assigned_to=morning)
     b.draft(beto, DRAFT_UNASSIGNED, "Algunas teclas no escriben desde ayer.")
@@ -360,8 +408,14 @@ def load(db) -> list[dict]:
         {"rol": "Técnico", "correo": away.email,
          "probar": "De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
-         "probar": "Agrupación (#%d en #%d y la red en #%d), vencimientos, borrador \"Sin revisor\"."
+         "probar": "Área [DEMO] Internet. Agrupación (#%d en #%d y la red en #%d), vencimientos, borrador \"Sin revisor\"."
                    % (mail_2.id, mail_1.id, net[0].id)},
+        {"rol": "Coordinador", "correo": it_coordinator.email,
+         "probar": "Área interna [DEMO] TI: solo ve el ticket del empleado interno."},
+        {"rol": "Técnico", "correo": unplaced.email,
+         "probar": "Sin departamento: ve el aviso y no recibe tickets (con el enrutamiento encendido)."},
+        {"rol": "Empleado ADN", "correo": internal.email,
+         "probar": "Solicitante interno: aviso de datos al entrar y solo áreas internas."},
         {"rol": "Cliente", "correo": ana.email,
          "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
         {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y borrador sin revisor."},
@@ -445,9 +499,12 @@ def _scenario_ids(db) -> dict | None:
         "due_soon": ticket(DUE_SOON), "overdue": ticket(OVERDUE), "overdue_cause": ticket(OVERDUE_WITH_CAUSE),
         "draft_assigned": drafts.get(f"{DEMO_TAG} {DRAFT_ASSIGNED}"),
         "draft_unassigned": drafts.get(f"{DEMO_TAG} {DRAFT_UNASSIGNED}"),
+        "internal_ticket": ticket(INTERNAL_TICKET),
+        "net_area": db.scalar(select(models.ServiceArea.id).where(models.ServiceArea.name == f"{DEMO_TAG} {AREA_NET}")),
+        "enforced": routing.enforced(db),
     }
-    needed = [found[k] for k in found if k not in ("users", "network")] + found["network"]
-    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR)]
+    needed = [found[k] for k in found if k not in ("users", "network", "enforced")] + found["network"]
+    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR, UNPLACED, IT_COORDINATOR, INTERNAL)]
     return found if all(needed) else None
 
 
@@ -472,6 +529,10 @@ def _fingerprint(db) -> tuple:
             models.TicketLink.principal_ticket_id.in_(tickets))),
         sorted((c.ticket_id, c.cause) for c in db.query(models.OverdueCause).filter(
             models.OverdueCause.ticket_id.in_(tickets))),
+        sorted((r.ticket_id, r.area_id, r.department_id) for r in db.query(models.TicketRouting).filter(
+            models.TicketRouting.ticket_id.in_(tickets))),
+        sorted((p.user_id, p.department_id, p.tier) for p in db.query(models.StaffPlacement).filter(
+            models.StaffPlacement.user_id.in_(users))),
         db.query(models.Ticket).filter(models.Ticket.created_by.in_(users)).count(),
     )
 
@@ -607,6 +668,65 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
 
     add("Suplantación", "Coordinador", "reporte abierto y sin la etiqueta \"Reportada\"", impostor_report)
     checks.append(Check("Suplantación", "Administrador", "el reporte lo abrió el Agente virtual", NO_ADMIN, None))
+
+    # ----- Áreas y departamentos -----
+    internal_ticket = ids["internal_ticket"]
+    off = "enrutamiento apagado (Administración › Activación)"
+
+    def status_is(local, path, expected):
+        response = api.get(local, path)
+        return response.status_code == expected, f"HTTP {response.status_code}"
+
+    if ids["enforced"]:
+        add("Áreas", "Coordinador (Internet)", f"abrir #{internal_ticket} (área interna): HTTP 403",
+            lambda: status_is(COORDINATOR, f"/api/tickets/{internal_ticket}", 403))
+    else:
+        checks.append(Check("Áreas", "Coordinador (Internet)", f"abrir #{internal_ticket} (área interna): HTTP 403", off, None))
+    add("Áreas", "Coordinador (TI)", f"abrir #{internal_ticket} (su área): HTTP 200",
+        lambda: status_is(IT_COORDINATOR, f"/api/tickets/{internal_ticket}", 200))
+
+    def in_area_queue():
+        response = api.get(COORDINATOR, "/api/queue", view="all", area_id=ids["net_area"], search=DEMO_TAG)
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        seen = {i["id"] for i in response.json()["items"]}
+        return principal in seen and internal_ticket not in seen, f"{len(seen)} ticket(s) en el filtro"
+
+    add("Áreas", "Coordinador (Internet)", "filtro por área: sus tickets, sin el interno", in_area_queue)
+
+    def unplaced_notice():
+        response = api.get(UNPLACED, "/api/auth/me")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        flag = response.json().get("placement_missing")
+        return flag is True, "con aviso" if flag else "sin aviso"
+
+    if ids["enforced"]:
+        add("Personal", "Técnico sin departamento", "aviso «sin departamento asignado»", unplaced_notice)
+    else:
+        checks.append(Check("Personal", "Técnico sin departamento", "aviso «sin departamento asignado»", off, None))
+
+    def internal_areas():
+        response = api.get(INTERNAL, "/api/areas")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        data = response.json()
+        names = [a["name"] for a in data["areas"]]
+        ok = bool(names) and f"{DEMO_TAG} {AREA_NET}" not in names and not data["unsure_allowed"]
+        return ok, f"{len(names)} área(s) interna(s)" + (", sin «No estoy seguro»" if not data["unsure_allowed"] else "")
+
+    add("Solicitante interno", "Empleado ADN", "solo áreas internas", internal_areas)
+
+    def internal_notice():
+        response = api.get(INTERNAL, "/api/auth/me")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        pending = response.json().get("privacy_pending")
+        return response.json().get("requester_kind") == "internal", (
+            "interno, aviso " + ("pendiente" if pending else "aceptado"))
+
+    add("Solicitante interno", "Empleado ADN", "tipo interno y aviso de datos", internal_notice)
+    checks.append(Check("Áreas", "Administrador", "personal sin departamento en la alerta", NO_ADMIN, None))
     return checks
 
 
@@ -637,9 +757,10 @@ def verify(db, http) -> int:
     before = _fingerprint(db)
     api = DemoApi(http)
     try:
-        for local in (MORNING, EVENING, COORDINATOR):
+        for local in (MORNING, EVENING, COORDINATOR, IT_COORDINATOR, UNPLACED):
             api.login(local, "staff")
         api.login(ANA, "requester")
+        api.login(INTERNAL, "requester")
         checks = _checks(api, ids)
     finally:
         api.logout_all()
