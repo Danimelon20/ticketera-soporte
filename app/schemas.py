@@ -69,6 +69,10 @@ class StaffInvitationCreate(BaseModel):
     email: str = Field(min_length=3, max_length=150)
     name: str = Field(min_length=1, max_length=100)
     role: Literal["technician", "coordinator"]
+    # Técnico: departamento y nivel (1–3); coordinador: área. Obligatorios (se revisan en el servidor)
+    department_id: Optional[int] = None
+    tier: Optional[int] = Field(default=None, ge=1, le=3)
+    area_id: Optional[int] = None
 
     @field_validator("name")
     @classmethod
@@ -175,6 +179,11 @@ class MeRead(BaseModel):
     schedule_summary: Optional[str] = None
     # Vacaciones e incapacidades vigentes y futuras (las registra la persona o quien gestiona su cuenta)
     periods: list[AvailabilityPeriodRead] = []
+    # Áreas: personal sin departamento o área (con el enrutamiento encendido), tipo de solicitante
+    # (internal/external) y aviso de datos pendiente de aceptar
+    placement_missing: bool = False
+    requester_kind: Optional[str] = None
+    privacy_pending: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -306,6 +315,9 @@ class TicketCreate(BaseModel):
     priority_id: int
     contact_phone: Optional[str] = None
     requester_id: Optional[int] = None
+    # Área de atención elegida; unsure: "No estoy seguro" (va al departamento de entrada)
+    area_id: Optional[int] = None
+    unsure: bool = False
 
     @field_validator("contact_phone")
     @classmethod
@@ -361,6 +373,11 @@ class TicketRead(BaseModel):
     last_activity_at: Optional[datetime] = None
     # Solo para el personal y si está cancelado
     cancellation: Optional[CancellationRead] = None
+    # Área de atención (la ve también el solicitante) y departamento (solo el personal)
+    area_id: Optional[int] = None
+    area_name: Optional[str] = None
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -783,6 +800,8 @@ class QueueItem(BaseModel):
     incident: bool = False
     # Causa registrada del vencimiento (su etiqueta), si la tiene
     overdue_cause: Optional[str] = None
+    area_name: Optional[str] = None
+    department_name: Optional[str] = None
 
 
 class QueuePage(BaseModel):
@@ -1007,3 +1026,216 @@ class OverdueReport(BaseModel):
     timeline: list[OverdueTimelineEvent]
     cause: Optional[OverdueCauseRead] = None
     can_record_cause: bool = False
+
+
+# ===== Áreas de atención y departamentos =====
+
+class DepartmentRead(BaseModel):
+    id: int
+    name: str
+    parent_id: Optional[int] = None
+    path: str
+    is_active: bool
+    active_path: bool = True
+    area_id: Optional[int] = None
+    area_name: Optional[str] = None
+    aliases: list[str] = []
+    technicians: int = 0
+
+
+class DepartmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: Optional[int] = None
+
+
+class DepartmentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    # 0: sin padre (raíz)
+    parent_id: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
+    add_alias: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    remove_alias: Optional[str] = Field(default=None, max_length=300)
+
+
+class DepartmentImportRow(BaseModel):
+    line: int
+    original: str
+    path: Optional[str] = None
+    status: Literal["new", "exists", "duplicate", "error"]
+    notes: list[str] = []
+
+
+class DepartmentMerge(BaseModel):
+    merge: str = Field(max_length=1000)
+    into: str = Field(max_length=1000)
+    reason: Optional[str] = None
+
+
+class DepartmentImportPreview(BaseModel):
+    rows: list[DepartmentImportRow]
+    suggestions: list[DepartmentMerge]
+    counts: dict[str, int]
+
+
+class DepartmentImportConfirm(BaseModel):
+    paths: list[str] = Field(max_length=2000)
+    merges: list[DepartmentMerge] = Field(default_factory=list, max_length=2000)
+
+
+class DepartmentImportResult(BaseModel):
+    created: int
+    aliases: int
+
+
+class AreaRead(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    audience: str
+    is_active: bool
+    coordinator_id: Optional[int] = None
+    coordinator_name: Optional[str] = None
+    entry_department_id: Optional[int] = None
+    entry_department_name: Optional[str] = None
+    department_ids: list[int] = []
+
+
+class AreaCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=300)
+    audience: Literal["external", "internal"] = "external"
+
+
+class AreaUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=300)
+    audience: Optional[Literal["external", "internal"]] = None
+    is_active: Optional[bool] = None
+    # 0: quitar
+    coordinator_id: Optional[int] = Field(default=None, ge=0)
+    entry_department_id: Optional[int] = Field(default=None, ge=0)
+
+
+class AreaDepartments(BaseModel):
+    department_ids: list[int] = Field(max_length=500)
+
+
+class AreaOption(BaseModel):
+    """Lo que ve el solicitante al elegir: nombre y ejemplos."""
+    id: int
+    name: str
+    description: Optional[str] = None
+
+
+class AreaOptions(BaseModel):
+    areas: list[AreaOption]
+    # Solo externos: "No estoy seguro" (va al departamento de entrada)
+    unsure_allowed: bool
+    required: bool
+
+
+class FilterDepartment(BaseModel):
+    id: int
+    name: str
+    area_id: Optional[int] = None
+
+
+class AreaFilters(BaseModel):
+    """Opciones de los filtros de la cola: solo nombres (con el enrutamiento, las del área del coordinador)."""
+    areas: list[AreaOption]
+    departments: list[FilterDepartment]
+
+
+class AreaSuggestRequest(BaseModel):
+    title: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=5000)
+
+
+class AreaSuggestion(BaseModel):
+    area_id: Optional[int] = None
+
+
+class EntryDepartmentUpdate(BaseModel):
+    department_id: Optional[int] = None
+
+
+class PlacementUpdate(BaseModel):
+    department_id: Optional[int] = None
+    tier: Optional[int] = Field(default=None, ge=1, le=3)
+    area_id: Optional[int] = None
+
+
+class PlacementRead(BaseModel):
+    user_id: int
+    role: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    tier: Optional[int] = None
+    area_id: Optional[int] = None
+    area_name: Optional[str] = None
+    placed: bool
+
+
+class UnplacedPerson(BaseModel):
+    id: int
+    name: str
+    role: str
+
+
+class StaffAlerts(BaseModel):
+    unplaced: list[UnplacedPerson]
+    areas_without_coordinator: list[AreaOption]
+
+
+class ChecklistItem(BaseModel):
+    key: str
+    label: str
+    ok: bool
+    detail: Optional[str] = None
+
+
+class SwitchRead(BaseModel):
+    key: str
+    label: str
+    enabled: bool
+    available: bool
+    checklist: list[ChecklistItem]
+    updated_at: Optional[datetime] = None
+    updated_by_name: Optional[str] = None
+
+
+class SwitchUpdate(BaseModel):
+    enabled: bool
+
+
+class RouteChange(BaseModel):
+    reason: str = Field(min_length=3, max_length=300)
+    area_id: Optional[int] = None
+    department_id: Optional[int] = None
+
+
+class AreaMetric(BaseModel):
+    area_id: Optional[int] = None
+    area_name: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    open: int = 0
+    unassigned: int = 0
+    overdue: int = 0
+    resolved: int = 0
+
+
+class InternalRequesterCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=150)
+    name: str = Field(min_length=1, max_length=100)
+
+
+class PrivacyNotice(BaseModel):
+    kind: str
+    version: str
+    text: str
+
+
+class PrivacyAccept(BaseModel):
+    version: str = Field(min_length=1, max_length=20)
+    accepted: bool
