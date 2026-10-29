@@ -330,7 +330,18 @@ def routing_switch(client):
     from app import routing
 
     _set_switch(routing.ROUTING_ENFORCED, "false")
+    # Igual el de clientes con contrato: apagado, cualquier correo registrado abre tickets (como siempre)
+    _set_switch(routing.CLIENT_DOMAIN_ENFORCED, "false")
     yield
+
+
+@pytest.fixture
+def clients_on(routing_switch):
+    from app import routing
+
+    _set_switch(routing.CLIENT_DOMAIN_ENFORCED, "true")
+    yield
+    _set_switch(routing.CLIENT_DOMAIN_ENFORCED, "false")
 
 
 @pytest.fixture

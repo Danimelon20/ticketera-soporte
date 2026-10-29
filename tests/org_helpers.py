@@ -91,3 +91,41 @@ def setting(key: str, value: str | None) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def organization(name=None, domains=(), start=None, end=None, contract="CT-PRUEBA") -> int:
+    """Organización cliente; por defecto con contrato vigente (de hace un año a dentro de un año)."""
+    from datetime import date, timedelta
+
+    db = SessionLocal()
+    try:
+        org = models.Organization(
+            name=name or unique("Cliente"), kind="client", contract_number=contract,
+            contract_start=start or date.today() - timedelta(days=365),
+            contract_end=end or date.today() + timedelta(days=365),
+        )
+        db.add(org)
+        db.flush()
+        for domain in domains:
+            db.add(models.OrganizationDomain(organization_id=org.id, domain=domain))
+        db.commit()
+        return org.id
+    finally:
+        db.close()
+
+
+def unique_domain(prefix="cliente") -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}.example"
+
+
+def link(user_id: int, org_id: int, authorized=False, activation="active") -> None:
+    db = SessionLocal()
+    try:
+        row = db.query(models.RequesterProfile).filter(models.RequesterProfile.user_id == user_id).first()
+        if row is None:
+            row = models.RequesterProfile(user_id=user_id)
+            db.add(row)
+        row.organization_id, row.authorized_for_changes, row.activation = org_id, authorized, activation
+        db.commit()
+    finally:
+        db.close()

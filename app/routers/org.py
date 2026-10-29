@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import audit, config, departments, models, org_setup, routing
+from .. import audit, clients, config, departments, models, org_setup, routing
 from ..schemas import (
     AreaCreate, AreaDepartments, AreaOption, AreaRead, AreaUpdate, ChecklistItem, DepartmentCreate,
     DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead, DepartmentUpdate,
@@ -30,7 +30,6 @@ ENTRY_OUTSIDE = "El departamento de entrada debe ser uno de los departamentos de
 DEPARTMENT_REQUIRED = "Elija el departamento del técnico"
 AREA_REQUIRED_STAFF = "Elija el área que dirige el coordinador"
 CHECKLIST_PENDING = "Revise la lista de verificación antes de encender"
-PHASE_2 = "Se habilita con las organizaciones y contratos (Fase 2)"
 
 
 # ----- Departamentos -----
@@ -400,8 +399,8 @@ def _switch_read(db: Session, key: str) -> SwitchRead:
         checklist = routing.routing_checklist(db)
         available = True
     else:
-        checklist = [{"key": "phase_2", "label": PHASE_2, "ok": False, "detail": None}]
-        available = False
+        checklist = clients.checklist(db)
+        available = True
     by = db.get(models.User, row.updated_by) if row is not None and row.updated_by else None
     return SwitchRead(
         key=key, label=routing.SWITCH_LABELS[key], enabled=routing.switch_on(db, key), available=available,

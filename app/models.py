@@ -442,6 +442,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     # Áreas y departamentos: ubicación del personal (target: la persona; new_value: departamento o área)
     # y ajustes de la página (target_label: la clave; old/new: apagado o encendido)
     "placement_changed", "setting_changed", "internal_requester_created",
+    # Organizaciones cliente (target_label: la organización; new_value: lo que cambió, correos enmascarados)
+    "organization_changed", "organization_imported", "client_linked", "unrecognized_linked",
 )
 SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
 
@@ -1073,3 +1075,48 @@ class PrivacyAcceptance(Base):
     via = Column(String(20), nullable=False, default="login")
 
     __table_args__ = (UniqueConstraint("user_id", "notice", "version", name="uq_privacy_acceptance"),)
+
+
+class OrganizationContract(Base):
+    """PDF del contrato de una organización cliente (uno por organización; subir otro lo reemplaza)."""
+    __tablename__ = "organization_contracts"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), unique=True, nullable=False)
+    original_name = Column(String(255), nullable=False)
+    stored_name = Column(String(64), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class UnrecognizedContact(Base):
+    """Correo que intentó registrarse o escribir sin ser de un cliente con contrato vigente.
+
+    El correo va completo (para poder ligarlo) y solo lo ve el administrador. Si no se liga, se borra a
+    los 30 días de first_seen; al ligarlo, la fila se borra (queda el registro de cambios, enmascarado).
+    """
+    __tablename__ = "unrecognized_contacts"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(254), unique=True, nullable=False)
+    # register (registro en la página) o email (correo al buzón), el último que se vio
+    channel = Column(String(10), nullable=False)
+    first_seen = Column(DateTime, nullable=False, index=True)
+    last_seen = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=1)
+
+
+class PrivacyEmailToken(Base):
+    """Enlace "Acepto" de un solo uso que va en el primer correo a un contacto que no ha entrado (hash)."""
+    __tablename__ = "privacy_email_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    version = Column(String(20), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)

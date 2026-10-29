@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, entra_login, models, org_setup, people_activity
+from . import auto_assign, chatbot, clients, config, entra_login, models, org_setup, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -31,6 +31,7 @@ from .routers.grouping import router as grouping_router
 from .routers.microsoft_auth import router as microsoft_auth_router
 from .routers.org import router as org_router
 from .routers.areas import router as areas_router
+from .routers.organizations import router as organizations_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -154,9 +155,12 @@ async def lifespan(app: FastAPI):
         logging.info("Asignación automática activa (modo %s), pendientes cada %s segundos",
                      auto_assign.load_mode(), config.AUTO_ASSIGN_CHECK_SECONDS)
 
+    # Correos no reconocidos: se borran a los 30 días si nadie los ligó
+    purge_task = asyncio.create_task(clients.purge_forever())
+
     yield
 
-    for task in (poller, summary, alerts_task, assign_task):
+    for task in (poller, summary, alerts_task, assign_task, purge_task):
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -189,6 +193,7 @@ app.include_router(grouping_router)
 app.include_router(microsoft_auth_router)
 app.include_router(org_router)
 app.include_router(areas_router)
+app.include_router(organizations_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

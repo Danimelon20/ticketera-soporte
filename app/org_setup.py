@@ -6,10 +6,13 @@
 - Organización interna de ADN con los dominios de INTERNAL_DOMAINS.
 - Tickets sin ruta: área "Internet y conectividad" en el departamento de entrada (si ya existe); conservan
   su responsable. Personal existente: sin departamento ni área (aparece en la alerta del administrador).
+- Clientes ya registrados: se ligan a su organización por el dominio del correo; el resto queda sin
+  organización (aparece en No reconocidos y, con el interruptor de clientes, no abre tickets nuevos).
+- Correos no reconocidos de más de 30 días: se borran.
 """
 from sqlalchemy.orm import Session
 
-from . import config, models, routing
+from . import clients, config, models, routing
 
 
 def _has_data(db: Session) -> bool:
@@ -86,4 +89,6 @@ def ensure_structure(db: Session) -> None:
     _ensure_areas(db)
     _ensure_internal_organization(db)
     migrate_tickets(db)
+    clients.link_existing_clients(db)
     db.commit()
+    clients.purge_unrecognized(db)
