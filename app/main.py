@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, entra_login, models, people_activity
+from . import auto_assign, chatbot, config, entra_login, models, org_setup, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -29,6 +29,8 @@ from .routers.overdue import router as overdue_router
 from .routers.attachments import router as attachments_router
 from .routers.grouping import router as grouping_router
 from .routers.microsoft_auth import router as microsoft_auth_router
+from .routers.org import router as org_router
+from .routers.areas import router as areas_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -91,6 +93,10 @@ def init_db():
             )
             db.add(agente)
             db.commit()
+
+        # Áreas, interruptores, organización interna y tickets que ya existían (después del Agente:
+        # una base con solo el Agente cuenta como nueva)
+        org_setup.ensure_structure(db)
     finally:
         db.close()
 
@@ -181,6 +187,8 @@ app.include_router(overdue_router)
 app.include_router(attachments_router)
 app.include_router(grouping_router)
 app.include_router(microsoft_auth_router)
+app.include_router(org_router)
+app.include_router(areas_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

@@ -73,3 +73,8 @@ def hacienda_strict() -> bool:
 # Vencimiento de sesión: sin uso durante SESSION_IDLE_MINUTES o SESSION_MAX_HOURS desde que se abrió
 SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "240"))
 SESSION_MAX_HOURS = int(os.getenv("SESSION_MAX_HOURS", "12"))
+
+# Dominios de correo de ADN (separados por coma, p. ej. data.cr). Vacío: nadie es solicitante interno
+INTERNAL_DOMAINS = tuple(
+    d.strip().lower().lstrip("@") for d in os.getenv("INTERNAL_DOMAINS", "").split(",") if d.strip()
+)

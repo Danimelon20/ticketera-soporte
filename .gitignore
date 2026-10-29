@@ -6,3 +6,7 @@ venv/
 .env
 .vscode/
 data/
+data-pruebas/
+*.db.*
+# Organigrama real: nunca al repositorio (la demo usa departamentos [DEMO])
+organigrama*

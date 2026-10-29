@@ -19,6 +19,7 @@ APP_ENV_VARS = (
     "ATTACHMENTS_DIR", "HACIENDA_CHECK", "HACIENDA_STRICT", "SESSION_IDLE_MINUTES", "SESSION_MAX_HOURS",
     "DATABASE_URL",
     "MS_LOGIN_ENABLED", "MS_LOGIN_TENANT_ID", "MS_LOGIN_CLIENT_ID", "MS_LOGIN_CLIENT_SECRET", "MS_LOGIN_REDIRECT_URI",
+    "INTERNAL_DOMAINS",
 )
 for _name in APP_ENV_VARS:
     os.environ.pop(_name, None)
@@ -307,3 +308,35 @@ def code_from(body: str) -> str:
     match = re.search(r"\b(\d{6})\b", body)
     assert match, "El correo no trae un código de 6 dígitos"
     return match.group(1)
+
+
+def _set_switch(key: str, value: str) -> None:
+    from app.database import SessionLocal
+    from app import routing
+
+    db = SessionLocal()
+    try:
+        routing.set_setting(db, key, value)
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def routing_switch(client):
+    """La base de las pruebas es nueva (los interruptores arrancan encendidos: test_org_setup lo revisa).
+    Las pruebas de antes de las áreas corren con el enrutamiento apagado, que es el comportamiento de
+    siempre; las de las áreas lo encienden con routing_on."""
+    from app import routing
+
+    _set_switch(routing.ROUTING_ENFORCED, "false")
+    yield
+
+
+@pytest.fixture
+def routing_on(routing_switch):
+    from app import routing
+
+    _set_switch(routing.ROUTING_ENFORCED, "true")
+    yield
+    _set_switch(routing.ROUTING_ENFORCED, "false")

@@ -78,6 +78,8 @@ class Ticket(Base):
     ai_analysis = relationship("TicketAIAnalysis", back_populates="ticket", uselist=False)
     # Solo si está cancelado (ver TicketCancellation)
     cancellation_row = relationship("TicketCancellation", uselist=False, viewonly=True)
+    # Área y departamento (ver TicketRouting)
+    routing_row = relationship("TicketRouting", uselist=False, viewonly=True)
 
 
 class Comment(Base):
@@ -437,6 +439,9 @@ ACCOUNT_CHANGE_ACTIONS = (
     "id_number_conflict",
     # Ingreso con contraseña (y código, si el rol lo pide) e intento fallido de una cuenta existente
     "login", "login_failed",
+    # Áreas y departamentos: ubicación del personal (target: la persona; new_value: departamento o área)
+    # y ajustes de la página (target_label: la clave; old/new: apagado o encendido)
+    "placement_changed", "setting_changed", "internal_requester_created",
 )
 SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
 
@@ -892,3 +897,179 @@ class AutoReportIdOwner(Base):
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     __table_args__ = (UniqueConstraint("report_id", "owner_user_id", name="uq_auto_report_id_owner"),)
+
+
+# ===== Áreas de atención y departamentos (tablas nuevas: create_all no altera las existentes) =====
+
+AREA_AUDIENCES = ("external", "internal")
+ORGANIZATION_KINDS = ("internal", "client")
+TECHNICIAN_TIERS = (1, 2, 3)
+
+
+class Department(Base):
+    """Estructura interna (jerarquía padre/hijo). Cada técnico pertenece a uno solo (StaffPlacement)."""
+    __tablename__ = "departments"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False)
+    parent_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (UniqueConstraint("parent_id", "name", name="uq_department_parent_name"),)
+
+    aliases = relationship("DepartmentAlias", cascade="all, delete-orphan")
+
+
+class DepartmentAlias(Base):
+    """Nombre alternativo que equivale a un departamento (importaciones y una futura sincronización con Entra)."""
+    __tablename__ = "department_aliases"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), index=True, nullable=False)
+    # Ruta completa tal como venía (única) y normalizada (sin tildes, minúsculas, abreviaturas) para buscarla
+    alias = Column(String(300), unique=True, nullable=False)
+    normalized = Column(String(300), index=True, nullable=False)
+
+
+class ServiceArea(Base):
+    """Área de atención que ve el solicitante. Un coordinador por área y un área por coordinador."""
+    __tablename__ = "service_areas"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(String(300), nullable=True)
+    # external o internal, validado en Python
+    audience = Column(String(10), nullable=False, default="external")
+    coordinator_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=True)
+    entry_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    coordinator = relationship("User", foreign_keys=[coordinator_id])
+
+
+class ServiceAreaDepartment(Base):
+    """Departamento agrupado en un área (uno solo por departamento; sus subdepartamentos lo heredan)."""
+    __tablename__ = "service_area_departments"
+
+    id = Column(Integer, primary_key=True)
+    area_id = Column(Integer, ForeignKey("service_areas.id", ondelete="CASCADE"), index=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+
+class StaffPlacement(Base):
+    """Departamento y nivel (1 = N1 … 3 = N3) de un técnico. Sin fila o sin departamento: no recibe tickets."""
+    __tablename__ = "staff_placements"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    tier = Column(Integer, nullable=False, default=1)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (CheckConstraint("tier BETWEEN 1 AND 3", name="chk_placement_tier"),)
+
+
+class StaffInvitationPlacement(Base):
+    """Departamento y nivel (técnico) o área (coordinador) de una invitación: se aplican al activarla."""
+    __tablename__ = "staff_invitation_placements"
+
+    id = Column(Integer, primary_key=True)
+    invitation_id = Column(Integer, ForeignKey("staff_invitations.id", ondelete="CASCADE"), unique=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    area_id = Column(Integer, ForeignKey("service_areas.id"), nullable=True)
+    tier = Column(Integer, nullable=True)
+
+
+class Organization(Base):
+    """Organización de los solicitantes: ADN (interna, sin contrato) o un cliente con contrato (Fase 2)."""
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(150), nullable=False)
+    # internal o client, validado en Python
+    kind = Column(String(10), nullable=False, default="client")
+    legal_id = Column(String(20), nullable=True)
+    contract_number = Column(String(50), nullable=True)
+    contract_start = Column(Date, nullable=True)
+    contract_end = Column(Date, nullable=True)
+    main_phone = Column(String(20), nullable=True)
+    data_clause = Column(Boolean, nullable=False, default=False)
+    contract_attachment_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    domains = relationship("OrganizationDomain", cascade="all, delete-orphan")
+
+
+class OrganizationDomain(Base):
+    __tablename__ = "organization_domains"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False)
+    domain = Column(String(150), unique=True, nullable=False)
+
+
+class RequesterProfile(Base):
+    """Organización de un solicitante. Sin fila: cliente externo sin organización."""
+    __tablename__ = "requester_profiles"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), index=True, nullable=True)
+    authorized_for_changes = Column(Boolean, nullable=False, default=False)
+    # active o pending (contacto importado que todavía no entra), validado en Python
+    activation = Column(String(10), nullable=False, default="active")
+
+    organization = relationship("Organization")
+
+
+class TicketRouting(Base):
+    """Área y departamento de un ticket. migrated: venía de antes de las áreas (sin departamento de entrada)."""
+    __tablename__ = "ticket_routing"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    area_id = Column(Integer, ForeignKey("service_areas.id"), index=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    migrated = Column(Boolean, nullable=False, default=False)
+
+    area = relationship("ServiceArea")
+    department = relationship("Department")
+
+
+class DraftRouting(Base):
+    """Área que eligió la IA para un borrador de correo. Sin área: va al departamento de entrada."""
+    __tablename__ = "draft_routing"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), unique=True, nullable=False)
+    area_id = Column(Integer, ForeignKey("service_areas.id"), nullable=True)
+
+
+class AppSetting(Base):
+    """Ajustes que cambia el administrador desde la página (clave y valor en texto)."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(50), unique=True, nullable=False)
+    value = Column(String(200), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class PrivacyAcceptance(Base):
+    """Aceptación del aviso de tratamiento de datos (Ley 8968, art. 5): una por persona, aviso y versión."""
+    __tablename__ = "privacy_acceptances"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    # internal o external, validado en Python
+    notice = Column(String(10), nullable=False)
+    version = Column(String(20), nullable=False)
+    accepted_at = Column(DateTime, nullable=False)
+    ip = Column(String(45), nullable=True)
+    # login (pantalla del primer ingreso) o email_link (enlace de un solo uso, Fase 2)
+    via = Column(String(20), nullable=False, default="login")
+
+    __table_args__ = (UniqueConstraint("user_id", "notice", "version", name="uq_privacy_acceptance"),)
