@@ -1183,6 +1183,55 @@
                         </form>
                     </div>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="org-clients">
+                    <div class="admin-card-head"><h2>Organizaciones</h2></div>
+                    <p class="admin-text">Clientes con contrato. Un correo se reconoce por el dominio de su empresa (nunca Gmail, Hotmail u otro genérico). Con el interruptor de clientes encendido, solo abren tickets los contactos de una organización con contrato vigente.</p>
+                    <form id="orgCreateForm" class="org-inline-form org-client-form">
+                        <div class="ui-field">
+                            <label for="orgCreateName">Nombre</label>
+                            <input type="text" id="orgCreateName" class="ui-input" maxlength="150" required>
+                        </div>
+                        <div class="ui-field">
+                            <label for="orgCreateDomains">Dominios (separados por coma)</label>
+                            <input type="text" id="orgCreateDomains" class="ui-input" maxlength="500" placeholder="empresa.cr">
+                        </div>
+                        <div class="ui-field">
+                            <label for="orgCreateContract">Número de contrato</label>
+                            <input type="text" id="orgCreateContract" class="ui-input" maxlength="50">
+                        </div>
+                        <div class="ui-field">
+                            <label for="orgCreateStart">Inicio</label>
+                            <input type="date" id="orgCreateStart" class="ui-input">
+                        </div>
+                        <div class="ui-field">
+                            <label for="orgCreateEnd">Fin</label>
+                            <input type="date" id="orgCreateEnd" class="ui-input">
+                        </div>
+                        <button type="submit" class="ui-btn ui-btn-primary">Crear organización</button>
+                    </form>
+                    <details class="org-import">
+                        <summary>Importar desde CSV</summary>
+                        <p class="admin-text">Una fila por contacto; las filas con el mismo nombre se juntan en una organización. Errores (no se importa esa organización): contrato incompleto, dominio repetido, genérico o de ADN. Advertencia: contacto con un correo de otro dominio. Los contactos nuevos quedan «pendiente de activar» hasta que se registren con su correo.</p>
+                        <button type="button" id="orgTemplateBtn" class="ui-btn ui-btn-secondary ui-btn-sm">Descargar plantilla</button>
+                        <form id="orgImportForm" class="org-inline-form">
+                            <div class="ui-field">
+                                <label for="orgImportFile">Archivo CSV</label>
+                                <input type="file" id="orgImportFile" class="ui-input" accept=".csv,text/csv" required>
+                            </div>
+                            <button type="submit" class="ui-btn ui-btn-secondary">Vista previa</button>
+                        </form>
+                        <div id="orgImportPreview" class="org-preview" hidden></div>
+                    </details>
+                    <div id="orgList" class="org-areas"></div>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="org-unrecognized">
+                    <div class="admin-card-head"><h2>No reconocidos</h2></div>
+                    <p class="admin-text">Correos que intentaron registrarse o escribir sin ser de un cliente con contrato vigente. El correo se muestra completo solo aquí, para poder ligarlo a una organización. Si nadie lo liga, se borra solo a los 30 días.</p>
+                    <ul id="unrecognizedList" class="org-list"></ul>
+                    <h3 class="org-subtitle">Clientes registrados sin organización</h3>
+                    <p class="admin-text">Con el interruptor de clientes encendido no pueden abrir tickets nuevos hasta ligarlos.</p>
+                    <ul id="looseClientsList" class="org-list"></ul>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="approvals">
                     <div class="admin-card-head">
                         <h2>Solicitudes pendientes</h2>
@@ -1484,6 +1533,23 @@
             <div class="dialog-actions">
                 <button type="button" id="privacyLogout" class="btn-secondary">Salir</button>
                 <button type="submit" class="btn-submit">Continuar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="emailNoticeDialog" class="app-dialog privacy-dialog" aria-labelledby="emailNoticeTitle">
+        <form id="emailNoticeForm" class="profile-form">
+            <h2 id="emailNoticeTitle" class="modal-title">Aviso de tratamiento de datos personales</h2>
+            <p id="emailNoticeDone" class="help-text" hidden></p>
+            <div id="emailNoticeText" class="privacy-text" tabindex="0"></div>
+            <label class="privacy-check" id="emailNoticeCheckRow">
+                <input type="checkbox" id="emailNoticeAccept">
+                <span>He leído el aviso y acepto el tratamiento de mis datos</span>
+            </label>
+            <p id="emailNoticeError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="emailNoticeClose" class="btn-secondary">Cerrar</button>
+                <button type="submit" id="emailNoticeSubmit" class="btn-submit">Acepto</button>
             </div>
         </form>
     </dialog>

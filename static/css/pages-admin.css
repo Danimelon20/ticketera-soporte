@@ -1371,3 +1371,25 @@
 .org-merge-row { align-items: flex-start; }
 
 .org-merge-choices { display: grid; gap: 4px; flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+
+/* Organizaciones cliente y no reconocidos */
+.org-client-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-2) var(--sp-3); }
+
+.org-client-fields .form-group { margin: 0; min-width: 0; }
+
+.org-upload { position: relative; cursor: pointer; }
+
+.org-contacts:empty { display: none; }
+
+.org-contacts { border-top: 1px solid var(--line-soft); padding-top: var(--sp-2); }
+
+.org-contact-add .form-group, .org-unrecognized .org-inline-form .form-group { flex: 1 1 200px; min-width: 0; margin: 0; }
+
+.org-error { color: var(--overdue); }
+
+.org-unrecognized { align-items: flex-start; }
+
+.org-unrecognized .org-inline-form { width: 100%; }
+
+.org-list-search { width: 100%; margin-bottom: var(--sp-3); }
+

@@ -6413,6 +6413,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     queueSection('overdue', 'Vencidos', 'mi-trabajo/vencidos', {
                         count: 'overdue', tone: 'alert', context: 'Sus tickets que pasaron el tiempo de respuesta',
                     }),
+                    navSection('organizations', 'Organizaciones', 'mi-trabajo/organizaciones', () => showListPage('organizations'), {
+                        context: 'Busque un cliente por nombre o dominio y vea si su contrato está vigente',
+                    }),
                 ] },
             ];
         }
@@ -6435,8 +6438,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     navSection('org-areas', 'Áreas de atención', 'admin/areas', () => showAdminSection('org-areas'), {
                         context: 'Lo que ve el solicitante: coordinador, departamentos y departamento de entrada',
                     }),
+                    navSection('org-clients', 'Organizaciones', 'admin/organizaciones', () => showAdminSection('org-clients'), {
+                        context: 'Clientes con contrato: dominios, contactos y contrato en PDF',
+                    }),
+                    navSection('org-unrecognized', 'No reconocidos', 'admin/no-reconocidos', () => showAdminSection('org-unrecognized'), {
+                        context: 'Correos que no son de un cliente vigente · se borran solos a los 30 días',
+                    }),
                     navSection('org-activation', 'Activación', 'admin/activacion', () => showAdminSection('org-activation'), {
-                        context: 'Encienda el enrutamiento cuando la lista de verificación esté completa',
+                        context: 'Encienda cada interruptor cuando su lista de verificación esté completa',
                     }),
                     navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
                         count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
@@ -6485,6 +6494,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
                 navSection('clients', 'Clientes', 'tickets/clientes', () => openAccounts('clients'), {
                     aliases: ['accounts'], context: 'Fichas de los clientes, en solo lectura',
+                }),
+                navSection('organizations', 'Organizaciones', 'tickets/organizaciones', () => showListPage('organizations'), {
+                    context: 'Organizaciones cliente y su contrato, en solo lectura',
                 }),
             ] },
             { id: 'drafts', label: 'Borradores', icon: 'mail', sections: [
@@ -6873,7 +6885,8 @@ document.addEventListener('DOMContentLoaded', () => {
         listViewNote.textContent = '';
         let data;
         try {
-            data = await apiFetch(kind === 'incidents' ? '/incidents' : '/team', { silent: true });
+            const source = { incidents: '/incidents', organizations: '/organizations' }[kind] || '/team';
+            data = await apiFetch(source, { silent: true });
         } catch (err) {
             if (seq !== listSeq) return;
             clearSkeleton(listViewBody);
@@ -6883,6 +6896,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (seq !== listSeq) return;
         clearSkeleton(listViewBody);
         if (kind === 'incidents') renderIncidentsPage(data);
+        else if (kind === 'organizations') renderOrganizationsPage(data);
         else if (kind === 'load') renderLoadPage(data);
         else renderAvailabilityPage(data);
     }
@@ -6891,6 +6905,54 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = makeEl('li', `list-row ${className}`.trim());
         return li;
     }
+
+    // Organizaciones (coordinador y técnico): solo lectura; el técnico no recibe cédula, teléfono ni contrato
+    let listOrganizations = [];
+    const ORG_STATUS_TONES = { current: 'is-ok', expired: 'is-danger', future: 'is-warn', incomplete: 'is-warn' };
+
+    function renderOrganizationsPage(items) {
+        listOrganizations = items;
+        listViewBody.replaceChildren();
+        listViewNote.textContent = 'Solo los contactos de una organización con contrato vigente pueden abrir tickets nuevos.';
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.id = 'orgListSearch';
+        search.className = 'ui-input org-list-search';
+        search.placeholder = 'Buscar por nombre o dominio';
+        search.setAttribute('aria-label', 'Buscar organización por nombre o dominio');
+        listViewBody.append(search, makeEl('ul', 'list-rows org-list-rows'));
+        renderOrganizationRows('');
+    }
+
+    function renderOrganizationRows(text) {
+        const list = listViewBody.querySelector('.org-list-rows');
+        if (!list) return;
+        const needle = text.trim().toLowerCase();
+        const shown = listOrganizations.filter(o => !needle || o.name.toLowerCase().includes(needle)
+            || o.domains.some(d => d.includes(needle)));
+        list.replaceChildren();
+        if (!shown.length) {
+            list.appendChild(emptyState({ title: needle ? 'Ninguna coincide' : 'Todavía no hay organizaciones',
+                text: needle ? 'Pruebe con otra parte del nombre o del dominio.' : 'El administrador las agrega en Organizaciones.' }));
+            return;
+        }
+        shown.forEach(org => {
+            const li = listRow();
+            const text = makeEl('span', 'list-row-text');
+            text.appendChild(makeEl('span', 'list-row-title', org.name));
+            const sub = [org.domains.join(', ') || 'Sin dominios'];
+            if (org.contract_end) sub.push(`Contrato ${org.contract_number || ''} hasta el ${formatPlainDate(org.contract_end)}`.replace('  ', ' '));
+            if (typeof org.contacts === 'number') sub.push(`${org.contacts} contacto(s), ${org.authorized_contacts} autorizado(s) para cambios`);
+            text.appendChild(makeEl('span', 'list-row-sub', sub.join(' · ')));
+            li.append(makeEl('span', `ui-tag ${ORG_STATUS_TONES[org.status] || ''}`, org.status_label), text);
+            list.appendChild(li);
+        });
+    }
+
+    // Un solo listener para la búsqueda (el campo se vuelve a crear en cada carga)
+    listViewBody.addEventListener('input', (e) => {
+        if (e.target.id === 'orgListSearch') renderOrganizationRows(e.target.value);
+    });
 
     function renderIncidentsPage(items) {
         listViewBody.replaceChildren();
@@ -10039,6 +10101,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ADMIN_SECTION_TITLES = {
         health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
         'org-departments': 'Departamentos', 'org-areas': 'Áreas de atención', 'org-activation': 'Activación',
+        'org-clients': 'Organizaciones', 'org-unrecognized': 'No reconocidos',
     };
 
     function showAccountsSection(section) {
@@ -11801,6 +11864,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadOrgSection(section) {
+        if (section === 'org-clients') return renderOrganizations();
+        if (section === 'org-unrecognized') return renderUnrecognized();
         try {
             await loadOrgData();
         } catch (err) {
@@ -12292,6 +12357,494 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         renderActivation();
     });
+
+    // ----- Administración: organizaciones cliente y no reconocidos -----
+    let adminOrganizations = [];
+    let orgImportFile = null;
+
+    function splitDomains(text) {
+        return text.split(/[\s,;]+/).map(d => d.trim()).filter(Boolean);
+    }
+
+    function orgInput(type, name, value, label, id, extra = {}) {
+        const input = document.createElement('input');
+        input.type = type;
+        input.className = 'ui-input';
+        input.name = name;
+        input.id = id;
+        if (type === 'checkbox') input.checked = Boolean(value);
+        else input.value = value || '';
+        Object.assign(input, extra);
+        return type === 'checkbox' ? input : inviteField(label, input);
+    }
+
+    async function renderOrganizations() {
+        const host = document.getElementById('orgList');
+        try {
+            adminOrganizations = await apiFetch('/admin/organizations', { silent: true });
+        } catch (err) {
+            host.replaceChildren(errorState(err, renderOrganizations));
+            return;
+        }
+        host.replaceChildren();
+        if (!adminOrganizations.length) {
+            host.appendChild(emptyState({ title: 'Todavía no hay organizaciones', text: 'Créelas una por una o impórtelas desde un CSV.' }));
+            return;
+        }
+        adminOrganizations.forEach(org => {
+            const card = makeEl('form', 'org-area org-client');
+            card.dataset.orgId = String(org.id);
+            const head = makeEl('div', 'org-area-head');
+            head.appendChild(makeEl('h3', 'org-subtitle', org.name));
+            head.appendChild(makeEl('span', `ui-tag ${ORG_STATUS_TONES[org.status] || ''}`, org.status_label));
+            if (org.has_contract_file) head.appendChild(makeEl('span', 'ui-tag', 'Contrato en PDF'));
+            card.appendChild(head);
+            card.appendChild(makeEl('p', 'org-row-sub',
+                `${org.contacts} contacto(s) · ${org.authorized_contacts} autorizado(s) para cambios`));
+
+            const fields = makeEl('div', 'org-client-fields');
+            fields.append(
+                orgInput('text', 'domains', org.domains.join(', '), 'Dominios', `orgDomains${org.id}`, { maxLength: 500 }),
+                orgInput('text', 'contract_number', org.contract_number, 'Número de contrato', `orgContract${org.id}`, { maxLength: 50 }),
+                orgInput('date', 'contract_start', org.contract_start, 'Inicio', `orgStart${org.id}`),
+                orgInput('date', 'contract_end', org.contract_end, 'Fin', `orgEnd${org.id}`),
+                orgInput('text', 'legal_id', org.legal_id, 'Cédula jurídica', `orgLegal${org.id}`, { maxLength: 14 }),
+                orgInput('tel', 'main_phone', org.main_phone, 'Teléfono principal', `orgPhone${org.id}`, { maxLength: 14 }),
+            );
+            card.appendChild(fields);
+            const clause = makeEl('label', 'org-check');
+            clause.append(orgInput('checkbox', 'data_clause', org.data_clause, '', `orgClause${org.id}`),
+                makeEl('span', '', 'El contrato incluye la cláusula de datos personales'));
+            card.appendChild(clause);
+
+            const actions = makeEl('div', 'org-row-actions');
+            const save = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm', 'Guardar');
+            save.type = 'submit';
+            const contacts = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Contactos');
+            contacts.type = 'button';
+            contacts.dataset.orgAction = 'contacts';
+            const upload = makeEl('label', 'ui-btn ui-btn-secondary ui-btn-sm org-upload', 'Subir contrato (PDF)');
+            const file = document.createElement('input');
+            file.type = 'file';
+            file.accept = 'application/pdf,.pdf';
+            file.className = 'sr-only';
+            file.dataset.orgAction = 'contract';
+            upload.appendChild(file);
+            actions.append(save, contacts, upload);
+            if (org.has_contract_file) {
+                const view = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Ver contrato');
+                view.type = 'button';
+                view.dataset.orgAction = 'view-contract';
+                actions.appendChild(view);
+            }
+            card.appendChild(actions);
+            card.appendChild(makeEl('div', 'org-contacts'));
+            host.appendChild(card);
+        });
+    }
+
+    async function orgJson(path, method, body) {
+        return apiFetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    }
+
+    document.getElementById('orgCreateForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const value = id => document.getElementById(id).value.trim();
+        try {
+            await orgJson('/admin/organizations', 'POST', {
+                name: value('orgCreateName'), domains: splitDomains(value('orgCreateDomains')),
+                contract_number: value('orgCreateContract') || null,
+                contract_start: value('orgCreateStart') || null, contract_end: value('orgCreateEnd') || null,
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        e.target.reset();
+        showSuccess('Organización creada');
+        renderOrganizations();
+    });
+
+    const orgList = document.getElementById('orgList');
+    orgList.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const card = e.target.closest('form[data-org-id]');
+        if (!card) return;
+        const field = name => card.querySelector(`[name="${name}"]`);
+        try {
+            await orgJson(`/admin/organizations/${card.dataset.orgId}`, 'PATCH', {
+                domains: splitDomains(field('domains').value),
+                contract_number: field('contract_number').value.trim() || null,
+                contract_start: field('contract_start').value || null,
+                contract_end: field('contract_end').value || null,
+                legal_id: field('legal_id').value.trim() || null,
+                main_phone: field('main_phone').value.trim() || null,
+                data_clause: field('data_clause').checked,
+            });
+        } catch (err) {
+            return;
+        }
+        showSuccess('Organización guardada');
+        renderOrganizations();
+    });
+
+    async function downloadFile(path, fallbackName) {
+        try {
+            const response = await apiFetch(path, { responseType: 'blob' });
+            const blob = await response.blob();
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="?([^";]+)"?/);
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = match ? match[1] : fallbackName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        } catch (err) {
+            // apiFetch ya mostró el error
+        }
+    }
+
+    async function renderContacts(card) {
+        const box = card.querySelector('.org-contacts');
+        let contacts;
+        try {
+            contacts = await apiFetch(`/admin/organizations/${card.dataset.orgId}/contacts`, { silent: true });
+        } catch (err) {
+            box.replaceChildren(errorState(err, () => renderContacts(card)));
+            return;
+        }
+        box.replaceChildren(makeEl('h4', 'org-subtitle', 'Contactos'));
+        const list = makeEl('ul', 'org-list');
+        if (!contacts.length) list.appendChild(makeEl('li', 'admin-text', 'Sin contactos todavía.'));
+        contacts.forEach(c => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', c.name));
+            const sub = [c.email_hint, c.activation === 'pending' ? 'Pendiente de activar' : 'Activo'];
+            text.appendChild(makeEl('span', 'org-row-sub', sub.join(' · ')));
+            li.appendChild(text);
+            if (c.privacy_pending) li.appendChild(makeEl('span', 'ui-tag is-warn', 'Aviso pendiente'));
+            const auth = makeEl('label', 'org-check');
+            const check = document.createElement('input');
+            check.type = 'checkbox';
+            check.checked = c.authorized_for_changes;
+            check.dataset.contactId = String(c.id);
+            auth.append(check, makeEl('span', '', 'Autorizado para cambios'));
+            li.appendChild(auth);
+            list.appendChild(li);
+        });
+        box.appendChild(list);
+        // Contacto nuevo: no es un formulario dentro de otro (la tarjeta ya es un form)
+        const add = makeEl('div', 'org-inline-form org-contact-add');
+        const name = document.createElement('input');
+        name.type = 'text';
+        name.className = 'ui-input';
+        name.id = `orgContactName${card.dataset.orgId}`;
+        name.maxLength = 100;
+        const email = document.createElement('input');
+        email.type = 'email';
+        email.className = 'ui-input';
+        email.id = `orgContactEmail${card.dataset.orgId}`;
+        email.maxLength = 254;
+        const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Agregar contacto');
+        button.type = 'button';
+        button.dataset.orgAction = 'add-contact';
+        add.append(inviteField('Nombre', name), inviteField('Correo', email), button);
+        box.appendChild(add);
+    }
+
+    orgList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-org-action]');
+        const card = e.target.closest('form[data-org-id]');
+        if (!button || !card) return;
+        const id = card.dataset.orgId;
+        if (button.dataset.orgAction === 'contacts') renderContacts(card);
+        if (button.dataset.orgAction === 'view-contract') downloadFile(`/admin/organizations/${id}/contract`, 'contrato.pdf');
+        if (button.dataset.orgAction === 'add-contact') {
+            const name = document.getElementById(`orgContactName${id}`).value.trim();
+            const email = document.getElementById(`orgContactEmail${id}`).value.trim();
+            try {
+                await orgJson(`/admin/organizations/${id}/contacts`, 'POST', { name, email });
+            } catch (err) {
+                return;
+            }
+            showSuccess('Contacto agregado: queda pendiente de activar hasta que se registre');
+            renderContacts(card);
+        }
+    });
+
+    // Enter en los campos del contacto nuevo no guarda la organización (la tarjeta es un formulario)
+    orgList.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target.closest('.org-contact-add')) e.preventDefault();
+    });
+
+    orgList.addEventListener('change', async (e) => {
+        const card = e.target.closest('form[data-org-id]');
+        if (!card) return;
+        if (e.target.dataset.contactId) {
+            try {
+                await orgJson(`/admin/organizations/${card.dataset.orgId}/contacts/${e.target.dataset.contactId}`, 'PATCH',
+                    { authorized_for_changes: e.target.checked });
+            } catch (err) {
+                e.target.checked = !e.target.checked;
+                return;
+            }
+            showSuccess('Contacto guardado');
+        }
+        if (e.target.dataset.orgAction === 'contract' && e.target.files[0]) {
+            const form = new FormData();
+            form.append('file', e.target.files[0]);
+            try {
+                await apiFetch(`/admin/organizations/${card.dataset.orgId}/contract`, { method: 'POST', body: form });
+            } catch (err) {
+                return;
+            }
+            showSuccess('Contrato guardado');
+            renderOrganizations();
+        }
+    });
+
+    document.getElementById('orgTemplateBtn').addEventListener('click',
+        () => downloadFile('/admin/organizations/template.csv', 'plantilla-organizaciones.csv'));
+
+    const orgImportPreview = document.getElementById('orgImportPreview');
+    const ORG_IMPORT_STATUS = { new: 'Nueva', update: 'Se actualiza', error: 'Con errores: no se importa' };
+
+    document.getElementById('orgImportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = document.getElementById('orgImportFile').files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        let data;
+        try {
+            data = await apiFetch('/admin/organizations/import/preview', { method: 'POST', body: form });
+        } catch (err) {
+            return;
+        }
+        orgImportFile = file;
+        orgImportPreview.replaceChildren();
+        const c = data.counts;
+        orgImportPreview.appendChild(makeEl('p', 'admin-text',
+            `${c.new} nuevas · ${c.update} se actualizan · ${c.error} con errores`));
+        const list = makeEl('ul', 'org-list org-preview-rows');
+        data.organizations.forEach(org => {
+            const li = makeEl('li', `org-row is-${org.status === 'error' ? 'error' : 'new'}`);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `${org.name} (fila ${org.lines.join(', ')})`));
+            text.appendChild(makeEl('span', 'org-row-sub',
+                [ORG_IMPORT_STATUS[org.status], org.domains.join(', '), `${org.contacts} contacto(s)`].filter(Boolean).join(' · ')));
+            org.errors.forEach(msg => text.appendChild(makeEl('span', 'org-row-sub org-error', `Error: ${msg}`)));
+            org.warnings.forEach(msg => text.appendChild(makeEl('span', 'org-row-sub', `Advertencia: ${msg}`)));
+            li.appendChild(text);
+            list.appendChild(li);
+        });
+        orgImportPreview.appendChild(list);
+        const confirm = makeEl('button', 'ui-btn ui-btn-primary org-import-confirm', 'Importar las que no tienen errores');
+        confirm.type = 'button';
+        confirm.disabled = c.new + c.update === 0;
+        orgImportPreview.appendChild(confirm);
+        orgImportPreview.hidden = false;
+    });
+
+    orgImportPreview.addEventListener('click', async (e) => {
+        const button = e.target.closest('.org-import-confirm');
+        if (!button || !orgImportFile) return;
+        const form = new FormData();
+        form.append('file', orgImportFile);
+        button.disabled = true;
+        let result;
+        try {
+            result = await apiFetch('/admin/organizations/import/confirm', { method: 'POST', body: form });
+        } catch (err) {
+            button.disabled = false;
+            return;
+        }
+        orgImportPreview.hidden = true;
+        orgImportFile = null;
+        document.getElementById('orgImportForm').reset();
+        showSuccess(`Importación lista: ${result.created} nueva(s), ${result.updated} actualizada(s), `
+            + `${result.contacts_created} contacto(s) nuevo(s), ${result.skipped} con errores`);
+        renderOrganizations();
+    });
+
+    function organizationSelect(id) {
+        const select = document.createElement('select');
+        select.className = 'ui-input';
+        select.id = id;
+        select.appendChild(staffOption('', 'Elegir organización', true));
+        adminOrganizations.forEach(o => select.appendChild(staffOption(String(o.id), `${o.name} (${o.status_label})`, false)));
+        return select;
+    }
+
+    const CHANNEL_LABELS = { register: 'Registro en la página', email: 'Correo al buzón' };
+
+    async function renderUnrecognized() {
+        const list = document.getElementById('unrecognizedList');
+        const loose = document.getElementById('looseClientsList');
+        let data;
+        try {
+            [data, adminOrganizations] = await Promise.all([
+                apiFetch('/admin/unrecognized', { silent: true }),
+                apiFetch('/admin/organizations', { silent: true }),
+            ]);
+        } catch (err) {
+            list.replaceChildren(errorState(err, renderUnrecognized));
+            return;
+        }
+        list.replaceChildren();
+        if (!data.contacts.length) list.appendChild(makeEl('li', 'admin-text', 'No hay correos no reconocidos.'));
+        data.contacts.forEach(c => {
+            const li = makeEl('li', 'org-row org-unrecognized');
+            li.dataset.unrecognizedId = String(c.id);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', c.email));
+            text.appendChild(makeEl('span', 'org-row-sub', `${CHANNEL_LABELS[c.channel] || c.channel} · ${c.attempts} intento(s) · `
+                + `último ${exactDateTime(c.last_seen)} · se borra el ${formatPlainDate(c.expires_on)}`));
+            li.appendChild(text);
+            const form = makeEl('div', 'org-inline-form');
+            const name = document.createElement('input');
+            name.type = 'text';
+            name.className = 'ui-input';
+            name.id = `unrecName${c.id}`;
+            name.maxLength = 100;
+            const domain = makeEl('label', 'org-check');
+            const addDomain = document.createElement('input');
+            addDomain.type = 'checkbox';
+            addDomain.id = `unrecDomain${c.id}`;
+            domain.append(addDomain, makeEl('span', '', 'Agregar también su dominio a la organización'));
+            const linkBtn = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm', 'Ligar');
+            linkBtn.type = 'button';
+            linkBtn.dataset.unrecAction = 'link';
+            const dropBtn = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Borrar');
+            dropBtn.type = 'button';
+            dropBtn.dataset.unrecAction = 'delete';
+            form.append(inviteField('Organización', organizationSelect(`unrecOrg${c.id}`)), inviteField('Nombre del contacto', name),
+                domain, linkBtn, dropBtn);
+            li.appendChild(form);
+            list.appendChild(li);
+        });
+
+        loose.replaceChildren();
+        if (!data.clients_without_organization.length) loose.appendChild(makeEl('li', 'admin-text', 'Todos los clientes tienen organización.'));
+        data.clients_without_organization.forEach(u => {
+            const li = makeEl('li', 'org-row');
+            li.dataset.clientId = String(u.id);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', u.name));
+            text.appendChild(makeEl('span', 'org-row-sub', u.email));
+            const form = makeEl('div', 'org-inline-form');
+            const button = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm', 'Ligar');
+            button.type = 'button';
+            button.dataset.clientAction = 'link';
+            form.append(inviteField('Organización', organizationSelect(`looseOrg${u.id}`)), button);
+            li.append(text, form);
+            loose.appendChild(li);
+        });
+    }
+
+    document.getElementById('unrecognizedList').addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-unrec-action]');
+        const row = e.target.closest('[data-unrecognized-id]');
+        if (!button || !row) return;
+        const id = row.dataset.unrecognizedId;
+        try {
+            if (button.dataset.unrecAction === 'delete') {
+                await apiFetch(`/admin/unrecognized/${id}`, { method: 'DELETE' });
+            } else {
+                await orgJson(`/admin/unrecognized/${id}/link`, 'POST', {
+                    organization_id: Number(document.getElementById(`unrecOrg${id}`).value) || 0,
+                    name: document.getElementById(`unrecName${id}`).value.trim(),
+                    add_domain: document.getElementById(`unrecDomain${id}`).checked,
+                });
+                showSuccess('Correo ligado: el contacto queda pendiente de activar hasta que se registre');
+            }
+        } catch (err) {
+            return;
+        }
+        renderUnrecognized();
+    });
+
+    document.getElementById('looseClientsList').addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-client-action]');
+        const row = e.target.closest('[data-client-id]');
+        if (!button || !row) return;
+        try {
+            await orgJson(`/admin/clients/${row.dataset.clientId}/organization`, 'PUT', {
+                organization_id: Number(document.getElementById(`looseOrg${row.dataset.clientId}`).value) || 0,
+            });
+        } catch (err) {
+            return;
+        }
+        showSuccess('Cliente ligado a la organización');
+        renderUnrecognized();
+    });
+
+    // Enlace "Acepto" del correo (#aviso/<token>): funciona sin sesión y el token sale de la dirección enseguida
+    const emailNoticeDialog = document.getElementById('emailNoticeDialog');
+    const emailNoticeError = document.getElementById('emailNoticeError');
+    let emailNoticeToken = null;
+    let emailNoticeVersion = null;
+
+    function showEmailNoticeDone(text) {
+        const done = document.getElementById('emailNoticeDone');
+        done.textContent = text;
+        done.hidden = false;
+        document.getElementById('emailNoticeText').hidden = true;
+        document.getElementById('emailNoticeCheckRow').hidden = true;
+        document.getElementById('emailNoticeSubmit').hidden = true;
+    }
+
+    async function openEmailNotice(token) {
+        emailNoticeToken = token;
+        emailNoticeError.hidden = true;
+        let result;
+        try {
+            result = await postAuth('/privacy/email-notice', { token });
+        } catch (err) {
+            result = { ok: false, data: { detail: 'No se pudo conectar con el servidor' } };
+        }
+        if (!emailNoticeDialog.open) emailNoticeDialog.showModal();
+        if (!result.ok) {
+            showEmailNoticeDone(getErrorMessage(result.data));
+            return;
+        }
+        if (result.data.accepted) {
+            showEmailNoticeDone('Usted ya aceptó este aviso. No hace falta hacer nada más.');
+            return;
+        }
+        emailNoticeVersion = result.data.version;
+        document.getElementById('emailNoticeText').textContent = result.data.text;
+        document.getElementById('emailNoticeAccept').checked = false;
+    }
+
+    document.getElementById('emailNoticeClose').addEventListener('click', () => emailNoticeDialog.close());
+    document.getElementById('emailNoticeForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        let result;
+        try {
+            result = await postAuth('/privacy/email-accept', {
+                token: emailNoticeToken, version: emailNoticeVersion,
+                accepted: document.getElementById('emailNoticeAccept').checked,
+            });
+        } catch (err) {
+            result = { ok: false, data: { detail: 'No se pudo conectar con el servidor' } };
+        }
+        if (!result.ok) {
+            emailNoticeError.textContent = getErrorMessage(result.data);
+            emailNoticeError.hidden = false;
+            return;
+        }
+        emailNoticeToken = null;
+        showEmailNoticeDone('Gracias. Su aceptación quedó registrada.');
+    });
+
+    if (window.location.hash.startsWith('#aviso/')) {
+        const token = window.location.hash.slice('#aviso/'.length);
+        clearHash();
+        openEmailNotice(token);
+    }
 
     // Ubicación del personal: departamento y nivel (técnico) o área (coordinador)
     const placementDialog = document.getElementById('placementDialog');
