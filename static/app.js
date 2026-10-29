@@ -11775,6 +11775,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let orgDepartments = [];
     let orgAreas = [];
     let orgCoordinators = [];
+    // Campo que recibe el foco al llegar desde un enlace de la lista de Activación
+    let orgPendingFocus = null;
 
     async function loadOrgData() {
         const [departments, areas] = await Promise.all([
@@ -12024,8 +12026,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             current = null;
         }
-        const grouped = orgDepartments.filter(d => d.area_id).map(d => d.id);
+        const grouped = orgDepartments.filter(d => d.area_id && d.active_path).map(d => d.id);
         departmentOptions(entry, { empty: 'Sin configurar', ids: grouped, selected: current });
+        const currentDept = orgDepartments.find(d => d.id === current);
+        let hint;
+        if (!grouped.length) {
+            hint = 'Todavía no hay departamentos agrupados en un área. Marque departamentos en un área, guárdela y luego elija aquí el de entrada.';
+        } else if (currentDept && grouped.includes(current)) {
+            hint = `Actual: ${currentDept.path}. Solo aparecen departamentos que ya están agrupados en un área.`;
+        } else {
+            hint = 'Sin configurar: el requisito de Activación queda pendiente. Solo aparecen departamentos que ya están agrupados en un área.';
+        }
+        document.getElementById('entryDepartmentHint').textContent = hint;
         const host = document.getElementById('areaList');
         host.replaceChildren();
         orgAreas.forEach(a => {
@@ -12078,6 +12090,7 @@ document.addEventListener('DOMContentLoaded', () => {
             entryDept.id = `areaEntry${a.id}`;
             departmentOptions(entryDept, { empty: 'Cualquiera del área', ids: a.department_ids, selected: a.entry_department_id });
             card.appendChild(inviteField('Departamento de entrada del área', entryDept));
+            card.appendChild(makeEl('span', 'org-row-sub', 'Se elige entre los departamentos marcados arriba.'));
 
             const active = makeEl('label', 'org-check');
             const activeCheck = document.createElement('input');
@@ -12092,7 +12105,36 @@ document.addEventListener('DOMContentLoaded', () => {
             card.appendChild(save);
             host.appendChild(card);
         });
+        focusPendingOrgField();
     }
+
+    function focusPendingOrgField() {
+        if (!orgPendingFocus) return;
+        const field = document.getElementById(orgPendingFocus);
+        orgPendingFocus = null;
+        if (!field || field.closest('[hidden]')) return;
+        const block = field.closest('.org-entry');
+        field.scrollIntoView({ block: 'center' });
+        field.focus();
+        if (block) {
+            block.classList.add('is-target');
+            setTimeout(() => block.classList.remove('is-target'), 2500);
+        }
+    }
+
+    // El departamento de entrada del área se elige entre los marcados, aunque el área no se haya guardado
+    function refreshAreaEntryOptions(card) {
+        const select = card.querySelector('select[name="entry"]');
+        const ids = [...card.querySelectorAll('input[name="dept"]:checked')].map(c => Number(c.value));
+        const selected = Number(select.value) || null;
+        departmentOptions(select, { empty: 'Cualquiera del área', ids, selected: ids.includes(selected) ? selected : null });
+    }
+
+    document.getElementById('areaList').addEventListener('change', (e) => {
+        if (e.target.name !== 'dept') return;
+        const card = e.target.closest('form[data-area-id]');
+        if (card) refreshAreaEntryOptions(card);
+    });
 
     // Un solo listener: cada tarjeta es un formulario
     document.getElementById('areaList').addEventListener('submit', async (e) => {
@@ -12123,16 +12165,22 @@ document.addEventListener('DOMContentLoaded', () => {
         loadOrgSection('org-areas');
     });
 
-    document.getElementById('entryDepartment').addEventListener('change', async (e) => {
+    document.getElementById('entryDepartmentForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const button = e.target.querySelector('button[type="submit"]');
+        button.disabled = true;
         try {
             await apiFetch('/admin/settings/entry-department', {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ department_id: Number(e.target.value) || null }),
+                body: JSON.stringify({ department_id: Number(document.getElementById('entryDepartment').value) || null }),
             });
         } catch (err) {
-            return;
+            return; // apiFetch ya mostró el error
+        } finally {
+            button.disabled = false;
         }
-        showSuccess('Departamento de entrada guardado');
+        showSuccess('Departamento de entrada general guardado');
+        loadOrgSection('org-areas');
     });
 
     document.getElementById('areaCreateForm').addEventListener('submit', async (e) => {
@@ -12174,6 +12222,14 @@ document.addEventListener('DOMContentLoaded', () => {
             sw.checklist.forEach(item => {
                 const li = makeEl('li', item.ok ? 'is-ok' : 'is-pending',
                     `${item.ok ? '✓' : '•'} ${item.label}${item.detail ? ` (${item.detail})` : ''}`);
+                if (item.link) {
+                    // Enlace directo a donde se corrige el requisito
+                    const link = makeEl('a', 'org-checklist-link', item.ok ? 'Cambiar' : 'Configurar');
+                    link.href = `#/${item.link}`;
+                    link.dataset.orgLink = item.link;
+                    if (item.focus) link.dataset.orgFocus = item.focus;
+                    li.appendChild(link);
+                }
                 list.appendChild(li);
             });
             card.appendChild(list);
@@ -12215,6 +12271,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('switchList').addEventListener('click', async (e) => {
+        const link = e.target.closest('a[data-org-link]');
+        if (link) {
+            e.preventDefault();
+            orgPendingFocus = link.dataset.orgFocus || null;
+            goRoute(link.dataset.orgLink);
+            return;
+        }
         const button = e.target.closest('button[data-switch-key]');
         if (!button) return;
         button.disabled = true;

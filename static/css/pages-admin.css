@@ -1333,6 +1333,17 @@
 
 .org-switch .ui-btn { justify-self: start; }
 
+/* Departamento de entrada general: bloque propio, se resalta al llegar desde Activación */
+.org-entry { margin: var(--sp-3) 0; padding: var(--sp-3); border: 1px solid var(--card-line); border-radius: var(--r-md); background: var(--card-bg); }
+
+.org-entry .org-subtitle { margin-top: 0; }
+
+.org-entry .org-inline-form { margin-bottom: var(--sp-2); }
+
+.org-entry.is-target { outline: 2px solid var(--link); outline-offset: 2px; }
+
+.org-checklist-link { margin-left: var(--sp-2); color: var(--link); font-weight: 600; }
+
 /* Aviso del personal sin departamento (arriba del contenido) */
 .placement-notice { margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--note-line); border-radius: var(--r-md); background: var(--note-bg); color: var(--due-soon); font-weight: 600; }
 

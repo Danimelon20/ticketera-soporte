@@ -1133,12 +1133,17 @@
                 <article class="admin-card admin-card-wide" data-admin-section="org-areas">
                     <div class="admin-card-head"><h2>Áreas de atención</h2></div>
                     <p class="admin-text">Lo que ve el solicitante al abrir un ticket. Cada área tiene un coordinador y agrupa departamentos.</p>
-                    <div class="org-inline-form">
-                        <div class="ui-field">
-                            <label for="entryDepartment">Departamento de entrada («No estoy seguro» y correos sin área clara)</label>
-                            <select id="entryDepartment" class="ui-input"></select>
-                        </div>
-                    </div>
+                    <section class="org-entry" aria-labelledby="entryDepartmentTitle">
+                        <h3 class="org-subtitle" id="entryDepartmentTitle">Departamento de entrada general</h3>
+                        <form id="entryDepartmentForm" class="org-inline-form">
+                            <div class="ui-field">
+                                <label for="entryDepartment">Departamento de entrada general (No estoy seguro y correos sin clasificar)</label>
+                                <select id="entryDepartment" class="ui-input"></select>
+                            </div>
+                            <button type="submit" class="ui-btn ui-btn-primary">Guardar</button>
+                        </form>
+                        <p class="admin-text" id="entryDepartmentHint"></p>
+                    </section>
                     <form id="areaCreateForm" class="org-inline-form">
                         <div class="ui-field">
                             <label for="areaCreateName">Área nueva</label>

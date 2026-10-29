@@ -1195,6 +1195,9 @@ class ChecklistItem(BaseModel):
     label: str
     ok: bool
     detail: Optional[str] = None
+    # Sección del menú donde se corrige (ruta) y el campo que recibe el foco
+    link: Optional[str] = None
+    focus: Optional[str] = None
 
 
 class SwitchRead(BaseModel):

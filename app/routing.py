@@ -373,10 +373,25 @@ def routing_checklist(db: Session) -> list[dict]:
          "ok": not unplaced, "detail": f"{len(unplaced)} sin ubicación" if unplaced else None},
         {"key": "areas_without_coordinator", "label": "Todas las áreas activas tienen coordinador",
          "ok": without_coordinator == 0,
-         "detail": f"{without_coordinator} sin coordinador" if without_coordinator else None},
-        {"key": "entry_department", "label": "Departamento de entrada configurado",
-         "ok": entry_department(db) is not None, "detail": None},
+         "detail": f"{without_coordinator} sin coordinador" if without_coordinator else None,
+         "link": "admin/areas", "focus": None},
+        _entry_department_item(db),
     ]
+
+
+def _entry_department_item(db: Session) -> dict:
+    """El departamento de entrada general tiene que estar agrupado en un área para recibir tickets."""
+    entry = entry_department(db)
+    grouped = entry is not None and area_of_department(db, entry.id) is not None
+    if grouped:
+        detail = path_label(entry, departments_by_id(db))
+    elif entry is not None:
+        detail = "el departamento elegido ya no está en ningún área"
+    else:
+        detail = "sin configurar"
+    # Enlace directo al selector en Administración › Áreas de atención
+    return {"key": "entry_department", "label": "Departamento de entrada configurado", "ok": grouped,
+            "detail": detail, "link": "admin/areas", "focus": "entryDepartment"}
 
 
 # ----- Invitaciones del personal -----
