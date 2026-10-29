@@ -84,9 +84,12 @@ def _unassigned(db: Session, now: datetime) -> int:
     return sum(1 for t in _not_overdue(_open_tickets(db), now) if t.assigned_to is None)
 
 
-def _drafts_pending(db: Session, reviewer_id: int | None = None) -> int:
-    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor."""
+def _drafts_pending(db: Session, reviewer_id: int | None = None, viewer: models.User | None = None) -> int:
+    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor.
+    Con viewer (coordinador), los mismos que le muestra la lista según su área."""
     query = db.query(models.EmailDraft).filter(models.EmailDraft.status.in_(auto_assign.DRAFT_PENDING_STATUSES))
+    if viewer is not None:
+        query = routing.filter_drafts(db, viewer, query)
     if reviewer_id is not None:
         query = query.join(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id).filter(
             models.DraftAssignment.user_id == reviewer_id
@@ -156,7 +159,7 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         # Los vencidos van aparte, en Vencidos
         "open": len(tickets) - overdue,
         "resolved_today": len(resolved_today),
-        "drafts_pending": _drafts_pending(db),
+        "drafts_pending": _drafts_pending(db, viewer=user),
         # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
         "cancelled": cancellations.count(db),
     }

@@ -7,6 +7,7 @@
 """
 from datetime import datetime, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from . import audit, config, models
@@ -251,6 +252,41 @@ def coordinator_manages(db: Session, coordinator: models.User, target: models.Us
         return True
     area = coordinator_area(db, coordinator)
     return area is not None and technician_in_area(db, target, area.id)
+
+
+# ----- Borradores de correo por área -----
+
+def draft_area(db: Session, draft_id: int) -> int | None:
+    """Área de la IA (solo con confianza alta) si sigue activa; None = sin área clara."""
+    row = db.query(models.DraftRouting).filter(models.DraftRouting.draft_id == draft_id).first()
+    if row is None or row.area_id is None:
+        return None
+    area = db.get(models.ServiceArea, row.area_id)
+    return area.id if area is not None and area.is_active else None
+
+
+def filter_drafts(db: Session, user: models.User, query):
+    """Con el enrutamiento, el coordinador ve los borradores de su área y los que no tienen área clara
+    (sin área, confianza baja o área desactivada): esos los ven todos. Apagado: todos ven todo."""
+    if user.role != "coordinator" or not enforced(db):
+        return query
+    active = [r[0] for r in db.query(models.ServiceArea.id).filter(models.ServiceArea.is_active.is_(True))]
+    query = query.outerjoin(models.DraftRouting, models.DraftRouting.draft_id == models.EmailDraft.id)
+    unclear = or_(models.DraftRouting.area_id.is_(None), models.DraftRouting.area_id.notin_(active))
+    area = coordinator_area(db, user)
+    if area is None:
+        return query.filter(unclear)
+    return query.filter(or_(unclear, models.DraftRouting.area_id == area.id))
+
+
+def draft_visible(db: Session, draft: models.EmailDraft, user: models.User) -> bool:
+    if user.role != "coordinator" or not enforced(db):
+        return True
+    area_id = draft_area(db, draft.id)
+    if area_id is None:
+        return True
+    area = coordinator_area(db, user)
+    return area is not None and area.id == area_id
 
 
 # ----- Áreas que ve cada solicitante -----

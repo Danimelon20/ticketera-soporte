@@ -21,6 +21,7 @@ REVIEW_ROLES = ("technician", "coordinator")
 # Ven todos los borradores, los reasignan y confirman cualquiera
 MANAGER_ROLES = ("coordinator",)
 NOT_YOURS = "Este borrador está asignado a otra persona"
+OTHER_AREA = "Este borrador es de otra área"
 # Los poco claros y los que no son soporte no se revisan: no se listan ni se cuentan
 DEFAULT_STATUSES = auto_assign.DRAFT_PENDING_STATUSES
 DraftStatus = Literal[
@@ -63,15 +64,16 @@ def _reviewer_id(db: Session, draft_id: int) -> int | None:
 
 
 def can_review(db: Session, draft: models.EmailDraft, user: models.User) -> bool:
-    """El coordinador, o el técnico que es su revisor."""
+    """El coordinador (de su área o sin área clara, con el enrutamiento), o el técnico que es su revisor."""
     if user.role in MANAGER_ROLES:
-        return True
+        return routing.draft_visible(db, draft, user)
     return user.role == "technician" and _reviewer_id(db, draft.id) == user.id
 
 
 def _check_can_review(db: Session, draft: models.EmailDraft, user: models.User) -> None:
     if not can_review(db, draft, user):
-        raise HTTPException(status_code=403, detail=NOT_YOURS)
+        other_area = user.role in MANAGER_ROLES
+        raise HTTPException(status_code=403, detail=OTHER_AREA if other_area else NOT_YOURS)
 
 
 def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> DraftRead:
@@ -171,6 +173,7 @@ def list_drafts(
         query = query.filter(models.DraftAssignment.user_id == reviewer.id)
     elif assigned == "none":
         query = query.filter(models.DraftAssignment.user_id.is_(None))
+    query = routing.filter_drafts(db, reviewer, query)
     drafts = query.order_by(models.EmailDraft.created_at.asc(), models.EmailDraft.id.asc()).all()
     return [_draft_read(db, d, reviewer) for d in drafts]
 
@@ -340,11 +343,15 @@ def assign_draft(draft_id: int, data: DraftAssign, db: Session = Depends(get_db)
     if reviewer.role not in MANAGER_ROLES:
         raise HTTPException(status_code=403, detail="Solo un coordinador puede reasignar borradores")
     draft = _open_draft(db, draft_id)
+    _check_can_review(db, draft, reviewer)
     if draft.status not in DEFAULT_STATUSES:
         raise HTTPException(status_code=409, detail="Este borrador ya no está pendiente")
     user = db.get(models.User, data.user_id)
     if user is None or not user.is_active or user.role != "technician":
         raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos activos")
+    area_id = routing.draft_area(db, draft.id) if routing.enforced(db) else None
+    if area_id is not None and not routing.technician_in_area(db, user, area_id):
+        raise HTTPException(status_code=400, detail="Ese técnico no está en el área del borrador")
     row = auto_assign.draft_row(db, draft.id)
     if row is not None and row.user_id == user.id and row.status == "assigned":
         return _draft_read(db, draft, reviewer)
