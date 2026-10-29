@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 from sqlalchemy import delete, func, select, update
 
-from app import config, grouping, models, routing, suspicion
+from app import clients, config, grouping, models, privacy, routing, suspicion
 from app.business_hours import add_business_hours, business_hours_between
 from app.database import SessionLocal
 from app.main import init_db
@@ -50,7 +50,7 @@ OWNING_COLUMNS = {
 }
 ALERT_KINDS = ("critical", "due_soon", "overdue")
 # Tablas que son DEMO por su nombre (no tienen cuenta ni ticket DEMO de dueño)
-NAMED_TABLES = ("departments", "service_areas")
+NAMED_TABLES = ("departments", "service_areas", "organizations")
 
 # Cuentas y títulos de los escenarios (verificar los busca por aquí: los números cambian en cada base)
 MORNING, EVENING, AWAY, COORDINATOR = "tecnica.manana", "tecnico.tarde", "tecnico.vacaciones", "coordinadora"
@@ -68,6 +68,9 @@ UNPLACED, IT_COORDINATOR, INTERNAL = "tecnico.sindepto", "coordinador.ti", "empl
 DEPT_N1, DEPT_NOC, DEPT_IT = "Soporte N1", "NOC", "Soporte TI"
 AREA_NET, AREA_IT = "Internet y conectividad", "Soporte interno (TI)"
 INTERNAL_TICKET = "La laptop no enciende"
+# Organizaciones cliente: una vigente (dominio demo.invalid) y una vencida
+EXPIRED_CLIENT = "dora.vencida"
+ORG_CURRENT, ORG_EXPIRED = "Cliente con contrato", "Cliente vencido"
 # Avisos de la campana que ya corresponden a cada estado (como los dejaría due_notices.sync)
 NOTICE_KINDS = {"due_soon": ("due_50", "due_80"), "overdue": ("due_50", "due_80", "overdue", "report")}
 
@@ -349,6 +352,26 @@ def load(db) -> list[dict]:
     # Empleado de ADN: ligado a la organización interna (solo ve las áreas internas)
     internal = _user(db, INTERNAL, "Empleado Interno", "requester")
     routing.link_internal(db, internal)
+    # Organización vigente con el dominio demo.invalid (Ana autorizada para cambios) y una vencida (Dora).
+    # Beto queda con el aviso de datos pendiente; los demás ya lo aceptaron
+    current_org = models.Organization(name=f"{DEMO_TAG} {ORG_CURRENT}", kind="client", contract_number="CT-DEMO-1",
+                                      contract_start=today - timedelta(days=30), contract_end=today + timedelta(days=335),
+                                      data_clause=True)
+    expired_org = models.Organization(name=f"{DEMO_TAG} {ORG_EXPIRED}", kind="client", contract_number="CT-DEMO-0",
+                                      contract_start=today - timedelta(days=400), contract_end=today - timedelta(days=35))
+    db.add_all([current_org, expired_org])
+    db.flush()
+    if db.query(models.OrganizationDomain).filter(models.OrganizationDomain.domain == DEMO_DOMAIN).first() is None:
+        db.add(models.OrganizationDomain(organization_id=current_org.id, domain=DEMO_DOMAIN))
+    dora = _user(db, EXPIRED_CLIENT, "Dora Cliente Vencida", "requester", "80000005", _free_id_numbers(db, 1)[0])
+    for person in (ana, beto, carla, impostor):
+        clients.link_user(db, person, current_org, authorized=person is ana)
+    clients.link_user(db, dora, expired_org)
+    notice = privacy.read_notice("external")
+    if notice is not None:
+        for person in (ana, carla, impostor, dora):
+            db.add(models.PrivacyAcceptance(user_id=person.id, notice="external", version=notice[0],
+                                            accepted_at=now, via="login"))
 
     # Agrupación A: el mismo cliente con el mismo problema en otras palabras (se fusiona)
     mail_1 = b.ticket(ana, MAIL_TARGET,
@@ -417,9 +440,13 @@ def load(db) -> list[dict]:
         {"rol": "Empleado ADN", "correo": internal.email,
          "probar": "Solicitante interno: aviso de datos al entrar y solo áreas internas."},
         {"rol": "Cliente", "correo": ana.email,
-         "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
-        {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y borrador sin revisor."},
+         "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d). Autorizada para cambios."
+                   % mail_1.id},
+        {"rol": "Cliente", "correo": beto.email,
+         "probar": "Ticket de red principal y borrador sin revisor. Aviso de datos pendiente (interruptor de clientes)."},
         {"rol": "Cliente", "correo": carla.email, "probar": "Ticket de red ligado y borrador con revisor."},
+        {"rol": "Cliente", "correo": dora.email,
+         "probar": "Organización con el contrato vencido: no puede abrir tickets (con el interruptor de clientes)."},
         {"rol": "Cliente", "correo": impostor.email,
          "probar": "Intentó usar la cédula de Ana: el admin ve el reporte del Agente virtual."},
     ]
@@ -502,9 +529,11 @@ def _scenario_ids(db) -> dict | None:
         "internal_ticket": ticket(INTERNAL_TICKET),
         "net_area": db.scalar(select(models.ServiceArea.id).where(models.ServiceArea.name == f"{DEMO_TAG} {AREA_NET}")),
         "enforced": routing.enforced(db),
+        "clients_enforced": clients.enforced(db),
     }
-    needed = [found[k] for k in found if k not in ("users", "network", "enforced")] + found["network"]
-    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR, UNPLACED, IT_COORDINATOR, INTERNAL)]
+    needed = [found[k] for k in found if k not in ("users", "network", "enforced", "clients_enforced")] + found["network"]
+    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR, UNPLACED, IT_COORDINATOR, INTERNAL,
+                                      EXPIRED_CLIENT)]
     return found if all(needed) else None
 
 
@@ -727,6 +756,32 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
 
     add("Solicitante interno", "Empleado ADN", "tipo interno y aviso de datos", internal_notice)
     checks.append(Check("Áreas", "Administrador", "personal sin departamento en la alerta", NO_ADMIN, None))
+
+    def expired_blocked():
+        # Categoría que no existe: si el bloqueo fallara, se detiene ahí sin crear nada
+        response = api.post(EXPIRED_CLIENT, "/api/tickets", {
+            "title": "Prueba", "description": "No se crea", "category_id": MISSING_CATEGORY_ID, "priority_id": 1,
+            "unsure": True})
+        detail = response.json().get("detail") if response.status_code != 200 else ""
+        return response.status_code == 403 and detail == clients.CONTRACT_NOT_CURRENT, f"HTTP {response.status_code}"
+
+    expected = "ticket nuevo: HTTP 403 (contrato vencido)"
+    if ids["clients_enforced"]:
+        add("Clientes", "Cliente vencido", expected, expired_blocked)
+    else:
+        checks.append(Check("Clientes", "Cliente vencido", expected,
+                            "interruptor de clientes apagado (Administración › Activación)", None))
+
+    def organization_listed():
+        response = api.get(COORDINATOR, "/api/organizations", q=DEMO_TAG)
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        statuses = {o["name"]: o["status"] for o in response.json()}
+        ok = (statuses.get(f"{DEMO_TAG} {ORG_CURRENT}") == "current"
+              and statuses.get(f"{DEMO_TAG} {ORG_EXPIRED}") == "expired")
+        return ok, ", ".join(f"{n}: {v}" for n, v in statuses.items()) or "ninguna"
+
+    add("Clientes", "Coordinador", "organizaciones DEMO: una vigente y una vencida", organization_listed)
     return checks
 
 
@@ -760,6 +815,7 @@ def verify(db, http) -> int:
         for local in (MORNING, EVENING, COORDINATOR, IT_COORDINATOR, UNPLACED):
             api.login(local, "staff")
         api.login(ANA, "requester")
+        api.login(EXPIRED_CLIENT, "requester")
         api.login(INTERNAL, "requester")
         checks = _checks(api, ids)
     finally:

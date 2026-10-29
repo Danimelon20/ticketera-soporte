@@ -41,7 +41,7 @@ def test_load_creates_the_scenarios(client, sent):
         users = _demo_users(db)
         assert all(u.name.startswith("[DEMO] ") for u in users)
         roles = sorted(u.role for u in users)
-        assert roles == ["coordinator"] * 2 + ["requester"] * 5 + ["technician"] * 4
+        assert roles == ["coordinator"] * 2 + ["requester"] * 6 + ["technician"] * 4
         demo_ids = {u.id for u in users}
 
         tickets = _demo_tickets(db)
@@ -122,7 +122,7 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
     db = SessionLocal()
     try:
         before_users, before_tickets = _real_snapshot(db)
-        assert len(_demo_users(db)) == 11 and len(_demo_tickets(db)) == 9
+        assert len(_demo_users(db)) == 12 and len(_demo_tickets(db)) == 9
 
         # Uso de la página mezclado con datos reales: ticket real asignado a un técnico DEMO,
         # cambio de un admin real sobre una cuenta DEMO y un adjunto en un ticket DEMO
@@ -206,11 +206,11 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    # Con el enrutamiento apagado se omiten las revisiones que lo necesitan
-    assert "17 de 17 correctos (5 omitidos)" in out
+    # Con el enrutamiento y el interruptor de clientes apagados se omiten las revisiones que los necesitan
+    assert "18 de 18 correctos (6 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
-    assert out.count("OMITIDO") == 5
+    assert out.count("OMITIDO") == 6
     # Ni contraseñas ni tokens; y cierra las sesiones que abrió
     assert demo_data.PASSWORD not in out and "Bearer" not in out
     assert _demo_sessions() == 0
@@ -223,9 +223,25 @@ def test_verify_with_routing_on_checks_area_scope(client, capsys, sent, routing_
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "19 de 19 correctos (3 omitidos)" in out
+    assert "20 de 20 correctos (4 omitidos)" in out
     assert "| FALLA" not in out
     demo_data.run("limpiar")
+
+
+def test_verify_with_clients_on_blocks_expired_contract(client, capsys, sent, clients_on):
+    demo_data.run("cargar")
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 0
+    out = capsys.readouterr().out
+    assert "ticket nuevo: HTTP 403 (contrato vencido)" in out and "19 de 19 correctos (5 omitidos)" in out
+    assert "| FALLA" not in out
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        # Las organizaciones DEMO también se borran
+        assert db.query(models.Organization).filter(models.Organization.name.like("[DEMO]%")).count() == 0
+    finally:
+        db.close()
 
 
 def test_verify_reports_a_broken_scenario(client, capsys):
@@ -243,7 +259,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "15 de 17 correctos" in out
+    assert out.count("| FALLA") == 2 and "16 de 18 correctos" in out
     demo_data.run("limpiar")
 
 

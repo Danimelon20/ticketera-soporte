@@ -63,3 +63,13 @@ Lo que quedó fuera de las fases ya entregadas, con lo que haría falta para cad
 - **Chatbot y áreas**: el asistente no crea tickets y solo atiende a quien ya inició sesión, así que no tiene
   remitentes "no reconocidos". Los puntos de áreas y contactos no reconocidos se aplican solo al correo entrante.
   Si el chat llega a crear tickets, debe usar la misma sugerencia de área (`app/area_ai.py`) con confirmación.
+
+## Organizaciones y clientes (Fase 2)
+
+- **Texto oficial de los avisos**: `app/legal/aviso_privacidad.md` (clientes) y `app/legal/aviso_interno.md` tienen la
+  estructura del artículo 5 con marcas `[PENDIENTE: texto oficial de American Data Networks]`. Al cambiar el texto,
+  subir la versión de la primera línea para que todos acepten de nuevo.
+- **Lista de dominios genéricos**: está en `app/domains.py` (`GENERIC_DOMAINS`). Si aparece otro servicio de correo
+  gratuito, agregarlo ahí.
+- **Remitente falsificado y dominios**: reconocer al cliente por el dominio depende de que el remitente sea real
+  (ver "Remitente falsificado" arriba).
