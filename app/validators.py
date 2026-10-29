@@ -1,3 +1,14 @@
+from . import config
+
+INTERNAL_EMAIL = "Los correos de ADN no se registran como cliente. Si necesita acceso, solicítelo al administrador."
+
+
+def is_internal_email(email: str) -> bool:
+    """El dominio del correo (o uno de sus subdominios) está en INTERNAL_DOMAINS, sin importar mayúsculas."""
+    domain = email.strip().lower().rpartition("@")[2]
+    return any(domain == d or domain.endswith("." + d) for d in config.INTERNAL_DOMAINS)
+
+
 def normalize_phone(value: str) -> str:
     digits = "".join(c for c in value if c in "0123456789")
     if digits.startswith("506") and len(digits) == 11:

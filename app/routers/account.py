@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import audit, availability, config, mailer, models, throttle
+from ..validators import INTERNAL_EMAIL, is_internal_email
 from ..schemas import AvailabilityPeriodCreate, CodeRequest, EmailChangeRequest, MeRead, PasswordChange, PhoneUpdate, SignupStarted
 from ..security import (
     generate_login_code, get_current_session, get_current_user, hash_code, hash_password,
@@ -126,6 +127,8 @@ def request_email_change(
         raise HTTPException(status_code=422, detail="Escriba un correo válido")
     if new_email == normalize_email(current_user.email):
         raise HTTPException(status_code=400, detail="Ese ya es el correo de su cuenta")
+    if current_user.role == "requester" and is_internal_email(new_email):
+        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
 
     # La espera cuenta para correos libres y en uso: así no se pueden probar muchos correos seguidos
     attempt = db.query(models.EmailChangeAttempt).filter(models.EmailChangeAttempt.user_id == current_user.id).first()
@@ -189,6 +192,11 @@ def confirm_email_change(
         if throttle.register_failure(db, normalize_email(old_email), current_user):
             raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
         raise HTTPException(status_code=400, detail=CODE_INVALID)
+    # Cambio pedido antes de agregar el dominio a INTERNAL_DOMAINS
+    if current_user.role == "requester" and is_internal_email(change.new_email):
+        db.delete(change)
+        db.commit()
+        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
     if _find_user(db, change.new_email) is not None:
         db.delete(change)
         db.commit()

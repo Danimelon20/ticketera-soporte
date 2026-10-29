@@ -18,6 +18,9 @@ MS_LOGIN_CLIENT_ID = os.getenv("MS_LOGIN_CLIENT_ID", "")
 MS_LOGIN_CLIENT_SECRET = os.getenv("MS_LOGIN_CLIENT_SECRET", "")
 MS_LOGIN_REDIRECT_URI = os.getenv("MS_LOGIN_REDIRECT_URI", "http://localhost:8000/auth/microsoft/callback")
 
+# Dominios de la empresa (separados por coma): sus correos no pueden ser cuentas de solicitante. Vacío: no bloquea
+INTERNAL_DOMAINS = [d.strip().lower().lstrip("@") for d in os.getenv("INTERNAL_DOMAINS", "").split(",") if d.strip()]
+
 # Asistente de la página (modelo local servido por Ollama)
 CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "false").lower() == "true"
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://ollama:11434").rstrip("/")

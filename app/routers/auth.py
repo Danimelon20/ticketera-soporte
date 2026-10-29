@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, schedules, throttle
+from ..validators import INTERNAL_EMAIL, is_internal_email
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
@@ -148,6 +149,8 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
     response = SignupStarted(email_hint=mask_email(email))
     if "@" not in email:
         raise HTTPException(status_code=422, detail="Escriba un correo válido")
+    if is_internal_email(email):
+        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
 
     # Se calcula siempre: el tiempo de respuesta no delata si el correo ya tenía cuenta
     password_hash = hash_password(user_data.password)
@@ -191,6 +194,9 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/auth/register/verify", response_model=AuthResponse)
 def verify_signup(data: EmailCodeRequest, db: Session = Depends(get_db)):
     email = normalize_email(data.email)
+    # Registros que quedaron a medias antes de agregar el dominio a INTERNAL_DOMAINS
+    if is_internal_email(email):
+        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
     pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
     if (
         pending is None
@@ -220,6 +226,8 @@ def verify_signup(data: EmailCodeRequest, db: Session = Depends(get_db)):
 @router.post("/auth/register/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
 def resend_signup(data: EmailRequest, db: Session = Depends(get_db)):
     email = normalize_email(data.email)
+    if is_internal_email(email):
+        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
     pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
     if pending is not None and pending.password_hash != "!" and _can_resend(pending.sent_at):
         code = _new_signup_code(pending)
