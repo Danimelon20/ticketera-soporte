@@ -141,7 +141,11 @@ async def preview_import(file: UploadFile = File(...), db: Session = Depends(get
 
 @router.post("/departments/import/confirm", response_model=DepartmentImportResult)
 def confirm_import(data: DepartmentImportConfirm, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    result = departments.confirm(db, data.paths, [m.model_dump() for m in data.merges])
+    try:
+        result = departments.confirm(db, data.paths, [m.model_dump() for m in data.merges])
+    except departments.ImportError_ as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
     return result
 

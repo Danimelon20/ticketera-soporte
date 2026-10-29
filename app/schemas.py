@@ -1066,9 +1066,12 @@ class DepartmentImportRow(BaseModel):
 
 
 class DepartmentMerge(BaseModel):
+    # "into" queda como nombre oficial y "merge" como alias
     merge: str = Field(max_length=1000)
     into: str = Field(max_length=1000)
     reason: Optional[str] = None
+    # False: uno ya existe con otro padre y se conserva (no se puede invertir)
+    choosable: bool = True
 
 
 class DepartmentImportPreview(BaseModel):

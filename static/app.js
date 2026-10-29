@@ -11937,18 +11937,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         deptImportPreview.appendChild(table);
         if (data.suggestions.length) {
-            deptImportPreview.appendChild(makeEl('h3', 'org-subtitle', 'Posibles equivalencias: marque las que se fusionan'));
+            deptImportPreview.appendChild(makeEl('h3', 'org-subtitle',
+                'Posibles equivalencias: marque las que se fusionan y elija el nombre oficial (el otro queda como alias)'));
             const merges = makeEl('ul', 'org-list');
             data.suggestions.forEach((sug, i) => {
-                const li = makeEl('li', 'org-row');
+                const li = makeEl('li', 'org-row org-merge-row');
                 const label = makeEl('label', 'org-merge');
                 const check = document.createElement('input');
                 check.type = 'checkbox';
                 check.className = 'org-merge-check';
                 check.dataset.index = String(i);
-                label.appendChild(check);
-                label.appendChild(makeEl('span', '', `«${sug.merge}» → «${sug.into}» (${sug.reason}). El nombre fusionado queda como alias.`));
+                label.append(check, makeEl('span', '', `Fusionar · ${sug.reason}`));
                 li.appendChild(label);
+                // Nombre oficial: por defecto el propuesto (con tildes); se puede cambiar salvo que ya exista con otro padre
+                const choices = makeEl('div', 'org-merge-choices');
+                [sug.into, sug.merge].forEach((path, j) => {
+                    const option = makeEl('label', 'org-check');
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = `orgOfficial${i}`;
+                    radio.value = path;
+                    radio.checked = j === 0;
+                    radio.disabled = !sug.choosable && j === 1;
+                    option.append(radio, makeEl('span', '', `Oficial: ${path}`));
+                    choices.appendChild(option);
+                });
+                if (!sug.choosable) choices.appendChild(makeEl('span', 'org-row-sub', 'Ya existe con otro departamento padre: se conserva su nombre.'));
+                li.appendChild(choices);
                 merges.appendChild(li);
             });
             deptImportPreview.appendChild(merges);
@@ -11966,8 +11981,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const button = e.target.closest('.org-import-confirm');
         if (!button) return;
         const suggestions = JSON.parse(deptImportPreview.dataset.suggestions || '[]');
-        const merges = [...deptImportPreview.querySelectorAll('.org-merge-check:checked')]
-            .map(check => suggestions[Number(check.dataset.index)]);
+        const merges = [...deptImportPreview.querySelectorAll('.org-merge-check:checked')].map(check => {
+            const i = Number(check.dataset.index);
+            const sug = suggestions[i];
+            const chosen = deptImportPreview.querySelector(`input[name="orgOfficial${i}"]:checked`);
+            const official = chosen ? chosen.value : sug.into;
+            return { merge: official === sug.into ? sug.merge : sug.into, into: official };
+        });
         button.disabled = true;
         let result;
         try {

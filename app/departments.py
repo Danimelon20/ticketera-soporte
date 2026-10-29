@@ -154,24 +154,10 @@ def preview(db: Session, paths: list[str]) -> dict:
                 status = "exists"
         rows.append({"line": number, "original": raw, "path": path, "status": status, "notes": notes})
 
-    # Equivalencias: iguales al normalizar (tildes, mayúsculas, abreviaturas) o al juntar segmentos
-    # equivalentes seguidos ("Soporte Nivel 2 / Soporte N2" ≈ "Soporte N2")
     existing_paths = set(existing_texts.values())
     known = {r["path"] for r in rows if r["status"] in ("new", "exists")} | existing_paths
-    groups: dict[tuple, list[str]] = {}
-    for path in sorted(known, key=lambda p: (p.count(SEPARATOR), p)):
-        groups.setdefault(tuple(_collapsed(path)), []).append(path)
-    suggestions = []
-    merged = set()
-    for group in groups.values():
-        if len(group) < 2:
-            continue
-        # Se conserva la que ya existe; si no, la más corta (o la primera)
-        keep = next((p for p in group if p in existing_paths), group[0])
-        for other in group:
-            if other != keep and other not in existing_paths:
-                merged.add(other)
-                suggestions.append({"merge": other, "into": keep, "reason": _reason(other, keep)})
+    suggestions = _suggestions(known, existing_paths)
+    merged = {s["merge"] for s in suggestions} | {s["into"] for s in suggestions}
     for row in rows:
         if row["status"] == "new" and row["path"] in merged:
             row["notes"].append("Parece el mismo departamento que otra ruta: revise las equivalencias")
@@ -179,7 +165,70 @@ def preview(db: Session, paths: list[str]) -> dict:
             "counts": {s: sum(1 for r in rows if r["status"] == s) for s in ("new", "exists", "duplicate", "error")}}
 
 
+def _accents(path: str) -> int:
+    """Letras con tilde o diéresis: ante dos nombres equivalentes, se propone el que las tiene."""
+    return sum(1 for c in path if _plain(c) != c.lower())
+
+
+def _parent(path: str) -> str:
+    return path.rpartition(SEPARATOR)[0]
+
+
+def renamable(existing: str, new: str) -> bool:
+    """Un departamento que ya existe solo puede quedar con el nombre del otro si tienen el mismo padre."""
+    return _parent(existing) == _parent(new) and normalize_name(existing.split(SEPARATOR)[-1]) == normalize_name(
+        new.split(SEPARATOR)[-1])
+
+
+def _pair(a: str, b: str, existing_paths: set[str], prefer_deeper: bool) -> dict | None:
+    """Sugerencia {merge, into, reason, choosable} con el nombre oficial propuesto en "into", o None."""
+    a_exists, b_exists = a in existing_paths, b in existing_paths
+    if a_exists and b_exists:
+        return None
+    depth = (lambda p: p.count(SEPARATOR)) if prefer_deeper else (lambda p: -p.count(SEPARATOR))
+    keep, other = max((a, b), key=lambda p: (_accents(p), depth(p))), None
+    other = b if keep == a else a
+    choosable = True
+    old, new = (a, b) if a_exists else (b, a) if b_exists else (None, None)
+    if old is not None and not renamable(old, new):
+        # El que ya existe se conserva: el otro queda como alias
+        keep, other, choosable = old, new, False
+    return {"merge": other, "into": keep, "reason": _reason(other, keep), "choosable": choosable}
+
+
+def _suggestions(known: set[str], existing_paths: set[str]) -> list[dict]:
+    """Equivalencias: iguales al normalizar (tildes, mayúsculas, abreviaturas) o al juntar segmentos
+    equivalentes seguidos ("Soporte Nivel 2 / Soporte N2" ≈ "Soporte N2"); además, mismo nombre final
+    con padres distintos (se muestran las dos rutas completas: decide el administrador)."""
+    ordered = sorted(known, key=lambda p: (p.count(SEPARATOR), p))
+    result, paired = [], set()
+
+    def add(group: list[str], prefer_deeper: bool) -> None:
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                if frozenset((a, b)) in paired:
+                    continue
+                suggestion = _pair(a, b, existing_paths, prefer_deeper)
+                if suggestion is not None:
+                    paired.add(frozenset((a, b)))
+                    result.append(suggestion)
+
+    same: dict[tuple, list[str]] = {}
+    leaves: dict[str, list[str]] = {}
+    for path in ordered:
+        collapsed = _collapsed(path)
+        same.setdefault(tuple(collapsed), []).append(path)
+        leaves.setdefault(collapsed[-1], []).append(path)
+    for group in same.values():
+        add(group, prefer_deeper=False)
+    for group in leaves.values():
+        add(group, prefer_deeper=True)
+    return result
+
+
 def _reason(a: str, b: str) -> str:
+    if _collapsed(a) != _collapsed(b):
+        return "Mismo nombre final con otros departamentos padre: revise las dos rutas"
     leaf_a, leaf_b = a.split(SEPARATOR)[-1], b.split(SEPARATOR)[-1]
     if a.count(SEPARATOR) != b.count(SEPARATOR):
         return "Mismo nombre en otra ruta"
@@ -226,9 +275,26 @@ def confirm(db: Session, paths: list[str], merges: list[dict]) -> dict:
         source, target = item.get("merge"), item.get("into")
         if source and target and source != target:
             merge_map[SEPARATOR.join(clean_segments(source)[0])] = target
-    existing, _ = _existing(db)
+    existing, existing_texts = _existing(db)
     before = set(existing.values())
     aliases = 0
+    # Un departamento que ya existe y se fusiona en otro nombre: se renombra (mismo padre) y su nombre
+    # anterior queda como alias. Con otro padre no se puede (lo revisa el servidor, no solo la página)
+    current = set(existing_texts.values())
+    for source in [m for m in merge_map if m in current]:
+        target = SEPARATOR.join(clean_segments(merge_map.pop(source))[0])
+        if target in current:
+            raise ImportError_(f"«{source}» y «{target}» ya existen: renombre o desactive uno desde la lista")
+        if not renamable(source, target):
+            raise ImportError_(f"«{source}» ya existe: solo puede quedar con un nombre del mismo departamento padre")
+        dept = db.get(models.Department, existing[normalize_path(source.split(SEPARATOR))])
+        dept.name = target.split(SEPARATOR)[-1]
+        db.query(models.DepartmentAlias).filter(models.DepartmentAlias.alias == target).delete()
+        db.flush()
+        if add_alias(db, dept, source):
+            aliases += 1
+        existing, existing_texts = _existing(db)
+        current = set(existing_texts.values())
     for raw in paths:
         segments, _ = clean_segments(raw or "")
         if not segments:

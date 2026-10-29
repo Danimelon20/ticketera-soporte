@@ -1,4 +1,6 @@
 """Importación del organigrama: vista previa con normalización, duplicados, equivalencias y alias."""
+import uuid
+
 from app import departments, models
 from app.database import SessionLocal
 from org_helpers import unique
@@ -62,7 +64,8 @@ def test_preview_does_not_save_and_flags_duplicates_and_suggestions(client, make
     assert rows[7]["status"] == "error"
     pairs = {(s["merge"], s["into"]) for s in data["suggestions"]}
     assert (f"{root} / Soporte Nivel 2 / Soporte N2", f"{root} / Soporte N2") in pairs
-    assert (f"{root} / Facturación", f"{root} / Facturacion") in pairs
+    # Ante dos nombres equivalentes se propone como oficial el que tiene tildes
+    assert (f"{root} / Facturacion", f"{root} / Facturación") in pairs
     # Solo vista previa: nada en la base
     assert _paths_in_db(root) == []
 
@@ -134,3 +137,83 @@ def test_real_org_chart_is_never_stored(client, make_user):
         assert db.query(models.Department).count() == before
     finally:
         db.close()
+
+
+def _confirm(client, admin, paths, merges):
+    return client.post("/api/admin/departments/import/confirm", headers=admin["headers"],
+                       json={"paths": paths, "merges": merges})
+
+
+def _listed(client, admin):
+    return {d["path"]: d for d in client.get("/api/admin/departments", headers=admin["headers"]).json()}
+
+
+def test_accented_name_is_proposed_as_official_and_can_be_changed(client, make_user):
+    admin = make_user("admin")
+    root = unique("Gerencias")
+    plain, accented = f"{root} / Fibra Optica", f"{root} / Fibra Óptica"
+    data = _preview(client, admin, _csv(plain, accented)).json()
+    suggestion = next(s for s in data["suggestions"] if {s["merge"], s["into"]} == {plain, accented})
+    assert suggestion["into"] == accented and suggestion["choosable"] is True
+
+    # Con lo propuesto: oficial con tilde, el otro como alias
+    assert _confirm(client, admin, [plain, accented], [suggestion]).status_code == 200
+    listed = _listed(client, admin)
+    assert plain not in listed
+    assert listed[accented]["aliases"] == [plain]
+
+    # El administrador puede elegir el otro como oficial
+    other = unique("Gerencias")
+    plain2, accented2 = f"{other} / Fibra Optica", f"{other} / Fibra Óptica"
+    assert _confirm(client, admin, [plain2, accented2], [{"merge": accented2, "into": plain2}]).status_code == 200
+    listed = _listed(client, admin)
+    assert accented2 not in listed and listed[plain2]["aliases"] == [accented2]
+
+
+def test_existing_name_without_accent_can_be_renamed_by_the_merge(client, make_user):
+    """Lo que dejó la versión anterior: "Fibra Optica" oficial y "Fibra Óptica" como alias."""
+    admin = make_user("admin")
+    root = unique("Gerencias")
+    plain, accented = f"{root} / Fibra Optica", f"{root} / Fibra Óptica"
+    _confirm(client, admin, [plain, accented], [{"merge": accented, "into": plain}])
+    assert _listed(client, admin)[plain]["aliases"] == [accented]
+
+    data = _preview(client, admin, _csv(accented)).json()
+    suggestion = next(s for s in data["suggestions"] if {s["merge"], s["into"]} == {plain, accented})
+    assert suggestion == {"merge": plain, "into": accented, "reason": "Solo cambian tildes o mayúsculas",
+                          "choosable": True}
+    response = _confirm(client, admin, [accented], [suggestion])
+    assert response.status_code == 200, response.text
+    listed = _listed(client, admin)
+    assert plain not in listed
+    # Mismo departamento renombrado: el nombre anterior queda como alias
+    assert listed[accented]["aliases"] == [plain]
+
+
+def test_same_leaf_with_different_parents_is_suggested(client, make_user):
+    admin = make_user("admin")
+    token = uuid.uuid4().hex[:8]
+    short = f"Soporte N2 {token}"
+    deep = f"Gerencias / Gerencia de Tecnologías / Soporte Nivel 2 {token} / Soporte N2 {token}"
+    data = _preview(client, admin, _csv(short, deep)).json()
+    suggestion = next(s for s in data["suggestions"] if {s["merge"], s["into"]} == {short, deep})
+    # Las dos rutas completas, para que el administrador decida
+    assert suggestion["reason"] == "Mismo nombre final con otros departamentos padre: revise las dos rutas"
+    assert suggestion["choosable"] is True
+    assert _confirm(client, admin, [short, deep], [{"merge": short, "into": deep}]).status_code == 200
+    listed = _listed(client, admin)
+    assert short not in listed and listed[deep]["aliases"] == [short]
+
+
+def test_existing_department_with_other_parent_is_kept(client, make_user):
+    admin = make_user("admin")
+    token = uuid.uuid4().hex[:8]
+    short = f"Soporte N2 {token}"
+    deep = f"Gerencias / Soporte N2 {token}"
+    _confirm(client, admin, [short], [])
+    suggestion = next(s for s in _preview(client, admin, _csv(deep)).json()["suggestions"]
+                      if {s["merge"], s["into"]} == {short, deep})
+    # El que ya existe no puede quedar con un nombre de otro padre: se conserva
+    assert suggestion["into"] == short and suggestion["choosable"] is False
+    response = _confirm(client, admin, [deep], [{"merge": short, "into": deep}])
+    assert response.status_code == 400
