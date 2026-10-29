@@ -1,4 +1,6 @@
 """Comando de servidor para cuentas de administrador (scripts.admin_tools)."""
+import uuid
+
 import pytest
 
 from app import accounts, models
@@ -113,3 +115,115 @@ def test_rejects_unknown_command(make_user):
     with pytest.raises(SystemExit):
         admin_tools.main(["delete", "--email", target["email"]], confirm=lambda prompt: target["email"])
     assert _db_user(target["id"]).is_active
+
+
+# ----- Solicitantes con correo de dominio interno -----
+
+def _set_email(user_id, email):
+    db = SessionLocal()
+    try:
+        db.get(models.User, user_id).email = email
+        db.commit()
+    finally:
+        db.close()
+
+
+def _delete(email, typed=None):
+    answer = email if typed is None else typed
+    return admin_tools.main(["delete-requester", "--email", email], confirm=lambda prompt: answer)
+
+
+def test_internal_requesters_lists_only_internal_requesters(client, make_user, make_ticket, monkeypatch, capsys):
+    from app import config
+    monkeypatch.setattr(config, "INTERNAL_DOMAINS", ["data.cr"])
+    inside = make_user("requester", "Cliente Interno")
+    sub = make_user("requester", "Cliente Subdominio")
+    outside = make_user("requester", "Cliente Externo")
+    staff = make_user("technician", "Técnico Interno")
+    tag = uuid.uuid4().hex[:8]
+    _set_email(inside["id"], f"interno-{tag}@data.cr")
+    _set_email(sub["id"], f"sub-{tag}@ti.DATA.cr")
+    _set_email(staff["id"], f"tecnico-{tag}@data.cr")
+    make_ticket(inside)
+    make_ticket(inside)
+
+    assert admin_tools.main(["internal-requesters"]) == 0
+    out = capsys.readouterr().out
+    lines = {line.split("\t")[0]: line.split("\t") for line in out.splitlines()}
+    assert lines[str(inside["id"])][2] == f"interno-{tag}@data.cr"
+    assert lines[str(inside["id"])][5] == "2"
+    assert str(sub["id"]) in lines
+    assert str(outside["id"]) not in lines and str(staff["id"]) not in lines
+
+
+def test_internal_requesters_without_domains_says_so(client, monkeypatch, capsys):
+    from app import config
+    monkeypatch.setattr(config, "INTERNAL_DOMAINS", [])
+    assert admin_tools.main(["internal-requesters"]) == 0
+    assert "INTERNAL_DOMAINS está vacía" in capsys.readouterr().out
+
+
+def test_delete_requester_refuses_with_tickets(client, make_user, make_ticket, capsys):
+    target = make_user("requester")
+    make_ticket(target)
+    assert _delete(target["email"]) == 1
+    assert "Tickets: 1, comentarios: 0, borradores: 0" in capsys.readouterr().err
+    assert _db_user(target["id"]) is not None
+
+
+def test_delete_requester_refuses_with_draft(client, make_user, capsys):
+    target = make_user("requester", profile=False)
+    db = SessionLocal()
+    try:
+        db.add(models.EmailDraft(message_id=f"<borrar-{target['id']}@test>", requester_id=target["id"],
+                                 subject="Ayuda", body="Texto", status="pending_review"))
+        db.commit()
+    finally:
+        db.close()
+    assert _delete(target["email"]) == 1
+    assert "borradores: 1" in capsys.readouterr().err
+    assert _db_user(target["id"]) is not None
+
+
+@pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
+def test_delete_requester_refuses_other_roles(client, make_user, role, capsys):
+    target = make_user(role)
+    assert _delete(target["email"]) == 1
+    assert "no de solicitante" in capsys.readouterr().err
+    assert _db_user(target["id"]) is not None
+
+
+def test_delete_requester_needs_the_email_typed(client, make_user):
+    target = make_user("requester")
+    assert _delete(target["email"], typed="otro@correo.com") == 1
+    assert _db_user(target["id"]) is not None
+
+
+def test_delete_requester_without_activity(client, make_user, sent):
+    viewer = make_user("admin")
+    target = make_user("requester", "Cliente Equivocado")
+    email = target["email"]
+    # Un fallo de inicio de sesión (fila de intentos y registro de cambios) y un código pendiente
+    client.post("/api/auth/login", json={"email": email, "password": "otra-clave-999", "portal": "requester"})
+    assert client.post("/api/auth/password-reset", json={"email": email, "portal": "requester"}).status_code == 202
+
+    assert _delete(email.upper()) == 0
+    assert _db_user(target["id"]) is None
+    assert _sessions(target["id"]) == 0
+    assert client.get("/api/auth/me", headers=target["headers"]).status_code == 401
+    db = SessionLocal()
+    try:
+        assert db.query(models.PasswordReset).filter(models.PasswordReset.user_id == target["id"]).count() == 0
+        assert db.query(models.LoginThrottle).filter(models.LoginThrottle.email == email).count() == 0
+        assert db.query(models.AccountChange).filter(models.AccountChange.target_user_id == target["id"]).count() == 0
+    finally:
+        db.close()
+
+    # Constancia como "Servidor" y el historial anterior se conserva con el nombre de la cuenta
+    row = next(c for c in _changes(client, viewer, "server_account_deleted") if "Cliente Equivocado" in c["account"])
+    assert row["actor"] == "Servidor"
+    assert email not in row["account"]
+    assert any("Cliente Equivocado" in c["account"] for c in _changes(client, viewer, "login_failed"))
+    # El correo queda libre para registrarse de nuevo
+    response = client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123"})
+    assert response.status_code == 202
