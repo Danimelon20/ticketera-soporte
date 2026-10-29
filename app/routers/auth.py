@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, schedules, throttle
+from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, privacy, routing, schedules, throttle
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
@@ -47,6 +47,8 @@ ACTIVATE_PATH = "/#activar-cuenta"
 RESET_PATH = "/#restablecer"
 # Con MS_LOGIN_ENABLED, técnicos y coordinadores no usan contraseña
 STAFF_USE_MICROSOFT = accounts.STAFF_USE_MICROSOFT
+INTERNAL_USE_MICROSOFT = "Los correos de ADN entran con su cuenta Microsoft"
+INTERNAL_ASK_ADMIN = "Los correos de ADN no se registran aquí: pida su cuenta al administrador"
 
 
 def check_staff_password_allowed(portal: str | None) -> None:
@@ -148,6 +150,10 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
     response = SignupStarted(email_hint=mask_email(email))
     if "@" not in email:
         raise HTTPException(status_code=422, detail="Escriba un correo válido")
+    # Los empleados de ADN entran con Microsoft (o, sin Microsoft, el administrador crea su cuenta)
+    if routing.is_internal_domain(email):
+        raise HTTPException(status_code=403, detail=INTERNAL_USE_MICROSOFT if config.MS_LOGIN_ENABLED
+                            else INTERNAL_ASK_ADMIN)
 
     # Se calcula siempre: el tiempo de respuesta no delata si el correo ya tenía cuenta
     password_hash = hash_password(user_data.password)
@@ -291,6 +297,7 @@ def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Dep
     invitation.used_by = user.id
     invitation.used_at = _now()
     audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
+    routing.apply_invitation_placement(db, invitation, user)
     db.commit()
     # Única respuesta con la contraseña: que el navegador no la guarde
     response.headers["Cache-Control"] = "no-store"
@@ -532,6 +539,9 @@ def me_read(db: Session, user: models.User) -> MeRead:
         id_number=user.id_number,
         profile_complete=identity.profile_complete(user),
         identity_locked=locked,
+        placement_missing=routing.placement_missing(db, user),
+        requester_kind=routing.requester_kind(db, user) if user.role == "requester" else None,
+        privacy_pending=privacy.pending(db, user) is not None,
         **_availability_fields(db, user),
     )
 

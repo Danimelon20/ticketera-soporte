@@ -15,7 +15,7 @@ import msal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import audit, config, mailer, models
+from . import audit, config, mailer, models, routing
 from .security import hash_token, mask_email, unusable_password_hash
 
 # MSAL agrega openid y profile por su cuenta; offline_access se excluye. Nunca permisos de correo
@@ -39,6 +39,8 @@ REJECT_REASONS = {
     "already_linked": "Ya enlazada a otra cuenta Microsoft",
     "invitation": "Invitación no válida",
     "invitation_email": "Correo distinto al de la invitación",
+    "not_internal": "Correo que no es de un dominio interno",
+    "guest": "Cuenta invitada de otro inquilino",
 }
 
 
@@ -59,6 +61,8 @@ class Identity:
     purpose: str
     portal: str | None
     invitation_id: int | None
+    # Cuenta propia del inquilino (no invitada desde otro): solo estas pueden volverse solicitantes internos
+    member: bool = True
 
 
 def _now() -> datetime:
@@ -141,7 +145,16 @@ def finish(db: Session, params: dict, browser: str | None) -> Identity:
         raise LoginRejected("tenant", portal=portal, email=email)
     if claims.get("aud") != config.MS_LOGIN_CLIENT_ID or not claims.get("oid"):
         raise LoginRejected("failed", portal=portal, email=email)
-    return Identity(oid=claims["oid"], email=email, purpose=purpose, portal=portal, invitation_id=invitation_id)
+    return Identity(oid=claims["oid"], email=email, purpose=purpose, portal=portal, invitation_id=invitation_id,
+                    member=is_member(claims))
+
+
+def is_member(claims: dict) -> bool:
+    """Cuenta del propio inquilino. Un invitado (B2B) trae idp con su inquilino de origen, o acct = 1."""
+    if claims.get("acct") == 1:
+        return False
+    idp = claims.get("idp")
+    return not idp or config.MS_LOGIN_TENANT_ID in idp
 
 
 def _find_by_email(db: Session, email: str) -> models.User | None:
@@ -156,10 +169,15 @@ def _link(db: Session, user: models.User, oid: str) -> None:
 
 
 def resolve_user(db: Session, identity: Identity, allowed_roles: tuple) -> models.User:
-    """Cuenta del personal que ya existe y está activa. Primer ingreso: se enlaza por correo. No hace commit."""
+    """Cuenta del personal que ya existe y está activa. Primer ingreso: se enlaza por correo. No hace commit.
+
+    Opción Solicitante: solo empleados de ADN (solicitantes internos); sin cuenta, se crea al entrar.
+    """
     portal, email = identity.portal, identity.email
     link = db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.oid == identity.oid).first()
     user = db.get(models.User, link.user_id) if link is not None else _find_by_email(db, email)
+    if portal == "requester":
+        return _resolve_internal_requester(db, identity, user, link)
     if user is None or user.role == "agent":
         raise LoginRejected("not_staff", portal=portal, email=email)
     if user.role == "requester":
@@ -168,6 +186,38 @@ def resolve_user(db: Session, identity: Identity, allowed_roles: tuple) -> model
         raise LoginRejected("inactive", portal=portal, user=user)
     if user.role not in allowed_roles:
         raise LoginRejected("wrong_portal", portal=portal, user=user)
+    if link is None:
+        if db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.user_id == user.id).first():
+            raise LoginRejected("already_linked", portal=portal, user=user)
+        _link(db, user, identity.oid)
+    return user
+
+
+def _resolve_internal_requester(db: Session, identity: Identity, user: models.User | None,
+                                link: models.UserMicrosoftLink | None) -> models.User:
+    """Mismo inquilino (ya revisado en finish), cuenta miembro y dominio de INTERNAL_DOMAINS. El rol y el
+    departamento del personal nunca salen de aquí: solo los da el administrador."""
+    portal, email = identity.portal, identity.email
+    if not identity.member:
+        raise LoginRejected("guest", portal=portal, email=email, user=user)
+    if user is None:
+        if not routing.is_internal_domain(email):
+            raise LoginRejected("not_internal", portal=portal, email=email)
+        user = models.User(name="", email=email, role="requester", password_hash=unusable_password_hash())
+        db.add(user)
+        db.flush()
+        routing.link_internal(db, user)
+        audit.record(db, user.id, "internal_requester_created", target=user, new=mask_email(email))
+        _link(db, user, identity.oid)
+        return user
+    if user.role == "agent":
+        raise LoginRejected("not_staff", portal=portal, email=email)
+    if user.role != "requester":
+        raise LoginRejected("wrong_portal", portal=portal, user=user)
+    if not user.is_active:
+        raise LoginRejected("inactive", portal=portal, user=user)
+    if routing.requester_kind(db, user) != "internal":
+        raise LoginRejected("not_internal", portal=portal, user=user)
     if link is None:
         if db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.user_id == user.id).first():
             raise LoginRejected("already_linked", portal=portal, user=user)
@@ -195,6 +245,7 @@ def activate(db: Session, identity: Identity) -> models.User:
     invitation.used_by = user.id
     invitation.used_at = _now()
     audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
+    routing.apply_invitation_placement(db, invitation, user)
     _link(db, user, identity.oid)
     return user
 
@@ -235,7 +286,12 @@ def redeem(db: Session, code: str, browser: str | None) -> models.User | None:
         return None
     row.used_at = _now()
     user = db.get(models.User, row.user_id)
-    if user is None or not user.is_active or user.role not in ("technician", "coordinator", "admin"):
+    if user is None or not user.is_active:
+        return None
+    # Solicitantes: solo los internos (empleados de ADN)
+    if user.role not in ("technician", "coordinator", "admin") and not (
+        user.role == "requester" and routing.requester_kind(db, user) == "internal"
+    ):
         return None
     return user
 

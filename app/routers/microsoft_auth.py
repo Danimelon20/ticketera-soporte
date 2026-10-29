@@ -15,7 +15,8 @@ from .auth import PORTAL_ROLES, _create_session, normalize_email, valid_invitati
 router = APIRouter(tags=["microsoft-login"])
 
 # Pestañas de la pantalla de inicio que entran con Microsoft
-MICROSOFT_PORTALS = ("staff", "admin")
+# requester: solo empleados de ADN (solicitantes internos)
+MICROSOFT_PORTALS = ("staff", "admin", "requester")
 RETURN_PATH = "/#microsoft"
 EXCHANGE_FAILED = "El inicio de sesión con Microsoft venció. Intente de nuevo."
 UNAVAILABLE = "No se pudo conectar con Microsoft. Intente más tarde."
