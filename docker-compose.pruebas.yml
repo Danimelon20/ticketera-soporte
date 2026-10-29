@@ -1,0 +1,19 @@
+name: ticketera-pruebas
+
+services:
+  app:
+    build: .
+    env_file:
+      - path: .env.pruebas
+        required: true
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data-pruebas:/app/data
+    networks:
+      - compartida
+
+networks:
+  compartida:
+    name: ticketera-soporte_default
+    external: true
