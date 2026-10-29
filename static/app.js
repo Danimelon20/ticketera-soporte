@@ -237,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isStaffShell() && !profileRequired()) startStaffRoute();
         setupPortal();
         setupChat();
+        setupOrgNotices();
     }
 
     // Enlace de un correo (#ticket/N): se abre ese ticket después de iniciar sesión
@@ -294,6 +295,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Vuelta de Microsoft: #microsoft?code=... (código de un solo uso) o #microsoft?error=clave
     const MICROSOFT_ROUTE = '#microsoft';
     const MICROSOFT_PORTALS = ['staff', 'admin'];
+    // Pestaña Cliente: los empleados de ADN también entran con Microsoft (los clientes, con contraseña)
+    const MICROSOFT_INTERNAL_PORTAL = 'requester';
     const MICROSOFT_ERRORS = {
         state: 'El inicio de sesión con Microsoft venció o no es válido. Intente de nuevo.',
         failed: 'Microsoft no confirmó su identidad. Intente de nuevo.',
@@ -305,7 +308,9 @@ document.addEventListener('DOMContentLoaded', () => {
         wrong_portal: 'Esta cuenta no entra por esta opción. Pruebe con la otra pestaña.',
         already_linked: 'Su cuenta ya está enlazada a otra cuenta Microsoft. Comuníquese con el administrador.',
         invitation: 'La invitación no es válida o venció. Pida una nueva al administrador.',
-        invitation_email: 'Entre con la cuenta Microsoft del correo al que llegó la invitación.'
+        invitation_email: 'Entre con la cuenta Microsoft del correo al que llegó la invitación.',
+        not_internal: 'Esa cuenta Microsoft no es de un dominio de ADN. Si es cliente, entre con su correo y contraseña.',
+        guest: 'Las cuentas invitadas de otras organizaciones no pueden entrar como empleados de ADN.'
     };
     const MICROSOFT_AUTH_HOST = 'https://login.microsoftonline.com/';
     const microsoftLoginBox = document.getElementById('microsoftLogin');
@@ -397,8 +402,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Muestra el botón de Microsoft o el formulario según la pestaña elegida
     function applyMicrosoftLogin() {
         const useMicrosoft = microsoftLogin && MICROSOFT_PORTALS.includes(loginPortal);
-        microsoftLoginBox.hidden = !useMicrosoft;
-        if (useMicrosoft) microsoftLoginBtn.href = `/auth/microsoft/login?portal=${loginPortal}`;
+        const internal = microsoftLogin && loginPortal === MICROSOFT_INTERNAL_PORTAL;
+        microsoftLoginBox.hidden = !useMicrosoft && !internal;
+        if (useMicrosoft || internal) microsoftLoginBtn.href = `/auth/microsoft/login?portal=${loginPortal}`;
+        document.getElementById('microsoftLoginLabel').textContent = internal
+            ? 'Empleado de ADN: entrar con Microsoft' : 'Entrar con Microsoft';
         emergencyAccessLink.hidden = !(useMicrosoft && loginPortal === 'admin' && !emergencyAccess);
         loginForm.hidden = useMicrosoft && !(loginPortal === 'admin' && emergencyAccess);
         document.getElementById('activateSubmit').textContent = microsoftLogin ? 'Activar con Microsoft' : 'Activar cuenta';
@@ -2754,6 +2762,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 showError('Seleccione categoría y prioridad');
                 return;
             }
+            if (!areaGroup.hidden && !ticketArea.value) {
+                showError('Elija un área de atención');
+                return;
+            }
 
             // Nombre y cédula salen del perfil; solo el teléfono de contacto se puede cambiar
             const contactPhone = document.getElementById('contactPhone').value.trim();
@@ -2778,6 +2790,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         category_id: parseInt(categoryId),
                         priority_id: parseInt(priorityId),
                         contact_phone: contactPhone,
+                        ...areaPayload(),
                         ...(selectedRequesterId !== null ? { requester_id: selectedRequesterId } : {})
                     })
                 });
@@ -5848,6 +5861,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectedRequesterId = match.id;
                 fillContactFields(match);
                 loadNewTicketOpen(match);
+                // Las áreas dependen del tipo de solicitante (cliente o empleado de ADN)
+                loadTicketAreas();
                 return;
             }
             // El texto no coincide con ninguna opción: no se manda requester_id
@@ -5870,6 +5885,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentUser) {
                 fillContactFields(currentUser);
             }
+            loadTicketAreas();
         });
     }
 
@@ -5895,6 +5911,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? 'Cuéntenos qué pasa. Le avisaremos por correo cada vez que haya novedades.'
                 : 'Para registrar un caso que llegó por teléfono o en persona.';
             setDocumentTitle(portal ? 'Nueva solicitud' : 'Nuevo ticket');
+            loadTicketAreas();
             if (currentUser) {
                 document.getElementById('contactName').value = currentUser.name;
                 document.getElementById('contactEmail').value = currentUser.email;
@@ -6178,7 +6195,30 @@ document.addEventListener('DOMContentLoaded', () => {
         submit.type = 'submit';
         submit.className = 'ui-btn ui-btn-primary';
         submit.textContent = 'Enviar invitación';
-        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role), submit);
+        const inviteDept = document.createElement('select');
+        inviteDept.id = 'inviteDepartment';
+        inviteDept.required = true;
+        const inviteTier = document.createElement('select');
+        inviteTier.id = 'inviteTier';
+        ['1', '2', '3'].forEach(value => inviteTier.appendChild(staffOption(value, `N${value}`, value === '1')));
+        const inviteArea = document.createElement('select');
+        inviteArea.id = 'inviteArea';
+        const deptField = inviteField('Departamento', inviteDept);
+        const tierField = inviteField('Nivel', inviteTier);
+        const areaField = inviteField('Área que dirige', inviteArea);
+        function syncInviteRole() {
+            const technician = role.value === 'technician';
+            deptField.hidden = !technician;
+            tierField.hidden = !technician;
+            areaField.hidden = technician;
+            inviteDept.required = technician;
+            inviteArea.required = !technician;
+        }
+        role.addEventListener('change', syncInviteRole);
+        fillInvitePlacement(inviteDept, inviteArea);
+        syncInviteRole();
+        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role),
+            deptField, tierField, areaField, submit);
 
         // Cada sección es nueva: el listener se registra una sola vez por formulario
         form.addEventListener('submit', async (e) => {
@@ -6188,9 +6228,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await apiFetch('/staff-invitations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: email.value.trim(), name: name.value.trim(), role: role.value })
+                    body: JSON.stringify({
+                        email: email.value.trim(), name: name.value.trim(), role: role.value,
+                        ...(role.value === 'technician'
+                            ? { department_id: Number(inviteDept.value) || null, tier: Number(inviteTier.value) }
+                            : { area_id: Number(inviteArea.value) || null }),
+                    })
                 });
                 form.reset();
+                syncInviteRole();
                 if (data.email_sent) {
                     showSuccess('Invitación enviada');
                 } else {
@@ -6383,6 +6429,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         setReportsAccount(null);
                         showView('reports');
                     }, { count: 'reports_open', tone: 'alert', context: 'Cuentas de solicitante reportadas por el personal' }),
+                    navSection('org-departments', 'Departamentos', 'admin/departamentos', () => showAdminSection('org-departments'), {
+                        context: 'Estructura interna: importe el organigrama, edite y desactive departamentos',
+                    }),
+                    navSection('org-areas', 'Áreas de atención', 'admin/areas', () => showAdminSection('org-areas'), {
+                        context: 'Lo que ve el solicitante: coordinador, departamentos y departamento de entrada',
+                    }),
+                    navSection('org-activation', 'Activación', 'admin/activacion', () => showAdminSection('org-activation'), {
+                        context: 'Encienda el enrutamiento cuando la lista de verificación esté completa',
+                    }),
                     navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
                         count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
                     }),
@@ -7298,10 +7353,10 @@ document.addEventListener('DOMContentLoaded', () => {
         queueTitle.textContent = currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos';
         queueSearch = '';
         queuePageNum = 1;
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueArea, queueDepartment].forEach(select => { select.value = ''; });
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
         // El técnico no crea tickets (igual que el botón de la barra superior)
-        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
+        document.getElementById('queueNewTicket').textContent = currentUser.role === 'technician' ? 'Ticket interno' : 'Nuevo ticket';
         renderSideNav();
         startNavPolling();
     }
@@ -7333,6 +7388,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const queueLevel = document.getElementById('queueLevel');
     const queueAssignee = document.getElementById('queueAssignee');
     const queueSource = document.getElementById('queueSource');
+    const queueArea = document.getElementById('queueArea');
+    const queueDepartment = document.getElementById('queueDepartment');
     const queuePrev = document.getElementById('queuePrev');
     const queueNext = document.getElementById('queueNext');
     const queuePageLabel = document.getElementById('queuePage');
@@ -7535,6 +7592,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (queueStatus.value) params.set('status', queueStatus.value);
         if (queueLevel.value) params.set('level', queueLevel.value);
         if (queueSource.value) params.set('source', queueSource.value);
+        if (queueArea.value) params.set('area_id', queueArea.value);
+        if (queueDepartment.value) params.set('department_id', queueDepartment.value);
         // El técnico no filtra por responsable
         if (queueAssignee.value && currentUser.role !== 'technician') params.set('assigned_to', queueAssignee.value);
         if (queueSearch) params.set('search', queueSearch);
@@ -7543,19 +7602,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function queueFiltersSet() {
-        return [queueStatus, queueLevel, queueSource].some(select => select.value)
+        return [queueStatus, queueLevel, queueSource, queueArea, queueDepartment].some(select => select.value)
             || (queueAssignee.value && currentUser.role !== 'technician');
     }
 
     // Filtros como chips: punteados sin valor, azules con valor
     function renderQueueChips() {
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueArea, queueDepartment].forEach(select => {
             select.classList.toggle('is-set', Boolean(select.value));
         });
     }
 
     function clearQueueFilters() {
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueArea, queueDepartment].forEach(select => { select.value = ''; });
         renderQueueChips();
         queuePageNum = 1;
         loadQueue();
@@ -7569,6 +7628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isStaffShell()) return;
         queueAssignee.hidden = currentUser.role === 'technician';
         if (queueAssignee.options.length <= 2) fillAssigneeFilter();
+        if (queueArea.options.length <= 1) fillAreaFilters();
         renderQueueChips();
         const seq = ++queueSeq;
         if (!quiet) {
@@ -8171,7 +8231,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         openQueueTicket(Number(row.dataset.id));
     });
-    [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+    [queueStatus, queueLevel, queueAssignee, queueSource, queueArea, queueDepartment].forEach(select => {
         select.addEventListener('change', () => {
             queuePageNum = 1;
             renderQueueChips();
@@ -8899,6 +8959,10 @@ document.addEventListener('DOMContentLoaded', () => {
         staffField(fields, 'Nivel', readOnly
             ? levelText(ticket.ai_analysis ? ticket.ai_analysis.effective_level : null) : staffLevelControl(ticket));
         staffField(fields, 'Canal', SOURCE_LABELS[ticket.source] || ticket.source);
+        if (ticket.area_name) staffField(fields, 'Área', routeControl(ticket, 'area', canManage && !isClosed));
+        if (ticket.area_name) {
+            staffField(fields, 'Departamento', routeControl(ticket, 'department', canManage && !isClosed));
+        }
         staffField(fields, 'Vence', staffDueContent(ticket));
         staffField(fields, 'Prioridad', priorityMap[ticket.priority_id] || '');
         staffField(fields, 'Categoría', categoryMap[ticket.category_id] || '');
@@ -9972,7 +10036,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Una sola sección por opción del menú =====
     const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };
-    const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
+    const ADMIN_SECTION_TITLES = {
+        health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
+        'org-departments': 'Departamentos', 'org-areas': 'Áreas de atención', 'org-activation': 'Activación',
+    };
 
     function showAccountsSection(section) {
         accountsView.querySelectorAll('[data-account-section]').forEach(el => {
@@ -9990,6 +10057,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('adminTitle').textContent = ADMIN_SECTION_TITLES[section];
         showView('admin');
         setDocumentTitle(ADMIN_SECTION_TITLES[section]);
+        if (section.startsWith('org-')) loadOrgSection(section);
     }
 
     // Verificación en el navegador: después de elegir una opción del menú debe verse una sola vista
@@ -11473,6 +11541,751 @@ document.addEventListener('DOMContentLoaded', () => {
             body: cancelBody(pending),
         }).catch(() => {});
     });
+
+    // ===== Áreas de atención y departamentos =====
+    // El servidor valida todo (permisos, áreas permitidas, departamento obligatorio): aquí solo se muestra
+    const areaGroup = document.getElementById('areaGroup');
+    const ticketArea = document.getElementById('ticketArea');
+    const ticketAreaHint = document.getElementById('ticketAreaHint');
+    const ticketAreaSuggestion = document.getElementById('ticketAreaSuggestion');
+    const AREA_UNSURE = 'unsure';
+    const TIER_NAMES = { 1: 'N1', 2: 'N2', 3: 'N3' };
+    let ticketAreaOptions = [];
+    let areaSuggestSeq = 0;
+    let areaSuggestTimer = null;
+    let areaTouched = false;
+
+    function areaPayload() {
+        if (areaGroup.hidden || !ticketArea.value) return {};
+        return ticketArea.value === AREA_UNSURE ? { unsure: true } : { area_id: Number(ticketArea.value) };
+    }
+
+    function renderAreaHint() {
+        const chosen = ticketAreaOptions.find(a => String(a.id) === ticketArea.value);
+        ticketAreaHint.textContent = chosen && chosen.description
+            ? chosen.description
+            : (ticketArea.value === AREA_UNSURE ? 'Lo revisa primero el equipo de entrada y lo envía al área correcta.' : '');
+    }
+
+    // Áreas que puede elegir quien queda como solicitante (externas o internas según su tipo)
+    async function loadTicketAreas() {
+        areaTouched = false;
+        ticketAreaSuggestion.hidden = true;
+        const query = selectedRequesterId !== null ? `?requester_id=${selectedRequesterId}` : '';
+        let data;
+        try {
+            data = await apiFetch(`/areas${query}`, { silent: true });
+        } catch (err) {
+            areaGroup.hidden = true;
+            return;
+        }
+        ticketAreaOptions = data.areas;
+        ticketArea.replaceChildren(staffOption('', 'Seleccionar', true));
+        data.areas.forEach(a => ticketArea.appendChild(staffOption(String(a.id), a.name, false)));
+        if (data.unsure_allowed) ticketArea.appendChild(staffOption(AREA_UNSURE, 'No estoy seguro', false));
+        areaGroup.hidden = data.areas.length === 0;
+        ticketArea.required = !areaGroup.hidden;
+        renderAreaHint();
+    }
+
+    ticketArea.addEventListener('change', () => {
+        areaTouched = true;
+        renderAreaHint();
+    });
+
+    // La IA propone un área a partir de lo escrito; el solicitante confirma o cambia
+    async function suggestTicketArea() {
+        if (areaGroup.hidden || areaTouched) return;
+        const title = document.getElementById('title').value.trim();
+        const description = document.getElementById('description').value.trim();
+        if (description.length < 15) return;
+        const seq = ++areaSuggestSeq;
+        const query = selectedRequesterId !== null ? `?requester_id=${selectedRequesterId}` : '';
+        let data;
+        try {
+            data = await apiFetch(`/areas/suggest${query}`, {
+                method: 'POST', silent: true,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description }),
+            });
+        } catch (err) {
+            return; // Sin sugerencia: el solicitante elige
+        }
+        if (seq !== areaSuggestSeq || areaTouched || !data.area_id) return;
+        const chosen = ticketAreaOptions.find(a => a.id === data.area_id);
+        if (!chosen) return;
+        ticketArea.value = String(chosen.id);
+        renderAreaHint();
+        ticketAreaSuggestion.textContent = `Sugerida según su descripción: ${chosen.name}. Puede cambiarla.`;
+        ticketAreaSuggestion.hidden = false;
+    }
+
+    document.getElementById('description').addEventListener('input', () => {
+        clearTimeout(areaSuggestTimer);
+        areaSuggestTimer = setTimeout(suggestTicketArea, 1200);
+    });
+
+    // ----- Filtros de la cola -----
+    async function fillAreaFilters() {
+        let data;
+        try {
+            data = await apiFetch('/areas/filters', { silent: true });
+        } catch (err) {
+            return;
+        }
+        queueArea.replaceChildren(staffOption('', '+ Área', true));
+        data.areas.forEach(a => queueArea.appendChild(staffOption(String(a.id), `Área: ${a.name}`, false)));
+        queueDepartment.replaceChildren(staffOption('', '+ Departamento', true));
+        data.departments.forEach(d => queueDepartment.appendChild(staffOption(String(d.id), `Depto.: ${d.name}`, false)));
+        queueArea.hidden = data.areas.length === 0;
+        queueDepartment.hidden = data.departments.length === 0;
+    }
+
+    // ----- Detalle del ticket: área y departamento (el coordinador del área los cambia) -----
+    function routeControl(ticket, kind, canChange) {
+        const box = makeEl('span', 'route-field');
+        box.appendChild(makeEl('span', '', kind === 'area' ? ticket.area_name : (ticket.department_name || 'Sin departamento')));
+        if (canChange) {
+            const button = makeEl('button', 'link-btn route-change', kind === 'area' ? 'Transferir' : 'Mover');
+            button.type = 'button';
+            button.addEventListener('click', () => openRouteDialog(ticket, kind));
+            box.appendChild(button);
+        }
+        return box;
+    }
+
+    const routeDialog = document.getElementById('routeDialog');
+    const routeForm = document.getElementById('routeForm');
+    const routeTarget = document.getElementById('routeTarget');
+    const routeReason = document.getElementById('routeReason');
+    const routeError = document.getElementById('routeError');
+    let routeTicket = null;
+    let routeKind = 'area';
+
+    async function openRouteDialog(ticket, kind) {
+        routeTicket = ticket;
+        routeKind = kind;
+        routeError.hidden = true;
+        routeReason.value = '';
+        document.getElementById('routeDialogTitle').textContent = kind === 'area' ? 'Transferir a otra área' : 'Mover a otro departamento';
+        document.getElementById('routeTargetLabel').textContent = kind === 'area' ? 'Área de destino' : 'Departamento de destino (misma área)';
+        routeTarget.replaceChildren(staffOption('', 'Seleccionar', true));
+        let data;
+        try {
+            data = await apiFetch('/areas/filters', { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        if (kind === 'area') {
+            // Todas las áreas activas: el servidor revisa que sean del mismo tipo de solicitante
+            let all = data.areas;
+            try {
+                const everyone = await apiFetch('/areas/transfer-targets', { silent: true });
+                all = everyone.areas;
+            } catch (err) {
+                // Sin la lista completa se muestran las conocidas
+            }
+            all.filter(a => a.id !== ticket.area_id).forEach(a => routeTarget.appendChild(staffOption(String(a.id), a.name, false)));
+        } else {
+            data.departments.filter(d => d.area_id === ticket.area_id && d.id !== ticket.department_id)
+                .forEach(d => routeTarget.appendChild(staffOption(String(d.id), d.name, false)));
+        }
+        routeDialog.showModal();
+    }
+
+    document.getElementById('routeCancel').addEventListener('click', () => routeDialog.close());
+    routeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!routeTicket || !routeTarget.value) return;
+        const endpoint = routeKind === 'area' ? 'transfer-area' : 'move-department';
+        const body = { reason: routeReason.value.trim(),
+            [routeKind === 'area' ? 'area_id' : 'department_id']: Number(routeTarget.value) };
+        try {
+            await apiFetch(`/tickets/${routeTicket.id}/${endpoint}`, {
+                method: 'POST', silent: true,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+        } catch (err) {
+            routeError.textContent = err.message;
+            routeError.hidden = false;
+            return;
+        }
+        routeDialog.close();
+        showSuccess(routeKind === 'area' ? 'Ticket transferido' : 'Ticket movido');
+        const ticketId = routeTicket.id;
+        // Si ya no es de su área, el coordinador deja de verlo: vuelve a la cola
+        try {
+            await apiFetch(`/tickets/${ticketId}`, { silent: true });
+            openTicketById(ticketId);
+        } catch (err) {
+            setQueueView(queueView, queueTitle.textContent || defaultQueueLabel());
+        }
+    });
+
+    // ----- Avisos al entrar: aviso de datos (solicitantes) y personal sin departamento -----
+    const privacyDialog = document.getElementById('privacyDialog');
+    const privacyForm = document.getElementById('privacyForm');
+    const privacyError = document.getElementById('privacyError');
+    let privacyVersion = null;
+
+    async function setupOrgNotices() {
+        document.getElementById('placementNotice').hidden = !(currentUser && currentUser.placement_missing);
+        if (!currentUser || !currentUser.privacy_pending) return;
+        let notice;
+        try {
+            notice = await apiFetch('/privacy/notice', { silent: true });
+        } catch (err) {
+            return;
+        }
+        if (!notice) return;
+        privacyVersion = notice.version;
+        // Texto del aviso como texto plano (nunca HTML)
+        document.getElementById('privacyText').textContent = notice.text;
+        document.getElementById('privacyAccept').checked = false;
+        privacyError.hidden = true;
+        if (!privacyDialog.open) privacyDialog.showModal();
+    }
+
+    // Sin aceptar no se continúa: Escape no lo cierra
+    privacyDialog.addEventListener('cancel', (e) => e.preventDefault());
+    document.getElementById('privacyLogout').addEventListener('click', () => {
+        privacyDialog.close();
+        if (switchAccountBtn) switchAccountBtn.click();
+    });
+    privacyForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            await apiFetch('/privacy/accept', {
+                method: 'POST', silent: true,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ version: privacyVersion, accepted: document.getElementById('privacyAccept').checked }),
+            });
+        } catch (err) {
+            privacyError.textContent = err.message;
+            privacyError.hidden = false;
+            return;
+        }
+        currentUser.privacy_pending = false;
+        privacyDialog.close();
+    });
+
+    // ----- Administración: departamentos, áreas y activación -----
+    let orgDepartments = [];
+    let orgAreas = [];
+    let orgCoordinators = [];
+
+    async function loadOrgData() {
+        const [departments, areas] = await Promise.all([
+            apiFetch('/admin/departments', { silent: true }),
+            apiFetch('/admin/areas', { silent: true }),
+        ]);
+        orgDepartments = departments;
+        orgAreas = areas;
+    }
+
+    function departmentOptions(select, { empty = 'Seleccionar', activeOnly = true, ids = null, selected = null } = {}) {
+        select.replaceChildren(staffOption('', empty, selected === null));
+        orgDepartments
+            .filter(d => (!activeOnly || d.active_path) && (!ids || ids.includes(d.id)))
+            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, d.id === selected)));
+    }
+
+    function areaOptions(select, { empty = 'Seleccionar', selected = null, free = false } = {}) {
+        select.replaceChildren(staffOption('', empty, selected === null));
+        orgAreas.filter(a => a.is_active && (!free || !a.coordinator_id || a.id === selected))
+            .forEach(a => select.appendChild(staffOption(String(a.id), a.name, a.id === selected)));
+    }
+
+    async function loadOrgSection(section) {
+        try {
+            await loadOrgData();
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        if (section === 'org-departments') renderDepartments();
+        if (section === 'org-areas') await renderAreas();
+        if (section === 'org-activation') await renderActivation();
+    }
+
+    function renderDepartments() {
+        departmentOptions(document.getElementById('deptCreateParent'), { empty: '(Raíz)' });
+        const list = document.getElementById('deptList');
+        list.replaceChildren();
+        if (!orgDepartments.length) {
+            list.appendChild(emptyState({ title: 'Todavía no hay departamentos', text: 'Agréguelos uno por uno o importe el organigrama.' }));
+            return;
+        }
+        orgDepartments.forEach(d => {
+            const li = makeEl('li', `org-row${d.active_path ? '' : ' is-off'}`);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', d.path));
+            const sub = [d.area_name ? `Área: ${d.area_name}` : 'Sin área', `${d.technicians} técnico(s)`];
+            if (!d.is_active) sub.push('Desactivado');
+            else if (!d.active_path) sub.push('Desactivado por su departamento padre');
+            if (d.aliases.length) sub.push(`Alias: ${d.aliases.join('; ')}`);
+            text.appendChild(makeEl('span', 'org-row-sub', sub.join(' · ')));
+            const actions = makeEl('div', 'org-row-actions');
+            [['rename', 'Renombrar'], ['move', 'Mover'], ['alias', 'Agregar alias'],
+                ['toggle', d.is_active ? 'Desactivar' : 'Activar']].forEach(([action, label]) => {
+                const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', label);
+                button.type = 'button';
+                button.dataset.deptAction = action;
+                button.dataset.deptId = String(d.id);
+                actions.appendChild(button);
+            });
+            li.append(text, actions);
+            list.appendChild(li);
+        });
+    }
+
+    async function patchDepartment(id, body) {
+        try {
+            await apiFetch(`/admin/departments/${id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        loadOrgSection('org-departments');
+    }
+
+    // Un solo listener para todas las filas
+    document.getElementById('deptList').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-dept-action]');
+        if (!button) return;
+        const dept = orgDepartments.find(d => d.id === Number(button.dataset.deptId));
+        if (!dept) return;
+        const action = button.dataset.deptAction;
+        if (action === 'rename') {
+            const name = window.prompt('Nombre nuevo del departamento', dept.name);
+            if (name && name.trim()) patchDepartment(dept.id, { name: name.trim() });
+        } else if (action === 'alias') {
+            const alias = window.prompt('Nombre alternativo (ruta completa, por ejemplo «Gerencias / Soporte Nivel 2»)');
+            if (alias && alias.trim()) patchDepartment(dept.id, { add_alias: alias.trim() });
+        } else if (action === 'toggle') {
+            patchDepartment(dept.id, { is_active: !dept.is_active });
+        } else if (action === 'move') {
+            movingDepartment = dept;
+            document.getElementById('deptMoveTarget').textContent = dept.path;
+            const select = document.getElementById('deptMoveParent');
+            // Ni él mismo ni lo que cuelga de él (el servidor también lo revisa)
+            const inside = orgDepartments.filter(d => d.path === dept.path || d.path.startsWith(`${dept.path} / `)).map(d => d.id);
+            departmentOptions(select, { empty: '(Raíz)', activeOnly: false, selected: dept.parent_id,
+                ids: orgDepartments.filter(d => !inside.includes(d.id)).map(d => d.id) });
+            document.getElementById('deptMoveDialog').showModal();
+        }
+    });
+
+    let movingDepartment = null;
+    document.getElementById('deptMoveCancel').addEventListener('click', () => document.getElementById('deptMoveDialog').close());
+    document.getElementById('deptMoveForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('deptMoveDialog').close();
+        if (!movingDepartment) return;
+        patchDepartment(movingDepartment.id, { parent_id: Number(document.getElementById('deptMoveParent').value) || 0 });
+    });
+
+    document.getElementById('deptCreateForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('deptCreateName');
+        const parent = document.getElementById('deptCreateParent');
+        try {
+            await apiFetch('/admin/departments', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.value.trim(), parent_id: Number(parent.value) || null }),
+            });
+        } catch (err) {
+            return;
+        }
+        name.value = '';
+        loadOrgSection('org-departments');
+    });
+
+    // Importación: vista previa (nada se guarda) y confirmación con las fusiones elegidas
+    let importPaths = [];
+    const deptImportPreview = document.getElementById('deptImportPreview');
+    const IMPORT_STATUS = { new: 'Nuevo', exists: 'Ya existe', duplicate: 'Repetido', error: 'Error' };
+
+    document.getElementById('deptImportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = document.getElementById('deptImportFile').files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        let data;
+        try {
+            data = await apiFetch('/admin/departments/import/preview', { method: 'POST', body: form });
+        } catch (err) {
+            return;
+        }
+        importPaths = data.rows.filter(r => r.status === 'new' || r.status === 'exists').map(r => r.path);
+        deptImportPreview.replaceChildren();
+        const c = data.counts;
+        deptImportPreview.appendChild(makeEl('p', 'admin-text',
+            `${c.new} nuevos · ${c.exists} ya existen · ${c.duplicate} repetidos · ${c.error} con error`));
+        const table = makeEl('ul', 'org-list org-preview-rows');
+        data.rows.forEach(r => {
+            const li = makeEl('li', `org-row is-${r.status}`);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `${r.line}. ${r.path || r.original || '(vacía)'}`));
+            text.appendChild(makeEl('span', 'org-row-sub', [IMPORT_STATUS[r.status], ...r.notes].join(' · ')));
+            li.appendChild(text);
+            table.appendChild(li);
+        });
+        deptImportPreview.appendChild(table);
+        if (data.suggestions.length) {
+            deptImportPreview.appendChild(makeEl('h3', 'org-subtitle', 'Posibles equivalencias: marque las que se fusionan'));
+            const merges = makeEl('ul', 'org-list');
+            data.suggestions.forEach((sug, i) => {
+                const li = makeEl('li', 'org-row');
+                const label = makeEl('label', 'org-merge');
+                const check = document.createElement('input');
+                check.type = 'checkbox';
+                check.className = 'org-merge-check';
+                check.dataset.index = String(i);
+                label.appendChild(check);
+                label.appendChild(makeEl('span', '', `«${sug.merge}» → «${sug.into}» (${sug.reason}). El nombre fusionado queda como alias.`));
+                li.appendChild(label);
+                merges.appendChild(li);
+            });
+            deptImportPreview.appendChild(merges);
+            deptImportPreview.dataset.suggestions = JSON.stringify(data.suggestions);
+        } else {
+            deptImportPreview.dataset.suggestions = '[]';
+        }
+        const confirm = makeEl('button', 'ui-btn ui-btn-primary org-import-confirm', 'Confirmar importación');
+        confirm.type = 'button';
+        deptImportPreview.appendChild(confirm);
+        deptImportPreview.hidden = false;
+    });
+
+    deptImportPreview.addEventListener('click', async (e) => {
+        const button = e.target.closest('.org-import-confirm');
+        if (!button) return;
+        const suggestions = JSON.parse(deptImportPreview.dataset.suggestions || '[]');
+        const merges = [...deptImportPreview.querySelectorAll('.org-merge-check:checked')]
+            .map(check => suggestions[Number(check.dataset.index)]);
+        button.disabled = true;
+        let result;
+        try {
+            result = await apiFetch('/admin/departments/import/confirm', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: importPaths, merges }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return;
+        }
+        deptImportPreview.hidden = true;
+        document.getElementById('deptImportForm').reset();
+        showSuccess(`Importación lista: ${result.created} departamento(s) nuevo(s), ${result.aliases} alias`);
+        loadOrgSection('org-departments');
+    });
+
+    async function loadCoordinators() {
+        // El directorio del administrador ya trae nombre y rol (correos enmascarados no hacen falta aquí)
+        const team = await apiFetch('/team', { silent: true });
+        orgCoordinators = team.filter(m => m.role === 'coordinator' && m.is_active);
+    }
+
+    async function renderAreas() {
+        try {
+            await loadCoordinators();
+        } catch (err) {
+            orgCoordinators = [];
+        }
+        const entry = document.getElementById('entryDepartment');
+        let current = null;
+        try {
+            current = (await apiFetch('/admin/settings/entry-department', { silent: true })).department_id;
+        } catch (err) {
+            current = null;
+        }
+        const grouped = orgDepartments.filter(d => d.area_id).map(d => d.id);
+        departmentOptions(entry, { empty: 'Sin configurar', ids: grouped, selected: current });
+        const host = document.getElementById('areaList');
+        host.replaceChildren();
+        orgAreas.forEach(a => {
+            const card = makeEl('form', `org-area${a.is_active ? '' : ' is-off'}`);
+            card.dataset.areaId = String(a.id);
+            const head = makeEl('div', 'org-area-head');
+            head.appendChild(makeEl('h3', 'org-subtitle', a.name));
+            head.appendChild(makeEl('span', 'ui-tag', a.audience === 'internal' ? 'Empleados de ADN' : 'Clientes'));
+            if (!a.coordinator_id) head.appendChild(makeEl('span', 'ui-tag is-warn', 'Sin coordinador'));
+            card.appendChild(head);
+
+            const desc = document.createElement('input');
+            desc.type = 'text';
+            desc.className = 'ui-input';
+            desc.name = 'description';
+            desc.maxLength = 300;
+            desc.value = a.description || '';
+            desc.id = `areaDesc${a.id}`;
+            card.appendChild(inviteField('Ejemplos para el solicitante', desc));
+
+            const coordinator = document.createElement('select');
+            coordinator.className = 'ui-input';
+            coordinator.name = 'coordinator';
+            coordinator.id = `areaCoord${a.id}`;
+            coordinator.appendChild(staffOption('0', 'Sin coordinador', !a.coordinator_id));
+            const taken = new Set(orgAreas.filter(o => o.id !== a.id && o.coordinator_id).map(o => o.coordinator_id));
+            orgCoordinators.filter(c => !taken.has(c.id) || c.id === a.coordinator_id)
+                .forEach(c => coordinator.appendChild(staffOption(String(c.id), c.name, c.id === a.coordinator_id)));
+            card.appendChild(inviteField('Coordinador responsable', coordinator));
+
+            const depts = makeEl('fieldset', 'org-area-depts');
+            depts.appendChild(makeEl('legend', '', 'Departamentos que agrupa'));
+            orgDepartments.filter(d => d.active_path).forEach(d => {
+                const label = makeEl('label', 'org-check');
+                const check = document.createElement('input');
+                check.type = 'checkbox';
+                check.name = 'dept';
+                check.value = String(d.id);
+                check.checked = a.department_ids.includes(d.id);
+                label.appendChild(check);
+                const note = d.area_id && d.area_id !== a.id ? ` (hoy en ${d.area_name})` : '';
+                label.appendChild(makeEl('span', '', `${d.path}${note}`));
+                depts.appendChild(label);
+            });
+            card.appendChild(depts);
+
+            const entryDept = document.createElement('select');
+            entryDept.className = 'ui-input';
+            entryDept.name = 'entry';
+            entryDept.id = `areaEntry${a.id}`;
+            departmentOptions(entryDept, { empty: 'Cualquiera del área', ids: a.department_ids, selected: a.entry_department_id });
+            card.appendChild(inviteField('Departamento de entrada del área', entryDept));
+
+            const active = makeEl('label', 'org-check');
+            const activeCheck = document.createElement('input');
+            activeCheck.type = 'checkbox';
+            activeCheck.name = 'active';
+            activeCheck.checked = a.is_active;
+            active.append(activeCheck, makeEl('span', '', 'Activa'));
+            card.appendChild(active);
+
+            const save = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm', 'Guardar área');
+            save.type = 'submit';
+            card.appendChild(save);
+            host.appendChild(card);
+        });
+    }
+
+    // Un solo listener: cada tarjeta es un formulario
+    document.getElementById('areaList').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const card = e.target.closest('form[data-area-id]');
+        if (!card) return;
+        const id = Number(card.dataset.areaId);
+        const ids = [...card.querySelectorAll('input[name="dept"]:checked')].map(c => Number(c.value));
+        try {
+            // Primero los departamentos: el de entrada tiene que ser uno de ellos
+            await apiFetch(`/admin/areas/${id}/departments`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ department_ids: ids }),
+            });
+            const entry = Number(card.querySelector('select[name="entry"]').value) || 0;
+            await apiFetch(`/admin/areas/${id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    description: card.querySelector('input[name="description"]').value,
+                    coordinator_id: Number(card.querySelector('select[name="coordinator"]').value) || 0,
+                    entry_department_id: ids.includes(entry) ? entry : 0,
+                    is_active: card.querySelector('input[name="active"]').checked,
+                }),
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        showSuccess('Área guardada');
+        loadOrgSection('org-areas');
+    });
+
+    document.getElementById('entryDepartment').addEventListener('change', async (e) => {
+        try {
+            await apiFetch('/admin/settings/entry-department', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ department_id: Number(e.target.value) || null }),
+            });
+        } catch (err) {
+            return;
+        }
+        showSuccess('Departamento de entrada guardado');
+    });
+
+    document.getElementById('areaCreateForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('areaCreateName');
+        try {
+            await apiFetch('/admin/areas', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.value.trim(), audience: document.getElementById('areaCreateAudience').value }),
+            });
+        } catch (err) {
+            return;
+        }
+        name.value = '';
+        loadOrgSection('org-areas');
+    });
+
+    async function renderActivation() {
+        let switches;
+        let alerts;
+        try {
+            [switches, alerts] = await Promise.all([
+                apiFetch('/admin/activation', { silent: true }),
+                apiFetch('/admin/staff-alerts', { silent: true }),
+            ]);
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        const host = document.getElementById('switchList');
+        host.replaceChildren();
+        switches.forEach(sw => {
+            const card = makeEl('div', 'org-switch');
+            const head = makeEl('div', 'org-area-head');
+            head.appendChild(makeEl('h3', 'org-subtitle', sw.label));
+            head.appendChild(makeEl('span', `ui-tag${sw.enabled ? ' is-ok' : ''}`, sw.enabled ? 'Encendido' : 'Apagado'));
+            card.appendChild(head);
+            const list = makeEl('ul', 'org-checklist');
+            sw.checklist.forEach(item => {
+                const li = makeEl('li', item.ok ? 'is-ok' : 'is-pending',
+                    `${item.ok ? '✓' : '•'} ${item.label}${item.detail ? ` (${item.detail})` : ''}`);
+                list.appendChild(li);
+            });
+            card.appendChild(list);
+            if (sw.updated_at) {
+                card.appendChild(makeEl('p', 'admin-text', `Último cambio: ${sw.updated_by_name || 'Sistema'} · ${exactDateTime(sw.updated_at)}`));
+            }
+            const ready = sw.available && sw.checklist.every(item => item.ok);
+            const button = makeEl('button', `ui-btn ${sw.enabled ? 'ui-btn-secondary' : 'ui-btn-primary'}`,
+                sw.enabled ? 'Apagar' : 'Encender');
+            button.type = 'button';
+            button.dataset.switchKey = sw.key;
+            button.dataset.enable = sw.enabled ? 'false' : 'true';
+            button.disabled = !sw.enabled && !ready;
+            card.appendChild(button);
+            host.appendChild(card);
+        });
+
+        const unplaced = document.getElementById('unplacedList');
+        unplaced.replaceChildren();
+        if (!alerts.unplaced.length) unplaced.appendChild(makeEl('li', 'admin-text', 'Todo el personal tiene departamento o área.'));
+        alerts.unplaced.forEach(person => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', person.name));
+            text.appendChild(makeEl('span', 'org-row-sub', ROLE_MAP[person.role] || person.role));
+            const button = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm', 'Asignar');
+            button.type = 'button';
+            button.dataset.placeId = String(person.id);
+            button.dataset.placeRole = person.role;
+            button.dataset.placeName = person.name;
+            li.append(text, button);
+            unplaced.appendChild(li);
+        });
+        const noCoord = document.getElementById('noCoordinatorList');
+        noCoord.replaceChildren();
+        if (!alerts.areas_without_coordinator.length) noCoord.appendChild(makeEl('li', 'admin-text', 'Todas las áreas tienen coordinador.'));
+        alerts.areas_without_coordinator.forEach(a => noCoord.appendChild(makeEl('li', 'org-row', `${a.name} · los tickets siguen llegando a sus técnicos`)));
+        document.getElementById('internalRequesterBox').hidden = microsoftLogin;
+    }
+
+    document.getElementById('switchList').addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-switch-key]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            await apiFetch(`/admin/activation/${button.dataset.switchKey}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: button.dataset.enable === 'true' }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return;
+        }
+        renderActivation();
+    });
+
+    // Ubicación del personal: departamento y nivel (técnico) o área (coordinador)
+    const placementDialog = document.getElementById('placementDialog');
+    const placementError = document.getElementById('placementError');
+    let placementUser = null;
+
+    document.getElementById('unplacedList').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-place-id]');
+        if (!button) return;
+        openPlacementDialog({ id: Number(button.dataset.placeId), role: button.dataset.placeRole, name: button.dataset.placeName });
+    });
+
+    function openPlacementDialog(person) {
+        placementUser = person;
+        placementError.hidden = true;
+        const technician = person.role === 'technician';
+        document.getElementById('placementDialogTitle').textContent = technician ? 'Asignar departamento' : 'Asignar área';
+        document.getElementById('placementTarget').textContent = `${person.name} · ${ROLE_MAP[person.role] || person.role}`;
+        document.getElementById('placementDeptGroup').hidden = !technician;
+        document.getElementById('placementTierGroup').hidden = !technician;
+        document.getElementById('placementAreaGroup').hidden = technician;
+        document.getElementById('placementDept').required = technician;
+        document.getElementById('placementArea').required = !technician;
+        departmentOptions(document.getElementById('placementDept'));
+        areaOptions(document.getElementById('placementArea'), { free: true });
+        placementDialog.showModal();
+    }
+
+    document.getElementById('placementCancel').addEventListener('click', () => placementDialog.close());
+    document.getElementById('placementForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!placementUser) return;
+        const technician = placementUser.role === 'technician';
+        const body = technician
+            ? { department_id: Number(document.getElementById('placementDept').value) || null,
+                tier: Number(document.getElementById('placementTier').value) }
+            : { area_id: Number(document.getElementById('placementArea').value) || null };
+        try {
+            await apiFetch(`/admin/users/${placementUser.id}/placement`, {
+                method: 'PUT', silent: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+        } catch (err) {
+            placementError.textContent = err.message;
+            placementError.hidden = false;
+            return;
+        }
+        placementDialog.close();
+        showSuccess('Ubicación guardada');
+        loadOrgSection('org-activation');
+    });
+
+    document.getElementById('internalRequesterForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('internalRequesterName');
+        const email = document.getElementById('internalRequesterEmail');
+        try {
+            await apiFetch('/admin/internal-requesters', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.value.trim(), email: email.value.trim() }),
+            });
+        } catch (err) {
+            return;
+        }
+        e.target.reset();
+        showSuccess('Solicitante interno creado. Para entrar, use «¿La olvidó?» en la pestaña Cliente.');
+    });
+
+    // Invitaciones: las listas salen de los mismos datos de Departamentos y Áreas
+    async function fillInvitePlacement(deptSelect, areaSelect) {
+        try {
+            await loadOrgData();
+        } catch (err) {
+            return;
+        }
+        departmentOptions(deptSelect);
+        areaOptions(areaSelect, { free: true });
+    }
 
     initApp();
 });

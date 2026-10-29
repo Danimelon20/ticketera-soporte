@@ -96,7 +96,7 @@
                                 <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
                                 <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
                             </svg>
-                            <span>Entrar con Microsoft</span>
+                            <span id="microsoftLoginLabel">Entrar con Microsoft</span>
                         </a>
                         <button type="button" id="emergencyAccessLink" class="auth-link auth-link-btn auth-link-small ms-emergency" hidden>Acceso de emergencia</button>
                     </div>
@@ -307,6 +307,7 @@
     </div>
 
     <main style="display: none;">
+        <p id="placementNotice" class="placement-notice" role="status" hidden>Su cuenta no tiene departamento asignado. Contacte al administrador</p>
         <!-- Personal: ruta (Módulo › Sección), título, contexto y acciones de la página -->
         <header id="pageHead" class="page-head" hidden>
             <nav class="page-crumb" aria-label="Ruta"><ol id="pageCrumb" class="page-crumb-list"></ol></nav>
@@ -369,6 +370,14 @@
                             <option value="">+ Canal</option>
                             <option value="web">Canal: Web</option>
                             <option value="email">Canal: Correo</option>
+                        </select>
+                        <label for="queueArea" class="sr-only">Área</label>
+                        <select id="queueArea" class="queue-chip">
+                            <option value="">+ Área</option>
+                        </select>
+                        <label for="queueDepartment" class="sr-only">Departamento</label>
+                        <select id="queueDepartment" class="queue-chip">
+                            <option value="">+ Departamento</option>
                         </select>
                         <div id="queueRequester" class="queue-requester" hidden>
                             <span id="queueRequesterName"></span>
@@ -535,6 +544,12 @@
                     <div class="ui-field">
                         <label for="description">Descripción</label>
                         <textarea id="description" name="description" class="ui-input" rows="5" placeholder="Qué pasa, desde cuándo y qué ya se intentó" required></textarea>
+                    </div>
+                    <div id="areaGroup" class="ui-field" hidden>
+                        <label for="ticketArea">Área de atención</label>
+                        <select id="ticketArea" class="ui-input" aria-describedby="ticketAreaHint ticketAreaSuggestion"></select>
+                        <span id="ticketAreaHint" class="ui-help"></span>
+                        <span id="ticketAreaSuggestion" class="ui-help area-suggestion" aria-live="polite" hidden></span>
                     </div>
                     <div class="new-ticket-row">
                         <div class="ui-field">
@@ -1087,6 +1102,82 @@
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="org-departments">
+                    <div class="admin-card-head"><h2>Departamentos</h2></div>
+                    <p class="admin-text">Estructura interna. Cada técnico pertenece a un solo departamento. Un departamento desactivado deja a sus técnicos sin recibir tickets.</p>
+                    <form id="deptCreateForm" class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="deptCreateName">Nombre</label>
+                            <input type="text" id="deptCreateName" class="ui-input" maxlength="120" required>
+                        </div>
+                        <div class="ui-field">
+                            <label for="deptCreateParent">Dentro de</label>
+                            <select id="deptCreateParent" class="ui-input"></select>
+                        </div>
+                        <button type="submit" class="ui-btn ui-btn-primary">Agregar</button>
+                    </form>
+                    <details class="org-import">
+                        <summary>Importar desde CSV</summary>
+                        <p class="admin-text">Una columna «ruta» con la ruta completa separada por « / » (por ejemplo «Gerencias / Operaciones / Fibra Óptica / Mantenimiento»). Primero verá una vista previa: nada se guarda hasta confirmar. El archivo no se guarda en el servidor.</p>
+                        <form id="deptImportForm" class="org-inline-form">
+                            <div class="ui-field">
+                                <label for="deptImportFile">Archivo CSV</label>
+                                <input type="file" id="deptImportFile" class="ui-input" accept=".csv,text/csv" required>
+                            </div>
+                            <button type="submit" class="ui-btn ui-btn-secondary">Vista previa</button>
+                        </form>
+                        <div id="deptImportPreview" class="org-preview" hidden></div>
+                    </details>
+                    <ul id="deptList" class="org-list"></ul>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="org-areas">
+                    <div class="admin-card-head"><h2>Áreas de atención</h2></div>
+                    <p class="admin-text">Lo que ve el solicitante al abrir un ticket. Cada área tiene un coordinador y agrupa departamentos.</p>
+                    <div class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="entryDepartment">Departamento de entrada («No estoy seguro» y correos sin área clara)</label>
+                            <select id="entryDepartment" class="ui-input"></select>
+                        </div>
+                    </div>
+                    <form id="areaCreateForm" class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="areaCreateName">Área nueva</label>
+                            <input type="text" id="areaCreateName" class="ui-input" maxlength="100" required>
+                        </div>
+                        <div class="ui-field">
+                            <label for="areaCreateAudience">La ven</label>
+                            <select id="areaCreateAudience" class="ui-input">
+                                <option value="external">Clientes externos</option>
+                                <option value="internal">Empleados de ADN</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="ui-btn ui-btn-primary">Crear área</button>
+                    </form>
+                    <div id="areaList" class="org-areas"></div>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="org-activation">
+                    <div class="admin-card-head"><h2>Activación</h2></div>
+                    <p class="admin-text">Mientras un interruptor esté apagado, todo funciona como antes. Revise la lista antes de encenderlo; cada cambio queda en el Registro de cambios.</p>
+                    <div id="switchList" class="org-switches"></div>
+                    <h3 class="org-subtitle">Personal sin departamento o área</h3>
+                    <ul id="unplacedList" class="org-list"></ul>
+                    <h3 class="org-subtitle">Áreas sin coordinador</h3>
+                    <ul id="noCoordinatorList" class="org-list"></ul>
+                    <div id="internalRequesterBox" hidden>
+                        <h3 class="org-subtitle">Empleado de ADN (sin Microsoft)</h3>
+                        <form id="internalRequesterForm" class="org-inline-form">
+                            <div class="ui-field">
+                                <label for="internalRequesterName">Nombre</label>
+                                <input type="text" id="internalRequesterName" class="ui-input" maxlength="100" required>
+                            </div>
+                            <div class="ui-field">
+                                <label for="internalRequesterEmail">Correo de ADN</label>
+                                <input type="email" id="internalRequesterEmail" class="ui-input" maxlength="150" required>
+                            </div>
+                            <button type="submit" class="ui-btn ui-btn-secondary">Crear solicitante interno</button>
+                        </form>
+                    </div>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="approvals">
                     <div class="admin-card-head">
                         <h2>Solicitudes pendientes</h2>
@@ -1312,6 +1403,85 @@
     <!-- Menú "Más acciones" de la tabla de personal: uno solo, se ubica junto al botón que lo abre -->
     <div id="rowMenu" class="row-menu" role="menu" aria-label="Más acciones" hidden></div>
     <div id="accountMenu" class="row-menu account-menu" role="menu" aria-label="Acciones de la cuenta" hidden></div>
+
+    <dialog id="placementDialog" class="app-dialog" aria-labelledby="placementDialogTitle">
+        <form id="placementForm" class="profile-form">
+            <h2 id="placementDialogTitle" class="modal-title">Asignar departamento</h2>
+            <p id="placementTarget" class="help-text"></p>
+            <div id="placementDeptGroup" class="form-group">
+                <label for="placementDept">Departamento (obligatorio)</label>
+                <select id="placementDept" required></select>
+            </div>
+            <div id="placementTierGroup" class="form-group">
+                <label for="placementTier">Nivel</label>
+                <select id="placementTier">
+                    <option value="1">N1</option>
+                    <option value="2">N2</option>
+                    <option value="3">N3</option>
+                </select>
+            </div>
+            <div id="placementAreaGroup" class="form-group" hidden>
+                <label for="placementArea">Área que dirige (obligatoria)</label>
+                <select id="placementArea"></select>
+            </div>
+            <p id="placementError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="placementCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="deptMoveDialog" class="app-dialog" aria-labelledby="deptMoveDialogTitle">
+        <form id="deptMoveForm" class="profile-form">
+            <h2 id="deptMoveDialogTitle" class="modal-title">Mover departamento</h2>
+            <p id="deptMoveTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptMoveParent">Nuevo departamento padre</label>
+                <select id="deptMoveParent"></select>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" id="deptMoveCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Mover</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="routeDialog" class="app-dialog" aria-labelledby="routeDialogTitle">
+        <form id="routeForm" class="profile-form">
+            <h2 id="routeDialogTitle" class="modal-title">Transferir a otra área</h2>
+            <div class="form-group">
+                <label id="routeTargetLabel" for="routeTarget">Área de destino</label>
+                <select id="routeTarget" required></select>
+            </div>
+            <div class="form-group">
+                <label for="routeReason">Motivo (queda en el historial)</label>
+                <textarea id="routeReason" rows="3" minlength="3" maxlength="300" required></textarea>
+            </div>
+            <p id="routeError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="routeCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Aviso de tratamiento de datos (Ley 8968): obligatorio, no se puede cerrar sin aceptar -->
+    <dialog id="privacyDialog" class="app-dialog privacy-dialog" aria-labelledby="privacyDialogTitle">
+        <form id="privacyForm" class="profile-form">
+            <h2 id="privacyDialogTitle" class="modal-title">Aviso de tratamiento de datos personales</h2>
+            <div id="privacyText" class="privacy-text" tabindex="0"></div>
+            <label class="privacy-check">
+                <input type="checkbox" id="privacyAccept" required>
+                <span>He leído el aviso y acepto el tratamiento de mis datos</span>
+            </label>
+            <p id="privacyError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="privacyLogout" class="btn-secondary">Salir</button>
+                <button type="submit" class="btn-submit">Continuar</button>
+            </div>
+        </form>
+    </dialog>
 
     <dialog id="roleDialog" class="app-dialog" aria-labelledby="roleDialogTitle">
         <form id="roleForm" class="profile-form">
