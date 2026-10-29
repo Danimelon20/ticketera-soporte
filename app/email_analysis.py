@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from . import chatbot, config, mailer, models
+from . import area_ai, chatbot, config, mailer, models, routing
 from .business_hours import add_business_hours, day_hours
 from .database import SessionLocal
 from .email_parser import _PREFIX_RE, _SUPPORT_TAG_RE, _clean_title, normalize, strip_quoted
@@ -129,8 +129,8 @@ def ticket_schema(category_names: list[str]) -> dict:
     }
 
 
-def draft_schema(category_names: list[str]) -> dict:
-    return {
+def draft_schema(category_names: list[str], area_names: list[str] | None = None) -> dict:
+    schema = {
         "type": "object",
         "properties": {
             "kind": {"type": "string", "enum": list(DRAFT_KINDS)},
@@ -142,6 +142,11 @@ def draft_schema(category_names: list[str]) -> dict:
         },
         "required": ["kind", "title", "category", "description", "level", "summary"],
     }
+    if area_names:
+        # Opcionales: sin área o sin confianza, el ticket va al departamento de entrada
+        schema["properties"]["area"] = {"type": "string", "enum": area_names}
+        schema["properties"]["area_confidence"] = {"type": "string", "enum": ["alta", "baja"]}
+    return schema
 
 
 def build_messages(ticket: models.Ticket, category_names: list[str]) -> list[dict]:
@@ -298,7 +303,13 @@ UNCLEAR_SUBJECT = "[Soporte] Necesitamos más detalles sobre su solicitud"
 UNCLEAR_RESEND_HOURS = 24
 
 
-def build_draft_messages(draft: models.EmailDraft, category_names: list[str]) -> list[dict]:
+def build_draft_messages(draft: models.EmailDraft, category_names: list[str],
+                         areas: list[models.ServiceArea] | None = None) -> list[dict]:
+    area_lines = [
+        "area: el área de atención que corresponde (usa exactamente uno de estos nombres):",
+        *[f"- {a.name}: {a.description or ''}".rstrip(": ") for a in areas],
+        "area_confidence: alta si el área es clara; baja si dudas.",
+    ] if areas else []
     system = "\n".join([
         _analysis_rules(category_names),
         "El correo viene escrito sin formato. Tipos de correo (kind):",
@@ -307,6 +318,7 @@ def build_draft_messages(draft: models.EmailDraft, category_names: list[str]) ->
         "unclear: no se entiende qué necesita.",
         "not_support: no es soporte (publicidad, boletines, respuestas automáticas).",
         "title: título corto; description: qué pasa, máximo 3 oraciones.",
+        *area_lines,
     ])
     # La respuesta a nuestro pedido de detalles se juzga por el cuerpo, no por nuestro asunto
     subject = "" if _clean_title(draft.subject) == _clean_title(UNCLEAR_SUBJECT) else draft.subject
@@ -324,6 +336,25 @@ def _text(value, limit: int) -> str | None:
     if not isinstance(value, str):
         return None
     return value.strip()[:limit] or None
+
+
+def _area_part(content: str) -> str:
+    """Solo el área y su confianza de la respuesta del borrador, con las claves de area_ai."""
+    try:
+        data = json.loads(content)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return json.dumps({"area": data.get("area"), "confidence": data.get("area_confidence")})
+
+
+def _save_draft_area(db: Session, draft: models.EmailDraft, area_id: int | None) -> None:
+    row = db.query(models.DraftRouting).filter(models.DraftRouting.draft_id == draft.id).first()
+    if row is None:
+        row = models.DraftRouting(draft_id=draft.id)
+        db.add(row)
+    row.area_id = area_id
 
 
 def _parse_draft(content: str, categories: list[models.Category]) -> dict:
@@ -478,8 +509,10 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         db.query(models.Category).filter(models.Category.is_active.is_(True)).order_by(models.Category.id).all()
     )
     names = [c.name for c in categories]
+    areas = routing.allowed_areas(db, draft.requester)
     payload = chatbot.ollama_payload(
-        "draft_analysis", build_draft_messages(draft, names), temperature=0.1, format=draft_schema(names)
+        "draft_analysis", build_draft_messages(draft, names, areas), temperature=0.1,
+        format=draft_schema(names, [a.name for a in areas]),
     )
     try:
         content = chatbot.post_chat(payload, task="draft_analysis")
@@ -496,6 +529,8 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         return draft.status
 
     result = _parse_draft(content, categories)
+    # Área de la IA solo con confianza alta; si no, al confirmar va al departamento de entrada
+    _save_draft_area(db, draft, area_ai.parse(_area_part(content), areas))
     category_name = next((c.name for c in categories if c.id == result["category_id"]), None)
     # Nivel final: también decide la prioridad y, al confirmar, el tiempo meta
     result["level"] = apply_level_floor(category_name, f"{draft.subject}\n{draft.body}", result["level"])

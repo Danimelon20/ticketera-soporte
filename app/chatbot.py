@@ -29,7 +29,7 @@ TIMEOUT_SECONDS = 120
 # El modelo queda cargado entre peticiones (la carga en frío tarda ~9 s en CPU)
 KEEP_ALIVE = "24h"
 # Tope de tokens de la respuesta por tarea (en CPU se generan ~20 tokens/s)
-NUM_PREDICT = {"chat": 400, "ticket_analysis": 300, "draft_analysis": 300, "group_check": 80}
+NUM_PREDICT = {"chat": 400, "ticket_analysis": 300, "draft_analysis": 300, "group_check": 80, "area_suggest": 60}
 WARM_UP_TIMEOUT_SECONDS = 180
 COMMENT_CHARS = 300
 

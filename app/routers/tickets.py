@@ -9,11 +9,13 @@ from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest,
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
-from .. import cancellations, config, hacienda, mailer
+from .. import cancellations, config, hacienda, mailer, privacy
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, ticket_access
+from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, routing, ticket_access
 
 AI_ROLES = ("technician", "coordinator")
+# Cambios de área y de departamento: internos, el solicitante no los ve
+ROUTE_FIELDS = ("area", "department")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
 OPERATION_ROLES = ("coordinator",)
 
@@ -27,12 +29,20 @@ def verify_id_number(id_number: str) -> None:
         raise HTTPException(status_code=400, detail=error)
 
 
-def check_access(db: Session, db_ticket: models.Ticket, current_user, full: bool = False) -> str:
-    """Reglas de ticket_access: 403 si no puede verlo; con full, también si solo puede leerlo."""
+OWN_TICKET = "Abrió este ticket como solicitante: no puede cambiar su estado ni su asignación"
+
+
+def check_access(db: Session, db_ticket: models.Ticket, current_user, full: bool = False, allow_own: bool = False) -> str:
+    """Reglas de ticket_access: 403 si no puede verlo; con full, también si solo puede leerlo.
+
+    allow_own: el personal en su propio ticket cuenta como solicitante (por ejemplo, para comentar).
+    """
     level = ticket_access.access(db, current_user, db_ticket)
     if level is None:
         raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
-    if full and level != ticket_access.FULL:
+    if full and level == ticket_access.OWN and not allow_own:
+        raise HTTPException(status_code=403, detail=OWN_TICKET)
+    if full and level not in (ticket_access.FULL, ticket_access.OWN):
         raise HTTPException(status_code=403, detail=ticket_access.READ_ONLY)
     return level
 
@@ -79,7 +89,11 @@ def unavailable_message(user: models.User, status: str, return_date) -> str:
 
 def hides_personal_data(ticket: models.Ticket, current_user) -> bool:
     """Técnico no asignado: el teléfono o la cédula escritos en el texto se ocultan al responder."""
-    return current_user.role == "technician" and ticket.assigned_to != current_user.id
+    return (
+        current_user.role == "technician"
+        and ticket.assigned_to != current_user.id
+        and ticket.created_by != current_user.id
+    )
 
 
 def ticket_read(ticket: models.Ticket, current_user, last_activity_at=None) -> TicketRead:
@@ -90,6 +104,14 @@ def ticket_read(ticket: models.Ticket, current_user, last_activity_at=None) -> T
     data.last_activity_at = last_activity_at or ticket.updated_at
     if hides_personal_data(ticket, current_user):
         data.description = _redact(data.description)
+    route = ticket.routing_row
+    if route is not None:
+        data.area_id = route.area_id
+        data.area_name = route.area.name if route.area else None
+        # El departamento es estructura interna: el solicitante no lo recibe
+        if current_user.role != "requester" and route.department is not None:
+            data.department_id = route.department_id
+            data.department_name = route.department.name
     row = ticket.cancellation_row
     # El solicitante ve su ticket "Cerrado", sin el motivo interno
     if row is not None and current_user.role != "requester":
@@ -154,13 +176,43 @@ def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIA
     )
 
 
+def _is_internal_area(db: Session, area_id: int | None) -> bool:
+    area = db.get(models.ServiceArea, area_id) if area_id is not None else None
+    return area is not None and area.audience == "internal"
+
+
+def ticket_route(db: Session, owner: models.User, area_id: int | None, unsure: bool) -> tuple[int | None, int | None]:
+    """Área y departamento del ticket nuevo según lo que eligió el solicitante.
+
+    Solo áreas activas de su tipo (externa o interna). "No estoy seguro" (solo externos) va al departamento
+    de entrada. Sin elegir: con el enrutamiento encendido es obligatorio; apagado, como "No estoy seguro".
+    """
+    kind = routing.requester_kind(db, owner)
+    if area_id is not None:
+        area = db.get(models.ServiceArea, area_id)
+        if area is None or not area.is_active or area.audience != kind:
+            raise HTTPException(status_code=400, detail=routing.AREA_NOT_ALLOWED)
+        return routing.route_for_area(db, area)
+    if unsure and kind == "internal":
+        raise HTTPException(status_code=400, detail=routing.AREA_REQUIRED)
+    if not unsure and routing.enforced(db):
+        raise HTTPException(status_code=400, detail=routing.AREA_REQUIRED)
+    if kind == "internal":
+        # Apagado y sin elegir: la primera área interna
+        first = next(iter(routing.allowed_areas(db, owner)), None)
+        return (first.id, first.entry_department_id) if first is not None else (None, None)
+    return routing.unsure_route(db)
+
+
 @router.post("/tickets", response_model=TicketRead)
 def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    if current_user.role == "technician":
-        raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
     if current_user.role == "admin":
         raise HTTPException(status_code=403, detail="El administrador no crea tickets")
-    
+    # El técnico solo abre tickets internos para sí mismo (como solicitante)
+    if current_user.role == "technician" and (ticket.requester_id is not None or not _is_internal_area(db, ticket.area_id)):
+        raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
+    privacy.check_accepted(db, current_user)
+
     if ticket.requester_id is not None:
         if current_user.role not in OPERATION_ROLES:
             raise HTTPException(status_code=403, detail="No puedes crear tickets a nombre de otra persona")
@@ -181,6 +233,7 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     prioridad = db.query(models.Priority).filter(models.Priority.id == ticket.priority_id).first()
     if not prioridad:
         raise HTTPException(status_code=400, detail="La prioridad no existe")
+    area_id, department_id = ticket_route(db, owner, ticket.area_id, ticket.unsure)
 
     db_ticket = models.Ticket(
         title=ticket.title,
@@ -194,6 +247,8 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
         source="web",
     )
     db.add(db_ticket)
+    db.flush()
+    routing.set_route(db, db_ticket.id, area_id, department_id)
     # Desde el primer ticket, nombre y cédula quedan fijos
     identity.lock(db, owner)
     db.commit()
@@ -208,7 +263,7 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
         background_tasks.add_task(auto_assign.analyze_then_assign, db_ticket.id)
     elif config.AI_ANALYSIS_ENABLED:
         background_tasks.add_task(email_analysis.analyze_ticket_by_id, db_ticket.id)
-    return db_ticket
+    return ticket_read(db_ticket, current_user)
 
 
 @router.get("/tickets", response_model=list[TicketRead])
@@ -224,6 +279,7 @@ def list_tickets(
     # Solicitante: los suyos; técnico: asignados y los que tuvo; administrador: ninguno
     if current_user.role == "admin":
         raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
+    privacy.check_accepted(db, current_user)
     query = ticket_access.filter_visible(db, current_user, db.query(models.Ticket))
 
     if status:
@@ -253,6 +309,7 @@ def list_tickets(
 # exclude_unset: el solicitante no recibe la clave ai_analysis
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail, response_model_exclude_unset=True)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    privacy.check_accepted(db, current_user)
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     return ticket_detail(db, db_ticket, current_user)
 
@@ -291,10 +348,11 @@ def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> Ticket
         .order_by(models.History.id.asc())
         .all()
     )
-    if current_user.role == "requester":
-        history = [h for h in history if h.field not in grouping.STAFF_HISTORY_FIELDS]
+    as_requester = ticket_access.as_requester(db, current_user, db_ticket)
+    if as_requester:
+        history = [h for h in history if h.field not in grouping.STAFF_HISTORY_FIELDS + ROUTE_FIELDS]
     comments_query = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id)
-    if current_user.role == "requester":
+    if as_requester:
         # El solicitante nunca recibe los comentarios internos
         comments_query = internal_comments.not_internal(comments_query)
     comments = comments_query.order_by(models.Comment.id.asc()).all()
@@ -310,10 +368,10 @@ def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> Ticket
     extra = {}
     if current_user.role == "admin" or ticket_access.access(db, current_user, db_ticket) == ticket_access.READ:
         extra["read_only"] = True
-    if current_user.role in AI_ROLES or current_user.role == "admin":
+    if (current_user.role in AI_ROLES or current_user.role == "admin") and not as_requester:
         row = db_ticket.ai_analysis
         extra["ai_analysis"] = ai_analysis_read(row, db_ticket) if row else None
-    if current_user.role != "requester":
+    if not as_requester:
         # Solo el personal: el solicitante nunca recibe esta clave
         flags = account_reports.staff_flags(db, db.get(models.User, db_ticket.created_by))
         if flags is not None:
@@ -397,12 +455,13 @@ def check_can_comment(db: Session, ticket_id: int, current_user, internal: bool)
         raise HTTPException(status_code=404, detail="El ticket no existe")
     if db_ticket.status == "closed":
         raise HTTPException(status_code=400, detail="No se puede comentar un ticket cerrado")
+    privacy.check_accepted(db, current_user)
     # Regla: el solicitante solo comenta en los tickets que él creó
     if current_user.role == "requester" and db_ticket.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Solo puedes comentar en tus propios tickets")
-    # Técnico: solo el asignado; el administrador no comenta
-    check_access(db, db_ticket, current_user, full=True)
-    if internal and current_user.role not in nav.STAFF_ROLES:
+    # Técnico: solo el asignado; el administrador no comenta. El personal comenta su propio ticket
+    level = check_access(db, db_ticket, current_user, full=True, allow_own=True)
+    if internal and (current_user.role not in nav.STAFF_ROLES or level == ticket_access.OWN):
         raise HTTPException(status_code=403, detail="Solo el personal puede agregar notas internas")
     return db_ticket
 
@@ -547,6 +606,21 @@ def reopen_ticket(ticket_id: int, db: Session = Depends(get_db), current_user=De
     return ticket_read(ticket, current_user)
 
 
+ASSIGNEE_OUTSIDE_AREA = "Esa persona no pertenece al área de este ticket"
+
+
+def routing_allows_assignee(db: Session, ticket: models.Ticket, user: models.User) -> bool:
+    if not routing.enforced(db):
+        return True
+    row = routing.routing_of(db, ticket.id)
+    if row is None:
+        return False
+    if user.role == "coordinator":
+        area = routing.coordinator_area(db, user)
+        return area is not None and area.id == row.area_id
+    return routing.is_placed(db, user) and routing.technician_in_area(db, user, row.area_id)
+
+
 @router.patch("/tickets/{ticket_id}", response_model=TicketRead)
 def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
@@ -596,6 +670,9 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         # Regla: asignar y reasignar es del coordinador (el técnico solo atiende lo suyo)
         if current_user.role not in OPERATION_ROLES and data.assigned_to != db_ticket.assigned_to:
             raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
+        # Con el enrutamiento: solo técnicos con departamento dentro del área del ticket (o su coordinador)
+        if data.assigned_to != db_ticket.assigned_to and not routing_allows_assignee(db, db_ticket, user):
+            raise HTTPException(status_code=400, detail=ASSIGNEE_OUTSIDE_AREA)
         # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
         if (
             data.assigned_to != db_ticket.assigned_to

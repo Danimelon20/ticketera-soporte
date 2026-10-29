@@ -5,7 +5,7 @@ from email.header import decode_header, make_header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, email_attachments, hacienda, identity, mailer, models, suspicion
+from . import config, email_attachments, hacienda, identity, mailer, models, routing, suspicion
 from .email_parser import extract_sender, get_plain_body, parse_ticket_email, strip_quoted
 from .notifications import display_name, notify_followers
 
@@ -354,6 +354,8 @@ def process_message(db: Session, msg) -> str:
     ticket.contact_id_number = user.id_number or id_number
     db.add(ticket)
     db.flush()
+    # Con la plantilla no hay análisis de la IA todavía: departamento de entrada (internos, su área)
+    routing.set_route(db, ticket.id, *routing.fallback_route(db, user))
     identity.lock(db, user)
     db.add(models.TicketFollower(ticket_id=ticket.id, user_id=user.id))
     # La IA lo analiza después, en la revisión del buzón (solo se muestra)

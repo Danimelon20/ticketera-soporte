@@ -15,7 +15,7 @@ from starlette.background import BackgroundTask
 from ..database import engine, get_db
 from .. import (
     account_reports, accounts, alerts, auto_assign, availability, cancellations, config, daily_summary, email_analysis, email_poller,
-    identity, models, people_activity, schedules, throttle,
+    identity, models, people_activity, routing, schedules, throttle,
 )
 from ..schemas import (
     AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
@@ -132,6 +132,9 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
         raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
     order = {role: i for i, role in enumerate(TEAM_ROLES)}
     users = db.query(models.User).filter(models.User.role.in_(TEAM_ROLES)).order_by(models.User.name).all()
+    # Con el enrutamiento, el coordinador solo ve a los técnicos de su área
+    hidden = routing.hidden_technician_ids(db, current_user)
+    users = [u for u in users if u.id not in hidden]
     users.sort(key=lambda u: order[u.role])
     periods = availability.periods_for(db, availability.ids_with_status(users))
     loads = auto_assign.loads(db, [u.id for u in users]) if current_user.role == "coordinator" else None
@@ -552,6 +555,8 @@ def account_list(
     if term:
         query = query.filter(func.lower(models.User.name).like(term) | func.lower(models.User.email).like(term))
     users = query.order_by(models.User.role, models.User.name).all()
+    hidden = routing.hidden_technician_ids(db, viewer)
+    users = [u for u in users if u.id not in hidden]
     ids = [u.id for u in users]
     requester_ids = [u.id for u in users if u.role == "requester"]
     statuses = availability.statuses_for(db, availability.ids_with_status(users))
@@ -612,8 +617,8 @@ def account_list(
 @router.get("/accounts/{user_id}", response_model=AccountSummary)
 def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.User = Depends(require_account_viewer)):
     user = db.get(models.User, user_id)
-    # Fuera del alcance de quien mira: como si no existiera
-    if user is None or user.role not in ACCOUNT_SCOPE[viewer.role]:
+    # Fuera del alcance de quien mira (también un técnico de otra área): como si no existiera
+    if user is None or user.role not in ACCOUNT_SCOPE[viewer.role] or user.id in routing.hidden_technician_ids(db, viewer):
         raise HTTPException(status_code=404, detail="El usuario no existe")
     now = auto_assign._now()
     statuses = availability.statuses_for(db, availability.ids_with_status([user]), now)

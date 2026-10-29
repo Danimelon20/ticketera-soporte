@@ -39,6 +39,9 @@ def ticket_queue(
     search: Optional[str] = Query(default=None, max_length=150),
     # Solo los tickets que creó ese cliente
     requester_id: Optional[int] = Query(default=None, ge=1),
+    # Área de atención y departamento (con sus subdepartamentos)
+    area_id: Optional[int] = Query(default=None, ge=1),
+    department_id: Optional[int] = Query(default=None, ge=1),
     page: int = Query(default=1, ge=1),
     db: Session = Depends(get_db),
     current_user=Depends(require_staff),
@@ -52,4 +55,5 @@ def ticket_queue(
     return QueuePage(**nav.queue(
         db, current_user, view=view, status=status, level=level, assigned_to=assigned_to,
         source=source, search=search, requester_id=requester_id, page=page,
+        area_id=area_id, department_id=department_id,
     ))

@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, availability, identity, models, suspicion
+from .. import audit, availability, identity, models, routing, suspicion
 from ..schemas import MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
 from ..security import get_current_user
 from .auth import me_read
@@ -21,7 +21,8 @@ def _technician_statuses(db: Session, users: list[models.User]) -> dict[int, str
 @router.get("/users", response_model=list[UserRead | StaffRead])
 def get_users(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if current_user.role in ("coordinator", "admin"):
-        users = db.query(models.User).filter(models.User.is_active == True).all()
+        hidden = routing.hidden_technician_ids(db, current_user)
+        users = [u for u in db.query(models.User).filter(models.User.is_active == True).all() if u.id not in hidden]
         statuses = _technician_statuses(db, users)
         return [UserRead.model_validate(u).model_copy(update={"availability": statuses.get(u.id)}) for u in users]
     if current_user.role == "technician":

@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, email_analysis, email_attachments, grouping, identity, models, suspicion
+from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, email_analysis, email_attachments, grouping, identity, models, routing, suspicion
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import AttachmentRead, DraftAssign, DraftConfirm, DraftRead
@@ -224,6 +224,9 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     )
     db.add(ticket)
     db.flush()
+    # Área que eligió la IA (con confianza) o el departamento de entrada
+    chosen = db.query(models.DraftRouting).filter(models.DraftRouting.draft_id == draft.id).first()
+    routing.set_route(db, ticket.id, *routing.route_for_owner(db, requester, chosen.area_id if chosen else None))
     if owner is not None:
         db.add(models.History(
             ticket_id=ticket.id, field="assigned_to", old_value=None, new_value=str(owner.id), changed_by=reviewer.id,

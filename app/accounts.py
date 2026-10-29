@@ -1,10 +1,11 @@
 """Gestión de cuentas por rol: quién puede desactivar, restablecer o desbloquear a quién."""
 from fastapi import BackgroundTasks, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
-from . import audit, comments, config, daily_summary, mailer, models
+from . import audit, comments, config, daily_summary, mailer, models, routing
 
 NO_PERMISSION = "No tienes permiso para gestionar esta cuenta"
+OUTSIDE_AREA = "Esa persona no pertenece a su área"
 SELF_CHANGE = "No puedes cambiar tu propio rol ni desactivarte"
 AGENT_LOCKED = "El Agente virtual no se puede modificar"
 LAST_ADMIN = "Debe quedar al menos un administrador activo"
@@ -47,6 +48,10 @@ def check_can_manage(actor: models.User, target: models.User, action: str) -> No
         raise HTTPException(status_code=403, detail=SELF_CHANGE)
     if target.role not in PERMISSIONS.get(actor.role, {}).get(action, ()):
         raise HTTPException(status_code=403, detail=NO_PERMISSION)
+    # Con el enrutamiento encendido, el coordinador solo gestiona a los técnicos de su área
+    db = object_session(target)
+    if actor.role == "coordinator" and db is not None and not routing.coordinator_manages(db, actor, target):
+        raise HTTPException(status_code=403, detail=OUTSIDE_AREA)
     # Con Microsoft, técnicos y coordinadores no tienen contraseña que restablecer
     if action == "reset" and config.MS_LOGIN_ENABLED and target.role in ("technician", "coordinator"):
         raise HTTPException(status_code=403, detail=STAFF_USE_MICROSOFT)

@@ -4,16 +4,19 @@ Solo con AUTO_ASSIGN_ENABLED. Corre después del análisis de la IA (el nivel ya
 una asignación existente. Sin candidatos, el ticket queda en espera y el borrador "Sin revisor"; los
 reintenta auto_assign_forever, que no depende del correo.
 Carga = tickets abiertos + borradores pendientes asignados.
+Con el enrutamiento encendido solo elige técnicos del departamento del ticket (o de su área) con nivel
+suficiente (routing.eligible); apagado, cualquier técnico, como antes.
 """
 import asyncio
 import logging
 import threading
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
 
-from . import assignment_notice, audit, availability, config, email_analysis, models, schedules
+from . import assignment_notice, audit, availability, config, email_analysis, models, routing, schedules
 from .database import SessionLocal
 from .email_processing import _RunNow
 from .notifications import notify_followers
@@ -86,9 +89,42 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     return result
 
 
-def choose(db: Session, now: datetime) -> models.User | None:
-    """Menor carga; empate: la asignación automática más antigua (o ninguna) y luego el id."""
+def ticket_scope(db: Session, ticket: models.Ticket) -> tuple[models.TicketRouting | None, int | None]:
+    """Ruta y nivel del ticket. Un ticket sin ruta (no debería pasar) va al departamento de entrada;
+    con el enrutamiento apagado no se guarda nada."""
+    row = routing.routing_of(db, ticket.id)
+    if row is None:
+        area_id, department_id = routing.unsure_route(db)
+        if routing.enforced(db):
+            row = routing.set_route(db, ticket.id, area_id, department_id)
+        elif area_id is not None:
+            row = SimpleNamespace(area_id=area_id, department_id=department_id)
+    level = email_analysis.effective_level(ticket.ai_analysis) if ticket.ai_analysis else None
+    return row, level
+
+
+def draft_scope(db: Session, draft: models.EmailDraft) -> tuple[models.TicketRouting | None, int | None]:
+    """Ruta que tendrá el borrador al confirmarse (sin guardarla): el área de la IA o la de entrada."""
+    chosen = db.query(models.DraftRouting).filter(models.DraftRouting.draft_id == draft.id).first()
+    area = db.get(models.ServiceArea, chosen.area_id) if chosen is not None and chosen.area_id else None
+    if area is not None and area.is_active:
+        area_id, department_id = routing.route_for_area(db, area)
+    else:
+        area_id, department_id = routing.unsure_route(db)
+    if area_id is None:
+        return None, draft.ai_level
+    # Solo para elegir: no es una fila de la base
+    return SimpleNamespace(area_id=area_id, department_id=department_id), draft.ai_level
+
+
+def choose(db: Session, now: datetime, scope: tuple | None = None) -> models.User | None:
+    """Menor carga; empate: la asignación automática más antigua (o ninguna) y luego el id.
+
+    scope: (ruta, nivel) del ticket o borrador; sin scope (estado del sistema) no filtra por área.
+    """
     users = candidates(db, now)
+    if scope is not None:
+        users = routing.eligible(db, users, *scope)
     if not users:
         return None
     ids = [u.id for u in users]
@@ -102,12 +138,17 @@ def choose(db: Session, now: datetime) -> models.User | None:
     return min(users, key=lambda u: (load[u.id], last_auto.get(u.id) or datetime.min, u.id))
 
 
+def _choose_in(db: Session, now: datetime, scope: tuple) -> models.User | None:
+    """Con el enrutamiento apagado, la misma elección de siempre (sin área)."""
+    return choose(db, now, scope) if routing.enforced(db) else choose(db, now)
+
+
 def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment | None, now: datetime) -> bool:
     """Asigna si hay candidato. Sin candidato deja la fila en espera. No hace commit."""
     if row is None:
         row = models.TicketAutoAssignment(ticket_id=ticket.id, status="waiting", created_at=now)
         db.add(row)
-    user = choose(db, now)
+    user = _choose_in(db, now, ticket_scope(db, ticket))
     agent_id = audit.agent_id(db)
     if user is None or agent_id is None:
         return False
@@ -252,7 +293,7 @@ def _assign_draft(db: Session, draft: models.EmailDraft, row: models.DraftAssign
     if row is None:
         row = models.DraftAssignment(draft_id=draft.id, status="waiting", notify=notify, created_at=now)
         db.add(row)
-    user = choose(db, now)
+    user = _choose_in(db, now, draft_scope(db, draft))
     if user is None:
         db.flush()
         return False

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, models
+from .. import audit, models, routing
 from ..schemas import StaffInvitationCreate, StaffInvitationRead
 from ..security import get_current_user, mask_email
 from .auth import _can_resend, _find_user, _now, normalize_email, send_invitation
@@ -55,6 +55,9 @@ def create_invitation(
         raise HTTPException(status_code=422, detail="Escriba un correo válido")
     if _find_user(db, email) is not None:
         raise HTTPException(status_code=409, detail="Ese correo ya tiene una cuenta. Cambie su rol desde el Directorio.")
+    placement = routing.validate_invitation_placement(db, data.role, data.department_id, data.tier, data.area_id)
+    if isinstance(placement, str):
+        raise HTTPException(status_code=422, detail=placement)
 
     # Una sola invitación vigente por correo: la anterior deja de servir
     db.query(models.StaffInvitation).filter(
@@ -63,6 +66,7 @@ def create_invitation(
     invitation = models.StaffInvitation(email=email, name=data.name, role=data.role, created_by=current_user.id)
     db.add(invitation)
     sent = send_invitation(invitation)
+    routing.save_invitation_placement(db, invitation, *placement)
     _record_sent(db, current_user, invitation)
     db.commit()
     db.refresh(invitation)

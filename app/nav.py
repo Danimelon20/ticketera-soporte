@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, schedules, ticket_access
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, routing, schedules, ticket_access
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -142,14 +142,20 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         }
 
     tickets = _open_tickets(db)
+    resolved_today = _resolved_today_ids(db, now)
+    if user.role == "coordinator" and routing.enforced(db):
+        # Con el enrutamiento: solo los de su área (los mismos que ve en la cola)
+        visible = {t.id for t in ticket_access.filter_visible(db, user, db.query(models.Ticket.id))}
+        tickets = [t for t in tickets if t.id in visible]
+        resolved_today &= visible
     due_soon, overdue = _due_counts(tickets, now)
     result = {
-        "unassigned": _unassigned(db, now),
+        "unassigned": sum(1 for t in _not_overdue(tickets, now) if t.assigned_to is None),
         "due_soon": due_soon,
         "overdue": overdue,
         # Los vencidos van aparte, en Vencidos
         "open": len(tickets) - overdue,
-        "resolved_today": _resolved_today(db, now),
+        "resolved_today": len(resolved_today),
         "drafts_pending": _drafts_pending(db),
         # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
         "cancelled": cancellations.count(db),
@@ -204,6 +210,8 @@ def queue(
     requester_id: int | None = None,
     page: int = 1,
     now: datetime | None = None,
+    area_id: int | None = None,
+    department_id: int | None = None,
 ) -> dict:
     """Cola de tickets por vista, ordenada por vencimiento (los que no tienen fecha al final), de 25 en 25.
 
@@ -241,6 +249,13 @@ def queue(
     if requester_id is not None:
         # "Ver sus tickets" desde Cuentas
         query = query.filter(models.Ticket.created_by == requester_id)
+    if area_id is not None:
+        query = query.filter(models.Ticket.id.in_(
+            db.query(models.TicketRouting.ticket_id).filter(models.TicketRouting.area_id == area_id)))
+    if department_id is not None:
+        depts = routing.descendants(routing.departments_by_id(db), [department_id])
+        query = query.filter(models.Ticket.id.in_(
+            db.query(models.TicketRouting.ticket_id).filter(models.TicketRouting.department_id.in_(depts))))
     if assigned_to is not None and user.role != "technician":
         # 0: sin asignar
         query = query.filter(
@@ -309,6 +324,10 @@ def queue(
             "cancelled": ticket.id in cancelled,
             "incident": ticket.id in incidents,
             "overdue_cause": models.OVERDUE_CAUSES.get(causes[ticket.id], causes[ticket.id]) if ticket.id in causes else None,
+            "area_name": ticket.routing_row.area.name if ticket.routing_row and ticket.routing_row.area else None,
+            "department_name": (
+                ticket.routing_row.department.name if ticket.routing_row and ticket.routing_row.department else None
+            ),
             "due_at": due,
             "due_state": state,
             "remaining_seconds": int((due - now).total_seconds()) if due else None,
@@ -329,7 +348,7 @@ def suggestion(db: Session, ticket: models.Ticket, now: datetime | None = None) 
     current = ticket.assigned_user
     if current is not None and availability.is_available(db, current, now):
         return None
-    user = auto_assign.choose(db, now)
+    user = auto_assign._choose_in(db, now, auto_assign.ticket_scope(db, ticket))
     if user is None or user.id == ticket.assigned_to:
         return None
     return {"user_id": user.id, "name": user.name or "Sin nombre", "load": auto_assign.loads(db, [user.id])[user.id]}
