@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, privacy, routing, schedules, throttle
+from .. import accounts, audit, availability, clients, config, entra_login, identity, mailer, models, privacy, routing, schedules, throttle
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
@@ -69,6 +69,9 @@ def _create_session(db: Session, user: models.User) -> AuthResponse:
     db.add(db_session)
     db.flush()
     db.add(models.SessionActivity(session_id=db_session.id, last_used_at=_now()))
+    # Un contacto "pendiente de activar" que entra (por ejemplo, tras restablecer la contraseña) ya está activo
+    if clients.is_pending_contact(db, user):
+        clients.profile(db, user.id).activation = "active"
     db.commit()
     return AuthResponse(token=token, user=user)
 
@@ -154,11 +157,20 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
     if routing.is_internal_domain(email):
         raise HTTPException(status_code=403, detail=INTERNAL_USE_MICROSOFT if config.MS_LOGIN_ENABLED
                             else INTERNAL_ASK_ADMIN)
+    # Con el interruptor de clientes: solo dominios de una organización con contrato vigente.
+    # Depende del dominio, no de si hay cuenta: no revela quién está registrado
+    blocked = clients.signup_block(db, email)
+    if blocked:
+        clients.record_unrecognized(db, email, "register")
+        db.commit()
+        raise HTTPException(status_code=403, detail=blocked)
 
     # Se calcula siempre: el tiempo de respuesta no delata si el correo ya tenía cuenta
     password_hash = hash_password(user_data.password)
     pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-    if _find_user(db, email) is not None:
+    existing = _find_user(db, email)
+    # Contacto que cargó el administrador ("pendiente de activar"): se registra como una cuenta nueva
+    if existing is not None and not clients.is_pending_contact(db, existing):
         # Aviso al dueño (como mucho uno por minuto); no se crea cuenta.
         # La fila con hash "!" solo marca cuándo se avisó: nunca se puede confirmar.
         if pending is None:
@@ -209,14 +221,23 @@ def verify_signup(data: EmailCodeRequest, db: Session = Depends(get_db)):
         pending.attempts += 1
         db.commit()
         raise HTTPException(status_code=400, detail=CODE_INVALID)
-    if _find_user(db, email) is not None:
+    existing = _find_user(db, email)
+    if existing is not None and not clients.is_pending_contact(db, existing):
         db.delete(pending)
         db.commit()
         raise HTTPException(status_code=400, detail=CODE_INVALID)
 
-    # El nombre, la cédula y el teléfono se piden en "Complete su perfil"
-    user = models.User(name="", email=email, role="requester", password_hash=pending.password_hash)
-    db.add(user)
+    if existing is not None:
+        # Activa el contacto pendiente con la contraseña que eligió (conserva su organización)
+        user = existing
+        user.password_hash = pending.password_hash
+        clients.profile(db, user.id).activation = "active"
+    else:
+        # El nombre, la cédula y el teléfono se piden en "Complete su perfil"
+        user = models.User(name="", email=email, role="requester", password_hash=pending.password_hash)
+        db.add(user)
+        db.flush()
+        clients.link_by_domain(db, user)
     db.delete(pending)
     db.commit()
     db.refresh(user)

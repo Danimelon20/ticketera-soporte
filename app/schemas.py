@@ -1240,8 +1240,140 @@ class PrivacyNotice(BaseModel):
     kind: str
     version: str
     text: str
+    # Solo en el enlace del correo: ya estaba aceptado
+    accepted: bool = False
 
 
 class PrivacyAccept(BaseModel):
     version: str = Field(min_length=1, max_length=20)
     accepted: bool
+
+
+class PrivacyTokenRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=100)
+
+
+class PrivacyTokenAccept(PrivacyAccept):
+    token: str = Field(min_length=10, max_length=100)
+
+
+# ----- Organizaciones cliente (Fase 2) -----
+
+def _legal_id(value: Optional[str]) -> Optional[str]:
+    """Cédula jurídica: 10 dígitos (por ejemplo 3-101-123456); vacía queda en None."""
+    if value is None or not value.strip():
+        return None
+    digits = "".join(c for c in value if c.isdigit())
+    if len(digits) != 10:
+        raise ValueError("La cédula jurídica debe tener 10 dígitos")
+    return digits
+
+
+class OrganizationWrite(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=150)
+    legal_id: Optional[str] = None
+    contract_number: Optional[str] = Field(default=None, max_length=50)
+    contract_start: Optional[date] = None
+    contract_end: Optional[date] = None
+    main_phone: Optional[str] = None
+    data_clause: Optional[bool] = None
+    # Lista completa: reemplaza los dominios de la organización
+    domains: Optional[list[str]] = Field(default=None, max_length=30)
+
+    @field_validator("legal_id")
+    @classmethod
+    def _check_legal_id(cls, value):
+        return _legal_id(value)
+
+    @field_validator("main_phone")
+    @classmethod
+    def _check_phone(cls, value):
+        if value is None or not value.strip():
+            return None
+        return normalize_phone(value)
+
+    @field_validator("name", "contract_number")
+    @classmethod
+    def _strip(cls, value):
+        return " ".join(value.split()) if value is not None else None
+
+
+class OrganizationCreate(OrganizationWrite):
+    name: str = Field(min_length=2, max_length=150)
+
+
+class OrganizationSummary(BaseModel):
+    """Lo que ve el técnico al buscar: sin cédula jurídica, teléfono ni contrato."""
+    id: int
+    name: str
+    kind: str
+    status: str
+    status_label: str
+    domains: list[str]
+
+
+class OrganizationRead(OrganizationSummary):
+    legal_id: Optional[str] = None
+    contract_number: Optional[str] = None
+    contract_start: Optional[date] = None
+    contract_end: Optional[date] = None
+    main_phone: Optional[str] = None
+    data_clause: bool = False
+    has_contract_file: bool = False
+    contacts: int = 0
+    authorized_contacts: int = 0
+
+
+class ContactCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    name: str = Field(min_length=2, max_length=100)
+    authorized_for_changes: bool = False
+
+
+class ContactUpdate(BaseModel):
+    authorized_for_changes: bool
+
+
+class ContactRead(BaseModel):
+    """Contacto de una organización. Correo enmascarado; nunca cédula ni teléfono."""
+    id: int
+    name: str
+    email_hint: str
+    authorized_for_changes: bool
+    activation: str
+    privacy_pending: bool
+
+
+class UnrecognizedRead(BaseModel):
+    """Correo completo: solo el administrador lo ve (para poder ligarlo)."""
+    id: int
+    email: str
+    channel: str
+    first_seen: datetime
+    last_seen: datetime
+    attempts: int
+    expires_on: date
+
+
+class ClientWithoutOrganization(BaseModel):
+    id: int
+    name: str
+    email: str
+
+
+class UnrecognizedList(BaseModel):
+    contacts: list[UnrecognizedRead]
+    clients_without_organization: list[ClientWithoutOrganization]
+
+
+class UnrecognizedLink(BaseModel):
+    organization_id: int
+    name: str = Field(min_length=2, max_length=100)
+    authorized_for_changes: bool = False
+    # Agrega también el dominio del correo a la organización
+    add_domain: bool = False
+
+
+class ClientOrganizationUpdate(BaseModel):
+    organization_id: int
+

@@ -8,7 +8,7 @@ from ..database import get_db
 from .. import alerts, area_ai, auto_assign, models, nav, privacy, routing, ticket_access
 from ..schemas import (
     AreaFilters, AreaMetric, AreaOption, AreaOptions, FilterDepartment, AreaSuggestion, AreaSuggestRequest, PrivacyAccept, PrivacyNotice,
-    RouteChange, TicketRead,
+    PrivacyTokenAccept, PrivacyTokenRequest, RouteChange, TicketRead,
 )
 from ..security import get_current_user
 from .tickets import OPERATION_ROLES, ticket_read
@@ -225,4 +225,25 @@ def privacy_accept(data: PrivacyAccept, request: Request, db: Session = Depends(
     ip = request.client.host if request.client else None
     if not privacy.accept(db, current_user, data.version, ip):
         raise HTTPException(status_code=409, detail="El aviso cambió: léalo de nuevo")
+    db.commit()
+
+
+# Enlace "Acepto" del correo: sin sesión, el token (de un solo uso) identifica al contacto.
+# Va por POST para que el token no quede en la dirección ni en los registros del servidor
+@router.post("/privacy/email-notice", response_model=PrivacyNotice)
+def privacy_email_notice(data: PrivacyTokenRequest, db: Session = Depends(get_db)):
+    notice = privacy.notice_for_token(db, data.token)
+    if notice is None:
+        raise HTTPException(status_code=400, detail=privacy.LINK_INVALID)
+    return PrivacyNotice(**notice)
+
+
+@router.post("/privacy/email-accept", status_code=204)
+def privacy_email_accept(data: PrivacyTokenAccept, request: Request, db: Session = Depends(get_db)):
+    if not data.accepted:
+        raise HTTPException(status_code=400, detail="Marque la casilla para aceptar el aviso")
+    ip = request.client.host if request.client else None
+    error = privacy.accept_by_token(db, data.token, data.version, ip)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
     db.commit()

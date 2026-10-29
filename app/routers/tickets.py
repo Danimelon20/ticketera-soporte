@@ -9,7 +9,7 @@ from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest,
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
-from .. import cancellations, config, hacienda, mailer, privacy
+from .. import cancellations, clients, config, hacienda, mailer, privacy
 from ..notifications import STATUS_LABELS, display_name, notify_followers
 from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, routing, ticket_access
 
@@ -221,6 +221,10 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
             raise HTTPException(status_code=400, detail="El solicitante no existe")
     else:
         owner = current_user
+    # Clientes sin organización vigente no abren tickets nuevos (los que tienen siguen en proceso)
+    blocked = clients.ticket_block(db, owner)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
 
     # El ticket queda a nombre del perfil: sin nombre, cédula y teléfono no se crea
     if not identity.profile_complete(owner):

@@ -5,7 +5,7 @@ from email.header import decode_header, make_header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, email_attachments, hacienda, identity, mailer, models, routing, suspicion
+from . import clients, config, domains, email_attachments, hacienda, identity, mailer, models, routing, suspicion
 from .email_parser import extract_sender, get_plain_body, parse_ticket_email, strip_quoted
 from .notifications import display_name, notify_followers
 
@@ -77,6 +77,23 @@ def send_ticket_created(ticket: models.Ticket, user: models.User, category: mode
         "Le avisaremos por este medio cuando haya cambios.",
         f"Puede ver el ticket en {config.APP_URL}",
     ])
+    # Contacto que todavía no aceptó el aviso de datos: el aviso y su enlace "Acepto" (un solo uso)
+    from . import privacy
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        person = db.get(models.User, user.id)
+        link = privacy.email_link(db, person) if person is not None else None
+        db.commit()
+    finally:
+        db.close()
+    if link:
+        body += "\n".join([
+            "", "",
+            "Aviso de tratamiento de datos personales (Ley 8968): para atender sus solicitudes guardamos su "
+            "nombre, correo, teléfono y cédula. Lea el aviso completo y acéptelo en este enlace (sirve una sola vez):",
+            link,
+        ])
     mailer.send_email(user.email, f"[Ticket #{ticket.id}] Recibimos su solicitud: {ticket.title}", body)
 
 
@@ -218,6 +235,18 @@ def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User
     return "contact_updated"
 
 
+def _not_client(db: Session, sender: str, user: models.User | None) -> str | None:
+    """Mensaje para quien no es cliente vigente (o None). Sin cuenta: depende solo del dominio."""
+    if not clients.enforced(db):
+        return None
+    if user is not None:
+        return clients.ticket_block(db, user) if user.role == "requester" else None
+    if routing.is_internal_domain(sender):
+        return None
+    org = clients.organization_for_domain(db, domains.of_email(sender))
+    return None if org is not None and org.kind == "client" and clients.is_current(org) else clients.NOT_CLIENT
+
+
 def process_message(db: Session, msg) -> str:
     # a. Duplicados
     message_id = _message_id(msg)
@@ -243,6 +272,15 @@ def process_message(db: Session, msg) -> str:
         .filter(func.lower(models.User.email) == sender, models.User.is_active.is_(True))
         .first()
     )
+    # Con el interruptor de clientes: sin organización vigente no se crea nada (queda en No reconocidos)
+    not_client = _not_client(db, sender, user)
+    if not_client:
+        if not_client == clients.NOT_CLIENT:
+            clients.record_unrecognized(db, sender, "email")
+        _save_result(db, message_id, "not_client")
+        db.commit()
+        mailer.send_email(sender, "No pudimos crear su ticket", f"Buen día. Recibimos su correo. {not_client}.")
+        return "not_client"
     if user is None or user.role != "requester":
         _save_result(db, message_id, "unregistered")
         db.commit()
