@@ -58,6 +58,28 @@ def test_five_wrong_passwords_lock_for_15_minutes(client, make_user, sent):
     assert response.json()["requires_code"] is True
 
 
+def test_failures_of_one_account_do_not_lock_another(client, make_user, sent):
+    # Todas las solicitudes llegan desde la misma IP (el proxy): el límite es por correo
+    careless = make_user("requester")
+    other = make_user("requester")
+    responses = _fail(client, careless["email"], "requester", 5)
+    assert responses[-1].status_code == 429
+    response = _login(client, other["email"], "requester")
+    assert response.status_code == 200, response.text
+    assert _fail(client, other["email"], "requester", 1)[0].status_code == 401
+    assert _login(client, careless["email"], "requester").status_code == 429
+
+
+def test_forwarded_for_header_does_not_bypass_the_lock(client, make_user, sent):
+    user = make_user("requester")
+    _fail(client, user["email"], "requester", 5)
+    response = client.post(
+        "/api/auth/login", json={"email": user["email"], "password": PASSWORD, "portal": "requester"},
+        headers={"X-Forwarded-For": "203.0.113.7"},
+    )
+    assert response.status_code == 429
+
+
 def test_lock_message_is_the_same_whether_account_exists_or_not(client, make_user):
     user = make_user("requester")
     missing = f"nadie-{uuid.uuid4().hex}@test.com"

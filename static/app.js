@@ -144,7 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
             headers
         });
 
-        if (response.status === 401) {
+        // En el inicio de sesión un 401 es "correo o contraseña incorrectos", no una sesión vencida
+        if (response.status === 401 && endpoint !== '/auth/login') {
             const data = await response.json().catch(() => ({}));
             handleUnauthorized(data.detail);
             throw new Error('Unauthorized');
