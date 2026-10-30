@@ -430,6 +430,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "conversation_viewed",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
+    # Solicitante archivado (old_value: el correo original en claro; new_value: archivado-<id>@archivo.invalid)
+    "server_account_archived",
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
@@ -440,6 +442,7 @@ ACCOUNT_CHANGE_ACTIONS = (
 )
 SERVER_ACTIONS = (
     "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
+    "server_account_archived",
 )
 
 

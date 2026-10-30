@@ -94,6 +94,7 @@ ACTION_LABELS = {
     "server_account_activated": "Cuenta activada (servidor)",
     "server_role_changed": "Rol cambiado (servidor)",
     "server_account_deleted": "Cuenta borrada (servidor)",
+    "server_account_archived": "Cuenta archivada (servidor)",
     "overdue_report_downloaded": "PDF de reporte de vencimiento descargado",
     "attachment_uploaded": "Adjunto subido",
     "attachment_downloaded": "Adjunto descargado",

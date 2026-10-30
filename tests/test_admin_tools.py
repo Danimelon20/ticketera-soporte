@@ -5,6 +5,7 @@ import pytest
 
 from app import accounts, models
 from app.database import SessionLocal
+from conftest import code_from
 from scripts import admin_tools
 
 
@@ -227,3 +228,97 @@ def test_delete_requester_without_activity(client, make_user, sent):
     # El correo queda libre para registrarse de nuevo
     response = client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123"})
     assert response.status_code == 202
+
+
+# ----- Archivar un solicitante con actividad -----
+
+def _archive(email, typed=None):
+    answer = email if typed is None else typed
+    return admin_tools.main(["archive-requester", "--email", email], confirm=lambda prompt: answer)
+
+
+def _reported_requester(client, make_user, make_ticket, name="Cliente Reportado"):
+    """Solicitante con un ticket y un reporte ya cerrado desde la página, como en la instancia real."""
+    target = make_user("requester", name)
+    ticket = make_ticket(target)
+    coordinator = make_user("coordinator")
+    admin = make_user("admin")
+    response = client.post("/api/account-reports", json={"target_user_id": target["id"], "reason": "fake_data"},
+                           headers=coordinator["headers"])
+    assert response.status_code in (200, 201), response.text
+    report_id = response.json()["id"]
+    response = client.post(f"/api/account-reports/{report_id}/dismiss", json={"note": "Revisado"},
+                           headers=admin["headers"])
+    assert response.status_code == 200, response.text
+    return target, ticket, report_id
+
+
+def test_delete_requester_with_report_suggests_archive(client, make_user, make_ticket, capsys):
+    target, _ticket, _report_id = _reported_requester(client, make_user, make_ticket)
+    assert _delete(target["email"]) == 1
+    err = capsys.readouterr().err
+    assert "account_reports.target_user_id: 1" in err
+    assert "archive-requester" in err
+    assert _db_user(target["id"]) is not None
+
+
+def test_archive_requester_keeps_activity_and_frees_email(client, make_user, make_ticket, sent):
+    admin = make_user("admin")
+    target, ticket, report_id = _reported_requester(client, make_user, make_ticket, "Cliente Archivado")
+    email = target["email"]
+    client.post("/api/auth/login", json={"email": email, "password": "otra-clave-999", "portal": "requester"})
+
+    assert _archive(email.upper()) == 0
+    user = _db_user(target["id"])
+    archived = f"archivado-{target['id']}@archivo.invalid"
+    assert user.email == archived and not user.is_active and user.role == "requester"
+    assert _sessions(target["id"]) == 0
+    assert client.get("/api/auth/me", headers=target["headers"]).status_code == 401
+
+    db = SessionLocal()
+    try:
+        # Tickets, comentarios y reportes siguen apuntando a la cuenta archivada
+        assert db.get(models.Ticket, ticket["id"]).created_by == target["id"]
+        assert db.get(models.AccountReport, report_id).target_user_id == target["id"]
+        assert db.query(models.LoginThrottle).filter(models.LoginThrottle.email == email).count() == 0
+    finally:
+        db.close()
+
+    # Constancia como "Servidor" con el correo original
+    row = next(c for c in _changes(client, admin, "server_account_archived") if "Cliente Archivado" in c["account"])
+    assert row["actor"] == "Servidor"
+    assert (row["old_value"], row["new_value"]) == (email, archived)
+
+    # El correo original queda libre para una cuenta de personal
+    response = client.post("/api/staff-invitations", json={"email": email, "name": "Persona Interna", "role": "technician"},
+                           headers=admin["headers"])
+    assert response.status_code == 201, response.text
+    response = client.post("/api/auth/activate", json={"email": email, "code": code_from(sent[-1][2])})
+    assert response.status_code == 200, response.text
+    db = SessionLocal()
+    try:
+        staff = db.query(models.User).filter(models.User.email == email).one()
+        assert staff.role == "technician" and staff.id != target["id"]
+    finally:
+        db.close()
+
+    # Archivar otra vez la cuenta archivada no hace nada
+    assert _archive(archived) == 1
+
+
+@pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
+def test_archive_requester_refuses_other_roles(client, make_user, role, capsys):
+    target = make_user(role)
+    assert _archive(target["email"]) == 1
+    assert "no de solicitante" in capsys.readouterr().err
+    user = _db_user(target["id"])
+    assert user.email == target["email"] and user.is_active
+    assert _sessions(target["id"]) == 1
+
+
+def test_archive_requester_needs_the_email_typed(client, make_user):
+    target = make_user("requester")
+    assert _archive(target["email"], typed="otro@correo.com") == 1
+    user = _db_user(target["id"])
+    assert user.email == target["email"] and user.is_active
+    assert _sessions(target["id"]) == 1

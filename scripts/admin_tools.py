@@ -11,9 +11,13 @@ sesiones de la cuenta y queda en el registro de cambios como hecho por "Servidor
 Solicitantes con correo de un dominio interno (INTERNAL_DOMAINS):
     docker compose exec -it app python -m scripts.admin_tools internal-requesters
     docker compose exec -it app python -m scripts.admin_tools delete-requester --email persona@empresa.com
+    docker compose exec -it app python -m scripts.admin_tools archive-requester --email persona@empresa.com
 
 internal-requesters solo lista. delete-requester borra la cuenta solo si es de solicitante y nunca tuvo
 tickets, comentarios, borradores ni otra actividad; pide escribir el correo y queda en el registro de cambios.
+archive-requester es para el solicitante que sí tiene actividad: desactiva la cuenta, cierra sus sesiones y
+cambia su correo por archivado-<id>@archivo.invalid para liberar el original. Conserva tickets, comentarios
+y reportes; pide escribir el correo y el registro de cambios guarda el correo original.
 """
 import argparse
 import sys
@@ -39,11 +43,13 @@ DELETED_WITH_ACCOUNT = {
 }
 # Las que se informan por nombre al negarse
 COUNTED = {("tickets", "created_by"), ("tickets", "assigned_to"), ("comments", "user_id"), ("email_drafts", "requester_id")}
+ARCHIVE_DOMAIN = "archivo.invalid"
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m scripts.admin_tools", description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=ADMIN_COMMANDS + ("internal-requesters", "delete-requester"))
+    parser = argparse.ArgumentParser(prog="python -m scripts.admin_tools", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("command", choices=ADMIN_COMMANDS + ("internal-requesters", "delete-requester", "archive-requester"))
     parser.add_argument("--email", help="Correo de la cuenta (todos los comandos menos internal-requesters)")
     parser.add_argument("--to", choices=DEMOTE_ROLES, default="coordinator",
                         help="Solo con demote: rol nuevo (por defecto, coordinator)")
@@ -153,7 +159,7 @@ def delete_requester(email: str, confirm=input) -> int:
             message = f"La cuenta tiene actividad y no se borró. Tickets: {tickets}, comentarios: {comments}, borradores: {drafts}."
             if others:
                 message += " Otros registros: " + ", ".join(others) + "."
-            return _fail(message)
+            return _fail(message + " Para retirarla conservando todo, use archive-requester.")
 
         typed = confirm(f"Va a BORRAR la cuenta de solicitante {user.name or email}. Escriba el correo para confirmar: ")
         if typed.strip().lower() != email:
@@ -181,6 +187,39 @@ def delete_requester(email: str, confirm=input) -> int:
         db.close()
 
 
+def archive_requester(email: str, confirm=input) -> int:
+    """Archiva una cuenta de solicitante con actividad. Devuelve 0 si la archivó y 1 si no hizo nada."""
+    email = email.strip().lower()
+    db = SessionLocal()
+    try:
+        user = db.query(models.User).filter(func.lower(models.User.email) == email).first()
+        if user is None:
+            return _fail("No hay ninguna cuenta con ese correo")
+        if user.role != "requester":
+            return _fail(f"Esa cuenta es de {audit.role_name(user.role)}, no de solicitante. No se archivó.")
+        if email.endswith("@" + ARCHIVE_DOMAIN):
+            return _fail("La cuenta ya está archivada")
+
+        typed = confirm(f"Va a ARCHIVAR la cuenta de solicitante {user.name or email}. Escriba el correo para confirmar: ")
+        if typed.strip().lower() != email:
+            return _fail("El correo no coincide. No se hizo ningún cambio.")
+
+        archived = f"archivado-{user.id}@{ARCHIVE_DOMAIN}"
+        # El correo original queda en claro en el registro: es la constancia de a quién pertenecía la cuenta
+        audit.record(db, None, "server_account_archived", target=user, old=user.email, new=archived)
+        user.email = archived
+        user.is_active = False
+        accounts.close_sessions(db, user.id)
+        # El correo original queda libre: sin registros pendientes ni intentos fallidos que hereden otra cuenta
+        db.query(models.PendingSignup).filter(models.PendingSignup.email == email).delete()
+        db.query(models.LoginThrottle).filter(models.LoginThrottle.email == email).delete()
+        db.commit()
+        print(f"Listo. La cuenta {email} quedó desactivada y archivada como {archived}; se cerraron sus sesiones.")
+        return 0
+    finally:
+        db.close()
+
+
 def main(argv: list[str] | None = None, confirm=input) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -191,6 +230,8 @@ def main(argv: list[str] | None = None, confirm=input) -> int:
         return internal_requesters()
     if args.command == "delete-requester":
         return delete_requester(args.email, confirm)
+    if args.command == "archive-requester":
+        return archive_requester(args.email, confirm)
     return run(args.command, args.email, args.to, confirm)
 
 

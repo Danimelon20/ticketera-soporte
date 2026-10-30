@@ -5258,6 +5258,7 @@ document.addEventListener('DOMContentLoaded', () => {
         server_account_activated: 'Cuenta activada',
         server_role_changed: 'Rol cambiado',
         server_account_deleted: 'Cuenta borrada',
+        server_account_archived: 'Cuenta archivada',
         overdue_report_downloaded: 'PDF de reporte de vencimiento descargado',
         attachment_uploaded: 'Adjunto subido',
         attachment_downloaded: 'Adjunto descargado',
