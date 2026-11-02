@@ -20,6 +20,8 @@ APP_ENV_VARS = (
     "DATABASE_URL",
     "MS_LOGIN_ENABLED", "MS_LOGIN_TENANT_ID", "MS_LOGIN_CLIENT_ID", "MS_LOGIN_CLIENT_SECRET", "MS_LOGIN_REDIRECT_URI",
     "INTERNAL_DOMAINS",
+    "APP_ENV", "MAIL_TRANSPORT", "MAILBOX_POLL_ENABLED", "SMTP_HOST", "SMTP_PORT", "SMTP_TIMEOUT_SECONDS",
+    "MAIL_FROM", "SMTP_ALLOWED_HOSTS",
 )
 for _name in APP_ENV_VARS:
     os.environ.pop(_name, None)
@@ -208,10 +210,12 @@ def make_ticket(client):
 
 @pytest.fixture(autouse=True)
 def no_real_network():
-    """Falla la prueba que intente salir a la red. EMAIL_ENABLED solo se enciende con monkeypatch en la prueba."""
+    """Falla la prueba que intente salir a la red. El correo solo se enciende con monkeypatch en la prueba."""
     from app import config
 
     assert config.EMAIL_ENABLED is False, "EMAIL_ENABLED llegó encendido a la prueba"
+    assert config.MAIL_TRANSPORT == "log", "MAIL_TRANSPORT llegó distinto de log a la prueba"
+    assert config.MAILBOX_POLL_ENABLED is False, "MAILBOX_POLL_ENABLED llegó encendido a la prueba"
     start = len(REAL_NETWORK_ATTEMPTS)
     yield
     attempts = REAL_NETWORK_ATTEMPTS[start:]

@@ -91,7 +91,7 @@ def test_get_token_without_matching_account_requires_login(cache_path, monkeypat
 
 
 def test_send_email_uses_sendmail_with_base64_mime(fake_app, graph_calls, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     calls, _statuses = graph_calls
     assert mailer.send_email("ana@test.com", "Prueba", "Hola") is True
 
@@ -113,14 +113,14 @@ def test_send_email_disabled_does_not_call_graph(fake_app, graph_calls):
 
 
 def test_send_email_returns_false_when_graph_fails(fake_app, graph_calls, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     _calls, statuses = graph_calls
     statuses.append(500)
     assert mailer.send_email("ana@test.com", "Prueba", "Hola") is False
 
 
 def test_send_email_returns_false_without_session(cache_path, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     assert mailer.send_email("ana@test.com", "Prueba", "Hola") is False
 
 
@@ -162,7 +162,7 @@ def test_send_email_body_survives_encoding(fake_app, graph_calls, monkeypatch):
     import email
     from email import policy
 
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     calls, _statuses = graph_calls
     long_line = "Esta dirección no está registrada; regístrese en http://localhost:8000/registro " + "ñ" * 40
     assert len(long_line) > 100

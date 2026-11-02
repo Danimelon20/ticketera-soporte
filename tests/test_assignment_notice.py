@@ -142,7 +142,7 @@ def test_notice_has_no_protected_data(client, make_user, make_ticket, sent):
 
 
 def test_without_email_goes_to_dev_log(client, make_user, make_ticket, monkeypatch, caplog):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
     coordinator = make_user("coordinator")
     technician = make_user("technician")
     ticket = make_ticket(make_user("requester"), title="Pantalla azul")

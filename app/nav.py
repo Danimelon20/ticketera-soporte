@@ -164,7 +164,7 @@ def system_status(db: Session, now: datetime | None = None) -> dict:
     """Solo activo/inactivo y conteos: nunca buzones, URLs, modelos ni horas configuradas."""
     now = now or _now()
     return {
-        "email": bool(config.EMAIL_ENABLED),
+        "email": config.MAIL_TRANSPORT != "log",
         "ai_analysis": bool(config.AI_ANALYSIS_ENABLED),
         "auto_assign": bool(config.AUTO_ASSIGN_ENABLED),
         "auto_assign_mode": auto_assign.load_mode() if config.AUTO_ASSIGN_ENABLED else None,

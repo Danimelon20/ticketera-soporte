@@ -8,6 +8,28 @@ SUPPORT_MAILBOX = os.getenv("SUPPORT_MAILBOX", "").lower()
 MAIL_FOLDER = os.getenv("MAIL_FOLDER", "Ticketera")
 MS_TOKEN_CACHE = os.getenv("MS_TOKEN_CACHE", "data/ms_token_cache.json")
 EMAIL_POLL_SECONDS = int(os.getenv("EMAIL_POLL_SECONDS", "60"))
+
+# Entorno: "pruebas" activa la protección del correo (mailer.check_mail_config)
+APP_ENV = os.getenv("APP_ENV", "").strip().lower()
+MAIL_TRANSPORTS = ("graph", "smtp", "log")
+
+
+def resolve_mail_settings(env) -> tuple[str, bool]:
+    """(transporte, lee el buzón). Sin las variables nuevas, todo sale de EMAIL_ENABLED como antes."""
+    email_enabled = env.get("EMAIL_ENABLED", "false").lower() == "true"
+    transport = env.get("MAIL_TRANSPORT", "").strip().lower() or ("graph" if email_enabled else "log")
+    poll = env.get("MAILBOX_POLL_ENABLED", "").strip().lower()
+    return transport, (poll == "true") if poll else email_enabled
+
+
+# graph: Microsoft Graph; smtp: servidor SMTP (Mailpit en pruebas); log: no envía, solo lo anota en el log
+MAIL_TRANSPORT, MAILBOX_POLL_ENABLED = resolve_mail_settings(os.environ)
+SMTP_HOST = os.getenv("SMTP_HOST", "mailpit")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
+SMTP_TIMEOUT_SECONDS = float(os.getenv("SMTP_TIMEOUT_SECONDS", "10"))
+MAIL_FROM = os.getenv("MAIL_FROM", "ticketera@pruebas.local")
+# Con APP_ENV=pruebas, los únicos servidores SMTP aceptados
+SMTP_ALLOWED_HOSTS = [h.strip().lower() for h in os.getenv("SMTP_ALLOWED_HOSTS", "mailpit").split(",") if h.strip()]
 APP_URL = os.getenv("APP_URL", "http://localhost:8000")
 
 # Inicio de sesión del personal con Microsoft (Entra ID). Mismo registro de app que el buzón, pero

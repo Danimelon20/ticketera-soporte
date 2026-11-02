@@ -7,7 +7,7 @@ from conftest import code_from
 
 def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplog):
     # Con el correo encendido (simulado) los códigos nunca se escriben en el log
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     caplog.set_level(logging.DEBUG)
     secrets = []
 

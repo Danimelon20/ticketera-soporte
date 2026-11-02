@@ -702,7 +702,7 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
         "database": database,
         "users_by_role": users_by_role,
         "tickets_by_status": tickets_by_status,
-        "email_enabled": config.EMAIL_ENABLED,
+        "email_enabled": config.MAIL_TRANSPORT != "log",
         "email_last_run": last_run.isoformat() if last_run else None,
         "email_last_processed": email_poller.last_processed,
         "email_last_error": email_poller.last_error,
@@ -729,7 +729,7 @@ def send_daily_summary_now(db: Session = Depends(get_db), admin=Depends(get_curr
     # Reporte de operación: lo envía el coordinador. Envío manual: no cuenta para el control de una vez por día
     if admin.role != "coordinator":
         raise HTTPException(status_code=403, detail="Solo un coordinador puede enviar el resumen")
-    if not config.EMAIL_ENABLED:
+    if config.MAIL_TRANSPORT == "log":
         raise HTTPException(status_code=400, detail="El envío de correos está apagado")
     sent, total = daily_summary.send_summary(db)
     logging.info("Resumen diario enviado a mano por el usuario %s a %s destinatarios", admin.id, sent)

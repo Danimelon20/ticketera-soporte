@@ -372,7 +372,7 @@ class FakeResponse:
 def graph_calls(monkeypatch):
     # Este módulo reemplaza mailer.send_email con el fake de "sent": aquí se prueba el de verdad
     monkeypatch.undo()
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     monkeypatch.setattr(config, "SUPPORT_MAILBOX", MAILBOX)
     calls = []
 
@@ -443,7 +443,7 @@ def test_upload_to_session_sends_chunks(monkeypatch):
 
 def test_email_disabled_logs_only_the_count(monkeypatch, caplog):
     monkeypatch.undo()
-    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
     caplog.set_level(logging.INFO)
     assert mailer.send_email("cliente@ejemplo.com", "Asunto", "Hola",
                              attachments=[("Cédula secreta.pdf", PDF, "application/pdf")]) is False

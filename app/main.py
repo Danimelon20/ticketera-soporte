@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, entra_login, models, people_activity
+from . import auto_assign, chatbot, config, entra_login, mailer, models, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -106,16 +106,19 @@ def start_warm_up() -> threading.Thread | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Antes que nada: con una configuración de correo peligrosa la app no arranca
+    mailer.check_mail_config()
+    logging.info(mailer.describe_mail_config())
     init_db()
     start_warm_up()
 
     poller = None
-    if config.EMAIL_ENABLED:
+    if config.MAILBOX_POLL_ENABLED:
         if config.MS_TENANT_ID and config.MS_CLIENT_ID and config.SUPPORT_MAILBOX:
             poller = asyncio.create_task(poll_forever())
             logging.info("Revisando la carpeta %s cada %s segundos", config.MAIL_FOLDER, config.EMAIL_POLL_SECONDS)
         else:
-            logging.warning("EMAIL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
+            logging.warning("MAILBOX_POLL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
 
     if config.MS_LOGIN_ENABLED and not (
         config.MS_LOGIN_TENANT_ID and config.MS_LOGIN_CLIENT_ID and config.MS_LOGIN_CLIENT_SECRET
@@ -125,19 +128,19 @@ async def lifespan(app: FastAPI):
 
     summary = None
     if config.DAILY_SUMMARY_ENABLED:
-        if config.EMAIL_ENABLED:
+        if config.MAIL_TRANSPORT != "log":
             summary = asyncio.create_task(summary_forever())
             logging.info("Resumen diario activo a partir de las %s:00", config.DAILY_SUMMARY_HOUR)
         else:
-            logging.warning("DAILY_SUMMARY_ENABLED=true pero EMAIL_ENABLED=false: no se enviará el resumen")
+            logging.warning("DAILY_SUMMARY_ENABLED=true pero MAIL_TRANSPORT=log: no se enviará el resumen")
 
     alerts_task = None
     if config.ALERTS_ENABLED:
-        if config.EMAIL_ENABLED:
+        if config.MAIL_TRANSPORT != "log":
             alerts_task = asyncio.create_task(alerts_forever())
             logging.info("Alertas por correo activas cada %s segundos", config.ALERTS_CHECK_SECONDS)
         else:
-            logging.warning("ALERTS_ENABLED=true pero EMAIL_ENABLED=false: no se enviarán alertas")
+            logging.warning("ALERTS_ENABLED=true pero MAIL_TRANSPORT=log: no se enviarán alertas")
 
     # La asignación automática no depende del correo ni de las alertas
     assign_task = None

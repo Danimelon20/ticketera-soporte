@@ -209,7 +209,7 @@ def test_requester_cannot_read_counts_or_status(make_user, client):
 
 
 def test_system_status_only_flags_and_counts(make_user, client, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     monkeypatch.setattr(config, "AUTO_ASSIGN_ENABLED", True)
     monkeypatch.setattr(config, "AUTO_ASSIGN_LOAD_MODE", "count")
     technician = make_user("technician")

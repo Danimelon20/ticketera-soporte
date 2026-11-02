@@ -35,7 +35,7 @@ PASSWORD = "Demo-Ticketera-2026"
 DEMO_ID_PREFIX = "9990"
 # Banderas que este proceso apaga mientras corre
 QUIET_FLAGS = (
-    "EMAIL_ENABLED", "AI_ANALYSIS_ENABLED", "CHATBOT_ENABLED", "GROUPING_ENABLED",
+    "EMAIL_ENABLED", "MAILBOX_POLL_ENABLED", "AI_ANALYSIS_ENABLED", "CHATBOT_ENABLED", "GROUPING_ENABLED",
     "AUTO_ASSIGN_ENABLED", "ALERTS_ENABLED", "DAILY_SUMMARY_ENABLED",
 )
 # Tablas principales: una referencia opcional a algo DEMO se borra (queda en NULL), la fila real se conserva
@@ -81,9 +81,10 @@ def _email(local: str) -> str:
 @contextmanager
 def quiet():
     """Sin correos, IA, agrupación ni asignación automática en este proceso; al salir, como estaba."""
-    saved = {name: getattr(config, name) for name in QUIET_FLAGS}
+    saved = {name: getattr(config, name) for name in (*QUIET_FLAGS, "MAIL_TRANSPORT")}
     for name in QUIET_FLAGS:
         setattr(config, name, False)
+    config.MAIL_TRANSPORT = "log"
     try:
         yield
     finally:

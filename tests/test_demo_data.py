@@ -94,9 +94,12 @@ def test_load_creates_the_scenarios(client, sent):
 def test_quiet_turns_off_and_restores_flags(monkeypatch):
     monkeypatch.setattr(config, "AUTO_ASSIGN_ENABLED", True)
     monkeypatch.setattr(config, "GROUPING_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "smtp")
     with demo_data.quiet():
         assert all(getattr(config, name) is False for name in demo_data.QUIET_FLAGS)
+        assert config.MAIL_TRANSPORT == "log"
     assert config.AUTO_ASSIGN_ENABLED is True and config.GROUPING_ENABLED is True
+    assert config.MAIL_TRANSPORT == "smtp"
 
 
 def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make_user, make_ticket, sent):
@@ -166,14 +169,14 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
 
 
 def test_mailer_never_sends_to_invalid_domain(monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
 
     def _fail(*args, **kwargs):
         raise AssertionError("No debe llamar a Microsoft Graph")
 
     monkeypatch.setattr(graph, "graph_request", _fail)
     assert mailer.send_email("tecnica.manana@demo.invalid", "Asunto", "Cuerpo") is False
-    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
 
 
 # ----- verificar -----

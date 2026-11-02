@@ -75,7 +75,7 @@ def _create_session(db: Session, user: models.User) -> AuthResponse:
 def send_code_email(to: str, subject: str, body: str, code: str) -> bool:
     sent = mailer.send_email(to, subject, body)
     # Solo sin correo real; con el correo encendido el código nunca va a los logs
-    if not config.EMAIL_ENABLED:
+    if config.MAIL_TRANSPORT == "log":
         logging.warning("[SOLO DESARROLLO] Código para %s: %s", mask_email(to), code)
     return sent
 
@@ -174,7 +174,7 @@ def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
                 "Si no fue usted, puede ignorar este correo.",
             )
             # Solo sin correo real, para probar en desarrollo; el aviso no lleva códigos
-            if not config.EMAIL_ENABLED:
+            if config.MAIL_TRANSPORT == "log":
                 logging.warning("[SOLO DESARROLLO] aviso de cuenta existente para %s", mask_email(email))
         return response
 

@@ -30,7 +30,7 @@ def _codes(technician, other_technician, coordinator, admin, requester):
 @pytest.fixture
 def world(client, make_user, make_ticket, monkeypatch, sent):
     # Correo simulado: "Enviar resumen ahora" llega hasta el envío
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     users = {role: make_user("technician" if role.endswith("technician") else role) for role in ROLES}
     users["target_technician"] = make_user("technician")
     users["target_coordinator"] = make_user("coordinator")
