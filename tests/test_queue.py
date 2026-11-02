@@ -161,6 +161,22 @@ def test_technician_assigned_to_is_ignored(make_user, client):
     assert client.get("/api/queue?view=unassigned", headers=technician["headers"]).status_code == 403
 
 
+def test_technician_cannot_see_unassigned(make_user, client):
+    # "Ver sin asignar" ya no está en su pantalla: el servidor lo sigue negando, con filtros o sin ellos
+    technician = make_user("technician")
+    requester = make_user("requester")
+    mine = _ticket(requester, assigned_to=technician["id"])
+    _ticket(requester)
+
+    for path in ("/api/queue?view=unassigned", "/api/queue?view=unassigned&search=x&page=2"):
+        response = client.get(path, headers=technician["headers"])
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No tiene permiso para ver esta información"
+    # El filtro "Sin asignar" (assigned_to=0) se ignora: solo los suyos
+    response = client.get("/api/queue?view=open&assigned_to=0", headers=technician["headers"])
+    assert [item["id"] for item in response.json()["items"]] == [mine]
+
+
 def test_queue_response_has_no_personal_data(make_user, client):
     coordinator = make_user("coordinator")
     requester = make_user("requester")

@@ -7653,21 +7653,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (queueRequester) {
             return emptyState({ title: `${queueRequester.name} no tiene tickets en esta vista` });
         }
-        const toUnassigned = () => setQueueView('unassigned', 'Sin asignar');
         const messages = {
             open: ['No hay tickets abiertos', 'Cuando llegue uno nuevo aparecerá aquí.'],
             unassigned: ['Todos los tickets tienen responsable', 'No hay nada pendiente de asignar.'],
             due_soon: ['Ningún ticket está por vencer', 'Los tickets abiertos están dentro de su tiempo meta.'],
             overdue: ['No hay tickets vencidos', 'Todos los tickets abiertos están a tiempo.'],
             resolved_today: ['Todavía no se resolvió ningún ticket hoy', 'Los que se resuelvan hoy aparecerán aquí.'],
-            mine_open: ['No tiene tickets abiertos asignados', 'Puede tomar uno de los que están sin asignar.'],
+            mine_open: ['No tiene tickets abiertos asignados', 'Cuando le asignen un ticket aparecerá aquí.'],
             mine_due_soon: ['Ninguno de sus tickets está por vencer', 'Sus tickets abiertos están a tiempo.'],
             following: ['No sigue ningún ticket abierto', 'Use "Seguir" en un ticket para tenerlo a mano aquí.'],
             mine_resolved_today: ['Todavía no resolvió tickets hoy', 'Los que resuelva hoy aparecerán aquí.'],
             cancelled: ['No hay tickets cancelados', 'Los tickets que se cancelen aparecen aquí y se pueden reabrir.'],
         };
         const [title, text] = messages[queueView] || ['No hay tickets en esta vista', ''];
-        if (queueView === 'mine_open') return emptyState({ title, text, action: 'Ver sin asignar', onAction: toUnassigned });
         return emptyState({ title, text });
     }
 
