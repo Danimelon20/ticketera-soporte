@@ -77,6 +77,26 @@ def unavailable_message(user: models.User, status: str, return_date) -> str:
     return f"{person_name(user)} {state}{back}. ¿Asignar de todas formas?"
 
 
+def check_assignee(db: Session, current_user, user_id: int, current_assignee_id: Optional[int],
+                   confirm_unavailable: bool) -> models.User:
+    """Reglas para asignar a mano (al editar o al crear a nombre de un cliente). Devuelve la persona."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    # Una cuenta desactivada no recibe tickets
+    if not user or not user.is_active:
+        raise HTTPException(status_code=400, detail="El usuario asignado no existe")
+    # Regla: solo técnicos y coordinadores pueden ser asignados
+    if user.role not in ("technician", "coordinator"):
+        raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos o coordinadores")
+    # Regla: asignar y reasignar es del coordinador (el técnico solo atiende lo suyo)
+    if current_user.role not in OPERATION_ROLES and user_id != current_assignee_id:
+        raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
+    # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
+    if user_id != current_assignee_id and not confirm_unavailable and not availability.is_available(db, user):
+        status_, return_date = availability.get(db, user)
+        raise HTTPException(status_code=409, detail=unavailable_message(user, status_, return_date))
+    return user
+
+
 def hides_personal_data(ticket: models.Ticket, current_user) -> bool:
     """Técnico no asignado: el teléfono o la cédula escritos en el texto se ocultan al responder."""
     return current_user.role == "technician" and ticket.assigned_to != current_user.id
@@ -585,25 +605,7 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     # Validar que assigned_to, priority_id, category_id existan si se proporcionan
     assignee = None
     if data.assigned_to is not None:
-        user = db.query(models.User).filter(models.User.id == data.assigned_to).first()
-        assignee = user
-        # Una cuenta desactivada no recibe tickets
-        if not user or not user.is_active:
-            raise HTTPException(status_code=400, detail="El usuario asignado no existe")
-        # Regla: solo técnicos y coordinadores pueden ser asignados
-        if user.role not in ("technician", "coordinator"):
-            raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos o coordinadores")
-        # Regla: asignar y reasignar es del coordinador (el técnico solo atiende lo suyo)
-        if current_user.role not in OPERATION_ROLES and data.assigned_to != db_ticket.assigned_to:
-            raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
-        # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
-        if (
-            data.assigned_to != db_ticket.assigned_to
-            and not data.confirm_unavailable
-            and not availability.is_available(db, user)
-        ):
-            status_, return_date = availability.get(db, user)
-            raise HTTPException(status_code=409, detail=unavailable_message(user, status_, return_date))
+        assignee = check_assignee(db, current_user, data.assigned_to, db_ticket.assigned_to, data.confirm_unavailable)
         # Regla 3: Asignar en cualquier estado abierto (new, in_progress, resolved).
         # (El coordinador debe poder asignar o reasignar el ticket a un técnico o coordinador en los estados "new", "in_progress" y "resolved" - no en "closed", que ya da error).
         # Anteriormente ¿había alguna restricción para el coordinador que impedía asignar cuando el estado no es "new"?
