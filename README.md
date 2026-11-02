@@ -20,9 +20,10 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
 7. [Tickets por correo](#tickets-por-correo)
 8. [Datos de prueba](#datos-de-prueba)
 9. [Pruebas automáticas](#pruebas-automáticas)
-10. [Seguridad](#seguridad)
-11. [Problemas comunes](#problemas-comunes)
-12. [Tecnologías y decisiones](#tecnologías-y-decisiones)
+10. [Probar correos con Mailpit](#probar-correos-con-mailpit)
+11. [Seguridad](#seguridad)
+12. [Problemas comunes](#problemas-comunes)
+13. [Tecnologías y decisiones](#tecnologías-y-decisiones)
 
 ## Requisitos
 
@@ -92,7 +93,9 @@ este documento, en un ticket ni en un chat los valores reales de su `.env`.
 
 | Variable | Para qué sirve | Desarrollo | PC con correo |
 |---|---|---|---|
-| `EMAIL_ENABLED` | Lee el buzón y envía correos (respuestas, avisos, códigos). Con `false` solo lo anota en el registro | `false` | `true` |
+| `EMAIL_ENABLED` | Lee el buzón y envía correos (respuestas, avisos, códigos). Con `false` solo lo anota en el registro. Es el valor por defecto de las dos siguientes | `false` | `true` |
+| `MAIL_TRANSPORT` | Cómo se envían los correos: `graph` (Microsoft), `smtp` (Mailpit en pruebas) o `log` (solo se anotan). Sin definir: `graph` si `EMAIL_ENABLED=true`, si no `log` | sin definir | sin definir |
+| `MAILBOX_POLL_ENABLED` | Si se lee el buzón de soporte. Sin definir: igual que `EMAIL_ENABLED` | sin definir | sin definir |
 | `MS_TENANT_ID` | Id. de directorio (inquilino) del registro de la app en Microsoft Entra ID, para el buzón | el del ejemplo | el id. de su organización |
 | `MS_CLIENT_ID` | Id. de aplicación (cliente) del mismo registro, para el buzón | el del ejemplo | el id. del registro |
 | `SUPPORT_MAILBOX` | Buzón de soporte que lee el Agente virtual y desde el que responde | el del ejemplo | el buzón de soporte |
@@ -312,6 +315,30 @@ docker run --rm -v "$PWD/static:/s" node:20-alpine node --check /s/app.js
 Las pruebas usan una base temporal (nunca `data/tickets.db`) y nunca se conectan a Microsoft, Hacienda ni Ollama:
 esas llamadas se simulan y cualquier intento de salir a la red hace fallar la prueba. La suite completa tarda
 varios minutos.
+
+## Probar correos con Mailpit
+
+El entorno de pruebas (`docker-compose.pruebas.yml`, puerto 8001) trae Mailpit: un buzón falso que recibe los
+correos de la ticketera (invitaciones, códigos, avisos) y no los reenvía a nadie. En `.env.pruebas`:
+
+```
+APP_ENV=pruebas
+MAIL_TRANSPORT=smtp
+MAILBOX_POLL_ENABLED=false
+SMTP_HOST=mailpit
+SMTP_PORT=1025
+```
+
+```bash
+docker compose -f docker-compose.pruebas.yml up -d --build
+docker compose -f docker-compose.pruebas.yml exec app python -m scripts.check_mailpit
+```
+
+Los correos se ven en http://127.0.0.1:8025 (solo desde esta máquina; el puerto SMTP no se publica y la
+instancia real no puede llegar a Mailpit). Con `APP_ENV=pruebas` la app **no arranca** si usa `graph`, si lee
+el buzón o si `SMTP_HOST` no está en `SMTP_ALLOWED_HOSTS` (por defecto `mailpit`); el error lo explica en
+`docker compose -f docker-compose.pruebas.yml logs --tail 30 app`. Al arrancar, el log muestra la
+configuración efectiva, por ejemplo `Correo: transporte=smtp (mailpit:1025), lectura del buzón=no, entorno=pruebas`.
 
 ## Seguridad
 
