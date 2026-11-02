@@ -85,6 +85,21 @@ def open_tickets(db: Session, client: models.User) -> list[models.Ticket]:
     )
 
 
+def record_creation(db: Session, ticket: models.Ticket, actor: models.User, channel: str,
+                    method: str | None) -> None:
+    """Fila de registro e historial "Creado por X en nombre de Y vía Z" (new_value: el canal). No hace commit."""
+    db.add(models.TicketRegistration(
+        ticket_id=ticket.id, registered_by=actor.id, channel=channel, identity_check=method, created_at=_now(),
+    ))
+    db.add(models.History(
+        ticket_id=ticket.id, field="created_on_behalf", old_value=None, new_value=channel, changed_by=actor.id,
+    ))
+
+
+def registration_of(db: Session, ticket_id: int) -> models.TicketRegistration | None:
+    return db.query(models.TicketRegistration).filter(models.TicketRegistration.ticket_id == ticket_id).first()
+
+
 def recent_failures(db: Session, client: models.User, now: datetime | None = None) -> int:
     since = (now or _now()) - FAILURE_WINDOW
     return (

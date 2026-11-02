@@ -5,13 +5,13 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest, RegistrationRead, TicketCancelRequest, TicketCreate, TicketFields, TicketForClient, TicketForClientRead, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import cancellations, config, hacienda, mailer
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, ticket_access
+from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, registrations, ticket_access
 
 AI_ROLES = ("technician", "coordinator")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
@@ -190,11 +190,23 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     else:
         owner = current_user
 
+    check_profile(owner, current_user)
+    db_ticket = new_ticket(db, ticket, owner)
+    db.commit()
+    db.refresh(db_ticket)
+    after_create(background_tasks, db_ticket.id)
+    return db_ticket
+
+
+def check_profile(owner: models.User, current_user) -> None:
     # El ticket queda a nombre del perfil: sin nombre, cédula y teléfono no se crea
     if not identity.profile_complete(owner):
         detail = identity.INCOMPLETE_OWN if owner.id == current_user.id else identity.INCOMPLETE_OTHER
         raise HTTPException(status_code=400, detail=detail)
 
+
+def new_ticket(db: Session, ticket: TicketFields, owner: models.User) -> models.Ticket:
+    """Ticket de la página a nombre de owner (perfil ya revisado). No hace commit."""
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")
@@ -216,19 +228,52 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     db.add(db_ticket)
     # Desde el primer ticket, nombre y cédula quedan fijos
     identity.lock(db, owner)
-    db.commit()
-    db.refresh(db_ticket)
+    db.flush()
+    return db_ticket
 
+
+def after_create(background_tasks: BackgroundTasks, ticket_id: int) -> None:
     # Primero la agrupación: si se fusiona, el ticket queda cerrado y el análisis y la asignación lo saltan
     if config.GROUPING_ENABLED:
-        background_tasks.add_task(grouping.after_ticket_created, db_ticket.id)
+        background_tasks.add_task(grouping.after_ticket_created, ticket_id)
     # Mismo análisis que los tickets por correo, después de responder: no espera al modelo.
     # La asignación automática va después del análisis, para que el nivel ya exista.
     if config.AUTO_ASSIGN_ENABLED:
-        background_tasks.add_task(auto_assign.analyze_then_assign, db_ticket.id)
+        background_tasks.add_task(auto_assign.analyze_then_assign, ticket_id)
     elif config.AI_ANALYSIS_ENABLED:
-        background_tasks.add_task(email_analysis.analyze_ticket_by_id, db_ticket.id)
-    return db_ticket
+        background_tasks.add_task(email_analysis.analyze_ticket_by_id, ticket_id)
+
+
+@router.post("/tickets/for-client", response_model=TicketForClientRead)
+def create_for_client(data: TicketForClient, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+                      current_user = Depends(get_current_user)):
+    """Técnico o coordinador registra el caso de un cliente que llamó o escribió. Una sola lógica para los dos."""
+    registrations.require_staff(current_user)
+    # El técnico no elige responsable: siempre la asignación automática
+    if data.assigned_to is not None and current_user.role not in OPERATION_ROLES:
+        raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
+    owner = registrations.get_client(db, data.client_email)
+    check_profile(owner, current_user)
+    assignee = None
+    if data.assigned_to is not None:
+        assignee = check_assignee(db, current_user, data.assigned_to, None, data.confirm_unavailable)
+    # Un fallo de verificación queda registrado aunque no se cree el ticket
+    method = registrations.check_identity(db, current_user, owner, data.channel, data.identity_check, data.id_last4)
+
+    db_ticket = new_ticket(db, data, owner)
+    registrations.record_creation(db, db_ticket, current_user, data.channel, method)
+    if assignee is not None:
+        db_ticket.assigned_to = assignee.id
+        db.add(models.History(
+            ticket_id=db_ticket.id, field="assigned_to", old_value=None, new_value=str(assignee.id),
+            changed_by=current_user.id,
+        ))
+    db.commit()
+    db.refresh(db_ticket)
+    if assignee is not None and assignment_notice.should_notify(assignee, current_user):
+        assignment_notice.schedule(background_tasks, db_ticket, assignee)
+    after_create(background_tasks, db_ticket.id)
+    return TicketForClientRead(ticket_id=db_ticket.id, assigned_name=person_name(assignee) if assignee else None)
 
 
 @router.get("/tickets", response_model=list[TicketRead])
@@ -340,6 +385,11 @@ def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> Ticket
             extra["requester_flags"] = flags
         extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
         extra["grouping"] = grouping.staff_view(db, db_ticket, current_user)
+        registration = registrations.registration_of(db, db_ticket.id)
+        extra["registration"] = RegistrationRead(
+            registered_by_name=person_name(registration.registrar), channel=registration.channel,
+            identity_check=registration.identity_check,
+        ) if registration else None
     merge = grouping.active_merge_of(db, db_ticket.id)
     if merge is not None:
         extra["merged_into"] = merge.target_ticket_id

@@ -633,6 +633,24 @@ class TechnicianSchedule(Base):
 AUTO_ASSIGN_STATUSES = ("waiting", "assigned", "cancelled")
 
 
+class TicketRegistration(Base):
+    """Ticket que el personal creó a nombre de un cliente: quién, por qué canal y cómo verificó la identidad.
+
+    Tabla propia (create_all la agrega sin tocar tickets). Los tickets sin fila quedan "sin registrar".
+    identity_check: "email" o "id_last4" (solo por teléfono; nunca los dígitos). Estados en Python.
+    """
+    __tablename__ = "ticket_registrations"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    registered_by = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    channel = Column(String(10), nullable=False)
+    identity_check = Column(String(10), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    registrar = relationship("User", foreign_keys=[registered_by])
+
+
 class TicketAutoAssignment(Base):
     """Asignación automática de un ticket: pendiente (sin candidato), hecha o ya no aplica. Estado en Python."""
     __tablename__ = "ticket_auto_assignments"

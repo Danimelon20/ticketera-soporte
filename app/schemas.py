@@ -298,14 +298,13 @@ class PersonActivityPage(BaseModel):
     next_cursor: Optional[str] = None
 
 
-class TicketCreate(BaseModel):
+class TicketFields(BaseModel):
     # Nombre y cédula salen del perfil del dueño del ticket; el teléfono es opcional
     title: str
     description: str
     category_id: int
     priority_id: int
     contact_phone: Optional[str] = None
-    requester_id: Optional[int] = None
 
     @field_validator("contact_phone")
     @classmethod
@@ -313,6 +312,34 @@ class TicketCreate(BaseModel):
         if v is None or not v.strip():
             return None
         return normalize_phone(v)
+
+
+class TicketCreate(TicketFields):
+    requester_id: Optional[int] = None
+
+
+class TicketForClient(TicketFields):
+    """Ticket a nombre de un cliente (técnico o coordinador). El cliente se indica por su correo exacto."""
+    client_email: str = Field(min_length=3, max_length=150)
+    channel: Literal["email", "phone"]
+    # Solo por teléfono; los dígitos nunca se guardan
+    identity_check: Optional[Literal["email", "id_last4"]] = None
+    id_last4: Optional[str] = Field(default=None, max_length=4)
+    # Solo el coordinador; sin valor, asignación automática
+    assigned_to: Optional[int] = None
+    confirm_unavailable: bool = False
+
+
+class TicketForClientRead(BaseModel):
+    """Confirmación inmediata: el número y quién lo atiende (None: pendiente de asignación)."""
+    ticket_id: int
+    assigned_name: Optional[str] = None
+
+
+class RegistrationRead(BaseModel):
+    registered_by_name: str
+    channel: str
+    identity_check: Optional[str] = None
 
 
 class TicketUpdate(BaseModel):
@@ -482,6 +509,8 @@ class TicketDetail(TicketRead):
     grouping: Optional[GroupingRead] = None
     # Técnico que lo tuvo asignado antes, o administrador con "Ver conversación": solo lectura
     read_only: bool = False
+    # Solo el personal: quién lo creó a nombre del cliente (None: sin registrar)
+    registration: Optional[RegistrationRead] = None
 
     model_config = ConfigDict(from_attributes=True)
 
