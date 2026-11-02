@@ -439,6 +439,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "id_number_conflict",
     # Ingreso con contraseña (y código, si el rol lo pide) e intento fallido de una cuenta existente
     "login", "login_failed",
+    # Ticket a nombre de un cliente: los últimos 4 de la cédula no coincidieron (target: el cliente; nunca los dígitos)
+    "identity_check_failed",
 )
 SERVER_ACTIONS = (
     "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",

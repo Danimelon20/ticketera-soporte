@@ -2,8 +2,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, availability, identity, models, suspicion
-from ..schemas import MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
+from .. import audit, availability, identity, models, registrations, suspicion
+from ..schemas import ClientLookup, ClientLookupRead, ClientTicketRead, MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
 from ..security import get_current_user
 from .auth import me_read
 
@@ -51,6 +51,17 @@ def get_requesters(q: Optional[str] = None, db: Session = Depends(get_db), curre
         )
     
     return query.order_by(models.User.name).limit(20).all()
+
+
+# POST: el correo no queda en la URL ni en el registro de accesos
+@router.post("/requesters/lookup", response_model=ClientLookupRead, response_model_exclude_none=True)
+def lookup_client(data: ClientLookup, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    registrations.require_staff(current_user)
+    client = registrations.get_client(db, data.email)
+    result = ClientLookupRead(name=client.name, profile_complete=identity.profile_complete(client))
+    if current_user.role == "coordinator":
+        result.open_tickets = [ClientTicketRead.model_validate(t) for t in registrations.open_tickets(db, client)]
+    return result
 
 
 @router.put("/profile", response_model=MeRead)

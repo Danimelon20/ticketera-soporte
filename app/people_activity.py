@@ -106,6 +106,7 @@ ACTION_LABELS = {
     "ticket_link_undone": "Relación separada",
     "incident_marked": "Posible incidente",
     "conversation_viewed": "Ver conversación",
+    "identity_check_failed": "Verificación de identidad fallida",
 }
 STATUS_LABELS = {"new": "Nuevo", "in_progress": "En proceso", "resolved": "Resuelto", "closed": "Cerrado"}
 DRAFT_LABELS = {"confirmed": "Confirmó el borrador", "discarded": "Descartó el borrador",

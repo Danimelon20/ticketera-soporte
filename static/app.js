@@ -5269,7 +5269,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ticket_linked: 'Tickets relacionados',
         ticket_link_undone: 'Relación separada',
         incident_marked: 'Posible incidente',
-        conversation_viewed: 'Ver conversación'
+        conversation_viewed: 'Ver conversación',
+        identity_check_failed: 'Verificación de identidad fallida'
     };
     const changesList = document.getElementById('changesList');
     const changesEmpty = document.getElementById('changesEmpty');

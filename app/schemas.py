@@ -376,6 +376,25 @@ class HistoryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ClientLookup(BaseModel):
+    """Correo exacto del cliente para crear un ticket a su nombre."""
+    email: str = Field(min_length=3, max_length=150)
+
+
+class ClientTicketRead(BaseModel):
+    id: int
+    title: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ClientLookupRead(BaseModel):
+    # Nunca el id, teléfono, cédula ni correo del cliente. open_tickets: solo el coordinador
+    name: Optional[str] = None
+    profile_complete: bool
+    open_tickets: Optional[list[ClientTicketRead]] = None
+
+
 class RequesterRead(BaseModel):
     id: int
     name: str
