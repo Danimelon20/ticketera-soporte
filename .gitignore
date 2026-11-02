@@ -6,3 +6,5 @@ venv/
 .env
 .vscode/
 data/
+.env.pruebas
+data-pruebas/

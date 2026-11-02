@@ -10,10 +10,25 @@ services:
       - "8001:8000"
     volumes:
       - ./data-pruebas:/app/data
+    depends_on:
+      - mailpit
     networks:
+      - pruebas
       - compartida
 
+  # Buzón falso: recibe por SMTP (mailpit:1025) los correos de la app de pruebas y no los reenvía a nadie.
+  # Solo la página web se publica, y solo en esta máquina; el puerto SMTP no sale de la red "pruebas"
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    ports:
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+    networks:
+      - pruebas
+
 networks:
+  # Propia de este proyecto: la instancia real (ticketera-soporte_default) no ve a mailpit
+  pruebas:
   compartida:
     name: ticketera-soporte_default
     external: true
