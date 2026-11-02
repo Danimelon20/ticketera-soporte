@@ -242,3 +242,31 @@ def test_dev_code_only_logged_with_log_transport(monkeypatch, caplog, transport,
     with caplog.at_level(logging.WARNING):
         auth.send_code_email("ana@pruebas.local", "Código", "Su código es 654321", "654321")
     assert ("654321" in caplog.text) is logged
+
+
+# ----- el entorno de pruebas fija APP_ENV en el compose, no solo en .env.pruebas -----
+
+def _app_environment(compose_text: str) -> list[str]:
+    """Entradas de services.app.environment (forma de lista), sin depender de PyYAML."""
+    lines = compose_text.splitlines()
+    start = lines.index("  app:")
+    entries, inside = [], False
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith("    "):
+            break  # terminó el servicio app
+        if line.startswith("    ") and not line.startswith("     "):
+            inside = line.strip() == "environment:"
+            continue
+        if inside and line.strip().startswith("- "):
+            entries.append(line.strip()[2:].strip().strip('"'))
+    return entries
+
+
+def test_pruebas_compose_pins_app_env():
+    from pathlib import Path
+
+    compose = Path(__file__).resolve().parent.parent / "docker-compose.pruebas.yml"
+    text = compose.read_text(encoding="utf-8")
+    # "environment" tiene prioridad sobre env_file: aunque .env.pruebas no traiga APP_ENV, la protección queda activa
+    assert "APP_ENV=pruebas" in _app_environment(text)
+    assert "env_file" in text and "${APP_ENV" not in text

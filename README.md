@@ -322,12 +322,16 @@ El entorno de pruebas (`docker-compose.pruebas.yml`, puerto 8001) trae Mailpit: 
 correos de la ticketera (invitaciones, códigos, avisos) y no los reenvía a nadie. En `.env.pruebas`:
 
 ```
-APP_ENV=pruebas
 MAIL_TRANSPORT=smtp
 MAILBOX_POLL_ENABLED=false
 SMTP_HOST=mailpit
 SMTP_PORT=1025
+APP_URL=http://127.0.0.1:8001
 ```
+
+`APP_ENV=pruebas` no va ahí: lo fija `docker-compose.pruebas.yml` con `environment:`, que gana sobre
+`env_file`, para que la protección no dependa de no olvidar una línea. Use `127.0.0.1` y no `localhost`: las
+cookies de `localhost` se comparten entre puertos y chocarían con la instancia real del puerto 8000.
 
 ```bash
 docker compose -f docker-compose.pruebas.yml up -d --build

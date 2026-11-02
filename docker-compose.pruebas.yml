@@ -6,6 +6,10 @@ services:
     env_file:
       - path: .env.pruebas
         required: true
+    # Fijo aquí y no solo en .env.pruebas: "environment" gana sobre env_file, así la protección del correo
+    # (mailer.check_mail_config) sigue activa aunque a .env.pruebas le falte la línea. Valor literal, sin ${...}
+    environment:
+      - APP_ENV=pruebas
     ports:
       - "8001:8000"
     volumes:
