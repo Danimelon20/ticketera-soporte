@@ -21,6 +21,18 @@ def should_notify(assignee: models.User | None, actor: models.User | None) -> bo
     )
 
 
+PENDING_LEVEL = "pendiente de análisis"
+
+
+def level_line(ticket: models.Ticket) -> str:
+    """Asignado antes de que la IA termine (p. ej. a nombre de un cliente): nunca vacío."""
+    level = _level(ticket)
+    row = ticket.ai_analysis
+    if level is None and config.AI_ANALYSIS_ENABLED and (row is None or row.status == "pending"):
+        return f"Nivel: {PENDING_LEVEL}"
+    return f"Nivel: {_level_text(level)}"
+
+
 def build(ticket: models.Ticket, assignee: models.User) -> tuple[str, str]:
     title = _redact(ticket.title)
     subject = f"[Ticket #{ticket.id}] Se le asignó: {title}"
@@ -31,7 +43,7 @@ def build(ticket: models.Ticket, assignee: models.User) -> tuple[str, str]:
         "",
         f"Número: #{ticket.id}",
         f"Título: {title}",
-        f"Nivel: {_level_text(_level(ticket))}",
+        level_line(ticket),
         "",
         f"Puede verlo en {config.APP_URL}",
     ])

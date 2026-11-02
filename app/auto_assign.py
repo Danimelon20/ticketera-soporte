@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
 
-from . import assignment_notice, audit, availability, config, email_analysis, models, schedules
+from . import assignment_notice, audit, availability, config, email_analysis, models, registrations, schedules
 from .database import SessionLocal
 from .email_processing import _RunNow
 from .notifications import notify_followers
@@ -86,9 +86,15 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     return result
 
 
-def choose(db: Session, now: datetime) -> models.User | None:
-    """Menor carga; empate: la asignación automática más antigua (o ninguna) y luego el id."""
+def choose(db: Session, now: datetime, exclude_id: int | None = None) -> models.User | None:
+    """Menor carga; empate: la asignación automática más antigua (o ninguna) y luego el id.
+
+    exclude_id: el técnico que creó el ticket a nombre del cliente; solo se le asigna si es el único elegible.
+    """
     users = candidates(db, now)
+    others = [u for u in users if u.id != exclude_id]
+    if others:
+        users = others
     if not users:
         return None
     ids = [u.id for u in users]
@@ -102,12 +108,23 @@ def choose(db: Session, now: datetime) -> models.User | None:
     return min(users, key=lambda u: (load[u.id], last_auto.get(u.id) or datetime.min, u.id))
 
 
-def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment | None, now: datetime) -> bool:
-    """Asigna si hay candidato. Sin candidato deja la fila en espera. No hace commit."""
+def _creator_id(db: Session, ticket: models.Ticket) -> int | None:
+    """Quien registró el ticket a nombre del cliente (un coordinador nunca es candidato: no cambia nada)."""
+    registration = registrations.registration_of(db, ticket.id)
+    return registration.registered_by if registration else None
+
+
+def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment | None, now: datetime,
+            tasks=None) -> bool:
+    """Asigna si hay candidato. Sin candidato deja la fila en espera. No hace commit.
+
+    tasks: dónde se envían los avisos (por defecto, en el momento; en una petición, sus background_tasks).
+    """
+    tasks = tasks or _RunNow()
     if row is None:
         row = models.TicketAutoAssignment(ticket_id=ticket.id, status="waiting", created_at=now)
         db.add(row)
-    user = choose(db, now)
+    user = choose(db, now, exclude_id=_creator_id(db, ticket))
     agent_id = audit.agent_id(db)
     if user is None or agent_id is None:
         return False
@@ -133,9 +150,9 @@ def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment
     logging.info("Ticket %s asignado automáticamente al técnico %s", ticket.id, user.id)
     agent = db.get(models.User, agent_id)
     # Al técnico su aviso; a los demás seguidores el de siempre (un solo correo por persona)
-    assignment_notice.schedule(_RunNow(), ticket, user)
+    assignment_notice.schedule(tasks, ticket, user)
     notify_followers(
-        db, _RunNow(), ticket, agent,
+        db, tasks, ticket, agent,
         f"[Ticket #{ticket.id}] Nueva asignación",
         [f"El ticket se asignó automáticamente a {user.name or 'un técnico'}."],
         exclude_ids=(user.id,),
@@ -177,6 +194,22 @@ def assign_new(ticket_id: int, now: datetime | None = None) -> str:
             return "error"
         finally:
             db.close()
+
+
+def assign_in_request(db: Session, ticket: models.Ticket, background_tasks, now: datetime | None = None) -> bool:
+    """Ticket a nombre de un cliente: se asigna antes de responder, para decirle al cliente quién lo atiende.
+
+    No espera el análisis (la elección no usa el nivel del ticket nuevo; el aviso dice "pendiente de
+    análisis"). Sin candidato queda en espera y lo reintenta run_pending, con la misma exclusión del
+    creador. Hace commit.
+    """
+    if not config.AUTO_ASSIGN_ENABLED:
+        db.commit()
+        return False
+    with AUTO_ASSIGN_LOCK:
+        assigned = _assign(db, ticket, None, now or _now(), tasks=background_tasks)
+        db.commit()
+    return assigned
 
 
 def run_pending(now: datetime | None = None) -> int:

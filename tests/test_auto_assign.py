@@ -394,8 +394,8 @@ def test_conditional_update_does_not_overwrite(make_user, monkeypatch):
     ticket = _ticket(requester, level=2)
     real_choose = auto_assign.choose
 
-    def _choose_then_other_process_assigns(db, now):
-        user = real_choose(db, now)
+    def _choose_then_other_process_assigns(db, now, exclude_id=None):
+        user = real_choose(db, now, exclude_id)
         other = SessionLocal()
         try:
             other.get(models.Ticket, ticket).assigned_to = manual["id"]

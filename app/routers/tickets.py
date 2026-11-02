@@ -268,12 +268,16 @@ def create_for_client(data: TicketForClient, background_tasks: BackgroundTasks, 
             ticket_id=db_ticket.id, field="assigned_to", old_value=None, new_value=str(assignee.id),
             changed_by=current_user.id,
         ))
-    db.commit()
+        db.commit()
+        if assignment_notice.should_notify(assignee, current_user):
+            assignment_notice.schedule(background_tasks, db_ticket, assignee)
+    else:
+        # Antes de responder, para decirle al cliente quién lo atiende (el técnico creador, excluido)
+        auto_assign.assign_in_request(db, db_ticket, background_tasks)
     db.refresh(db_ticket)
-    if assignee is not None and assignment_notice.should_notify(assignee, current_user):
-        assignment_notice.schedule(background_tasks, db_ticket, assignee)
     after_create(background_tasks, db_ticket.id)
-    return TicketForClientRead(ticket_id=db_ticket.id, assigned_name=person_name(assignee) if assignee else None)
+    assigned = db_ticket.assigned_user
+    return TicketForClientRead(ticket_id=db_ticket.id, assigned_name=person_name(assigned) if assigned else None)
 
 
 @router.get("/tickets", response_model=list[TicketRead])
