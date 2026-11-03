@@ -1,9 +1,10 @@
 """scripts.demo_data: cargar y limpiar no dejan nada DEMO y no tocan los datos reales."""
 import os
+from datetime import timedelta
 
 from sqlalchemy import func
 
-from app import attachments, audit, config, graph, mailer, models
+from app import attachments, audit, config, graph, mailer, models, registrations
 from app.alerts import due_state
 from app.database import SessionLocal, engine
 from scripts import demo_data
@@ -41,11 +42,11 @@ def test_load_creates_the_scenarios(client, sent):
         users = _demo_users(db)
         assert all(u.name.startswith("[DEMO] ") for u in users)
         roles = sorted(u.role for u in users)
-        assert roles == ["coordinator"] + ["requester"] * 4 + ["technician"] * 3
+        assert roles == ["coordinator"] + ["requester"] * 5 + ["technician"] * 3
         demo_ids = {u.id for u in users}
 
         tickets = _demo_tickets(db)
-        assert len(tickets) == 8
+        assert len(tickets) == 10
         ticket_ids = {t.id for t in tickets}
         # Agrupación: una fusión del mismo cliente y dos tickets ligados de clientes distintos
         merges = db.query(models.TicketMerge).filter(models.TicketMerge.target_ticket_id.in_(ticket_ids)).all()
@@ -78,6 +79,18 @@ def test_load_creates_the_scenarios(client, sent):
             models.AccountReport.reporter_id == agent.id, models.AccountReport.target_user_id.in_(demo_ids)
         ).all()
         assert [r.reason for r in reports] == ["foreign_id"]
+
+        # A nombre de un cliente: uno por teléfono (técnico) y uno por correo (coordinador)
+        rows = db.query(models.TicketRegistration).filter(models.TicketRegistration.ticket_id.in_(ticket_ids)).all()
+        by_user = {u.id: u for u in users}
+        assert sorted((by_user[r.registered_by].role, r.channel, r.identity_check) for r in rows) == [
+            ("coordinator", "email", None), ("technician", "phone", "email")]
+        for row in rows:
+            history = db.query(models.History).filter_by(ticket_id=row.ticket_id).order_by(models.History.id).first()
+            assert (history.field, history.changed_by) == ("created_on_behalf", row.registered_by)
+        # Dora: verificación por cédula bloqueada (5 fallos recientes)
+        dora = next(u for u in users if u.email.startswith(demo_data.DORA))
+        assert registrations.recent_failures(db, dora) == registrations.MAX_FAILURES
 
         # Vacaciones de uno de los técnicos
         assert db.query(models.AvailabilityPeriod).filter(
@@ -114,7 +127,7 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
     db = SessionLocal()
     try:
         before_users, before_tickets = _real_snapshot(db)
-        assert len(_demo_users(db)) == 8 and len(_demo_tickets(db)) == 8
+        assert len(_demo_users(db)) == 9 and len(_demo_tickets(db)) == 10
 
         # Uso de la página mezclado con datos reales: ticket real asignado a un técnico DEMO,
         # cambio de un admin real sobre una cuenta DEMO y un adjunto en un ticket DEMO
@@ -195,7 +208,7 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "13 de 13 correctos (2 omitidos)" in out
+    assert "19 de 19 correctos (2 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
     assert out.count("OMITIDO") == 2
@@ -221,7 +234,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "11 de 13 correctos" in out
+    assert out.count("| FALLA") == 2 and "17 de 19 correctos" in out
     demo_data.run("limpiar")
 
 
@@ -242,3 +255,32 @@ def test_verify_without_demo_data(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     assert "Ejecute primero" in capsys.readouterr().out
+
+
+def test_verify_skips_expired_block_without_changing_anything(client, capsys):
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        ids = demo_data._scenario_ids(db)
+        dora = ids["users"][demo_data.DORA]
+        # Pasaron más de 15 minutos desde "cargar": el bloqueo ya venció
+        rows = db.query(models.AccountChange).filter(models.AccountChange.target_user_id == dora).all()
+        for row in rows:
+            row.created_at -= registrations.FAILURE_WINDOW + timedelta(minutes=1)
+        db.commit()
+        before = db.query(models.AccountChange).filter(models.AccountChange.target_user_id == dora).count()
+    finally:
+        db.close()
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 0
+    out = capsys.readouterr().out
+    assert "18 de 18 correctos (3 omitidos)" in out
+    assert "el bloqueo venció" in out
+    db = SessionLocal()
+    try:
+        # Ni un fallo nuevo ni un ticket nuevo a nombre de Dora
+        assert db.query(models.AccountChange).filter(models.AccountChange.target_user_id == dora).count() == before
+        assert db.query(models.Ticket).filter(models.Ticket.created_by == dora).count() == 0
+    finally:
+        db.close()
+    demo_data.run("limpiar")

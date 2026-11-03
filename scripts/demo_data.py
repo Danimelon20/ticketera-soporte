@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 from sqlalchemy import delete, func, select, update
 
-from app import config, grouping, models, suspicion
+from app import audit, config, grouping, models, registrations, suspicion
 from app.business_hours import add_business_hours, business_hours_between
 from app.database import SessionLocal
 from app.main import init_db
@@ -61,6 +61,10 @@ OVERDUE = "No abre el sistema de planillas"
 OVERDUE_WITH_CAUSE = "Necesito acceso a la carpeta de Finanzas"
 DRAFT_ASSIGNED = "El monitor parpadea"
 DRAFT_UNASSIGNED = "El teclado no responde"
+# Tickets creados por el personal a nombre de un cliente, y un cliente con la verificación por cédula bloqueada
+DORA = "dora.cliente"
+ON_BEHALF_PHONE = "No puedo imprimir desde la laptop"
+ON_BEHALF_EMAIL = "Necesito instalar el antivirus"
 # Avisos de la campana que ya corresponden a cada estado (como los dejaría due_notices.sync)
 NOTICE_KINDS = {"due_soon": ("due_50", "due_80"), "overdue": ("due_50", "due_80", "overdue", "report")}
 
@@ -229,7 +233,8 @@ class Builder:
         self.priorities = {p.level: p.id for p in db.query(models.Priority)}
 
     def ticket(self, owner, title, description, *, category="Software", level=2, created_at=None,
-               assigned=None, due_at=None, summary=None) -> models.Ticket:
+               assigned=None, due_at=None, summary=None, registered_by=None, channel=None,
+               identity_check=None) -> models.Ticket:
         db = self.db
         created_at = created_at or self.now - timedelta(hours=1)
         ticket = models.Ticket(
@@ -243,6 +248,13 @@ class Builder:
         db.add(ticket)
         db.flush()
         db.add(models.TicketFollower(ticket_id=ticket.id, user_id=owner.id))
+        if registered_by:
+            # Creado por el personal a nombre del cliente (como POST /api/tickets/for-client), antes de asignarse
+            db.add(models.TicketRegistration(ticket_id=ticket.id, registered_by=registered_by.id, channel=channel,
+                                             identity_check=identity_check, created_at=created_at))
+            db.add(models.History(ticket_id=ticket.id, field="created_on_behalf", old_value=None,
+                                  new_value=channel, changed_by=registered_by.id, changed_at=created_at))
+            db.flush()
         db.add(models.TicketAIAnalysis(
             ticket_id=ticket.id, status="done", ai_level=level, summary=summary or title[:300],
             due_at=due_at, model="demo", analyzed_at=created_at, created_at=created_at,
@@ -301,10 +313,11 @@ def load(db) -> list[dict]:
     coordinator = _user(db, COORDINATOR, "Coordinadora Demo", "coordinator")
 
     # Clientes con perfil completo y uno sin cédula que intenta usar la de otro
-    ids = _free_id_numbers(db, 3)
+    ids = _free_id_numbers(db, 4)
     ana = _user(db, ANA, "Ana Cliente Uno", "requester", "80000001", ids[0])
     beto = _user(db, BETO, "Beto Cliente Dos", "requester", "80000002", ids[1])
     carla = _user(db, CARLA, "Carla Cliente Tres", "requester", "80000003", ids[2])
+    dora = _user(db, DORA, "Dora Cliente Bloqueada", "requester", "80000005", ids[3])
     impostor = _user(db, IMPOSTOR, "Cliente Suplantador", "requester", "80000004")
 
     # Agrupación A: el mismo cliente con el mismo problema en otras palabras (se fusiona)
@@ -349,6 +362,17 @@ def load(db) -> list[dict]:
     b.draft(carla, DRAFT_ASSIGNED, "Buenas, el monitor parpadea cada rato y se apaga.", assigned_to=morning)
     b.draft(beto, DRAFT_UNASSIGNED, "Algunas teclas no escriben desde ayer.")
 
+    # A nombre de un cliente: el técnico de la tarde registró una llamada de Beto (se le asignó a la técnica de
+    # la mañana: él no lo ve) y la coordinadora un correo de Carla (pendiente de asignación)
+    b.ticket(beto, ON_BEHALF_PHONE, "Llamó: la laptop no encuentra la impresora.", category="Hardware",
+             created_at=now - timedelta(minutes=40), assigned=morning,
+             registered_by=evening, channel="phone", identity_check="email")
+    b.ticket(carla, ON_BEHALF_EMAIL, "Escribió pidiendo el antivirus en su equipo nuevo.",
+             created_at=now - timedelta(minutes=20), registered_by=coordinator, channel="email")
+    # Dora: 5 fallos recientes con los últimos 4 de la cédula. El bloqueo dura 15 minutos desde "cargar"
+    for _ in range(registrations.MAX_FAILURES):
+        audit.record(db, evening.id, registrations.FAILED_ACTION, target=dora, new="últimos 4 de la cédula")
+
     # Suplantación: intenta usar la cédula de Ana (queda el reporte automático del Agente virtual)
     suspicion.id_number_conflict(db, impostor, ana.id_number, "profile", actor_id=impostor.id)
     db.commit()
@@ -357,7 +381,8 @@ def load(db) -> list[dict]:
         {"rol": "Técnico", "correo": morning.email,
          "probar": "Turno L-V 07-15. Tiene el ticket por vencer y el borrador \"El monitor parpadea\"."},
         {"rol": "Técnico", "correo": evening.email,
-         "probar": "Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa."},
+         "probar": "Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa. Creó el de Beto por "
+                   "teléfono (no lo ve: se asignó a la técnica de la mañana)."},
         {"rol": "Técnico", "correo": away.email,
          "probar": "De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
@@ -365,8 +390,12 @@ def load(db) -> list[dict]:
                    % (mail_2.id, mail_1.id, net[0].id)},
         {"rol": "Cliente", "correo": ana.email,
          "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
-        {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y borrador sin revisor."},
-        {"rol": "Cliente", "correo": carla.email, "probar": "Ticket de red ligado y borrador con revisor."},
+        {"rol": "Cliente", "correo": beto.email,
+         "probar": "Ticket de red principal, borrador sin revisor y un ticket registrado por teléfono."},
+        {"rol": "Cliente", "correo": carla.email,
+         "probar": "Ticket de red ligado, borrador con revisor y un ticket registrado por correo."},
+        {"rol": "Cliente", "correo": dora.email,
+         "probar": "Verificación por cédula bloqueada 15 minutos: al crearle un ticket por teléfono, use el correo."},
         {"rol": "Cliente", "correo": impostor.email,
          "probar": "Intentó usar la cédula de Ana: el admin ve el reporte del Agente virtual."},
     ]
@@ -446,10 +475,17 @@ def _scenario_ids(db) -> dict | None:
         "due_soon": ticket(DUE_SOON), "overdue": ticket(OVERDUE), "overdue_cause": ticket(OVERDUE_WITH_CAUSE),
         "draft_assigned": drafts.get(f"{DEMO_TAG} {DRAFT_ASSIGNED}"),
         "draft_unassigned": drafts.get(f"{DEMO_TAG} {DRAFT_UNASSIGNED}"),
+        "on_behalf_phone": ticket(ON_BEHALF_PHONE), "on_behalf_email": ticket(ON_BEHALF_EMAIL),
     }
     needed = [found[k] for k in found if k not in ("users", "network")] + found["network"]
-    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR)]
-    return found if all(needed) else None
+    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, BETO, CARLA, DORA, IMPOSTOR)]
+    if not all(needed):
+        return None
+    # Solo para comprobar el bloqueo con los dígitos correctos (nunca se muestran)
+    dora = db.get(models.User, users[DORA])
+    found["dora_email"], found["dora_last4"] = dora.email, (dora.id_number or "")[-4:]
+    found["dora_failures"] = registrations.recent_failures(db, dora)
+    return found
 
 
 def _fingerprint(db) -> tuple:
@@ -607,6 +643,62 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
             f"{open_reports} reporte(s) abierto(s), " + ("Reportada" if reported else "sin etiqueta"))
 
     add("Suplantación", "Coordinador", "reporte abierto y sin la etiqueta \"Reportada\"", impostor_report)
+
+    # ----- A nombre de un cliente -----
+    by_phone, by_email = ids["on_behalf_phone"], ids["on_behalf_email"]
+
+    def creator_cannot_open():
+        response = api.get(EVENING, f"/api/tickets/{by_phone}")
+        return response.status_code == 403, f"HTTP {response.status_code}"
+
+    add("A nombre de un cliente", "Técnico (tarde)", f"abrir #{by_phone} (lo creó, es de otra técnica): HTTP 403",
+        creator_cannot_open)
+
+    def history(ticket_id, creator, client, channel):
+        response = api.get(COORDINATOR, f"/api/tickets/{ticket_id}")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        data = response.json()
+        names = {p["id"]: p["name"] for p in data["people"]}
+        entry = next((h for h in data["history"] if h["field"] == "created_on_behalf"), None)
+        if entry is None:
+            return False, "sin la línea en el historial"
+        text = (f"Creado por {names.get(entry['changed_by'], '?')} en nombre de "
+                f"{names.get(data['created_by'], '?')} vía {registrations.CHANNEL_LABELS.get(entry['new_value'], '?')}")
+        registration = data.get("registration") or {}
+        ok = (entry["changed_by"] == ids["users"][creator] and data["created_by"] == ids["users"][client]
+              and entry["new_value"] == channel and registration.get("channel") == channel)
+        return ok, text.replace(f"{DEMO_TAG} ", "")
+
+    add("A nombre de un cliente", "Coordinador", f"#{by_phone}: creado por Técnico Tarde en nombre de Beto vía teléfono",
+        lambda: history(by_phone, EVENING, BETO, "phone"))
+    add("A nombre de un cliente", "Coordinador", f"#{by_email}: creado por Coordinadora en nombre de Carla vía correo",
+        lambda: history(by_email, COORDINATOR, CARLA, "email"))
+
+    def lookup(local):
+        exact = api.post(local, "/api/requesters/lookup", {"email": _email(BETO)})
+        partial = api.post(local, "/api/requesters/lookup", {"email": BETO})
+        ok = exact.status_code == 200 and "id" not in exact.json() and partial.status_code == 404
+        return ok, f"exacto: HTTP {exact.status_code}, parcial: HTTP {partial.status_code}"
+
+    add("A nombre de un cliente", "Técnico (tarde)", "correo exacto: HTTP 200; parcial: HTTP 404", lambda: lookup(EVENING))
+    add("A nombre de un cliente", "Coordinador", "correo exacto: HTTP 200; parcial: HTTP 404", lambda: lookup(COORDINATOR))
+
+    expected = "Dora por teléfono con la cédula: HTTP 429 (bloqueada)"
+    if ids["dora_failures"] < registrations.MAX_FAILURES:
+        # Pasaron más de 15 minutos desde "cargar": ya no está bloqueada (se omite: probarlo cambiaría datos)
+        checks.append(Check("A nombre de un cliente", "Técnico (tarde)", expected,
+                            "el bloqueo venció: vuelva a cargar", None))
+    else:
+        def blocked():
+            # Dígitos correctos y una categoría que no existe: si no estuviera bloqueada, se detiene ahí sin crear nada
+            body = {"client_email": ids["dora_email"], "channel": "phone", "identity_check": "id_last4",
+                    "id_last4": ids["dora_last4"], "title": "Verificación", "description": "Verificación",
+                    "category_id": MISSING_CATEGORY_ID, "priority_id": MISSING_CATEGORY_ID}
+            response = api.post(EVENING, "/api/tickets/for-client", body)
+            return response.status_code == 429, f"HTTP {response.status_code}"
+
+        add("A nombre de un cliente", "Técnico (tarde)", expected, blocked)
     checks.append(Check("Suplantación", "Administrador", "el reporte lo abrió el Agente virtual", NO_ADMIN, None))
     return checks
 
