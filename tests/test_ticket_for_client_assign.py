@@ -204,3 +204,73 @@ def test_later_merge_stays_in_history(client, make_user):
     assert history == ["created_on_behalf", "assigned_to", "merged"]
     assert assigned_to == other["id"]
     assert "merged_from" in _ticket(first["ticket_id"])[2]
+
+
+# ----- Correo al cliente -----
+
+def _client_mail(sent, email):
+    return [(subject, body) for to, subject, body in sent if to == email]
+
+
+def _is_follower(ticket_id, user_id):
+    db = SessionLocal()
+    try:
+        return db.query(models.TicketFollower).filter_by(ticket_id=ticket_id, user_id=user_id).first() is not None
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("role", ("technician", "coordinator"))
+def test_client_confirmation_has_number_and_assignee(client, make_user, sent, role):
+    staff = _on_shift(make_user(role, "Quien Registra")) if role == "technician" else make_user(role, "Quien Registra")
+    _on_shift(make_user("technician", "Técnica Asignada"))
+    customer = make_user("requester", "Ana Cliente")
+    data = _create(client, staff, customer, identity_check="id_last4", id_last4=customer["id_number"][-4:])
+    [(subject, body)] = _client_mail(sent, customer["email"])
+    ticket_id = data["ticket_id"]
+    assert subject == f"[Ticket #{ticket_id}] Registramos su solicitud: Sin internet"
+    lines = body.splitlines()
+    assert f"Número: #{ticket_id}" in lines
+    assert "Lo atiende: Técnica Asignada" in lines
+    assert f"Registramos su solicitud por teléfono y creamos el ticket #{ticket_id}." in lines
+    assert "Si usted no hizo esta solicitud, responda este correo." in lines
+    # Nunca teléfono, cédula (ni sus últimos 4) ni cómo se verificó
+    for private in (customer["phone"], customer["id_number"], customer["id_number"][-4:], "cédula", "verific"):
+        assert private not in body
+    assert _is_follower(ticket_id, customer["id"])
+
+
+@pytest.mark.parametrize("role", ("technician", "coordinator"))
+def test_pending_client_gets_second_email_when_assigned(client, make_user, sent, role):
+    staff = make_user(role, "Quien Registra")
+    customer = make_user("requester")
+    data = _create(client, staff, customer, channel="email", identity_check=None)
+    [(_, body)] = _client_mail(sent, customer["email"])
+    assert "Lo atiende: Pendiente de asignación. Le avisaremos por correo cuando se asigne." in body.splitlines()
+
+    technician = _on_shift(make_user("technician", "Técnico de Turno"))
+    assert auto_assign.run_pending(MONDAY_10AM) == 1
+    mails = _client_mail(sent, customer["email"])
+    assert len(mails) == 2
+    subject, body = mails[1]
+    assert subject == f"[Ticket #{data['ticket_id']}] Nueva asignación"
+    assert "El ticket se asignó automáticamente a Técnico de Turno." in body
+    assert _ticket(data["ticket_id"])[0] == technician["id"]
+
+
+def test_client_gets_one_email_when_assigned_at_once(client, make_user, sent):
+    # Asignado en la misma petición: solo la confirmación, no además el aviso a seguidores
+    creator = _on_shift(make_user("technician"))
+    _on_shift(make_user("technician"))
+    customer = make_user("requester")
+    _create(client, creator, customer)
+    assert [subject for subject, _ in _client_mail(sent, customer["email"])] == [
+        f"[Ticket #{_last_ticket(customer)}] Registramos su solicitud: Sin internet"]
+
+
+def _last_ticket(customer):
+    db = SessionLocal()
+    try:
+        return db.query(models.Ticket.id).filter_by(created_by=customer["id"]).order_by(models.Ticket.id.desc()).scalar()
+    finally:
+        db.close()

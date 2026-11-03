@@ -14,7 +14,8 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import audit, config, models
+from . import audit, config, mailer, models
+from .notifications import display_name
 
 STAFF_ROLES = ("technician", "coordinator")
 CHANNELS = ("email", "phone")
@@ -98,6 +99,43 @@ def record_creation(db: Session, ticket: models.Ticket, actor: models.User, chan
         ticket_id=ticket.id, field="created_on_behalf", old_value=None, new_value=channel, changed_by=actor.id,
     ))
     db.flush()
+
+
+def follow_and_confirm(db: Session, background_tasks, ticket: models.Ticket, client: models.User,
+                       channel: str) -> None:
+    """El cliente sigue su ticket (como los que llegan por correo) y recibe la confirmación. Hace commit.
+
+    Va después de la asignación inmediata: si no, el aviso de asignación a los seguidores le llegaría
+    además de esta confirmación. Una asignación posterior (run_pending) sí le llega como seguidor.
+    """
+    if db.query(models.TicketFollower).filter_by(ticket_id=ticket.id, user_id=client.id).first() is None:
+        db.add(models.TicketFollower(ticket_id=ticket.id, user_id=client.id))
+    db.commit()
+    subject, body = confirmation(ticket, client, channel)
+    background_tasks.add_task(mailer.send_email, client.email, subject, body)
+
+
+def confirmation(ticket: models.Ticket, client: models.User, channel: str) -> tuple[str, str]:
+    """Número y quién lo atiende, para el cliente. Nunca teléfono, cédula ni cómo se verificó."""
+    assigned = ticket.assigned_user
+    owner_line = (f"Lo atiende: {assigned.name or 'un técnico'}" if assigned
+                  else "Lo atiende: Pendiente de asignación. Le avisaremos por correo cuando se asigne.")
+    subject = f"[Ticket #{ticket.id}] Registramos su solicitud: {ticket.title}"
+    body = "\n".join([
+        f"Buen día, {display_name(client)}.",
+        "",
+        f"Registramos su solicitud por {CHANNEL_LABELS.get(channel, channel)} y creamos el ticket #{ticket.id}.",
+        "",
+        f"Número: #{ticket.id}",
+        f"Título: {ticket.title}",
+        owner_line,
+        "",
+        "Le avisaremos por este medio cuando haya cambios.",
+        f"Puede ver el ticket en {config.APP_URL}",
+        "",
+        "Si usted no hizo esta solicitud, responda este correo.",
+    ])
+    return subject, body
 
 
 def registration_of(db: Session, ticket_id: int) -> models.TicketRegistration | None:

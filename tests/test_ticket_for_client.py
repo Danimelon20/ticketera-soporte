@@ -389,8 +389,10 @@ def test_coordinator_assigns_manually(client, make_user, sent, monkeypatch):
         ("created_on_behalf", None, "email", coordinator["id"]),
         ("assigned_to", None, str(technician["id"]), coordinator["id"]),
     ]
-    # El técnico recibe su aviso de asignación
-    assert [to for to, _, _ in sent] == [technician["email"]]
+    # El técnico recibe su aviso de asignación y el cliente su confirmación con el nombre
+    assert sorted(to for to, _, _ in sent) == sorted([technician["email"], customer["email"]])
+    [body] = [body for to, _, body in sent if to == customer["email"]]
+    assert "Lo atiende: Técnica Elegida" in body.splitlines()
 
 
 def test_coordinator_assign_unavailable_needs_confirmation(client, make_user, monkeypatch):

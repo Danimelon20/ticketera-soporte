@@ -275,6 +275,7 @@ def create_for_client(data: TicketForClient, background_tasks: BackgroundTasks, 
         # Antes de responder, para decirle al cliente quién lo atiende (el técnico creador, excluido)
         auto_assign.assign_in_request(db, db_ticket, background_tasks)
     db.refresh(db_ticket)
+    registrations.follow_and_confirm(db, background_tasks, db_ticket, owner, data.channel)
     after_create(background_tasks, db_ticket.id)
     assigned = db_ticket.assigned_user
     return TicketForClientRead(ticket_id=db_ticket.id, assigned_name=person_name(assigned) if assigned else None)
