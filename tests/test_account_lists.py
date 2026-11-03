@@ -13,7 +13,6 @@ EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 # Rutas que listan cuentas (o datos de cuentas ajenas)
 ACCOUNT_LISTS = (
     "/api/users",
-    "/api/requesters",
     "/api/directory",
     "/api/account-requests",
     "/api/staff-invitations",
@@ -65,9 +64,10 @@ def test_coordinator_and_admin_still_get_full_list(client, make_user, role):
     row = next(r for r in rows if r["id"] == requester["id"])
     assert row["email"] == requester["email"]
     assert client.get("/api/directory", headers=viewer["headers"]).status_code == 200
-    # Buscar solicitantes sirve para crear un ticket a su nombre: solo el coordinador (el admin no crea tickets)
-    expected = 200 if role == "coordinator" else 403
-    assert client.get("/api/requesters", headers=viewer["headers"]).status_code == expected
+    # Ya no hay búsqueda de solicitantes por coincidencia parcial: solo el correo exacto (POST /api/requesters/lookup)
+    response = client.get("/api/requesters?q=a", headers=viewer["headers"])
+    assert response.status_code in (404, 405)
+    assert requester["email"] not in response.text
 
 
 def test_ticket_brings_names_without_emails(client, make_user, make_ticket):
@@ -118,3 +118,18 @@ def test_technician_never_sees_requester_email_in_drafts(client, make_user):
     coordinator = make_user("coordinator")
     drafts = client.get("/api/drafts", headers=coordinator["headers"]).json()
     assert [d["requester_name"] for d in drafts if d["requester_id"] == requester["id"]] == [requester["email"]]
+
+
+def test_clients_view_unaffected(client, make_user):
+    # Cuentas › Clientes (y "Ver ficha del cliente") no usaba GET /api/requesters: sigue igual.
+    # Su búsqueda parcial queda anotada en docs/pendientes.md
+    coordinator = make_user("coordinator")
+    customer = make_user("requester", "Clara Ficha Intacta")
+    response = client.get("/api/accounts", params={"filter": "clients", "q": "Ficha Intacta"},
+                          headers=coordinator["headers"])
+    assert response.status_code == 200
+    assert customer["id"] in [row["id"] for row in response.json()["items"]]
+    detail = client.get(f"/api/accounts/{customer['id']}", headers=coordinator["headers"])
+    assert detail.status_code == 200
+    assert client.get("/api/accounts", params={"filter": "clients"},
+                      headers=make_user("technician")["headers"]).status_code == 403

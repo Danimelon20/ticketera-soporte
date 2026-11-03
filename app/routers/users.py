@@ -1,9 +1,8 @@
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import audit, availability, identity, models, registrations, suspicion
-from ..schemas import ClientLookup, ClientLookupRead, ClientTicketRead, MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
+from ..schemas import ClientLookup, ClientLookupRead, ClientTicketRead, MeRead, ProfileUpdate, StaffRead, UserRead
 from ..security import get_current_user
 from .auth import me_read
 
@@ -35,22 +34,6 @@ def get_users(db: Session = Depends(get_db), current_user = Depends(get_current_
         statuses = _technician_statuses(db, staff)
         return [StaffRead(id=u.id, name=u.name, role=u.role, availability=statuses.get(u.id)) for u in staff]
     raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
-
-
-@router.get("/requesters", response_model=list[RequesterRead])
-def get_requesters(q: Optional[str] = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Para crear un ticket a nombre de un cliente: solo el coordinador
-    if current_user.role != "coordinator":
-        raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
-    
-    query = db.query(models.User).filter(models.User.role == "requester", models.User.is_active == True)
-    
-    if q:
-        query = query.filter(
-            (models.User.name.ilike(f"%{q}%")) | (models.User.email.ilike(f"%{q}%"))
-        )
-    
-    return query.order_by(models.User.name).limit(20).all()
 
 
 # POST: el correo no queda en la URL ni en el registro de accesos

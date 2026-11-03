@@ -181,14 +181,11 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
     if current_user.role == "admin":
         raise HTTPException(status_code=403, detail="El administrador no crea tickets")
     
+    # A nombre de un cliente solo por /tickets/for-client (correo exacto, canal y verificación). Si el campo
+    # se ignorara, el ticket quedaría a nombre de quien lo envía
     if ticket.requester_id is not None:
-        if current_user.role not in OPERATION_ROLES:
-            raise HTTPException(status_code=403, detail="No puedes crear tickets a nombre de otra persona")
-        owner = db.query(models.User).filter(models.User.id == ticket.requester_id).first()
-        if not owner or owner.role != "requester":
-            raise HTTPException(status_code=400, detail="El solicitante no existe")
-    else:
-        owner = current_user
+        raise HTTPException(status_code=400, detail="Use el formulario para crear a nombre de un cliente")
+    owner = current_user
 
     check_profile(owner, current_user)
     db_ticket = new_ticket(db, ticket, owner)

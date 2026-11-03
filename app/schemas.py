@@ -422,16 +422,6 @@ class ClientLookupRead(BaseModel):
     open_tickets: Optional[list[ClientTicketRead]] = None
 
 
-class RequesterRead(BaseModel):
-    id: int
-    name: str
-    email: str
-    phone: Optional[str] = None
-    id_number: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class PriorityRead(BaseModel):
     id: int
     name: str

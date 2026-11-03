@@ -66,11 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let activityFilter = 'all';
     let currentTicket = null;
 
-    let selectedRequesterId = null;
-    let requesterResults = [];
-    let requesterSearchTimer = null;
-    let requesterSearchSeq = 0;
-
     let authToken = sessionStorage.getItem('ticketeraToken');
     // Arriba para que exista antes del primer showAuthScreen
     let draftsPollTimer = null;
@@ -213,8 +208,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 userAvatarEl.textContent = getInitials(currentUser.name);
             }
             if (openNewTicketBtn) {
-                // Ni el técnico ni el administrador crean tickets
-                openNewTicketBtn.style.display = ['technician', 'admin'].includes(currentUser.role) ? 'none' : 'block';
+                // El administrador no crea tickets; el técnico, solo a nombre de un cliente
+                openNewTicketBtn.style.display = currentUser.role === 'admin' ? 'none' : 'block';
             }
         }
 
@@ -2408,7 +2403,28 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (entry.field === 'unlinked') {
             target.appendChild(document.createTextNode(' separó este ticket de '));
             target.appendChild(makeEl('strong', '', `#${entry.old_value}`));
+        } else if (entry.field === 'created_on_behalf') {
+            // "Creado por Ana en nombre de Beto vía teléfono"
+            target.insertBefore(document.createTextNode('Creado por '), strongWho);
+            target.appendChild(document.createTextNode(' en nombre de '));
+            const client = currentTicket ? userMap[currentTicket.created_by] : null;
+            target.appendChild(makeEl('strong', '', client || 'el cliente'));
+            target.appendChild(document.createTextNode(` vía ${CHANNEL_LABELS[entry.new_value] || entry.new_value || ''}`));
         }
+    }
+
+    // Canal por el que el personal registró el ticket a nombre del cliente
+    const CHANNEL_LABELS = { email: 'correo', phone: 'teléfono' };
+    const IDENTITY_CHECK_LABELS = { email: 'correo registrado', id_last4: 'últimos 4 de la cédula' };
+
+    // Detalle del personal: quién lo registró a nombre del cliente (los tickets anteriores, "Sin registrar")
+    function registrationText(registration) {
+        if (!registration) return 'Sin registrar';
+        const parts = [registration.registered_by_name, `vía ${CHANNEL_LABELS[registration.channel] || registration.channel}`];
+        if (registration.identity_check) {
+            parts.push(`verificó con ${IDENTITY_CHECK_LABELS[registration.identity_check] || registration.identity_check}`);
+        }
+        return parts.join(' · ');
     }
 
     function renderEventsList(ticket, container) {
@@ -2756,11 +2772,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Nombre y cédula salen del perfil; solo el teléfono de contacto se puede cambiar
+            // Nombre y cédula salen del perfil; solo el teléfono de contacto se puede cambiar.
+            // A nombre de un cliente es opcional: vacío, el servidor usa el del perfil del cliente
             const contactPhone = document.getElementById('contactPhone').value.trim();
-            const contactError = validatePhone(contactPhone);
+            const contactError = newTicketMode === 'client' && !contactPhone ? null : validatePhone(contactPhone);
             if (contactError) {
                 showError(contactError);
+                return;
+            }
+            const base = {
+                title,
+                description,
+                category_id: parseInt(categoryId),
+                priority_id: parseInt(priorityId),
+                contact_phone: contactPhone,
+            };
+
+            if (newTicketMode === 'client') {
+                const body = forClientBody(base);
+                if (!body) return;
+                const submit = document.getElementById('newTicketSubmit');
+                submit.disabled = true;
+                let result;
+                try {
+                    result = await postForClient(body);
+                } finally {
+                    submit.disabled = false;
+                }
+                if (result) showNewTicketDone(result);
                 return;
             }
 
@@ -2773,14 +2812,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        title,
-                        description,
-                        category_id: parseInt(categoryId),
-                        priority_id: parseInt(priorityId),
-                        contact_phone: contactPhone,
-                        ...(selectedRequesterId !== null ? { requester_id: selectedRequesterId } : {})
-                    })
+                    body: JSON.stringify(base)
                 });
             } catch (err) {
                 return; // apiFetch ya mostró el error; el formulario conserva lo escrito
@@ -4058,6 +4090,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Revisar reportes de cuentas: solo el administrador. Dirigir la operación (equipo, incidentes, clientes): el coordinador
     const REPORT_REVIEW_ROLES = ['admin'];
     const OPERATION_ROLES = ['coordinator'];
+    // Crear tickets a nombre de un cliente (el servidor vuelve a revisar): técnico y coordinador
+    const CLIENT_TICKET_ROLES = ['technician', 'coordinator'];
 
     // "2026-11-03" → "03/11/2026" sin pasar por la zona horaria
     function formatPlainDate(value) {
@@ -5722,15 +5756,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Solicitante (solo coordinator y admin): crear tickets a nombre de otra persona
+    // ----- Nuevo ticket a nombre de un cliente (técnico y coordinador) -----
+    // El cliente se busca solo por su correo exacto: nunca listas ni búsquedas parciales.
+    // "client": a nombre del cliente (POST /tickets/for-client); "self": a nombre propio (coordinador con
+    // "Para mí" y el solicitante en su portal, POST /tickets).
     const requesterGroup = document.getElementById('requesterGroup');
-    const requesterSearch = document.getElementById('requesterSearch');
-    const requesterOptions = document.getElementById('requesterOptions');
+    const clientEmailInput = document.getElementById('clientEmail');
+    const clientFound = document.getElementById('clientFound');
+    const clientNotice = document.getElementById('clientNotice');
     const forMeBtn = document.getElementById('forMeBtn');
-
-    function requesterLabel(r) {
-        return `${r.name} — ${r.email}`;
-    }
+    const newTicketAssignee = document.getElementById('newTicketAssignee');
+    const idLast4Input = document.getElementById('idLast4');
+    let newTicketMode = 'self';
+    let newTicketClient = null;
+    let clientLookupSeq = 0;
 
     function fillContactFields(person) {
         document.getElementById('contactName').value = person.name || '';
@@ -5738,56 +5777,91 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('contactPhone').value = person.phone || '';
     }
 
-    function clearRequesterSelection() {
-        const hadRequester = selectedRequesterId !== null;
-        selectedRequesterId = null;
+    function checkedValue(name) {
+        const input = ticketForm.querySelector(`input[name="${name}"]:checked`);
+        return input ? input.value : null;
+    }
+
+    function showClientNotice(text) {
+        document.getElementById('clientNoticeText').textContent = text;
+        clientNotice.hidden = !text;
+    }
+
+    function clearClient() {
+        clientLookupSeq++;
         newTicketClient = null;
+        clientFound.hidden = true;
+        clientFound.textContent = '';
+        showClientNotice('');
         document.getElementById('newTicketAside').hidden = true;
-        if (hadRequester && currentUser) {
-            fillContactFields(currentUser);
-        }
+    }
+
+    // Canal y método: por teléfono hay que decir cómo se verificó; con la cédula, solo los últimos 4
+    function updateIdentityFields() {
+        const phone = newTicketMode === 'client' && checkedValue('ticketChannel') === 'phone';
+        document.getElementById('identityGroup').hidden = !phone;
+        document.getElementById('idLast4Row').hidden = !(phone && checkedValue('identityCheck') === 'id_last4');
+    }
+
+    function fillNewTicketAssignees() {
+        newTicketAssignee.replaceChildren(staffOption('', 'Automático', true));
+        Object.keys(userMap).forEach(userId => {
+            const role = userRoleMap[userId];
+            if (role !== 'technician' && role !== 'coordinator') return;
+            const availability = userAvailabilityMap[userId];
+            const text = availability && availability !== 'available'
+                ? `${userMap[userId]} · ${AVAILABILITY_LABELS[availability] || availability}` : userMap[userId];
+            newTicketAssignee.appendChild(staffOption(userId, text, false));
+        });
+    }
+
+    function setNewTicketMode(mode) {
+        newTicketMode = mode;
+        const staff = Boolean(currentUser) && CLIENT_TICKET_ROLES.includes(currentUser.role);
+        const coordinator = Boolean(currentUser) && OPERATION_ROLES.includes(currentUser.role);
+        const forClient = mode === 'client';
+        requesterGroup.hidden = !forClient;
+        forMeBtn.hidden = !coordinator;
+        document.getElementById('forMeGroup').hidden = forClient || !coordinator;
+        document.getElementById('channelGroup').hidden = !forClient;
+        document.getElementById('contactRow').hidden = forClient;
+        document.getElementById('assigneeGroup').hidden = !(forClient && coordinator);
+        document.getElementById('autoAssignNote').hidden = !(forClient && staff && !coordinator);
+        // A nombre del cliente el teléfono es opcional (vacío: el del perfil del cliente) y no se precarga
+        const phone = document.getElementById('contactPhone');
+        phone.required = !forClient;
+        phone.value = forClient ? '' : ((currentUser && currentUser.phone) || '');
+        document.getElementById('contactPhoneHint').textContent = forClient
+            ? 'Opcional. Si lo deja vacío, se usa el teléfono del perfil del cliente.'
+            : 'El ticket queda a nombre del perfil; la cédula sale del perfil.';
+        if (!forClient && currentUser) fillContactFields(currentUser);
+        clearClient();
+        if (forClient) clientEmailInput.value = '';
+        updateIdentityFields();
     }
 
     function resetRequesterField() {
-        clearTimeout(requesterSearchTimer);
-        requesterSearchSeq++;
-        requesterResults = [];
-        if (requesterSearch) requesterSearch.value = '';
-        if (requesterOptions) requesterOptions.replaceChildren();
-        clearRequesterSelection();
+        clientEmailInput.value = '';
+        idLast4Input.value = '';
+        clearClient();
     }
 
-    // ----- Nuevo ticket: tickets abiertos del cliente elegido, para no duplicar casos -----
-    let newTicketClient = null;
-    let newTicketOpenSeq = 0;
-
-    async function loadNewTicketOpen(client) {
-        newTicketClient = client;
-        const seq = ++newTicketOpenSeq;
+    // Tickets abiertos del cliente (solo el coordinador los recibe), para no duplicar casos
+    function showNewTicketOpen(client) {
         const aside = document.getElementById('newTicketAside');
         const list = document.getElementById('newTicketOpenList');
-        document.getElementById('newTicketOpenTitle').textContent = `Tickets abiertos de ${client.name}`;
-        aside.hidden = false;
-        showSkeleton(list, { rows: 2 });
-        let data;
-        try {
-            data = await apiFetch(`/queue?view=open&requester_id=${client.id}`, { silent: true });
-        } catch (err) {
-            if (seq !== newTicketOpenSeq) return;
-            list.removeAttribute('aria-busy');
-            list.replaceChildren(errorState(err, () => loadNewTicketOpen(client)));
+        if (!client.open_tickets) {
+            aside.hidden = true;
             return;
         }
-        if (seq !== newTicketOpenSeq) return;
-        list.removeAttribute('aria-busy');
+        document.getElementById('newTicketOpenTitle').textContent = `Tickets abiertos de ${client.name || 'el cliente'}`;
         list.replaceChildren();
-        if (!data.items.length) {
+        if (!client.open_tickets.length) {
             const li = makeEl('li');
             li.appendChild(emptyState({ title: 'No tiene tickets abiertos', text: 'Puede crear el ticket sin riesgo de duplicarlo.' }));
             list.appendChild(li);
-            return;
         }
-        data.items.slice(0, 6).forEach(item => {
+        client.open_tickets.forEach(item => {
             const li = makeEl('li');
             const button = makeEl('button', 'home-row new-ticket-open-row');
             button.type = 'button';
@@ -5797,7 +5871,58 @@ document.addEventListener('DOMContentLoaded', () => {
             li.appendChild(button);
             list.appendChild(li);
         });
+        aside.hidden = false;
     }
+
+    async function lookupClient() {
+        const email = clientEmailInput.value.trim();
+        clearClient();
+        // Mismo aviso para vacío o incompleto: la búsqueda es solo por el correo exacto
+        if (!/^[^@\s]+@[^@\s]+$/.test(email)) {
+            showClientNotice('Escriba el correo completo del cliente.');
+            return;
+        }
+        const seq = ++clientLookupSeq;
+        const button = document.getElementById('clientLookupBtn');
+        button.disabled = true;
+        let client;
+        try {
+            client = await apiFetch('/requesters/lookup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+                silent: true,
+            });
+        } catch (err) {
+            if (seq === clientLookupSeq) showClientNotice(err.message || getErrorMessage(err));
+            return;
+        } finally {
+            button.disabled = false;
+        }
+        if (seq !== clientLookupSeq) return; // cambió el correo mientras buscaba
+        newTicketClient = { ...client, email };
+        clientFound.textContent = `✓ ${client.name || 'Cliente sin nombre'}`;
+        clientFound.hidden = false;
+        if (!client.profile_complete) {
+            showClientNotice('El perfil del cliente está incompleto (nombre, cédula o teléfono). Pídale que lo complete en la página antes de crear el ticket.');
+        }
+        showNewTicketOpen(newTicketClient);
+    }
+
+    document.getElementById('clientLookupBtn').addEventListener('click', lookupClient);
+    clientEmailInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            lookupClient();
+        }
+    });
+    // Otro correo: el cliente encontrado ya no vale
+    clientEmailInput.addEventListener('input', clearClient);
+    ticketForm.addEventListener('change', (e) => {
+        if (e.target.name === 'ticketChannel' || e.target.name === 'identityCheck') updateIdentityFields();
+    });
+    forMeBtn.addEventListener('click', () => setNewTicketMode('self'));
+    document.getElementById('forClientBtn').addEventListener('click', () => setNewTicketMode('client'));
 
     document.getElementById('newTicketOpenList').addEventListener('click', (e) => {
         const row = e.target.closest('[data-ticket-id]');
@@ -5807,11 +5932,98 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('newTicketClientLink').addEventListener('click', () => {
         if (!newTicketClient) return;
         setSideNavActive('accounts');
-        openAccounts('clients', newTicketClient.name);
+        openAccounts('clients', newTicketClient.name || '');
+    });
+
+    // Cuerpo para /tickets/for-client; null (y el aviso en pantalla) si falta algo
+    function forClientBody(base) {
+        if (!newTicketClient) {
+            showClientNotice('Busque al cliente por su correo antes de crear el ticket.');
+            clientEmailInput.focus();
+            return null;
+        }
+        const channel = checkedValue('ticketChannel') || 'email';
+        const body = { ...base, client_email: newTicketClient.email, channel };
+        if (channel === 'phone') {
+            const method = checkedValue('identityCheck');
+            if (!method) {
+                showError('Indique cómo verificó la identidad del cliente');
+                return null;
+            }
+            body.identity_check = method;
+            if (method === 'id_last4') {
+                const digits = idLast4Input.value.trim();
+                if (!/^\d{4}$/.test(digits)) {
+                    showError('Escriba los últimos 4 dígitos de la cédula');
+                    idLast4Input.focus();
+                    return null;
+                }
+                body.id_last4 = digits;
+            }
+        }
+        if (newTicketAssignee.value && !document.getElementById('assigneeGroup').hidden) {
+            body.assigned_to = Number(newTicketAssignee.value);
+        }
+        return body;
+    }
+
+    async function postForClient(body) {
+        const send = (extra) => apiFetch('/tickets/for-client', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...body, ...extra }),
+            silent: true,
+        });
+        try {
+            return await send({});
+        } catch (err) {
+            // Responsable no disponible: el servidor pide confirmación explícita
+            if (err.status === 409 && body.assigned_to && confirm(err.message)) {
+                try {
+                    return await send({ confirm_unavailable: true });
+                } catch (retryErr) {
+                    showError(retryErr.message || 'No se pudo crear el ticket');
+                    return null;
+                }
+            }
+            if (err.status !== 409) showError(err.message || 'No se pudo crear el ticket');
+            return null;
+        }
+    }
+
+    // Confirmación inmediata: número y quién lo atiende, para decírselo al cliente. No queda guardada.
+    function showNewTicketDone(result) {
+        ticketForm.hidden = true;
+        document.getElementById('newTicketAside').hidden = true;
+        document.getElementById('newTicketDoneTitle').textContent = `✓ Ticket #${result.ticket_id} creado`;
+        document.getElementById('newTicketDoneOwner').textContent = result.assigned_name
+            ? `Lo atiende: ${result.assigned_name}` : 'Pendiente de asignación';
+        const open = document.getElementById('newTicketDoneOpen');
+        open.hidden = !OPERATION_ROLES.includes(currentUser.role);
+        open.dataset.ticketId = String(result.ticket_id);
+        const done = document.getElementById('newTicketDone');
+        done.hidden = false;
+        document.getElementById('newTicketDoneOk').focus();
+    }
+
+    function hideNewTicketDone() {
+        document.getElementById('newTicketDone').hidden = true;
+        document.getElementById('newTicketDoneOpen').dataset.ticketId = '';
+        ticketForm.hidden = false;
+    }
+
+    document.getElementById('newTicketDoneOk').addEventListener('click', () => leaveNewTicket());
+    document.getElementById('newTicketDoneOpen').addEventListener('click', (e) => {
+        const ticketId = Number(e.currentTarget.dataset.ticketId);
+        hideNewTicketDone();
+        ticketForm.reset();
+        resetRequesterField();
+        if (ticketId) openTicketById(ticketId);
     });
 
     // Volver o cancelar: a la cola (personal) o a Mis solicitudes (solicitante)
     function leaveNewTicket() {
+        hideNewTicketDone();
         ticketForm.reset();
         resetRequesterField();
         if (isStaffShell()) {
@@ -5825,58 +6037,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('newTicketBack').addEventListener('click', leaveNewTicket);
     document.getElementById('newTicketCancel').addEventListener('click', leaveNewTicket);
 
-    async function searchRequesters(q) {
-        const seq = ++requesterSearchSeq;
-        let results;
-        try {
-            results = await apiFetch(`/requesters?q=${encodeURIComponent(q)}`);
-        } catch (err) {
-            return; // apiFetch ya mostró el error
-        }
-        if (seq !== requesterSearchSeq) return; // llegó una búsqueda más nueva
-        requesterResults = results;
-        requesterOptions.replaceChildren();
-        results.forEach(r => {
-            const option = document.createElement('option');
-            option.value = requesterLabel(r);
-            requesterOptions.appendChild(option);
-        });
-    }
-
-    if (requesterSearch) {
-        requesterSearch.addEventListener('input', () => {
-            const text = requesterSearch.value;
-            const match = requesterResults.find(r => requesterLabel(r) === text);
-            if (match) {
-                clearTimeout(requesterSearchTimer);
-                selectedRequesterId = match.id;
-                fillContactFields(match);
-                loadNewTicketOpen(match);
-                return;
-            }
-            // El texto no coincide con ninguna opción: no se manda requester_id
-            clearRequesterSelection();
-            clearTimeout(requesterSearchTimer);
-            const q = text.trim();
-            if (q.length < 2) {
-                requesterSearchSeq++;
-                requesterResults = [];
-                requesterOptions.replaceChildren();
-                return;
-            }
-            requesterSearchTimer = setTimeout(() => searchRequesters(q), 300);
-        });
-    }
-
-    if (forMeBtn) {
-        forMeBtn.addEventListener('click', () => {
-            resetRequesterField();
-            if (currentUser) {
-                fillContactFields(currentUser);
-            }
-        });
-    }
-
     if (openNewTicket) {
         openNewTicket.addEventListener('click', async () => {
             hideError();
@@ -5885,10 +6045,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ruta propia: Atrás vuelve a la sección de donde vino
             if (isStaffShell()) pushRoute(NEW_TICKET_SECTION.route);
             showView('newTicket');
+            hideNewTicketDone();
             ticketForm.reset();
             resetRequesterField();
-            const canChooseRequester = currentUser && OPERATION_ROLES.includes(currentUser.role);
-            requesterGroup.hidden = !canChooseRequester;
+            const staff = Boolean(currentUser) && CLIENT_TICKET_ROLES.includes(currentUser.role);
+            if (staff && OPERATION_ROLES.includes(currentUser.role)) fillNewTicketAssignees();
             const portal = isRequesterPortal();
             document.getElementById('newTicketTitle').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
             document.getElementById('newTicketCrumb').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
@@ -5897,15 +6058,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('newTicketSubmit').textContent = portal ? 'Enviar solicitud' : 'Crear ticket';
             document.getElementById('newTicketIntro').textContent = portal
                 ? 'Cuéntenos qué pasa. Le avisaremos por correo cada vez que haya novedades.'
-                : 'Para registrar un caso que llegó por teléfono o en persona.';
+                : 'Para registrar un caso que llegó por correo o por teléfono.';
             setDocumentTitle(portal ? 'Nueva solicitud' : 'Nuevo ticket');
-            if (currentUser) {
-                document.getElementById('contactName').value = currentUser.name;
-                document.getElementById('contactEmail').value = currentUser.email;
-                if (currentUser.phone) {
-                    document.getElementById('contactPhone').value = currentUser.phone;
-                }
-            }
+            setNewTicketMode(staff ? 'client' : 'self');
+            if (staff) clientEmailInput.focus();
         });
     }
 
@@ -7304,8 +7460,8 @@ document.addEventListener('DOMContentLoaded', () => {
         queuePageNum = 1;
         [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
-        // El técnico no crea tickets (igual que el botón de la barra superior)
-        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
+        // Técnico y coordinador crean tickets a nombre de un cliente
+        document.getElementById('queueNewTicket').hidden = !canCreateTicket();
         renderSideNav();
         startNavPolling();
     }
@@ -8904,6 +9060,7 @@ document.addEventListener('DOMContentLoaded', () => {
         staffField(fields, 'Vence', staffDueContent(ticket));
         staffField(fields, 'Prioridad', priorityMap[ticket.priority_id] || '');
         staffField(fields, 'Categoría', categoryMap[ticket.category_id] || '');
+        staffField(fields, 'Registro', registrationText(ticket.registration));
         if (ticket.contact_phone) staffField(fields, 'Teléfono', ticket.contact_phone);
         if (ticket.contact_id_number) staffField(fields, 'Cédula', ticket.contact_id_number);
         props.appendChild(fields);
@@ -9882,6 +10039,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ticket.assigned_name) {
             detailContent.appendChild(makeEl('p', 'sd-muted portal-owner', `Le atiende: ${ticket.assigned_name}`));
         }
+        // Registrada por el personal a su nombre (lo mismo que dice el correo de confirmación)
+        const registered = (ticket.history || []).find(entry => entry.field === 'created_on_behalf');
+        if (registered) {
+            const who = userMap[registered.changed_by] || 'el equipo de soporte';
+            const channel = CHANNEL_LABELS[registered.new_value] || registered.new_value || '';
+            detailContent.appendChild(makeEl('p', 'sd-muted portal-registered', `Registrada por ${who} en su nombre vía ${channel}`));
+        }
         const original = makeEl('div', 'portal-original');
         original.appendChild(makeEl('p', 'portal-message-meta', 'Su solicitud'));
         original.appendChild(makeEl('p', 'portal-message-text', ticket.description));
@@ -10471,14 +10635,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const paletteList = document.getElementById('paletteList');
     let paletteItems = [];
     let paletteActive = 0;
-    let paletteClients = [];
-    let paletteClientSeq = 0;
-    let paletteClientTimer = null;
     let paletteReturnFocus = null;
 
-    // Crear a nombre de un cliente y reasignar: el coordinador (el administrador no entra al flujo de tickets)
+    // Crear a nombre de un cliente: técnico y coordinador. Reasignar: el coordinador (el administrador no entra al flujo de tickets)
     function canCreateTicket() {
-        return Boolean(currentUser && OPERATION_ROLES.includes(currentUser.role));
+        return Boolean(currentUser && CLIENT_TICKET_ROLES.includes(currentUser.role));
     }
 
     function canAssign() {
@@ -10524,13 +10685,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setSideNavActive(null);
                 setQueueView('all', `Búsqueda: ${text}`, text);
             } }];
-            // Clientes: solo nombre, sin correo (lo pueden ver coordinador y admin)
-            paletteClients.forEach(client => search.push({
-                label: client.name || 'Sin nombre', hint: 'Cliente', run: () => {
-                    setSideNavActive('accounts');
-                    openAccounts('clients', client.name || '');
-                },
-            }));
+            // Sin clientes: nunca se listan ni se buscan por coincidencia parcial (Ley 8968)
             groups.push({ title: 'Buscar', items: search });
         }
         return groups;
@@ -10577,25 +10732,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!paletteItems.length) paletteInput.removeAttribute('aria-activedescendant');
     }
 
-    async function searchPaletteClients(text) {
-        const seq = ++paletteClientSeq;
-        let clients = [];
-        try {
-            clients = await apiFetch(`/requesters?q=${encodeURIComponent(text)}`, { silent: true });
-        } catch (err) {
-            return;
-        }
-        if (seq !== paletteClientSeq || !paletteDialog.open) return;
-        paletteClients = clients.slice(0, 5);
-        renderPalette();
-    }
-
     function openPalette() {
         if (!isStaffShell() || paletteDialog.open) return;
         closeSideNav();
         paletteReturnFocus = document.activeElement;
         paletteInput.value = '';
-        paletteClients = [];
         paletteActive = 0;
         renderPalette();
         paletteDialog.showModal();
@@ -10618,13 +10759,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     paletteInput.addEventListener('input', () => {
         paletteActive = 0;
-        paletteClients = [];
         renderPalette();
-        clearTimeout(paletteClientTimer);
-        const text = paletteInput.value.trim();
-        if (OPERATION_ROLES.includes(currentUser.role) && text.length >= 2 && !/^#?\s*\d+$/.test(text)) {
-            paletteClientTimer = setTimeout(() => searchPaletteClients(text), 300);
-        }
     });
 
     paletteInput.addEventListener('keydown', (e) => {
@@ -10651,8 +10786,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === paletteDialog) closePalette();
     });
     paletteDialog.addEventListener('close', () => {
-        clearTimeout(paletteClientTimer);
-        paletteClientSeq++;
         if (paletteReturnFocus && document.contains(paletteReturnFocus)) paletteReturnFocus.focus();
         paletteReturnFocus = null;
     });

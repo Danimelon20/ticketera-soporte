@@ -58,7 +58,7 @@ def _category_id(name):
 
 
 def _create(client, actor, title="No abre el sistema", description="El sistema de planillas no abre.",
-            category="Software", requester_id=None):
+            category="Software", client_email=None):
     payload = {
         "title": title,
         "description": description,
@@ -67,11 +67,15 @@ def _create(client, actor, title="No abre el sistema", description="El sistema d
         "contact_phone": "8888-1234",
         "contact_id_number": "1-0234-0567",
     }
-    if requester_id is not None:
-        payload["requester_id"] = requester_id
-    response = client.post("/api/tickets", json=payload, headers=actor["headers"])
+    if client_email is None:
+        response = client.post("/api/tickets", json=payload, headers=actor["headers"])
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+    # A nombre de un cliente: por su correo exacto
+    payload.update(client_email=client_email, channel="email")
+    response = client.post("/api/tickets/for-client", json=payload, headers=actor["headers"])
     assert response.status_code == 200, response.text
-    return response.json()["id"]
+    return response.json()["ticket_id"]
 
 
 def _row(ticket_id):
@@ -109,7 +113,7 @@ def test_web_ticket_gets_analysis(client, make_user, sent, llm):
 def test_coordinator_ticket_for_requester_gets_analysis(client, make_user, sent, llm):
     requester = make_user("requester")
     coordinator = make_user("coordinator")
-    ticket_id = _create(client, coordinator, requester_id=requester["id"])
+    ticket_id = _create(client, coordinator, client_email=requester["email"])
     assert _row(ticket_id).status == "done"
 
 

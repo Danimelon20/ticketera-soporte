@@ -37,7 +37,8 @@ def test_incomplete_profile_cannot_create_ticket(client, make_user):
 def test_coordinator_cannot_create_ticket_for_incomplete_profile(client, make_user):
     coordinator = make_user("coordinator")
     requester = make_user("requester", profile=False)
-    response = client.post("/api/tickets", json=_ticket(requester_id=requester["id"]), headers=coordinator["headers"])
+    response = client.post("/api/tickets/for-client", json=_ticket(client_email=requester["email"], channel="email"),
+                           headers=coordinator["headers"])
     assert response.status_code == 400
     assert response.json()["detail"].startswith("El perfil del solicitante está incompleto")
 
@@ -61,9 +62,10 @@ def test_complete_profile_then_ticket_uses_profile(client, make_user):
 def test_coordinator_ticket_uses_requester_profile(client, make_user):
     coordinator = make_user("coordinator")
     requester = make_user("requester", "Laura Mora Vargas")
-    response = client.post("/api/tickets", json=_ticket(requester_id=requester["id"]), headers=coordinator["headers"])
+    response = client.post("/api/tickets/for-client", json=_ticket(client_email=requester["email"], channel="email"),
+                           headers=coordinator["headers"])
     assert response.status_code == 200, response.text
-    detail = client.get(f"/api/tickets/{response.json()['id']}", headers=coordinator["headers"]).json()
+    detail = client.get(f"/api/tickets/{response.json()['ticket_id']}", headers=coordinator["headers"]).json()
     assert detail["created_by"] == requester["id"]
     assert detail["contact_id_number"] == requester["id_number"]
     assert client.get("/api/auth/me", headers=requester["headers"]).json()["identity_locked"] is True

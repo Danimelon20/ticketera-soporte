@@ -21,6 +21,11 @@ Lo que quedó fuera de las fases ya entregadas, con lo que haría falta para cad
 - **Un solo reporte automático abierto por cuenta**: si llega otro motivo, se anota como "También: …" en el mismo
   reporte. Para tener reportes separados por motivo haría falta cambiar el índice de la tabla (requiere borrar la
   base o migrarla).
+- **Búsqueda parcial de clientes en Cuentas › Clientes**: crear tickets a nombre de un cliente ya solo busca por el
+  correo exacto (Ley 8968), pero Cuentas › Clientes (`GET /api/accounts?filter=clients&q=`) sigue listando a
+  todos los clientes y buscando por parte del nombre o del correo, para coordinador y administrador. "Ver ficha
+  del cliente" abre esa pantalla buscando por nombre. Haría falta decidir qué necesita ver cada rol (por ejemplo,
+  solo búsqueda por correo exacto o por número de ticket) y ajustar la pantalla y sus pruebas.
 
 ## Instalación y servidor
 

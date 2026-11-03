@@ -1,3 +1,6 @@
+import pytest
+
+
 def _ticket_payload(**extra):
     payload = {
         "title": "Ticket de contacto",
@@ -67,37 +70,26 @@ def test_auth_me_returns_phone_and_id_number(client, make_user):
     assert "id_number" in data
 
 
-def test_coordinator_creates_ticket_with_requester_id(client, make_user):
-    coordinator = make_user("coordinator", "Coordinator User")
+@pytest.mark.parametrize("role", ("coordinator", "requester"))
+def test_requester_id_is_rejected(client, make_user, role):
+    # A nombre de otra persona solo por /api/tickets/for-client: el campo no se ignora (crearía a nombre propio)
+    actor = make_user(role, "Quien Crea")
     requester = make_user("requester", "Requester User")
-    
     payload = {
-        "title": "Ticket por coordinador",
-        "description": "Creado por coordinador",
+        "title": "Ticket con requester_id",
+        "description": "Camino viejo",
         "category_id": 1,
         "priority_id": 1,
         "contact_phone": "8888-1234",
         "requester_id": requester["id"],
     }
-    response = client.post("/api/tickets", json=payload, headers=coordinator["headers"])
-    assert response.status_code == 200
-    ticket = response.json()
-    assert ticket["created_by"] == requester["id"]
-
-
-def test_requester_cannot_create_ticket_with_requester_id(client, make_user):
-    requester = make_user("requester", "Requester User")
-    
-    payload = {
-        "title": "Ticket por solicitante",
-        "description": "No debería permitir",
-        "category_id": 1,
-        "priority_id": 1,
-        "contact_phone": "8888-1234",
-        "requester_id": requester["id"],
-    }
-    response = client.post("/api/tickets", json=payload, headers=requester["headers"])
-    assert response.status_code == 403
+    response = client.post("/api/tickets", json=payload, headers=actor["headers"])
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Use el formulario para crear a nombre de un cliente"
+    # No se creó ni a nombre del cliente ni a nombre de quien lo envió
+    for user in {actor["id"]: actor, requester["id"]: requester}.values():
+        mine = client.get("/api/tickets", headers=user["headers"]).json()
+        assert "Ticket con requester_id" not in [t["title"] for t in mine if t["created_by"] == user["id"]]
 
 
 def test_ticket_detail_shows_contact_for_creator(client, make_user, make_ticket):
@@ -176,24 +168,13 @@ def test_list_tickets_no_contact_fields(client, make_user, make_ticket):
     assert "contact_id_number" not in ticket_data
 
 
-def test_get_requesters_coordinator(client, make_user):
-    coordinator = make_user("coordinator", "Coord User")
-    requester1 = make_user("requester", "Daniel")
-    requester2 = make_user("requester", "Another User")
-    
-    response = client.get("/api/requesters?q=dan", headers=coordinator["headers"])
-    assert response.status_code == 200
-    requesters = response.json()
-    names = [r["name"] for r in requesters]
-    assert "Daniel" in names
-
-
-def test_get_requesters_technician_forbidden(client, make_user):
-    technician = make_user("technician", "Tech User")
-    
-    response = client.get("/api/requesters?q=dan", headers=technician["headers"])
-    assert response.status_code == 403
-    assert response.json()["detail"] == "No tienes permiso para ver esta información"
+@pytest.mark.parametrize("role", ("coordinator", "technician"))
+def test_requesters_partial_search_is_gone(client, make_user, role):
+    viewer = make_user(role)
+    make_user("requester", "Daniel")
+    response = client.get("/api/requesters?q=dan", headers=viewer["headers"])
+    assert response.status_code in (404, 405)
+    assert "Daniel" not in response.text
 
 def _contact_payload(phone="8888-1234", id_number="1-0234-0567"):
     return _profile(phone=phone, id_number=id_number)

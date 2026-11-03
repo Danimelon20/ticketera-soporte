@@ -504,16 +504,38 @@
                         <h1 id="newTicketTitle" class="new-ticket-title">Nuevo ticket</h1>
                         <p id="newTicketIntro" class="new-ticket-intro">Para registrar un caso que llegó por teléfono o en persona.</p>
                     </div>
+                    <!-- Técnico y coordinador: el cliente se busca solo por su correo exacto (nunca listas) -->
                     <div id="requesterGroup" class="ui-field requester-group" hidden>
-                        <label for="requesterSearch">Cliente</label>
+                        <label for="clientEmail">Correo del cliente</label>
                         <div class="requester-row">
-                            <input type="text" id="requesterSearch" class="ui-input" list="requesterOptions" autocomplete="off" placeholder="Buscar por nombre o correo" aria-describedby="requesterHint">
-                            <button type="button" id="forMeBtn" class="ui-btn ui-btn-secondary">Para mí</button>
+                            <input type="email" id="clientEmail" class="ui-input" autocomplete="off" maxlength="150" placeholder="cliente@dominio.com" aria-describedby="clientEmailHint">
+                            <button type="button" id="clientLookupBtn" class="ui-btn ui-btn-secondary">Buscar</button>
+                            <button type="button" id="forMeBtn" class="ui-btn ui-btn-secondary" hidden>Para mí</button>
                         </div>
-                        <span id="requesterHint" class="ui-help">Escriba al menos 2 letras y elija de la lista. Sin cliente, el ticket queda a su nombre.</span>
-                        <datalist id="requesterOptions"></datalist>
+                        <span id="clientEmailHint" class="ui-help">Escriba el correo completo con el que se registró.</span>
+                        <p id="clientFound" class="client-found" role="status" hidden></p>
+                        <div id="clientNotice" class="ui-notice is-warn" role="alert" hidden><p id="clientNoticeText"></p></div>
                     </div>
-                    <div class="new-ticket-row">
+                    <div id="forMeGroup" class="ui-notice for-me-note" hidden>
+                        <p>El ticket queda a su nombre.</p>
+                        <button type="button" id="forClientBtn" class="link-btn">Crear a nombre de un cliente</button>
+                    </div>
+                    <fieldset id="channelGroup" class="new-ticket-choice" hidden>
+                        <legend>Canal</legend>
+                        <label><input type="radio" name="ticketChannel" value="email" checked> Correo</label>
+                        <label><input type="radio" name="ticketChannel" value="phone"> Teléfono</label>
+                    </fieldset>
+                    <fieldset id="identityGroup" class="new-ticket-choice" hidden>
+                        <legend>¿Cómo verificó la identidad?</legend>
+                        <label><input type="radio" name="identityCheck" value="email"> Me dictó el correo registrado</label>
+                        <label><input type="radio" name="identityCheck" value="id_last4"> Últimos 4 dígitos de la cédula</label>
+                        <div id="idLast4Row" class="id-last4-row" hidden>
+                            <span class="ui-help">Cédula: •••• ••••</span>
+                            <label for="idLast4">Dígitos que dictó</label>
+                            <input type="text" id="idLast4" class="ui-input id-last4" inputmode="numeric" maxlength="4" autocomplete="off">
+                        </div>
+                    </fieldset>
+                    <div id="contactRow" class="new-ticket-row">
                         <div class="ui-field">
                             <label for="contactName">Nombre</label>
                             <input type="text" id="contactName" name="contactName" class="ui-input" autocomplete="name" readonly>
@@ -546,11 +568,26 @@
                             <select id="priority" name="priority" class="ui-input"></select>
                         </div>
                     </div>
+                    <div id="assigneeGroup" class="ui-field" hidden>
+                        <label for="newTicketAssignee">Responsable</label>
+                        <select id="newTicketAssignee" class="ui-input"><option value="">Automático</option></select>
+                    </div>
+                    <p id="autoAssignNote" class="ui-help" hidden>El ticket se asigna automáticamente.</p>
                     <div class="new-ticket-actions">
                         <button type="button" id="newTicketCancel" class="ui-btn ui-btn-secondary">Cancelar</button>
                         <button type="submit" id="newTicketSubmit" class="ui-btn ui-btn-primary">Crear ticket</button>
                     </div>
                 </form>
+                <!-- Confirmación inmediata para decírsela al cliente: no se guarda en ninguna vista -->
+                <section id="newTicketDone" class="ui-card new-ticket-done" role="status" aria-live="polite" hidden>
+                    <h2 id="newTicketDoneTitle" class="new-ticket-done-title"></h2>
+                    <p id="newTicketDoneOwner" class="new-ticket-done-owner"></p>
+                    <p class="ui-help">Se envió la confirmación al correo del cliente.</p>
+                    <div class="new-ticket-actions">
+                        <button type="button" id="newTicketDoneOpen" class="ui-btn ui-btn-secondary" hidden>Abrir ticket</button>
+                        <button type="button" id="newTicketDoneOk" class="ui-btn ui-btn-primary">Listo</button>
+                    </div>
+                </section>
                 <aside id="newTicketAside" class="new-ticket-aside" hidden>
                     <section class="ui-card new-ticket-open" aria-labelledby="newTicketOpenTitle">
                         <h2 id="newTicketOpenTitle" class="ui-kicker new-ticket-open-title">Tickets abiertos</h2>

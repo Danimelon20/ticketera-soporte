@@ -1062,6 +1062,36 @@ body:not(.staff-shell) .new-ticket-layout { grid-template-columns: minmax(0, 720
 
 .new-ticket-client-link { align-self: flex-start; margin: 0; padding: 0 4px; font-size: var(--fs-sm); }
 
+/* A nombre de un cliente: búsqueda por correo exacto, canal, verificación y confirmación inmediata */
+.new-ticket-form[hidden], .new-ticket-done[hidden], .new-ticket-choice[hidden],
+.new-ticket-form .ui-notice[hidden], .new-ticket-form .new-ticket-row[hidden] { display: none; }
+
+.client-found { margin: 0; font-weight: 600; color: var(--ok); }
+
+.client-found[hidden] { display: none; }
+
+#clientNoticeText { overflow-wrap: anywhere; }
+
+.for-me-note .link-btn { flex: none; }
+
+.new-ticket-choice { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; border: none; }
+
+.new-ticket-choice legend { width: 100%; margin-bottom: 6px; padding: 0; font-weight: 600; }
+
+.new-ticket-choice label { display: flex; align-items: center; gap: 8px; font-weight: 400; cursor: pointer; }
+
+.id-last4-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; width: 100%; }
+
+.id-last4-row[hidden] { display: none; }
+
+.id-last4-row .ui-input.id-last4 { width: 6em; letter-spacing: 0.2em; }
+
+.new-ticket-done { padding: 22px 24px; display: flex; flex-direction: column; gap: 10px; border-radius: var(--r-xl); }
+
+.new-ticket-done-title { margin: 0; font-size: var(--fs-2xl); font-weight: 600; }
+
+.new-ticket-done-owner { margin: 0; font-size: var(--fs-lg); }
+
 @media (max-width: 900px) {
     .new-ticket-layout { grid-template-columns: minmax(0, 1fr); }
 }
@@ -1074,6 +1104,14 @@ body:not(.staff-shell) .new-ticket-layout { grid-template-columns: minmax(0, 720
     .new-ticket-actions { flex-direction: column-reverse; }
 
     .new-ticket-actions .ui-btn { width: 100%; min-height: 44px; }
+
+    .new-ticket-form .requester-row { flex-wrap: wrap; }
+
+    .new-ticket-form .requester-row .ui-input { flex-basis: 100%; }
+
+    .new-ticket-form .requester-row .ui-btn { flex: 1; min-height: 44px; }
+
+    .new-ticket-done { padding: 18px 16px; }
 }
 
 /* ----- Reporte de vencimiento ----- */
