@@ -701,6 +701,39 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
             return response.status_code == 429, f"HTTP {response.status_code}"
 
         add("A nombre de un cliente", "Técnico (tarde)", expected, blocked)
+    # ----- Clientes para el coordinador: solo por correo exacto o desde un ticket -----
+    client_ids = {ids["users"][key] for key in (ANA, BETO, CARLA, DORA, IMPOSTOR)}
+
+    def no_clients(path, **params):
+        response = api.get(COORDINATOR, path, **params)
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        body = response.json()
+        rows = body["items"] if isinstance(body, dict) else body
+        found = sum(1 for row in rows if row["id"] in client_ids)
+        leaked = _email(BETO) in response.text
+        return found == 0 and not leaked, f"{found} cliente(s) de {len(rows)} fila(s)"
+
+    add("Clientes", "Coordinador", "/api/users: sin clientes", lambda: no_clients("/api/users"))
+    add("Clientes", "Coordinador", "/api/directory buscando un cliente: sin clientes",
+        lambda: no_clients("/api/directory", role="requester", q=BETO))
+    add("Clientes", "Coordinador", "/api/accounts buscando un cliente: sin clientes",
+        lambda: no_clients("/api/accounts", filter="clients", q=BETO))
+
+    def client_by_id(key, expected_status):
+        response = api.get(COORDINATOR, f"/api/accounts/{ids['users'][key]}")
+        return response.status_code == expected_status, f"HTTP {response.status_code}"
+
+    add("Clientes", "Coordinador", "ficha por id de un cliente sin tickets: HTTP 404", lambda: client_by_id(IMPOSTOR, 404))
+    add("Clientes", "Coordinador", "ficha por id de un cliente con tickets: HTTP 200", lambda: client_by_id(BETO, 200))
+
+    def account_lookup():
+        exact = api.post(COORDINATOR, "/api/accounts/lookup", {"email": impostor_email})
+        partial = api.post(COORDINATOR, "/api/accounts/lookup", {"email": IMPOSTOR})
+        ok = exact.status_code == 200 and impostor_email not in exact.text and partial.status_code == 404
+        return ok, f"exacto: HTTP {exact.status_code}, parcial: HTTP {partial.status_code}"
+
+    add("Clientes", "Coordinador", "ficha por correo exacto: HTTP 200; parcial: HTTP 404", account_lookup)
     checks.append(Check("Suplantación", "Administrador", "el reporte lo abrió el Agente virtual", NO_ADMIN, None))
     return checks
 

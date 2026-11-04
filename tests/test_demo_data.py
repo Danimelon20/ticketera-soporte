@@ -208,7 +208,7 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "19 de 19 correctos (2 omitidos)" in out
+    assert "25 de 25 correctos (2 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
     assert out.count("OMITIDO") == 2
@@ -234,7 +234,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "17 de 19 correctos" in out
+    assert out.count("| FALLA") == 2 and "23 de 25 correctos" in out
     demo_data.run("limpiar")
 
 
@@ -274,7 +274,7 @@ def test_verify_skips_expired_block_without_changing_anything(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "18 de 18 correctos (3 omitidos)" in out
+    assert "24 de 24 correctos (3 omitidos)" in out
     assert "el bloqueo venció" in out
     db = SessionLocal()
     try:
