@@ -51,6 +51,9 @@ Lo que quedó fuera de las fases ya entregadas, con lo que haría falta para cad
   para que nadie llegue sin pasar por el proxy; (2) una lista de proxies de confianza y tomar de
   `X-Forwarded-For` la primera dirección de la derecha que no esté en esa lista; (3) un segundo límite por esa IP,
   aparte del de cada correo.
+- **Teléfono y cédula del personal en el directorio**: `GET /api/directory` le entrega al coordinador el teléfono
+  y la cédula completos de técnicos, coordinadores y administradores (a los clientes ya no los recibe). Haría
+  falta decidir qué necesita ver este rol y ajustar la ruta, la pantalla Directorio y sus pruebas.
 - **Límites de envío de Microsoft 365**: si se superan, las respuestas y avisos no salen. Haría falta una cola de
   reintentos y un aviso en Estado del sistema.
 - **Administrador DEMO para `verificar`**: dos comprobaciones de `scripts.demo_data verificar` (la cola del admin y

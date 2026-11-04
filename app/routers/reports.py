@@ -122,7 +122,11 @@ def create_report(data: AccountReportCreate, db: Session = Depends(get_db), curr
         db.rollback()
         raise HTTPException(status_code=409, detail=DUPLICATE)
     db.refresh(row)
-    return _read(row)
+    report = _read(row)
+    if current_user.role == "coordinator":
+        # Reportar acepta cualquier id: la respuesta no debe mostrar a clientes que no encontró por correo o ticket
+        return AccountReportRead(**report.model_dump(exclude_unset=True, exclude={"target_name", "target_email"}))
+    return report
 
 
 @router.get("/account-reports", response_model=list[AccountReportRead])

@@ -132,6 +132,32 @@ def test_reporter_can_withdraw_own_report(client, make_user):
     assert response.json()["status"] == "dismissed"
 
 
+def test_coordinator_report_response_does_not_show_the_client(client, make_user):
+    # Cliente sin tickets: el coordinador no puede ver quién es probando ids en este reporte
+    coordinator = make_user("coordinator")
+    requester = make_user("requester", "Clara Sin Exponer")
+    response = _report(client, coordinator, requester["id"])
+    assert response.status_code == 201
+    body = response.json()
+    assert "target_name" not in body and "target_email" not in body
+    assert "Clara Sin Exponer" not in response.text
+    assert requester["email"][:2] + "***" not in response.text
+
+    # El reporte se crea igual y el administrador lo ve completo
+    listed = client.get("/api/account-reports?status=open", headers=make_user("admin")["headers"]).json()
+    item = next(r for r in listed if r["id"] == body["id"])
+    assert item["target_name"] == "Clara Sin Exponer" and "***" in item["target_email"]
+
+
+def test_other_reporters_keep_client_in_response(client, make_user, make_ticket):
+    # El técnico solo reporta clientes que ya vio en un ticket; el administrador gestiona todas las cuentas
+    requester, _ = _requester_with_ticket(make_user, make_ticket)
+    for reporter in (make_user("technician"), make_user("admin")):
+        body = _report(client, reporter, requester["id"]).json()
+        assert body["target_name"] == requester["name"]
+        assert "***" in body["target_email"]
+
+
 def _directory_row(client, viewer, requester):
     rows = client.get(f"/api/directory?role=requester&q={requester['email']}", headers=viewer["headers"]).json()
     return next(r for r in rows if r["id"] == requester["id"])

@@ -738,8 +738,9 @@ class AccountReportResolve(BaseModel):
 class AccountReportRead(BaseModel):
     id: int
     target_user_id: int
-    target_name: str
-    target_email: str
+    # El coordinador no los recibe al crear el reporte: el id no debe servir para ver a un cliente
+    target_name: Optional[str] = None
+    target_email: Optional[str] = None
     reporter_id: int
     reporter: str
     reporter_role: str
