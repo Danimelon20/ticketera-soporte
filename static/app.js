@@ -2936,6 +2936,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateRoleTabs() {
         const role = currentUser ? currentUser.role : '';
         navDirectory.hidden = !(role === 'coordinator' || role === 'admin');
+        // El directorio de clientes es solo del administrador (el servidor tampoco se los da al coordinador)
+        const clientsOption = document.querySelector('#directoryRole option[value="requester"]');
+        clientsOption.hidden = clientsOption.disabled = role !== 'admin';
         navAdmin.hidden = role !== 'admin';
         navAccounts.hidden = role !== 'coordinator';
         navReports.hidden = !REPORT_REVIEW_ROLES.includes(role);

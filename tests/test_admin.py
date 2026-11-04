@@ -33,8 +33,28 @@ def test_coordinator_sees_directory_without_agent(client, make_user):
     assert response.status_code == 200
     rows = response.json()
     assert all(r["role"] != "agent" for r in rows)
-    assert any(r["id"] == requester["id"] for r in rows)
     assert all("password_hash" not in r for r in rows)
+    assert all(r["role"] != "requester" for r in rows)
+    assert requester["email"] not in response.text
+
+
+def test_coordinator_cannot_get_clients_from_directory(client, make_user):
+    coordinator = make_user("coordinator")
+    requester = make_user("requester", "Cliente Directorio Oculto")
+    for params in ({"role": "requester"}, {"q": "Directorio Oculto"}, {"q": requester["email"]},
+                   {"role": "requester", "q": requester["email"]}, {"state": "active"}):
+        response = _directory(client, coordinator, **params)
+        assert response.status_code == 200
+        assert requester["id"] not in [r["id"] for r in response.json()]
+        assert requester["email"] not in response.text
+
+
+def test_admin_keeps_clients_in_directory(client, make_user):
+    admin = make_user("admin")
+    requester = make_user("requester", "Cliente Directorio Visible")
+    rows = _directory(client, admin, q="Directorio Visible").json()
+    assert [r["id"] for r in rows] == [requester["id"]]
+    assert rows[0]["email"] == requester["email"]
 
 
 @pytest.mark.parametrize("role", ["technician", "requester"])
@@ -62,7 +82,7 @@ def test_directory_counts(client, make_user, make_ticket):
         response = client.patch(f"/api/tickets/{second['id']}", json={"status": status}, headers=coordinator["headers"])
         assert response.status_code == 200
 
-    rows = _directory(client, coordinator).json()
+    rows = _directory(client, make_user("admin")).json()
     assert _row(rows, requester)["tickets_created"] == 3
     assert _row(rows, requester)["tickets_assigned_open"] == 0
     assert _row(rows, technician)["tickets_assigned_open"] == 1

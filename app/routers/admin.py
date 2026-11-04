@@ -108,6 +108,9 @@ def get_directory(
         raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
 
     query = db.query(models.User).filter(models.User.role != "agent")
+    # Teléfono y cédula de clientes (Ley 8968): el directorio de clientes es solo del administrador
+    if current_user.role == "coordinator":
+        query = query.filter(models.User.role != "requester")
     if role:
         query = query.filter(models.User.role == role)
     if state:

@@ -141,39 +141,40 @@ def test_reported_label_while_open_or_confirmed(client, make_user, make_ticket):
     coordinator = make_user("coordinator")
     admin = make_user("admin")
     requester, ticket = _requester_with_ticket(make_user, make_ticket)
-    assert _directory_row(client, coordinator, requester)["reported"] is False
+    assert _directory_row(client, admin, requester)["reported"] is False
 
     first = _report(client, coordinator, requester["id"]).json()
-    assert _directory_row(client, coordinator, requester)["reported"] is True
+    assert _directory_row(client, admin, requester)["reported"] is True
     detail = client.get(f"/api/tickets/{ticket['id']}", headers=coordinator["headers"]).json()
     assert detail["requester_flags"]["reported"] is True
 
     _resolve(client, admin, first["id"], "confirm")
-    assert _directory_row(client, coordinator, requester)["reported"] is True
+    assert _directory_row(client, admin, requester)["reported"] is True
 
     second = _report(client, admin, requester["id"]).json()
     _resolve(client, admin, second["id"], "dismiss")
     # Confirmado sigue marcando
-    assert _directory_row(client, coordinator, requester)["reported"] is True
+    assert _directory_row(client, admin, requester)["reported"] is True
 
     other, _ = _requester_with_ticket(make_user, make_ticket)
     third = _report(client, coordinator, other["id"]).json()
     _resolve(client, admin, third["id"], "dismiss")
     # Solo descartados: sin etiqueta
-    assert _directory_row(client, coordinator, other)["reported"] is False
+    assert _directory_row(client, admin, other)["reported"] is False
 
 
 def test_reported_account_is_not_blocked(client, make_user, make_ticket):
     coordinator = make_user("coordinator")
     requester = make_user("requester")
     report = _report(client, coordinator, requester["id"]).json()
-    _resolve(client, make_user("admin"), report["id"], "confirm")
+    admin = make_user("admin")
+    _resolve(client, admin, report["id"], "confirm")
     assert client.get("/api/auth/me", headers=requester["headers"]).status_code == 200
     login = client.post(
         "/api/auth/login", json={"email": requester["email"], "password": "clave-segura-123", "portal": "requester"}
     )
     assert login.status_code == 200
-    assert _directory_row(client, coordinator, requester)["is_active"] is True
+    assert _directory_row(client, admin, requester)["is_active"] is True
 
 
 def test_reports_are_recorded_without_comment_or_note(client, make_user):
@@ -259,7 +260,7 @@ def test_staff_sees_identity_label(client, make_user, make_ticket, result):
     for viewer in (technician, coordinator):
         detail = client.get(f"/api/tickets/{ticket['id']}", headers=viewer["headers"]).json()
         assert detail["requester_flags"]["identity"] == expected
-    assert _directory_row(client, make_user("coordinator"), requester)["identity"] == expected
+    assert _directory_row(client, make_user("admin"), requester)["identity"] == expected
 
 
 def test_draft_shows_identity_and_reported(client, make_user):

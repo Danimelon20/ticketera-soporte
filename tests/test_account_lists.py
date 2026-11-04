@@ -56,14 +56,41 @@ def test_technician_gets_only_active_staff_without_emails(client, make_user):
     assert requester["id"] not in ids and inactive["id"] not in ids
 
 
-@pytest.mark.parametrize("role", ["coordinator", "admin"])
-def test_coordinator_and_admin_still_get_full_list(client, make_user, role):
-    viewer = make_user(role)
+def test_admin_still_gets_full_list(client, make_user):
+    admin = make_user("admin")
     requester = make_user("requester")
-    rows = client.get("/api/users", headers=viewer["headers"]).json()
+    rows = client.get("/api/users", headers=admin["headers"]).json()
     row = next(r for r in rows if r["id"] == requester["id"])
     assert row["email"] == requester["email"]
-    assert client.get("/api/directory", headers=viewer["headers"]).status_code == 200
+
+
+def test_coordinator_list_has_no_clients(client, make_user):
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    requester = make_user("requester")
+    response = client.get("/api/users", headers=coordinator["headers"])
+    assert response.status_code == 200
+    rows = response.json()
+    assert all(r["role"] != "requester" for r in rows)
+    assert requester["email"] not in response.text
+    # Sigue recibiendo al personal: lo usa para asignar y para los nombres del historial
+    assert technician["id"] in [r["id"] for r in rows]
+
+
+def test_coordinator_gets_client_name_with_the_ticket(client, make_user, make_ticket):
+    # Sin la lista, el detalle del ticket sigue trayendo el nombre del cliente (y no su correo)
+    coordinator = make_user("coordinator")
+    requester = make_user("requester", "Cliente Con Nombre")
+    ticket = make_ticket(requester)
+    response = client.get(f"/api/tickets/{ticket['id']}", headers=coordinator["headers"])
+    assert response.status_code == 200
+    assert {"id": requester["id"], "name": "Cliente Con Nombre", "role": "requester"} in response.json()["people"]
+
+
+@pytest.mark.parametrize("role", ["coordinator", "admin"])
+def test_requesters_partial_search_stays_gone(client, make_user, role):
+    viewer = make_user(role)
+    requester = make_user("requester")
     # Ya no hay búsqueda de solicitantes por coincidencia parcial: solo el correo exacto (POST /api/requesters/lookup)
     response = client.get("/api/requesters?q=a", headers=viewer["headers"])
     assert response.status_code in (404, 405)

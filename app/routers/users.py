@@ -20,7 +20,11 @@ def _technician_statuses(db: Session, users: list[models.User]) -> dict[int, str
 @router.get("/users", response_model=list[UserRead | StaffRead])
 def get_users(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if current_user.role in ("coordinator", "admin"):
-        users = db.query(models.User).filter(models.User.is_active == True).all()
+        query = db.query(models.User).filter(models.User.is_active == True)
+        # Al coordinador los nombres de clientes le llegan con cada ticket: nunca la lista con sus correos
+        if current_user.role == "coordinator":
+            query = query.filter(models.User.role != "requester")
+        users = query.all()
         statuses = _technician_statuses(db, users)
         return [UserRead.model_validate(u).model_copy(update={"availability": statuses.get(u.id)}) for u in users]
     if current_user.role == "technician":
