@@ -15,11 +15,11 @@ from starlette.background import BackgroundTask
 from ..database import engine, get_db
 from .. import (
     account_reports, accounts, alerts, auto_assign, availability, cancellations, config, daily_summary, email_analysis, email_poller,
-    identity, models, people_activity, schedules, throttle,
+    identity, models, people_activity, registrations, schedules, throttle,
 )
 from ..schemas import (
     AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
-    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, PersonActivityPage,
+    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, ClientLookup, DirectoryUser, PersonActivityPage,
     PersonHeader, PersonHit, TeamMember, ActivitySummary,
 )
 from ..security import get_current_user, mask_email, session_expired
@@ -457,6 +457,8 @@ ACCOUNT_SCOPE = {
     "admin": ("requester", "technician", "coordinator", "admin"),
     "coordinator": ("requester", "technician"),
 }
+# Cuentas que se listan y buscan: al cliente, el coordinador llega por su correo exacto o desde un ticket
+ACCOUNT_LIST_SCOPE = {**ACCOUNT_SCOPE, "coordinator": ("technician",)}
 
 
 def require_account_viewer(current_user=Depends(get_current_user)) -> models.User:
@@ -547,7 +549,7 @@ def account_list(
         if schedule_start is None or schedule_end is None:
             raise HTTPException(status_code=422, detail="Indique la hora de entrada y la de salida")
         schedules.check_range(schedule_start, schedule_end)
-    scope = ACCOUNT_SCOPE[viewer.role]
+    scope = ACCOUNT_LIST_SCOPE[viewer.role]
     roles = [r for r in scope if r in schedules.SCHEDULE_ROLES] if by_schedule else list(scope)
     term = f"%{q.strip().lower()}%" if q and q.strip() else None
 
@@ -612,12 +614,30 @@ def account_list(
     )
 
 
+# POST: el correo no queda en la URL ni en el registro de accesos
+@router.post("/accounts/lookup", response_model=AccountSummary)
+def account_lookup(data: ClientLookup, db: Session = Depends(get_db), viewer: models.User = Depends(require_account_viewer)):
+    """Ficha de un cliente por su correo exacto, aunque esté desactivado o no tenga tickets."""
+    user = registrations.find_client(db, data.email, only_active=False)
+    if user is None:
+        raise HTTPException(status_code=404, detail="No hay ningún cliente con ese correo")
+    return _account_summary(db, viewer, user)
+
+
 @router.get("/accounts/{user_id}", response_model=AccountSummary)
 def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.User = Depends(require_account_viewer)):
     user = db.get(models.User, user_id)
     # Fuera del alcance de quien mira: como si no existiera
     if user is None or user.role not in ACCOUNT_SCOPE[viewer.role]:
         raise HTTPException(status_code=404, detail="El usuario no existe")
+    # Por id, el coordinador solo abre clientes con tickets (ya los ve en su cola): no se recorren por número
+    if viewer.role == "coordinator" and user.role == "requester":
+        if db.query(models.Ticket.id).filter(models.Ticket.created_by == user.id).first() is None:
+            raise HTTPException(status_code=404, detail="El usuario no existe")
+    return _account_summary(db, viewer, user)
+
+
+def _account_summary(db: Session, viewer: models.User, user: models.User) -> AccountSummary:
     now = auto_assign._now()
     statuses = availability.statuses_for(db, availability.ids_with_status([user]), now)
     state = _account_state(db, user, statuses)

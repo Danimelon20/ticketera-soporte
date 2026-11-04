@@ -485,6 +485,7 @@ def _scenario_ids(db) -> dict | None:
     dora = db.get(models.User, users[DORA])
     found["dora_email"], found["dora_last4"] = dora.email, (dora.id_number or "")[-4:]
     found["dora_failures"] = registrations.recent_failures(db, dora)
+    found["impostor_email"] = db.get(models.User, users[IMPOSTOR]).email
     return found
 
 
@@ -529,7 +530,7 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
     principal, related = ids["network"][0], ids["network"][1:]
     soon, overdue, late = ids["due_soon"], ids["overdue"], ids["overdue_cause"]
     assigned, unassigned = ids["draft_assigned"], ids["draft_unassigned"]
-    impostor = ids["users"][IMPOSTOR]
+    impostor_email = ids["impostor_email"]
     checks = []
 
     def add(scenario, role, expected, test):
@@ -634,7 +635,8 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
     checks.append(Check("Permisos", "Administrador", "la cola (/api/queue): HTTP 403", NO_ADMIN, None))
 
     def impostor_report():
-        response = api.get(COORDINATOR, f"/api/accounts/{impostor}")
+        # No tiene tickets: el coordinador llega a su ficha solo con el correo exacto
+        response = api.post(COORDINATOR, "/api/accounts/lookup", {"email": impostor_email})
         if response.status_code != 200:
             return False, f"HTTP {response.status_code}"
         data = response.json()

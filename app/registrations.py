@@ -52,20 +52,18 @@ def require_staff(user: models.User) -> None:
         raise HTTPException(status_code=403, detail=NO_PERMISSION)
 
 
-def find_client(db: Session, email: str) -> models.User | None:
-    """Solicitante activo con ese correo exacto (sin importar mayúsculas ni espacios a los lados)."""
+def find_client(db: Session, email: str, only_active: bool = True) -> models.User | None:
+    """Solicitante con ese correo exacto (sin importar mayúsculas ni espacios a los lados)."""
     value = (email or "").strip().lower()
     if not value:
         return None
-    return (
-        db.query(models.User)
-        .filter(
-            func.lower(models.User.email) == value,
-            models.User.role == "requester",
-            models.User.is_active.is_(True),
-        )
-        .first()
+    query = db.query(models.User).filter(
+        func.lower(models.User.email) == value,
+        models.User.role == "requester",
     )
+    if only_active:
+        query = query.filter(models.User.is_active.is_(True))
+    return query.first()
 
 
 def get_client(db: Session, email: str) -> models.User:

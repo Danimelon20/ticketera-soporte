@@ -147,16 +147,98 @@ def test_technician_never_sees_requester_email_in_drafts(client, make_user):
     assert [d["requester_name"] for d in drafts if d["requester_id"] == requester["id"]] == [requester["email"]]
 
 
-def test_clients_view_unaffected(client, make_user):
-    # Cuentas › Clientes (y "Ver ficha del cliente") no usaba GET /api/requesters: sigue igual.
-    # Su búsqueda parcial queda anotada en docs/pendientes.md
+def _account_lookup(client, viewer, email):
+    return client.post("/api/accounts/lookup", json={"email": email}, headers=viewer["headers"])
+
+
+@pytest.mark.parametrize("params", [{"filter": "clients"}, {"filter": "clients", "q": "Ficha Oculta"},
+                                    {"filter": "all", "q": "Ficha Oculta"}, {"filter": "reported"},
+                                    {"filter": "unverified"}, {"filter": "locked"}])
+def test_coordinator_gets_no_clients_from_accounts_list(client, make_user, params):
     coordinator = make_user("coordinator")
-    customer = make_user("requester", "Clara Ficha Intacta")
-    response = client.get("/api/accounts", params={"filter": "clients", "q": "Ficha Intacta"},
-                          headers=coordinator["headers"])
+    customer = make_user("requester", "Clara Ficha Oculta")
+    response = client.get("/api/accounts", params=params, headers=coordinator["headers"])
     assert response.status_code == 200
-    assert customer["id"] in [row["id"] for row in response.json()["items"]]
-    detail = client.get(f"/api/accounts/{customer['id']}", headers=coordinator["headers"])
+    assert customer["id"] not in [row["id"] for row in response.json()["items"]]
+    assert response.json()["counts"]["clients"] == 0
+
+
+def test_admin_keeps_clients_list_and_partial_search(client, make_user):
+    admin = make_user("admin")
+    customer = make_user("requester", "Clara Ficha Administrada")
+    response = client.get("/api/accounts", params={"filter": "clients", "q": "Ficha Administrada"},
+                          headers=admin["headers"])
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()["items"]] == [customer["id"]]
+    assert response.json()["counts"]["clients"] == 1
+    # Sin tickets también: el administrador gestiona todas las cuentas
+    assert client.get(f"/api/accounts/{customer['id']}", headers=admin["headers"]).status_code == 200
+
+
+def test_coordinator_finds_client_only_by_exact_email(client, make_user):
+    coordinator = make_user("coordinator")
+    customer = make_user("requester", "Clara Correo Exacto")
+    email = customer["email"]
+    found = _account_lookup(client, coordinator, email)
+    assert found.status_code == 200
+    assert found.json()["id"] == customer["id"] and found.json()["name"] == "Clara Correo Exacto"
+    # Sin importar mayúsculas ni espacios, como al crear tickets
+    assert _account_lookup(client, coordinator, f"  {email.upper()} ").json()["id"] == customer["id"]
+    # El correo completo no vuelve en la respuesta
+    assert email not in found.text
+    for partial in (email[:-1], email.split("@")[0], "Clara Correo Exacto"):
+        response = _account_lookup(client, coordinator, partial)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "No hay ningún cliente con ese correo"
+
+
+def test_account_lookup_finds_only_clients(client, make_user):
+    coordinator = make_user("coordinator")
+    assert _account_lookup(client, coordinator, make_user("technician")["email"]).status_code == 404
+    assert _account_lookup(client, coordinator, make_user("admin")["email"]).status_code == 404
+
+
+def test_account_lookup_shows_inactive_client(client, make_user):
+    coordinator = make_user("coordinator")
+    customer = make_user("requester")
+    db = SessionLocal()
+    try:
+        db.get(models.User, customer["id"]).is_active = False
+        db.commit()
+    finally:
+        db.close()
+    response = _account_lookup(client, coordinator, customer["email"])
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+
+@pytest.mark.parametrize("role", ["technician", "requester"])
+def test_account_lookup_forbidden_for_others(client, make_user, role):
+    customer = make_user("requester")
+    assert _account_lookup(client, make_user(role), customer["email"]).status_code == 403
+
+
+def test_coordinator_opens_client_by_id_only_with_tickets(client, make_user, make_ticket):
+    coordinator = make_user("coordinator")
+    without = make_user("requester", "Clara Sin Tickets")
+    response = client.get(f"/api/accounts/{without['id']}", headers=coordinator["headers"])
+    assert response.status_code == 404
+    assert "Clara Sin Tickets" not in response.text
+    # Igual que un id que no existe: la respuesta no confirma que la cuenta exista
+    assert response.json() == client.get("/api/accounts/999999", headers=coordinator["headers"]).json()
+
+    # Con correo exacto sí llega a su ficha, aunque no tenga tickets
+    assert _account_lookup(client, coordinator, without["email"]).status_code == 200
+
+    # "Ver ficha del cliente" desde un ticket
+    make_ticket(without)
+    detail = client.get(f"/api/accounts/{without['id']}", headers=coordinator["headers"])
     assert detail.status_code == 200
-    assert client.get("/api/accounts", params={"filter": "clients"},
-                      headers=make_user("technician")["headers"]).status_code == 403
+    assert detail.json()["name"] == "Clara Sin Tickets"
+
+
+def test_coordinator_still_opens_technician_by_id(client, make_user):
+    # La restricción es solo para clientes: Equipo › Personas sigue igual
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    assert client.get(f"/api/accounts/{technician['id']}", headers=coordinator["headers"]).status_code == 200

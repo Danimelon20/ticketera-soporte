@@ -24,6 +24,10 @@ def _summary(client, viewer, user_id):
     return client.get(f"/api/accounts/{user_id}", headers=viewer["headers"])
 
 
+def _lookup(client, viewer, email):
+    return client.post("/api/accounts/lookup", json={"email": email}, headers=viewer["headers"])
+
+
 def _lock(email):
     db = SessionLocal()
     try:
@@ -127,13 +131,17 @@ def test_search_narrows_counts(client, accounts_set):
     }
 
 
-def test_coordinator_sees_only_technicians_and_clients(client, accounts_set):
+def test_coordinator_lists_only_technicians(client, accounts_set):
     s = accounts_set
     coordinator = s["coordinator"]
     page = _list(client, coordinator, q=s["tag"])
     roles = {row["role"] for row in page["items"] if row["kind"] == "user"}
-    assert roles == {"technician", "requester"}
+    assert roles == {"technician"}
     assert s["admin"]["id"] not in _ids(page) and coordinator["id"] not in _ids(page)
+    # Ningún filtro ni contador deja ver cuántos clientes coinciden con la búsqueda
+    assert all(page["counts"][key] == 0 for key in ("clients", "reported", "unverified"))
+    for name in FILTERS:
+        assert all(row["role"] != "requester" for row in _list(client, coordinator, filter=name, q=s["tag"])["items"])
     # Las invitaciones son del administrador: el coordinador no ve ninguna
     assert _ids(page, "invitation") == set()
     assert page["counts"]["staff"] == 2 and page["counts"]["invitations"] == 0
@@ -154,7 +162,7 @@ def test_coordinator_actions_stay_within_permissions(client, accounts_set):
     locked = _summary(client, coordinator, s["locked"]["id"]).json()
     assert "unlock" not in locked["actions"]
     # Ve sus tickets y puede reportarla; revisar reportes es del administrador
-    requester = _summary(client, coordinator, s["reported"]["id"]).json()
+    requester = _lookup(client, coordinator, s["reported"]["email"]).json()
     assert set(requester["actions"]) == {"view-tickets", "report"}
     # Nunca: restablecer a un cliente, ver datos completos ni aprobar solicitudes
     for detail in (technician, locked, requester):
@@ -186,7 +194,9 @@ def test_masked_email_and_no_personal_data(client, accounts_set):
         for row in page.json()["items"]:
             assert "***@" in row["email"]
             assert "phone" not in row and "id_number" not in row
-        detail = _summary(client, viewer, s["verified"]["id"])
+        detail = _lookup(client, viewer, s["verified"]["email"])
+        assert detail.status_code == 200
+        assert "***@" in detail.json()["email"]
         for body in (text, detail.text):
             assert s["verified"]["email"] not in body
             assert s["verified"]["id_number"] not in body

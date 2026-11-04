@@ -122,6 +122,8 @@ MATRIX = [
      _codes(403, 403, 200, 403, 403)),
     # ----- Cuentas (decisión 4: solo el administrador las gestiona) -----
     ("lista de cuentas", "get", lambda w: "/api/accounts", None, _codes(403, 403, 200, 200, 403)),
+    ("ficha por correo exacto", "post", lambda w: "/api/accounts/lookup",
+     lambda w: {"email": w["users"]["requester"]["email"]}, _codes(403, 403, 200, 200, 403)),
     ("resumen de una cuenta", "get", lambda w: f"/api/accounts/{w['users']['target_technician']['id']}", None,
      _codes(403, 403, 200, 200, 403)),
     ("desactivar", "post", lambda w: f"/api/accounts/{w['users']['target_technician']['id']}/deactivate", None,
