@@ -147,6 +147,15 @@
     border-color: var(--line);
 }
 
+/* Clientes del coordinador: título arriba; correo y "Buscar" en una fila, también a 375 px */
+.aa-main > .aa-filters[hidden] { display: none; }
+
+.is-client-search .aa-head .view-title { flex-basis: 100%; }
+
+.is-client-search .aa-search { flex-basis: 0; min-width: 0; }
+
+.is-client-search #aaSearchBtn { order: 4; }
+
 .aa-quick-btn {
     display: inline-flex;
     align-items: center;

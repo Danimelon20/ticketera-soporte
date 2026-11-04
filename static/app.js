@@ -5935,7 +5935,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('newTicketClientLink').addEventListener('click', () => {
         if (!newTicketClient) return;
         setSideNavActive('accounts');
-        openAccounts('clients', newTicketClient.name || '');
+        openClientAccount({ email: newTicketClient.email });
     });
 
     // Cuerpo para /tickets/for-client; null (y el aviso en pantalla) si falta algo
@@ -9243,7 +9243,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (e.target.closest('.td-client-account')) {
             setSideNavActive('accounts');
-            openAccounts('clients', userMap[currentTicket.created_by] || '');
+            openClientAccount({ id: currentTicket.created_by });
             return;
         }
 
@@ -9368,10 +9368,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let aaSeq = 0;
     let aaSearchTimer = null;
     let accountMenuOwner = null;
+    // Coordinador en Tickets › Clientes: la ficha abierta, por { email } o, desde un ticket, por { id }
+    let aaClientSource = null;
+    const aaSearchBtn = document.getElementById('aaSearchBtn');
+
+    // El coordinador no recibe la lista de clientes: los busca por su correo exacto
+    function isClientSearch() {
+        return aaFilter === 'clients' && OPERATION_ROLES.includes(currentUser.role);
+    }
 
     function aaPlaceholder() {
         aaCurrent = null;
-        aaDetail.replaceChildren(emptyState({
+        aaDetail.replaceChildren(emptyState(isClientSearch() ? {
+            title: 'Busque un cliente',
+            text: 'Aquí verá su estado, sus tickets y las acciones que puede hacer.',
+        } : {
             title: 'Elija una cuenta',
             text: 'Aquí verá su estado, sus tickets y las acciones que puede hacer.',
         }));
@@ -9385,12 +9396,92 @@ document.addEventListener('DOMContentLoaded', () => {
         aaFilter = filter;
         aaSearch.value = search;
         aaSelected = null;
+        aaClientSource = null;
+        const clientSearch = isClientSearch();
+        document.getElementById('adminAccountsTitle').textContent = clientSearch ? 'Clientes' : 'Cuentas';
+        adminAccountsView.classList.toggle('is-client-search', clientSearch);
+        const searchLabel = clientSearch ? 'Correo del cliente' : 'Nombre o correo';
+        document.querySelector('label[for="aaSearch"]').textContent = searchLabel;
+        aaSearch.placeholder = searchLabel;
+        aaSearchBtn.hidden = !clientSearch;
+        adminAccountsView.querySelector('.aa-filters').hidden = clientSearch;
+        aaScheduleFields.hidden = clientSearch || !aaScheduleOn.checked;
         aaPlaceholder();
         adminAccountsView.classList.remove('show-detail');
         showView('adminAccounts');
     }
 
+    // Desde un ticket o desde crear ticket: abre directo la ficha de ese cliente
+    function openClientAccount(source) {
+        openAccounts('clients', source.email || '');
+        showClientAccount(source);
+    }
+
+    function fetchClientAccount(source, silent = false) {
+        if (source.id) return apiFetch(`/accounts/${source.id}`, { silent });
+        return apiFetch('/accounts/lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: source.email }),
+            silent,
+        });
+    }
+
+    function showClientListNotice(content) {
+        aaSeq++;
+        aaClientSource = null;
+        aaRows = [];
+        aaSelected = null;
+        aaPlaceholder();
+        adminAccountsView.classList.remove('show-detail');
+        aaBody.removeAttribute('aria-busy');
+        aaBody.replaceChildren();
+        aaEmpty.replaceChildren(content);
+        aaEmpty.hidden = false;
+    }
+
+    async function showClientAccount(source) {
+        const seq = ++aaSeq;
+        let detail;
+        try {
+            detail = await fetchClientAccount(source, true);
+        } catch (err) {
+            if (seq !== aaSeq) return;
+            showClientListNotice(err.status === 404
+                ? emptyState({ title: err.message, text: 'Revise que el correo esté completo y bien escrito.' })
+                : errorState(err, () => showClientAccount(source)));
+            return;
+        }
+        if (seq !== aaSeq) return;
+        aaClientSource = source;
+        aaRows = [{ kind: 'user', ...detail }];
+        aaSelected = accountKey(aaRows[0]);
+        renderAdminAccounts();
+        aaCurrent = { kind: 'user', ...detail };
+        renderAccountPanel(detail);
+        adminAccountsView.classList.add('show-detail');
+    }
+
+    function searchClientAccount() {
+        const email = aaSearch.value.trim();
+        // Sin pedir nada al servidor si está vacío o incompleto: la búsqueda es solo por el correo exacto
+        if (!/^[^@\s]+@[^@\s]+$/.test(email)) {
+            showClientListNotice(emptyState({ title: 'Escriba el correo completo del cliente', text: 'Por privacidad, los clientes solo se buscan con su correo exacto.' }));
+            aaSearch.focus();
+            return;
+        }
+        showClientAccount({ email });
+    }
+
     async function loadAdminAccounts() {
+        if (isClientSearch()) {
+            if (aaClientSource) {
+                await showClientAccount(aaClientSource);
+            } else {
+                showClientListNotice(emptyState({ title: 'Busque al cliente por su correo', text: 'Escriba el correo completo y pulse Buscar.' }));
+            }
+            return;
+        }
         const params = new URLSearchParams({ filter: aaFilter });
         if (aaSearch.value.trim()) params.set('q', aaSearch.value.trim());
         // Filtro por horario: lo resuelve el servidor (solo técnicos y coordinadores con turno ese día)
@@ -9666,7 +9757,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let detail;
         try {
-            detail = await apiFetch(`/accounts/${row.id}`);
+            // Un cliente sin tickets se abre con su correo: por id, el coordinador recibe 404
+            detail = await (aaClientSource ? fetchClientAccount(aaClientSource) : apiFetch(`/accounts/${row.id}`));
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
@@ -9677,6 +9769,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshSelectedAccount() {
         await loadAdminAccounts();
+        // Tickets › Clientes: loadAdminAccounts ya recargó la ficha
+        if (isClientSearch()) return;
         if (aaSelected && aaRows.some(r => accountKey(r) === aaSelected)) await selectAccount(aaSelected);
         else aaPlaceholder();
     }
@@ -9862,9 +9956,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (aaScheduleOn.checked) loadAdminAccounts();
     }));
     aaSearch.addEventListener('input', () => {
+        // Clientes del coordinador: nada se envía mientras escribe, solo el correo completo al buscar
+        if (isClientSearch()) return;
         clearTimeout(aaSearchTimer);
         aaSearchTimer = setTimeout(loadAdminAccounts, 300);
     });
+    aaSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && isClientSearch()) {
+            e.preventDefault();
+            searchClientAccount();
+        }
+    });
+    aaSearchBtn.addEventListener('click', searchClientAccount);
     document.getElementById('aaInvite').addEventListener('click', () => navUsers.click());
     document.getElementById('aaBack').addEventListener('click', () => {
         closeAccountMenu(false);
