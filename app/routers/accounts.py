@@ -23,6 +23,9 @@ NOT_PENDING = "La solicitud ya fue resuelta"
 OWN_REQUEST = "No puedes resolver tu propia solicitud"
 NOT_LOCKED = "El solicitante todavía puede corregirlo desde su perfil"
 REQUEST_ROLES = ("requester", "technician", "coordinator")
+# El ascenso a coordinador lo decide el administrador directamente: el coordinador no lo solicita
+NO_PROMOTION = "El coordinador no puede solicitar el cambio a coordinador"
+PROMOTION_CLOSED = "Esta solicitud de ascenso a coordinador ya no se permite. Rechace la solicitud o cambie el rol desde Acciones."
 KIND_LABELS = {"role": "Cambio de rol", "name": "Corrección de nombre", "id_number": "Corrección de cédula"}
 
 
@@ -196,6 +199,8 @@ def create_request(
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
 
     if data.kind == "role":
+        if data.new_value == "coordinator":
+            raise HTTPException(status_code=403, detail=NO_PROMOTION)
         accounts.check_can_manage(current_user, user, "role", new_role=data.new_value)
         if data.new_value not in REQUEST_ROLES:
             raise HTTPException(status_code=422, detail="Rol no válido")
@@ -287,6 +292,9 @@ def _apply(db: Session, admin: models.User, row: models.AccountRequest) -> None:
     if user.id == admin.id:
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
     if row.kind == "role":
+        # Solicitudes de ascenso creadas antes de quitar esa opción: no se aprueban
+        if row.new_value == "coordinator":
+            raise HTTPException(status_code=409, detail=PROMOTION_CLOSED)
         # La cuenta pudo cambiar de rol después de la solicitud (p. ej., ahora es administradora)
         accounts.check_can_manage(admin, user, "role", new_role=row.new_value)
         accounts.change_role(db, admin, user, row.new_value)

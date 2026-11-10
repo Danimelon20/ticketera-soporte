@@ -148,6 +148,10 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
         )
         if loads is not None:
             member.load = loads[row.id]
+        # El coordinador no ve los tickets de otros coordinadores (ni cuántos tienen)
+        if current_user.role == "coordinator" and row.role == "coordinator" and row.id != current_user.id:
+            member.tickets_assigned_open = None
+            member.load = None
         members.append(member)
     return members
 

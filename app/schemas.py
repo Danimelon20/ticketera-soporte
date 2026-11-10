@@ -854,7 +854,8 @@ class TeamMember(BaseModel):
     email: str
     role: str
     is_active: bool
-    tickets_assigned_open: int = 0
+    # None: otro coordinador visto por un coordinador (no ve sus tickets)
+    tickets_assigned_open: Optional[int] = 0
     login_locked: bool = False
     availability: Optional[str] = None
     return_date: Optional[date] = None

@@ -20,8 +20,9 @@ def send_email(to: str, subject: str, body: str, attachments=None, html: str | N
     html: versión HTML opcional del cuerpo (va junto al texto, como multipart/alternative).
     """
     body = f"{body.rstrip()}\n\n{SIGNATURE}\n"
-    # .invalid nunca existe (RFC 2606): son las cuentas de prueba de scripts.demo_data
-    if to.strip().lower().endswith(".invalid"):
+    # .invalid nunca existe (RFC 2606): son las cuentas de prueba de scripts.demo_data. En el entorno de pruebas
+    # con SMTP sí salen, porque el único destino posible es Mailpit (check_mail_config no deja arrancar con otro)
+    if to.strip().lower().endswith(".invalid") and not _mailpit_catches_all():
         logging.info("Correo no enviado (dominio .invalid): %s", subject)
         return False
     if config.MAIL_TRANSPORT not in ("graph", "smtp"):
@@ -78,6 +79,10 @@ def _send_smtp(msg: EmailMessage, attachments) -> bool:
     with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=config.SMTP_TIMEOUT_SECONDS) as server:
         server.send_message(msg)
     return True
+
+
+def _mailpit_catches_all() -> bool:
+    return config.APP_ENV == "pruebas" and config.MAIL_TRANSPORT == "smtp"
 
 
 def check_mail_config() -> None:

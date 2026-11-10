@@ -236,6 +236,7 @@ def list_tickets(
         query = query.filter(models.Ticket.category_id == category_id)
 
     if assigned_to:
+        ticket_access.check_assignee_filter(db, current_user, assigned_to)
         query = query.filter(models.Ticket.assigned_to == assigned_to)
 
     if search:

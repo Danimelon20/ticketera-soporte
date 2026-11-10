@@ -8,6 +8,7 @@
 """
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Query, Session
 
@@ -58,6 +59,19 @@ def filter_visible(db: Session, user: models.User, query: Query) -> Query:
             (models.Ticket.assigned_to == user.id) | models.Ticket.id.in_(_past_assignments(db, user.id))
         )
     return query.filter(False)
+
+
+OTHER_COORDINATOR = "No puede ver los tickets de otro coordinador"
+
+
+def check_assignee_filter(db: Session, user: models.User, assigned_to: int | None) -> None:
+    """Filtro por responsable (Equipo › Turnos, "Ver sus tickets"): el coordinador no filtra por otro
+    coordinador. 403 si lo intenta."""
+    if user.role != "coordinator" or not assigned_to or assigned_to == user.id:
+        return
+    target = db.get(models.User, assigned_to)
+    if target is not None and target.role == "coordinator":
+        raise HTTPException(status_code=403, detail=OTHER_COORDINATOR)
 
 
 def visible_user_ids(db: Session, ticket: models.Ticket, user_ids: list[int]) -> set[int]:

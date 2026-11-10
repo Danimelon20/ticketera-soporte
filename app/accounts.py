@@ -38,8 +38,9 @@ PERMISSIONS = {
     "coordinator": {
         "availability": ("technician",),
         "schedule": ("technician",),
-        # Solo como solicitud con aprobación del administrador
-        "role": ("technician", "requester"),
+        # Solo como solicitud con aprobación del administrador, y nunca hacia coordinador ni administrador.
+        # Solo técnicos: el administrador ya no cambia el rol de solicitantes
+        "role": ("technician",),
     },
 }
 

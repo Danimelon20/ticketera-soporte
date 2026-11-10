@@ -64,3 +64,49 @@ def test_only_the_coordinator_gets_the_load(make_user, make_ticket, client):
     admin_rows = client.get("/api/team", headers=make_user("admin")["headers"]).json()
     assert all("load" not in r for r in admin_rows)
     assert client.get("/api/team", headers=technician["headers"]).status_code == 403
+
+
+def _assigned_ticket(make_user, owner_id):
+    from app import models
+    from app.database import SessionLocal
+
+    requester = make_user("requester")
+    db = SessionLocal()
+    try:
+        ticket = models.Ticket(title="De un coordinador", description="Abierto", category_id=1, priority_id=1,
+                               status="new", created_by=requester["id"], assigned_to=owner_id, source="web")
+        db.add(ticket)
+        db.commit()
+        return ticket.id
+    finally:
+        db.close()
+
+
+def test_coordinator_does_not_see_other_coordinators_tickets(make_user, client):
+    """Equipo › Turnos: "Ver sus tickets" de otro coordinador se rechaza en el servidor."""
+    coordinator = make_user("coordinator")
+    other = make_user("coordinator")
+    _assigned_ticket(make_user, other["id"])
+    for path in ("/api/queue", "/api/tickets"):
+        response = client.get(path, params={"assigned_to": other["id"]}, headers=coordinator["headers"])
+        assert response.status_code == 403, (path, response.text)
+    # Los propios y los de técnicos, sí
+    technician = make_user("technician")
+    for owner in (coordinator, technician):
+        response = client.get("/api/queue", params={"assigned_to": owner["id"]}, headers=coordinator["headers"])
+        assert response.status_code == 200, response.text
+
+
+def test_team_hides_ticket_counts_of_other_coordinators(make_user, client):
+    coordinator = make_user("coordinator")
+    other = make_user("coordinator")
+    technician = make_user("technician")
+    _assigned_ticket(make_user, other["id"])
+    rows = {r["id"]: r for r in client.get("/api/team", headers=coordinator["headers"]).json()}
+    assert rows[other["id"]]["tickets_assigned_open"] is None
+    assert rows[other["id"]].get("load") is None
+    assert isinstance(rows[coordinator["id"]]["tickets_assigned_open"], int)
+    assert isinstance(rows[technician["id"]]["tickets_assigned_open"], int)
+    # El administrador sigue viendo los conteos de todos
+    admin_rows = {r["id"]: r for r in client.get("/api/team", headers=make_user("admin")["headers"]).json()}
+    assert admin_rows[other["id"]]["tickets_assigned_open"] == 1

@@ -104,6 +104,21 @@ def test_smtp_skips_invalid_domain(smtp):
     assert smtp == []
 
 
+def test_test_environment_delivers_invalid_domain_to_mailpit(smtp, monkeypatch):
+    """APP_ENV=pruebas + SMTP: el único destino es Mailpit, así que las cuentas demo (.invalid) sí reciben
+    (para revisar ahí "Pedir detalles" y los demás avisos)."""
+    monkeypatch.setattr(config, "APP_ENV", "pruebas")
+    assert mailer.send_email("demo@demo.invalid", "Asunto", "Hola") is True
+    [msg] = smtp[0].sent_messages
+    assert msg["To"] == "demo@demo.invalid"
+
+
+def test_test_environment_with_log_transport_still_skips_invalid_domain(monkeypatch):
+    monkeypatch.setattr(config, "APP_ENV", "pruebas")
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
+    assert mailer.send_email("demo@demo.invalid", "Asunto", "Hola") is False
+
+
 def test_log_transport_does_not_send(monkeypatch):
     def _fail(*args, **kwargs):
         raise AssertionError("No debe abrir una conexión SMTP")

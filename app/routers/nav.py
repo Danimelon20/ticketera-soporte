@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import cancellations, nav
+from .. import cancellations, nav, ticket_access
 from ..schemas import NavCounts, QueuePage, SystemStatus
 from ..security import get_current_user
 
@@ -49,6 +49,7 @@ def ticket_queue(
     # Cancelados: solo quien puede cancelar y reabrir
     if view == "cancelled":
         cancellations.require_can_cancel(current_user)
+    ticket_access.check_assignee_filter(db, current_user, assigned_to)
     return QueuePage(**nav.queue(
         db, current_user, view=view, status=status, level=level, assigned_to=assigned_to,
         source=source, search=search, requester_id=requester_id, page=page,

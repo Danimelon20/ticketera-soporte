@@ -28,7 +28,7 @@ def test_role_request_applies_only_after_approval(client, make_user, sent):
     coordinator = make_user("coordinator")
     admin = make_user("admin")
     technician = make_user("technician")
-    response = _create(client, coordinator, technician, "role", "coordinator")
+    response = _create(client, coordinator, technician, "role", "requester")
     assert response.status_code == 201
     request_id = response.json()["id"]
     assert _user(technician["id"]).role == "technician"
@@ -41,7 +41,7 @@ def test_role_request_applies_only_after_approval(client, make_user, sent):
     approved = client.post(f"/api/account-requests/{request_id}/approve", headers=admin["headers"])
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
-    assert _user(technician["id"]).role == "coordinator"
+    assert _user(technician["id"]).role == "requester"
     # El rol cambió: sus sesiones se cerraron
     assert client.get("/api/auth/me", headers=technician["headers"]).status_code == 401
     assert any(to == coordinator["email"] and "resuelta" in subject for to, subject, _ in sent)
@@ -76,8 +76,8 @@ def test_only_coordinator_creates_and_only_admin_resolves(client, make_user):
     coordinator = make_user("coordinator")
     technician = make_user("technician")
     for role in ("admin", "technician", "requester"):
-        assert _create(client, make_user(role), technician, "role", "coordinator").status_code == 403
-    request_id = _create(client, coordinator, technician, "role", "coordinator").json()["id"]
+        assert _create(client, make_user(role), technician, "role", "requester").status_code == 403
+    request_id = _create(client, coordinator, technician, "role", "requester").json()["id"]
     for actor in (coordinator, make_user("coordinator"), make_user("technician"), make_user("requester")):
         assert client.post(f"/api/account-requests/{request_id}/approve", headers=actor["headers"]).status_code == 403
         assert client.post(f"/api/account-requests/{request_id}/reject", json={"reason": "x"},
@@ -98,7 +98,7 @@ def test_coordinator_cannot_request_for_coordinators_admins_or_self(client, make
 def test_nobody_approves_own_request(client, make_user):
     coordinator = make_user("coordinator")
     technician = make_user("technician")
-    request_id = _create(client, coordinator, technician, "role", "coordinator").json()["id"]
+    request_id = _create(client, coordinator, technician, "role", "requester").json()["id"]
     # El coordinador pasa a ser administrador: aun así no aprueba la suya
     db = SessionLocal()
     try:
@@ -115,7 +115,7 @@ def test_no_two_pending_requests_of_same_kind(client, make_user, make_ticket):
     coordinator = make_user("coordinator")
     other = make_user("coordinator")
     technician = make_user("technician")
-    assert _create(client, coordinator, technician, "role", "coordinator").status_code == 201
+    assert _create(client, coordinator, technician, "role", "requester").status_code == 201
     assert _create(client, other, technician, "role", "requester").status_code == 409
 
     requester = _locked_requester(make_user, make_ticket)
@@ -242,3 +242,42 @@ def test_requests_are_recorded_without_id_number(client, make_user, make_ticket)
         assert "102340567" not in " ".join(f"{r.old_value} {r.new_value}" for r in rows)
     finally:
         db.close()
+
+
+# ----- El coordinador no solicita ascensos a coordinador -----
+
+def test_coordinator_cannot_request_promotion_to_coordinator(client, make_user, sent):
+    coordinator = make_user("coordinator")
+    technician = make_user("technician")
+    response = _create(client, coordinator, technician, "role", "coordinator")
+    assert response.status_code == 403
+    assert "no puede solicitar" in response.json()["detail"]
+    assert _user(technician["id"]).role == "technician"
+    assert sent == []
+
+
+def test_old_promotion_request_is_not_approved(client, make_user, sent):
+    """Solicitudes de ascenso creadas antes del cambio: el administrador no las aprueba (409)."""
+    coordinator = make_user("coordinator")
+    admin = make_user("admin")
+    technician = make_user("technician")
+    db = SessionLocal()
+    try:
+        from datetime import datetime, timezone
+        row = models.AccountRequest(
+            kind="role", target_user_id=technician["id"], created_by=coordinator["id"], reason="Antigua",
+            new_value="coordinator", old_value="technician", status="pending",
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.add(row)
+        db.commit()
+        request_id = row.id
+    finally:
+        db.close()
+    response = client.post(f"/api/account-requests/{request_id}/approve", headers=admin["headers"])
+    assert response.status_code == 409
+    assert _user(technician["id"]).role == "technician"
+    # Se puede rechazar para cerrarla
+    rejected = client.post(f"/api/account-requests/{request_id}/reject", json={"reason": "Ya no aplica"},
+                           headers=admin["headers"])
+    assert rejected.status_code == 200

@@ -3469,8 +3469,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     draftsFilter.addEventListener('change', () => {
         selectedDraftId = null;
-        // Todos y Sin revisor tienen su sección en el menú; "Mis borradores" queda en la misma página
-        const routes = { all: 'borradores/todos', none: 'borradores/sin-revisor' };
+        // Todos tiene su sección en el menú; "Mis borradores" queda en la misma página
+        const routes = { all: 'borradores/todos' };
         if (routes[draftsFilter.value]) {
             goRoute(routes[draftsFilter.value]);
             return;
@@ -3971,7 +3971,7 @@ document.addEventListener('DOMContentLoaded', () => {
             availability: ['technician'],
             schedule: ['technician'],
             sessions: [],
-            role: ['technician', 'requester']
+            role: ['technician']
         }
     };
 
@@ -6481,9 +6481,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     title: 'Borradores de correo', count: 'drafts_pending',
                     context: 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
                 }),
-                draftsSection('drafts_none', 'Sin revisor', 'borradores/sin-revisor', 'none', {
-                    title: 'Borradores sin revisor', count: 'drafts_unassigned', tone: 'warn', context: 'Llegaron sin nadie en turno: se asignan solos al entrar alguien, o puede repartirlos',
-                }),
             ] },
             { id: 'team', label: 'Equipo', icon: 'team', sections: [
                 navSection('team', 'Turnos', 'equipo/turnos', () => showAccountsSection('team'), {
@@ -7214,14 +7211,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.visibilityState !== 'visible' || !authToken || !currentUser) return;
         if (!STAFF_SHELL_ROLES.includes(currentUser.role)) return;
         try {
-            const coordinator = OPERATION_ROLES.includes(currentUser.role);
-            const [counts, status, notices, unassignedDrafts] = await Promise.all([
+            const [counts, status, notices] = await Promise.all([
                 silentGet('/nav/counts'), silentGet('/system/status'), silentGet('/notifications/overdue'),
-                // Borradores › Sin revisor: el contador sale de la misma lista que ve el coordinador
-                coordinator ? silentGet('/drafts?assigned=none') : Promise.resolve(null),
             ]);
             if (counts) {
-                if (unassignedDrafts) counts.drafts_unassigned = unassignedDrafts.length;
                 navCounts = counts;
                 renderNavCounts();
             }
@@ -7511,6 +7504,8 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(userMap).forEach(userId => {
             const role = userRoleMap[userId];
             if (role !== 'technician' && role !== 'coordinator') return;
+            // El coordinador no filtra por otro coordinador (el servidor responde 403)
+            if (role === 'coordinator' && currentUser.role === 'coordinator' && Number(userId) !== currentUser.id) return;
             const opt = document.createElement('option');
             opt.value = userId;
             opt.textContent = userMap[userId];
@@ -7971,7 +7966,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ['tickets/sin-asignar', 'Sin asignar', value('unassigned'), homeOnShift === 0 ? 'nadie en turno' : '', 'warn'],
             ['tickets/vencidos', 'Vencidos', overdue,
              overdue && homeOverdueNoCause ? `${homeOverdueNoCause} sin causa registrada` : '', 'alert'],
-            ['borradores/sin-revisor', 'Borradores sin revisor', value('drafts_unassigned'), '', 'warn'],
+            // Una sola lista de borradores (los que llegaron sin revisor salen ahí con su etiqueta)
+            ['borradores/todos', 'Borradores pendientes', value('drafts_pending'), '', 'warn'],
         ];
     }
 
@@ -10249,14 +10245,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const info = makeEl('div', 'team-selected-info');
         info.appendChild(makeEl('h2', 'team-selected-name', name));
         info.appendChild(makeEl('p', 'team-selected-detail', `${ROLE_MAP[user.role] || user.role} · ${teamStateText(user)} · ${user.email}`));
-        const numbers = makeEl('p', 'team-selected-numbers');
-        numbers.appendChild(makeEl('b', '', String(user.tickets_assigned_open)));
-        numbers.appendChild(document.createTextNode(' tickets abiertos asignados'));
-        info.appendChild(numbers);
+        // Otro coordinador visto por un coordinador: el servidor no manda sus tickets
+        const seesTickets = typeof user.tickets_assigned_open === 'number';
+        if (seesTickets) {
+            const numbers = makeEl('p', 'team-selected-numbers');
+            numbers.appendChild(makeEl('b', '', String(user.tickets_assigned_open)));
+            numbers.appendChild(document.createTextNode(' tickets abiertos asignados'));
+            info.appendChild(numbers);
+        }
         box.appendChild(info);
 
         const actions = makeEl('div', 'team-selected-actions');
-        if (user.role !== 'admin') {
+        if (user.role !== 'admin' && seesTickets) {
             const tickets = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm team-view-tickets', 'Ver sus tickets');
             tickets.type = 'button';
             actions.appendChild(tickets);
@@ -10449,8 +10449,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const isCoordinator = currentUser.role === 'coordinator';
             document.getElementById('roleTarget').textContent = `${user.name || 'Sin nombre'} · ${ROLE_MAP[user.role] || user.role}`;
             roleSelect.replaceChildren();
+            // El coordinador no solicita ascensos a coordinador (el servidor lo rechaza)
             const options = isCoordinator
-                ? [['coordinator', 'Coordinador'], ['requester', 'Solicitante']]
+                ? [['requester', 'Solicitante']]
                 // Administrador: solo el otro rol del personal, sin motivo
                 : ROLE_OPTIONS.filter(([value]) => value !== user.role);
             options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, false)));

@@ -784,6 +784,35 @@ def test_request_details_sends_and_deletes_draft(client, make_user, sent, llm):
     assert len(_notices(requester["id"])) == 1
 
 
+def test_request_details_reaches_mailpit_for_demo_requester(client, make_user, llm, monkeypatch):
+    """Diagnóstico: en pruebas los borradores demo son de cuentas .invalid y el correo nunca salía (502).
+    Con APP_ENV=pruebas y SMTP (solo Mailpit) "Pedir detalles" sí llega."""
+    import smtplib
+
+    from test_mail_transport import FakeSMTP
+
+    coordinator = make_user("coordinator")
+    requester, draft, _msg = _pending_with_message(make_user, llm)
+    demo_email = f"cliente-{draft.id}@demo.invalid"
+    db = SessionLocal()
+    try:
+        db.get(models.User, requester["id"]).email = demo_email
+        db.commit()
+    finally:
+        db.close()
+    FakeSMTP.instances = []
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(config, "APP_ENV", "pruebas")
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "smtp")
+    monkeypatch.setattr(config, "SMTP_HOST", "mailpit")
+
+    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=coordinator["headers"])
+    assert response.status_code == 200, response.text
+    [msg] = FakeSMTP.instances[0].sent_messages
+    assert msg["To"] == demo_email
+    assert msg["Subject"] == "[Soporte] Necesitamos más detalles sobre su solicitud"
+
+
 def test_request_details_ignores_recent_notice(client, make_user, sent, llm):
     coordinator = make_user("coordinator")
     requester, draft, _msg = _pending_with_message(make_user, llm)
