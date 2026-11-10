@@ -63,14 +63,14 @@ def test_same_answer_whether_account_exists_or_not(client, make_user, sent):
     cases = [
         (requester["email"], "requester"),                 # existe
         (f"nadie-{uuid.uuid4().hex}@test.com", "requester"),  # no existe
-        (technician["email"], "requester"),                # opción equivocada
+        (technician["email"], "requester"),                # otra pestaña: ya no importa
         (inactive["email"], "requester"),                  # desactivada
     ]
     responses = [_request(client, email, portal) for email, portal in cases]
     assert {r.status_code for r in responses} == {202}
     assert len({tuple(sorted(r.json().keys())) for r in responses}) == 1
-    # Solo la cuenta activa con la opción correcta recibe un código
-    assert [to for to, _, _ in sent] == [requester["email"]]
+    # Toda cuenta activa recibe su código, sin importar la pestaña; la inexistente y la desactivada, nada
+    assert [to for to, _, _ in sent] == [requester["email"], technician["email"]]
 
 
 def test_requester_chooses_new_password_and_code_works_once(client, make_user, sent):

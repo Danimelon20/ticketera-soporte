@@ -355,10 +355,21 @@ def send_reset_code(db: Session, user: models.User, requested_by: models.User | 
     return send_code_email(user.email, "Restablecer el acceso a la Ticketera", body, code)
 
 
-def _reset_user(db: Session, email: str, portal: str | None) -> models.User | None:
-    """Cuenta activa cuyo rol entra por esa opción de inicio; si no, None (sin revelar por qué)."""
+RESET_ROLES = ("admin", "coordinator", "technician", "requester")
+
+
+def _reset_user(db: Session, email: str, portal: str | None = None) -> models.User | None:
+    """Cuenta activa que puede restablecer su contraseña; si no, None (sin revelar por qué).
+
+    La pestaña del inicio de sesión (portal) ya no decide: el código va al buzón del dueño de la cuenta y el
+    enlace lleva la opción que corresponde a su rol. Antes, una pestaña recordada por el navegador (p. ej.,
+    Administración) hacía que el pedido de un técnico respondiera 202 sin enviar nada."""
     user = _find_user(db, email)
-    if user is None or not user.is_active or user.role not in PORTAL_ROLES.get(portal or "", ()):
+    if user is None or not user.is_active or user.role not in RESET_ROLES:
+        return None
+    # Con Microsoft, técnicos y coordinadores no tienen contraseña que restablecer
+    if config.MS_LOGIN_ENABLED and user.role in ("technician", "coordinator"):
+        logging.info("Restablecimiento omitido para el usuario %s: el personal entra con Microsoft", user.id)
         return None
     return user
 
@@ -379,7 +390,13 @@ def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get
     email = normalize_email(data.email)
     user = _reset_user(db, email, data.portal)
     reset = _reset_row(db, user)
-    if user is not None and not throttle.is_locked(db, email) and _can_resend(reset.sent_at if reset else None):
+    if user is None:
+        pass
+    elif throttle.is_locked(db, email):
+        logging.info("Restablecimiento omitido para el usuario %s: bloqueado por intentos fallidos", user.id)
+    elif not _can_resend(reset.sent_at if reset else None):
+        logging.info("Restablecimiento omitido para el usuario %s: se pidió hace menos de %s s", user.id, RESEND_SECONDS)
+    else:
         send_reset_code(db, user)
     return SignupStarted(email_hint=mask_email(email))
 
