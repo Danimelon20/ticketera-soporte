@@ -6436,6 +6436,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
                         count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
                     }),
+                    // Solo lectura: la lista y el ticket principal (sin datos de contacto)
+                    navSection('incidents', 'Incidentes', 'admin/incidentes', () => showListPage('incidents'), {
+                        title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla · solo lectura',
+                    }),
                     navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
                         context: 'Horarios de la semana, vacaciones y ausencias',
                     }),
@@ -6899,7 +6903,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderIncidentsPage(items) {
         listViewBody.replaceChildren();
-        listViewNote.textContent = 'Al resolver el ticket principal se resuelven también los relacionados, y cada cliente recibe el aviso.';
+        listViewNote.textContent = currentUser.role === 'admin'
+            ? 'Solo lectura: el coordinador los atiende desde el ticket principal.'
+            : 'Al resolver el ticket principal se resuelven también los relacionados, y cada cliente recibe el aviso.';
         if (!items.length) {
             listViewBody.appendChild(emptyState({
                 title: 'No hay posibles incidentes', text: 'Aparecen cuando varios clientes reportan lo mismo en poco tiempo.',
@@ -7017,7 +7023,7 @@ document.addEventListener('DOMContentLoaded', () => {
     listViewBody.addEventListener('click', async (e) => {
         const incident = e.target.closest('.list-incident');
         if (incident) {
-            openTicketById(Number(incident.dataset.ticketId));
+            openTicketById(Number(incident.dataset.ticketId), { incident: true });
             return;
         }
         const edit = e.target.closest('.list-availability-edit');
@@ -7255,9 +7261,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ----- Buscador global: #número abre el ticket; el texto busca tickets y, con permiso, clientes -----
-    async function openTicketById(ticketId) {
-        // El administrador no abre tickets directamente: primero el motivo de "Ver conversación"
-        const admin = currentUser && currentUser.role === 'admin';
+    async function openTicketById(ticketId, { incident = false } = {}) {
+        // El administrador no abre tickets directamente: primero el motivo de "Ver conversación".
+        // Excepción: el principal de un incidente, en solo lectura y sin datos de contacto (lo revisa el servidor)
+        const admin = currentUser && currentUser.role === 'admin' && !incident;
         // Abierto desde una ruta (Atrás, Adelante, enlace): no se agrega otra entrada al historial
         const fromRoute = routing;
         const reason = admin ? await askConversationReason(ticketId) : null;

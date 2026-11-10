@@ -8,7 +8,8 @@ from ..security import get_current_user
 
 router = APIRouter(prefix="/api", tags=["grouping"])
 
-INCIDENT_ROLES = ("coordinator",)
+# El administrador ve la lista en solo lectura (y el principal, sin datos de contacto, en GET /tickets/{id})
+INCIDENT_ROLES = ("coordinator", "admin")
 
 
 @router.post("/merges/{merge_id}/undo", status_code=204)

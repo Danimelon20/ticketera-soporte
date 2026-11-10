@@ -103,7 +103,8 @@ MATRIX = [
      _codes(200, 403, 200, 403, 403)),
     ("causa del vencimiento", "post", lambda w: f"/api/tickets/{w['ticket_id']}/overdue-cause",
      lambda w: {"cause": "high_load"}, _codes(403, 403, 200, 403, 403)),
-    ("incidentes", "get", lambda w: "/api/incidents", None, _codes(403, 403, 200, 403, 403)),
+    # El administrador ve la lista en solo lectura
+    ("incidentes", "get", lambda w: "/api/incidents", None, _codes(403, 403, 200, 200, 403)),
     ("campana", "get", lambda w: "/api/notifications/overdue", None, _codes(200, 200, 200, 200, 403)),
     ("contadores", "get", lambda w: "/api/nav/counts", None, _codes(200, 200, 200, 200, 403)),
     # ----- Borradores -----

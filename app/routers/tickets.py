@@ -265,8 +265,24 @@ def list_tickets(
 # exclude_unset: el solicitante no recibe la clave ai_analysis
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail, response_model_exclude_unset=True)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if current_user.role == "admin":
+        return incident_detail_for_admin(db, ticket_id, current_user)
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     return ticket_detail(db, db_ticket, current_user)
+
+
+def incident_detail_for_admin(db: Session, ticket_id: int, admin) -> TicketDetail:
+    """Incidentes: el administrador abre el ticket principal en solo lectura, sin teléfono ni cédula.
+    Cualquier otro ticket sigue cerrado para él (solo con "Ver conversación", con motivo)."""
+    db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not db_ticket:
+        raise HTTPException(status_code=404, detail="El ticket no existe")
+    if ticket_id not in grouping.incident_ids(db):
+        raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
+    detail = ticket_detail(db, db_ticket, admin)
+    detail.contact_phone = None
+    detail.contact_id_number = None
+    return detail
 
 
 @router.post("/tickets/{ticket_id}/view-conversation", response_model=TicketDetail, response_model_exclude_unset=True)
