@@ -985,3 +985,45 @@ class AppSetting(Base):
     value = Column(String(200), nullable=True)
     updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# ===== Tickets por departamento (tablas aparte: no se agregan columnas a tickets) =====
+
+TICKET_CHANNELS = {"email": "correo", "phone": "teléfono", "in_person": "en persona"}
+
+
+class TicketDepartment(Base):
+    """Departamento que atiende el ticket. Sin fila: "Sin departamento" (tickets anteriores y los del portal)."""
+    __tablename__ = "ticket_departments"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class TicketReporter(Base):
+    """Quién reportó el problema cuando el ticket lo crea el personal en su nombre, y por qué canal."""
+    __tablename__ = "ticket_reporters"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    email = Column(String(150), nullable=True)
+    # Área de quien reporta: cualquier departamento del organigrama (atienda tickets o no)
+    area_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    phone = Column(String(30), nullable=True)
+    # email, phone o in_person (validado en Python)
+    channel = Column(String(20), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class TicketSolution(Base):
+    """Documentación de la solución: obligatoria al marcar el ticket como Resuelto (interruptor encendido)."""
+    __tablename__ = "ticket_solutions"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    text = Column(Text, nullable=False)
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    resolved_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))

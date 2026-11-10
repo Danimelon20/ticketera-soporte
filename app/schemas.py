@@ -332,6 +332,8 @@ class TicketUpdate(BaseModel):
     category_id: Optional[int] = None
     # Asignar a un técnico no disponible solo con confirmación explícita
     confirm_unavailable: bool = False
+    # Con el interruptor encendido: obligatoria al pasar a Resuelto
+    solution: Optional[str] = Field(default=None, max_length=5000)
 
 
 class CancellationRead(BaseModel):
@@ -455,6 +457,21 @@ class IncidentRead(BaseModel):
     clients: int
 
 
+class TicketReporterRead(BaseModel):
+    name: str
+    email: Optional[str] = None
+    area_name: Optional[str] = None
+    phone: Optional[str] = None
+    channel: str
+    channel_label: str
+
+
+class TicketSolutionRead(BaseModel):
+    text: str
+    resolved_by_name: str
+    resolved_at: datetime
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
@@ -473,6 +490,13 @@ class TicketDetail(TicketRead):
     grouping: Optional[GroupingRead] = None
     # Técnico que lo tuvo asignado antes, o administrador con "Ver conversación": solo lectura
     read_only: bool = False
+    # Solo el personal: departamento que atiende (None: "Sin departamento"), quién reportó y la solución
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    reporter: Optional[TicketReporterRead] = None
+    solution: Optional[TicketSolutionRead] = None
+    # Interruptor de tickets por departamento encendido (la pantalla pide la solución al resolver)
+    routing_enforced: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -758,6 +782,7 @@ class NavCounts(BaseModel):
     invitations_pending: Optional[int] = None
     approvals_pending: Optional[int] = None
     active_admins: Optional[int] = None
+    unclassified: Optional[int] = None
     mine_open: Optional[int] = None
     mine_due_soon: Optional[int] = None
     mine_resolved_today: Optional[int] = None
@@ -779,6 +804,8 @@ class QueueItem(BaseModel):
     id: int
     title: str
     requester_name: str
+    # Departamento que atiende; None: "Sin departamento"
+    department_name: Optional[str] = None
     level: Optional[int] = None
     source: str
     status: str
@@ -1129,6 +1156,8 @@ class ChecklistItem(BaseModel):
     detail: Optional[str] = None
     # Sección del menú donde se corrige (ruta)
     link: Optional[str] = None
+    # Advertencia: se muestra, pero no impide encender
+    warning: bool = False
 
 
 class SwitchRead(BaseModel):
@@ -1161,3 +1190,16 @@ class AdminOverview(BaseModel):
     departments: list[OverviewDepartment]
     routing_enforced: bool
     unplaced: list[UnplacedPerson]
+
+
+class UnclassifiedTicket(BaseModel):
+    id: int
+    title: str
+    status: str
+    created_at: datetime
+    requester_name: str
+    assigned_name: Optional[str] = None
+
+
+class TicketDepartmentUpdate(BaseModel):
+    department_id: int

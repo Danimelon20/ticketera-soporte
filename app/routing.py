@@ -341,6 +341,7 @@ def routing_checklist(db: Session) -> list[dict]:
         shown = "; ".join(names[:3])
         return f"{len(names)}: {shown}" + (" y otros" if len(names) > 3 else "")
 
+    unclassified = unclassified_open_tickets(db).count()
     return [
         {"key": "serving_departments", "label": "Hay al menos un departamento que atiende tickets",
          "ok": bool(serving), "detail": None if serving else "ninguno marcado", "link": "admin/departamentos"},
@@ -355,4 +356,50 @@ def routing_checklist(db: Session) -> list[dict]:
          "label": "Cada departamento que atiende tickets tiene al menos un técnico",
          "ok": bool(serving) and not without_technicians, "detail": detail(without_technicians),
          "link": "admin/departamentos"},
+        # Advertencia, no bloquea: los tickets sin departamento los clasifica el administrador
+        {"key": "unclassified_tickets", "label": "Tickets abiertos sin departamento", "warning": True,
+         "ok": unclassified == 0, "detail": f"{unclassified} por clasificar" if unclassified else None,
+         "link": "admin/sin-departamento"},
     ]
+
+
+def checklist_ready(checklist: list[dict]) -> bool:
+    """Lista lista para encender: las advertencias no bloquean."""
+    return all(item["ok"] for item in checklist if not item.get("warning"))
+
+
+# ----- Departamento del ticket -----
+
+def ticket_department(db: Session, ticket_id: int) -> models.Department | None:
+    row = db.query(models.TicketDepartment).filter(models.TicketDepartment.ticket_id == ticket_id).first()
+    return db.get(models.Department, row.department_id) if row is not None else None
+
+
+def ticket_department_ids(db: Session, ticket_ids) -> dict[int, int]:
+    """ticket_id → department_id (solo los que tienen departamento)."""
+    ids = list(ticket_ids)
+    if not ids:
+        return {}
+    return dict(db.query(models.TicketDepartment.ticket_id, models.TicketDepartment.department_id)
+                .filter(models.TicketDepartment.ticket_id.in_(ids)))
+
+
+def set_ticket_department(db: Session, ticket: models.Ticket, department_id: int) -> None:
+    """Fija el departamento del ticket (debe atender tickets). No escribe historial ni hace commit."""
+    dept = serving_department(db, department_id)
+    row = db.query(models.TicketDepartment).filter(models.TicketDepartment.ticket_id == ticket.id).first()
+    if row is None:
+        row = models.TicketDepartment(ticket_id=ticket.id, department_id=dept.id, updated_at=_now())
+        db.add(row)
+    else:
+        row.department_id = dept.id
+        row.updated_at = _now()
+    db.flush()
+
+
+def unclassified_open_tickets(db: Session):
+    """Tickets abiertos sin departamento (los clasifica el administrador)."""
+    return db.query(models.Ticket).filter(
+        models.Ticket.status.in_(("new", "in_progress")),
+        models.Ticket.id.notin_(db.query(models.TicketDepartment.ticket_id)),
+    )

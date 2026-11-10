@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException
@@ -11,12 +12,48 @@ from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import cancellations, config, hacienda, mailer
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, ticket_access
+from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, routing, ticket_access
 
 AI_ROLES = ("technician", "coordinator")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
 OPERATION_ROLES = ("coordinator",)
 FOLLOW_REQUESTERS_ONLY = "Solo el solicitante da seguimiento a un ticket por correo"
+SOLUTION_REQUIRED = "Documente la solución (al menos 10 caracteres) para marcar el ticket como Resuelto"
+SOLUTION_MIN = 10
+
+
+def department_fields(db: Session, ticket: models.Ticket) -> dict:
+    """Solo el personal: departamento que atiende, quién reportó (y por qué canal) y la solución."""
+    by_id = routing.departments_by_id(db)
+    dept = routing.ticket_department(db, ticket.id)
+    fields = {"department_id": dept.id if dept else None, "department_name": routing.path_label(dept, by_id),
+              "routing_enforced": routing.enforced(db)}
+    reporter = db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == ticket.id).first()
+    if reporter is not None:
+        fields["reporter"] = {
+            "name": reporter.name, "email": reporter.email, "phone": reporter.phone,
+            "area_name": routing.path_label(by_id.get(reporter.area_department_id), by_id),
+            "channel": reporter.channel, "channel_label": models.TICKET_CHANNELS.get(reporter.channel, reporter.channel),
+        }
+    solution = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
+    if solution is not None:
+        author = db.get(models.User, solution.resolved_by)
+        fields["solution"] = {"text": solution.text, "resolved_at": solution.resolved_at,
+                              "resolved_by_name": (author.name or "Sin nombre") if author else "Sin nombre"}
+    return fields
+
+
+def save_solution(db: Session, ticket: models.Ticket, text: str, user: models.User) -> None:
+    """La última documentación de la solución (si se reabre y se vuelve a resolver, se reemplaza). No hace commit."""
+    row = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
+    if row is None:
+        row = models.TicketSolution(ticket_id=ticket.id, text=text, resolved_by=user.id)
+        db.add(row)
+    row.text = text
+    row.resolved_by = user.id
+    row.resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 OVERDUE_LOCKED = "El ticket está vencido: el coordinador decide su estado y su nivel"
 
 
@@ -348,6 +385,7 @@ def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> Ticket
             extra["requester_flags"] = flags
         extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
         extra["grouping"] = grouping.staff_view(db, db_ticket, current_user)
+        extra.update(department_fields(db, db_ticket))
     merge = grouping.active_merge_of(db, db_ticket.id)
     if merge is not None:
         extra["merged_into"] = merge.target_ticket_id
@@ -607,6 +645,11 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         current_status = db_ticket.status
         if data.status not in allowed_transitions.get(current_status, []):
             raise HTTPException(status_code=400, detail="Cambio de estado no permitido")
+    # Tickets por departamento: la solución se documenta al resolver
+    solution = " ".join((data.solution or "").split()) if data.solution else ""
+    if data.status == "resolved" and db_ticket.status != "resolved" and routing.enforced(db):
+        if len(solution) < SOLUTION_MIN:
+            raise HTTPException(status_code=422, detail=SOLUTION_REQUIRED)
 
     # Regla 2 - No se inicia sin asignar:
     # En el PATCH, calcula assigned_final = data.assigned_to si viene en la petición, si no db_ticket.assigned_to. 
@@ -661,6 +704,8 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     old_category_id = db_ticket.category_id
 
     # Aplicar cambios solo si son diferentes
+    if data.status == "resolved" and db_ticket.status != "resolved" and solution:
+        save_solution(db, db_ticket, (data.solution or "").strip(), current_user)
     if data.status is not None and data.status != db_ticket.status:
         db_ticket.status = data.status
         if data.status != old_status:

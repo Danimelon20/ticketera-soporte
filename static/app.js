@@ -2249,6 +2249,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Texto de un cambio del historial: "Ana cambió el estado de Nuevo a En proceso"
     function appendHistoryText(target, entry, changedByName) {
+        // Departamentos: el servidor ya guarda la frase completa ("Transferido de X a Y por Z: motivo",
+        // "Creado por X en nombre de Y vía teléfono", "Clasificado en X por Z")
+        if (entry.field === 'department' || entry.field === 'created_on_behalf') {
+            target.appendChild(document.createTextNode(entry.new_value || ''));
+            return;
+        }
         const strongWho = document.createElement('strong');
         strongWho.textContent = changedByName;
         target.appendChild(strongWho);
@@ -6387,6 +6393,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
                         context: 'Horarios de la semana, vacaciones y ausencias',
                     }),
+                    navSection('unclassified', 'Sin departamento', 'admin/sin-departamento', () => showAdminSection('unclassified'), {
+                        count: 'unclassified', tone: 'warn', context: 'Tickets abiertos que todavía no tienen departamento',
+                    }),
                     navSection('departments', 'Departamentos', 'admin/departamentos', () => showAdminSection('departments'), {
                         context: 'Organigrama y departamentos que atienden tickets',
                     }),
@@ -8205,6 +8214,80 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ----- Panel de detalle -----
+    // ----- Tickets por departamento: departamento, quién reporta y solución en el detalle -----
+    function departmentControl(ticket, locked) {
+        const box = makeEl('span', 'route-field');
+        box.appendChild(makeEl('span', '', ticket.department_name || 'Sin departamento'));
+        if (ticket.routing_enforced && !locked && ticket.department_id) {
+            const transfer = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm route-change td-transfer', 'Transferir');
+            transfer.type = 'button';
+            box.appendChild(transfer);
+        }
+        return box;
+    }
+
+    function reporterCard(reporter) {
+        const card = makeEl('section', 'ui-card td-card td-reporter');
+        card.appendChild(makeEl('h2', 'ui-kicker', 'Quién reportó'));
+        const list = makeEl('dl', 'td-props');
+        staffField(list, 'Nombre', reporter.name);
+        staffField(list, 'Canal', reporter.channel_label);
+        if (reporter.area_name) staffField(list, 'Área', reporter.area_name);
+        if (reporter.email) staffField(list, 'Correo', reporter.email);
+        if (reporter.phone) staffField(list, 'Teléfono o extensión', reporter.phone);
+        card.appendChild(list);
+        return card;
+    }
+
+    function solutionCard(solution) {
+        const card = makeEl('section', 'ui-card td-card td-solution');
+        card.id = 'ticketSolution';
+        card.appendChild(makeEl('h2', 'ui-kicker', 'Solución'));
+        card.appendChild(makeEl('p', 'td-solution-text', solution.text));
+        card.appendChild(makeEl('p', 'org-row-sub', `${solution.resolved_by_name} · ${formatDateTime(solution.resolved_at)}`));
+        return card;
+    }
+
+    // Diálogo de la solución: devuelve el texto o null si se cancela
+    const solutionDialog = document.getElementById('solutionDialog');
+    const solutionText = document.getElementById('solutionText');
+    const solutionError = document.getElementById('solutionError');
+    let solutionDone = null;
+
+    function askSolution(ticketId) {
+        return new Promise(resolve => {
+            solutionDone = resolve;
+            document.getElementById('solutionTarget').textContent = `Ticket #${ticketId}`;
+            solutionText.value = '';
+            solutionError.hidden = true;
+            solutionDialog.showModal();
+            solutionText.focus();
+        });
+    }
+
+    function closeSolutionDialog(value) {
+        if (solutionDialog.open) solutionDialog.close();
+        const resolve = solutionDone;
+        solutionDone = null;
+        if (resolve) resolve(value);
+    }
+
+    document.getElementById('solutionCancel').addEventListener('click', () => closeSolutionDialog(null));
+    solutionDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeSolutionDialog(null);
+    });
+    document.getElementById('solutionForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = solutionText.value.trim();
+        if (text.length < 10) {
+            solutionError.textContent = 'Escriba al menos 10 caracteres';
+            solutionError.hidden = false;
+            return;
+        }
+        closeSolutionDialog(text);
+    });
+
     function staffField(list, label, content) {
         const box = makeEl('div', 'sd-field');
         box.appendChild(makeEl('dt', '', label));
@@ -8906,6 +8989,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const props = makeEl('section', 'ui-card td-card');
         props.appendChild(makeEl('h2', 'ui-kicker', 'Propiedades'));
         const fields = makeEl('dl', 'td-props');
+        // Departamento que atiende (con el interruptor encendido se puede transferir con motivo)
+        if (ticket.routing_enforced || ticket.department_name) {
+            staffField(fields, 'Departamento', departmentControl(ticket, readOnly || isClosed));
+        }
         staffField(fields, 'Responsable', staffAssigneeControl(ticket));
         staffField(fields, 'Nivel', readOnly
             ? levelText(ticket.ai_analysis ? ticket.ai_analysis.effective_level : null) : staffLevelControl(ticket));
@@ -8921,6 +9008,10 @@ document.addEventListener('DOMContentLoaded', () => {
             props.appendChild(makeEl('p', 'td-props-note', 'Para cambiar de responsable, pídaselo a su coordinador.'));
         }
         side.appendChild(props);
+
+        // Quién reportó (ticket creado por el personal en su nombre) y la solución documentada
+        if (ticket.reporter) side.appendChild(reporterCard(ticket.reporter));
+        if (ticket.solution) side.appendChild(solutionCard(ticket.solution));
 
         const suggestionSlot = makeEl('div', 'sd-suggestion-slot');
         side.appendChild(suggestionSlot);
@@ -9145,12 +9236,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusSelect = e.target.closest('.sd-status-select');
         if (statusSelect) {
             if (statusSelect.value === currentTicket.status) return;
+            const body = { status: statusSelect.value };
+            // Tickets por departamento: al resolver se documenta la solución (el servidor la exige)
+            if (statusSelect.value === 'resolved' && currentTicket.routing_enforced) {
+                const solution = await askSolution(currentTicket.id);
+                if (solution === null) {
+                    statusSelect.value = currentTicket.status;
+                    return;
+                }
+                body.solution = solution;
+            }
             statusSelect.disabled = true;
             try {
                 await apiFetch(`/tickets/${selectedTicketId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: statusSelect.value })
+                    body: JSON.stringify(body)
                 });
             } catch (err) {
                 statusSelect.value = currentTicket.status;
@@ -9993,6 +10094,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ADMIN_SECTION_TITLES = {
         health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
         departments: 'Departamentos', activation: 'Activación', panel: 'Panel',
+        unclassified: 'Tickets sin departamento',
     };
     // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
     const ADMIN_SECTION_LOADERS = {};
@@ -10256,6 +10358,70 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!button) return;
         const person = { id: Number(button.dataset.placeId), name: button.dataset.placeName, role: button.dataset.placeRole };
         if (await openPlacementDialog(person)) showActivation();
+    });
+
+    // ----- Administración › Tickets sin departamento: el administrador los clasifica -----
+    const unclassifiedList = document.getElementById('unclassifiedList');
+
+    async function showUnclassified() {
+        let tickets;
+        try {
+            [tickets] = await Promise.all([
+                apiFetch('/admin/tickets/unclassified', { silent: true }), loadOrgDepartments(),
+            ]);
+        } catch (err) {
+            unclassifiedList.replaceChildren(errorState(err, showUnclassified));
+            return;
+        }
+        unclassifiedList.replaceChildren();
+        if (!tickets.length) {
+            unclassifiedList.appendChild(emptyState({ title: 'No hay tickets sin departamento', text: 'Todos los tickets abiertos tienen departamento.' }));
+            return;
+        }
+        tickets.forEach(ticket => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `#${ticket.id} · ${ticket.title}`));
+            text.appendChild(makeEl('span', 'org-row-sub', [
+                ticket.requester_name, STATE_MAP[ticket.status] || ticket.status,
+                ticket.assigned_name ? `Responsable: ${ticket.assigned_name}` : 'Sin responsable',
+                formatDateTime(ticket.created_at),
+            ].join(' · ')));
+            const actions = makeEl('div', 'org-row-actions');
+            const select = makeEl('select', 'ui-input unclassified-dept');
+            select.setAttribute('aria-label', `Departamento del ticket #${ticket.id}`);
+            departmentOptions(select, { servingOnly: true });
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Clasificar');
+            button.type = 'button';
+            button.dataset.classifyId = String(ticket.id);
+            actions.append(select, button);
+            li.append(text, actions);
+            unclassifiedList.appendChild(li);
+        });
+    }
+    ADMIN_SECTION_LOADERS.unclassified = showUnclassified;
+
+    unclassifiedList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-classify-id]');
+        if (!button) return;
+        const select = button.closest('li').querySelector('.unclassified-dept');
+        if (!select.value) {
+            showError('Elija el departamento');
+            return;
+        }
+        button.disabled = true;
+        try {
+            await apiFetch(`/admin/tickets/${button.dataset.classifyId}/department`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ department_id: Number(select.value) }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        showSuccess(`Ticket #${button.dataset.classifyId} clasificado`);
+        showUnclassified();
+        pollNavCounts(false);
     });
 
     // ----- Administración › Panel: una fila por departamento que atiende tickets -----

@@ -3,15 +3,15 @@
 Adaptado de la rama areas-y-clientes sin áreas de atención: el administrador crea, renombra, mueve y
 desactiva departamentos y marca los que atienden tickets.
 """
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, departments, models, routing
+from .. import accounts, audit, auto_assign, config, departments, models, routing
 from ..schemas import (
     AdminOverview, DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
-    UnplacedPerson,
+    TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
 from .admin import require_admin
 
@@ -269,7 +269,7 @@ def _switch_read(db: Session, key: str) -> SwitchRead:
     author = db.get(models.User, row.updated_by) if row is not None and row.updated_by else None
     return SwitchRead(
         key=key, label=routing.SWITCH_LABELS[key], enabled=row is not None and row.value == "true",
-        checklist=checklist, ready=all(item["ok"] for item in checklist),
+        checklist=checklist, ready=routing.checklist_ready(checklist),
         updated_at=row.updated_at if author else None, updated_by_name=(author.name or "Sin nombre") if author else None,
     )
 
@@ -285,8 +285,47 @@ def set_switch(key: str, data: SwitchUpdate, db: Session = Depends(get_db), admi
     Registro de cambios (quién y cuándo)."""
     if key not in routing.SWITCHES:
         raise HTTPException(status_code=404, detail="Ese interruptor no existe")
-    if data.enabled and not all(item["ok"] for item in routing.routing_checklist(db)):
+    if data.enabled and not routing.checklist_ready(routing.routing_checklist(db)):
         raise HTTPException(status_code=409, detail=CHECKLIST_PENDING)
     routing.set_setting(db, key, "true" if data.enabled else "false", admin)
     db.commit()
     return _switch_read(db, key)
+
+
+# ----- Tickets sin departamento: los clasifica el administrador -----
+
+@router.get("/tickets/unclassified", response_model=list[UnclassifiedTicket])
+def unclassified_tickets(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Tickets abiertos sin departamento (los anteriores a los departamentos y los que llegan del portal)."""
+    rows = []
+    for ticket in routing.unclassified_open_tickets(db).order_by(models.Ticket.created_at, models.Ticket.id):
+        creator = db.get(models.User, ticket.created_by)
+        assignee = db.get(models.User, ticket.assigned_to) if ticket.assigned_to else None
+        rows.append(UnclassifiedTicket(
+            id=ticket.id, title=ticket.title, status=ticket.status, created_at=ticket.created_at,
+            requester_name=(creator.name or "Sin nombre") if creator else "Sin nombre",
+            assigned_name=(assignee.name or "Sin nombre") if assignee else None,
+        ))
+    return rows
+
+
+@router.put("/tickets/{ticket_id}/department", status_code=204)
+def classify_ticket(ticket_id: int, data: TicketDepartmentUpdate, background_tasks: BackgroundTasks,
+                    db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Clasifica un ticket sin departamento. Para cambiar el de un ticket que ya tiene, se transfiere (con motivo)."""
+    ticket = db.get(models.Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="El ticket no existe")
+    if routing.ticket_department(db, ticket.id) is not None:
+        raise HTTPException(status_code=409, detail="El ticket ya tiene departamento: use Transferir")
+    routing.set_ticket_department(db, ticket, data.department_id)
+    by_id = routing.departments_by_id(db)
+    label = routing.path_label(by_id[data.department_id], by_id)
+    db.add(models.History(ticket_id=ticket.id, field="department", old_value=None,
+                          new_value=f"Clasificado en {label} por {admin.name or 'el administrador'}"[:500],
+                          changed_by=admin.id))
+    db.commit()
+    # Sin responsable: entra a la asignación automática de ese departamento
+    if ticket.assigned_to is None and ticket.status in ("new", "in_progress") and config.AUTO_ASSIGN_ENABLED:
+        background_tasks.add_task(auto_assign.assign_new, ticket.id)
+    return None

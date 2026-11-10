@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, schedules, ticket_access
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, routing, schedules, ticket_access
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -123,6 +123,8 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
             "active_admins": db.query(models.User).filter(
                 models.User.role == "admin", models.User.is_active.is_(True)
             ).count(),
+            # Tickets abiertos sin departamento (los clasifica el administrador)
+            "unclassified": routing.unclassified_open_tickets(db).count(),
         }
     if user.role == "technician":
         mine = _open_tickets(db, assigned_to=user.id)

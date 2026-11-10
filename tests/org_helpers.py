@@ -42,3 +42,57 @@ def placement_for(role: str) -> dict:
     if _shared_department is None:
         _shared_department = department(unique("Soporte compartido"))
     return {"department_id": _shared_department, "tier": 1}
+
+
+def place(user_id: int, department_id: int, tier: int = 1) -> None:
+    """Técnico en un departamento (directo en la base)."""
+    db = SessionLocal()
+    try:
+        db.query(models.StaffPlacement).filter(models.StaffPlacement.user_id == user_id).delete()
+        db.add(models.StaffPlacement(user_id=user_id, department_id=department_id, tier=tier))
+        db.commit()
+    finally:
+        db.close()
+
+
+def coordinate(user_id: int, department_id: int) -> None:
+    """Coordinador de un departamento (directo en la base)."""
+    db = SessionLocal()
+    try:
+        db.query(models.DepartmentCoordinator).filter(models.DepartmentCoordinator.user_id == user_id).delete()
+        db.add(models.DepartmentCoordinator(department_id=department_id, user_id=user_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def set_department(ticket_id: int, department_id: int) -> None:
+    db = SessionLocal()
+    try:
+        row = db.query(models.TicketDepartment).filter(models.TicketDepartment.ticket_id == ticket_id).first()
+        if row is None:
+            db.add(models.TicketDepartment(ticket_id=ticket_id, department_id=department_id))
+        else:
+            row.department_id = department_id
+        db.commit()
+    finally:
+        db.close()
+
+
+def history(ticket_id: int, field: str) -> list[models.History]:
+    db = SessionLocal()
+    try:
+        return db.query(models.History).filter(models.History.ticket_id == ticket_id,
+                                               models.History.field == field).order_by(models.History.id).all()
+    finally:
+        db.close()
+
+
+def team(make_user, tier: int = 1):
+    """Departamento que atiende tickets con su coordinador y un técnico. Devuelve (dept_id, coordinador, técnico)."""
+    dept = department(unique("Equipo"))
+    coordinator = make_user("coordinator", unique("Coordinador"))
+    technician = make_user("technician", unique("Técnico"))
+    coordinate(coordinator["id"], dept)
+    place(technician["id"], dept, tier)
+    return dept, coordinator, technician

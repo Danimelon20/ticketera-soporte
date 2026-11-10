@@ -1120,6 +1120,11 @@
                         <ul id="panelUnplaced" class="org-list"></ul>
                     </div>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="unclassified">
+                    <div class="admin-card-head"><h2>Tickets sin departamento</h2></div>
+                    <p class="admin-text">Tickets abiertos de antes de los departamentos y los que llegan del portal. Elija el departamento que los atiende; si no tienen responsable, entran a la asignación automática de ese departamento.</p>
+                    <ul id="unclassifiedList" class="org-list"></ul>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="departments">
                     <div class="admin-card-head"><h2>Departamentos</h2></div>
                     <p class="admin-text">El organigrama de la empresa. Marque «Atiende tickets» solo en los departamentos que reciben tickets: cada uno tiene un coordinador y sus técnicos. La casilla no se hereda a los subdepartamentos.</p>
@@ -1315,6 +1320,24 @@
     </dialog>
 
     <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <!-- Al marcar Resuelto con tickets por departamento: la solución es obligatoria -->
+    <dialog id="solutionDialog" class="app-dialog" aria-labelledby="solutionDialogTitle">
+        <form id="solutionForm" class="profile-form">
+            <h2 id="solutionDialogTitle" class="modal-title">Documentar la solución</h2>
+            <p id="solutionTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="solutionText">Qué se hizo para resolverlo (obligatorio)</label>
+                <textarea id="solutionText" rows="5" minlength="10" maxlength="5000" required></textarea>
+                <small class="help-text">No se envía ningún correo: quien creó el ticket recibe un aviso en su campana para avisarle a quien reportó.</small>
+            </div>
+            <p id="solutionError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="solutionCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Marcar como Resuelto</button>
+            </div>
+        </form>
+    </dialog>
+
     <!-- Departamento (y nivel del técnico) de una persona del personal: solo el administrador -->
     <dialog id="placementDialog" class="app-dialog" aria-labelledby="placementDialogTitle">
         <form id="placementForm" class="profile-form">
