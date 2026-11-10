@@ -7,6 +7,7 @@ from app import accounts, models
 from app.database import SessionLocal
 from conftest import code_from, only_active_admins
 from scripts import admin_tools
+from org_helpers import placement_for
 
 
 def _db_user(user_id):
@@ -292,7 +293,8 @@ def test_archive_requester_keeps_activity_and_frees_email(client, make_user, mak
     assert (row["old_value"], row["new_value"]) == (email, archived)
 
     # El correo original queda libre para una cuenta de personal
-    response = client.post("/api/staff-invitations", json={"email": email, "name": "Persona Interna", "role": "technician"},
+    response = client.post("/api/staff-invitations", json={"email": email, "name": "Persona Interna", "role": "technician",
+                                                             **placement_for("technician")},
                            headers=admin["headers"])
     assert response.status_code == 201, response.text
     response = client.post("/api/auth/activate", json={"email": email, "code": code_from(sent[-1][2])})

@@ -69,6 +69,10 @@ class StaffInvitationCreate(BaseModel):
     email: str = Field(min_length=3, max_length=150)
     name: str = Field(min_length=1, max_length=100)
     role: Literal["technician", "coordinator"]
+    # Obligatorio (se valida en la ruta para dar el mensaje): departamento que atiende tickets
+    department_id: Optional[int] = None
+    # Solo técnicos: 1 = N1 … 3 = N3
+    tier: Optional[int] = Field(default=None, ge=1, le=3)
 
     @field_validator("name")
     @classmethod
@@ -88,6 +92,8 @@ class StaffInvitationRead(BaseModel):
     # registered: no se usó, pero el correo ya tiene cuenta (no se reenvía)
     status: Literal["available", "expired", "used", "registered"]
     email_sent: Optional[bool] = None
+    department_name: Optional[str] = None
+    tier: Optional[int] = None
 
 
 class ActivationResult(BaseModel):
@@ -174,6 +180,9 @@ class MeRead(BaseModel):
     schedule_summary: Optional[str] = None
     # Vacaciones e incapacidades vigentes y futuras (las registra la persona o quien gestiona su cuenta)
     periods: list[AvailabilityPeriodRead] = []
+    # Técnicos y coordinadores: departamento (ruta) y nivel del técnico (1 = N1 … 3 = N3)
+    department_name: Optional[str] = None
+    tier: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -605,6 +614,9 @@ class AdminUserUpdate(BaseModel):
     # Sin "admin": el administrador solo se crea con python -m app.create_admin (422 si se pide)
     role: Literal["requester", "technician", "coordinator"] | None = None
     is_active: bool | None = None
+    # Con el cambio técnico ↔ coordinador: el departamento nuevo (y el nivel si pasa a técnico)
+    department_id: Optional[int] = None
+    tier: Optional[int] = Field(default=None, ge=1, le=3)
 
 
 class ChatTurn(BaseModel):
@@ -811,6 +823,8 @@ class AdminAccountRow(BaseModel):
     invitation_hours_left: Optional[int] = None
     # Solo con el filtro por horario: el turno de ese día ("08:00–17:00")
     schedule_day: Optional[str] = None
+    # Personal: "Ruta · N2"; None sin departamento
+    department_name: Optional[str] = None
 
 
 class AdminAccountAlerts(BaseModel):
@@ -849,6 +863,8 @@ class TeamMember(BaseModel):
     email: str
     role: str
     is_active: bool
+    # Técnicos y coordinadores: "Ruta · N2"; None sin departamento
+    department_name: Optional[str] = None
     # None: otro coordinador visto por un coordinador (no ve sus tickets)
     tickets_assigned_open: Optional[int] = 0
     login_locked: bool = False
@@ -878,6 +894,8 @@ class AccountListRow(BaseModel):
     invitation_hours_left: Optional[int] = None
     # Solo con el filtro por horario: el turno de ese día ("08:00–17:00")
     schedule_day: Optional[str] = None
+    # Personal: "Ruta · N2"; None sin departamento
+    department_name: Optional[str] = None
 
 
 class AccountCounts(BaseModel):
@@ -1072,3 +1090,30 @@ class DepartmentImportConfirm(BaseModel):
 class DepartmentImportResult(BaseModel):
     created: int
     aliases: int
+
+
+class PlacementUpdate(BaseModel):
+    department_id: Optional[int] = None
+    # Solo técnicos: 1 = N1 … 3 = N3
+    tier: Optional[int] = Field(default=None, ge=1, le=3)
+
+
+class PlacementRead(BaseModel):
+    user_id: int
+    role: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    tier: Optional[int] = None
+    placed: bool
+
+
+class UnplacedPerson(BaseModel):
+    id: int
+    name: str
+    role: str
+    # Departamento que ya no sirve (desactivado o que no atiende tickets); None si no tiene
+    department_name: Optional[str] = None
+
+
+class StaffAlerts(BaseModel):
+    unplaced: list[UnplacedPerson]

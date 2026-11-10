@@ -3,9 +3,12 @@
 Adaptado de la rama areas-y-clientes sin las áreas de atención: el ancla es el departamento que atiende
 tickets (casilla "Atiende tickets", que no se hereda a los subdepartamentos).
 """
+from datetime import datetime, timezone
+
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from . import models
+from . import audit, models
 
 SEPARATOR = " / "
 
@@ -61,3 +64,208 @@ def descendants(by_id: dict[int, models.Department], root_ids) -> set[int]:
 def serves_tickets(dept: models.Department | None, by_id: dict[int, models.Department]) -> bool:
     """Atiende tickets y está activo (él y sus padres)."""
     return dept is not None and dept.handles_tickets and is_active_path(dept, by_id)
+
+
+# ----- Ubicación del personal -----
+
+PLACED_ROLES = ("technician", "coordinator")
+TIER_NAMES = {1: "N1", 2: "N2", 3: "N3"}
+NO_DEPARTMENT_TEXT = "Sin departamento"
+DEPARTMENT_REQUIRED = "Elija el departamento"
+NOT_SERVING = "Ese departamento no atiende tickets o está desactivado"
+TIER_REQUIRED = "Elija el nivel del técnico (N1, N2 o N3)"
+COORDINATOR_TAKEN = "Ese departamento ya tiene coordinador: {name}"
+COORDINATOR_PENDING = "Ese departamento ya tiene una invitación de coordinador pendiente"
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def technician_placement(db: Session, user_id: int) -> models.StaffPlacement | None:
+    return db.query(models.StaffPlacement).filter(models.StaffPlacement.user_id == user_id).first()
+
+
+def coordinator_row(db: Session, user_id: int) -> models.DepartmentCoordinator | None:
+    return db.query(models.DepartmentCoordinator).filter(models.DepartmentCoordinator.user_id == user_id).first()
+
+
+def coordinator_of(db: Session, department_id: int) -> models.DepartmentCoordinator | None:
+    return db.query(models.DepartmentCoordinator).filter(
+        models.DepartmentCoordinator.department_id == department_id).first()
+
+
+def department_of(db: Session, user: models.User) -> tuple[models.Department | None, int | None]:
+    """Departamento (y nivel, si es técnico) de la persona. (None, None) si no tiene."""
+    if user.role == "technician":
+        row = technician_placement(db, user.id)
+        return (db.get(models.Department, row.department_id), row.tier) if row else (None, None)
+    if user.role == "coordinator":
+        row = coordinator_row(db, user.id)
+        return (db.get(models.Department, row.department_id), None) if row else (None, None)
+    return None, None
+
+
+def placement_text(dept: models.Department | None, tier: int | None, by_id: dict) -> str:
+    if dept is None:
+        return NO_DEPARTMENT_TEXT
+    label = path_label(dept, by_id)
+    return f"{label} · {TIER_NAMES[tier]}" if tier in TIER_NAMES else label
+
+
+def _placements(db: Session) -> dict[int, int]:
+    """user_id → department_id de técnicos y coordinadores."""
+    result = dict(db.query(models.StaffPlacement.user_id, models.StaffPlacement.department_id))
+    result.update(dict(db.query(models.DepartmentCoordinator.user_id, models.DepartmentCoordinator.department_id)))
+    return result
+
+
+def placement_labels(db: Session) -> dict[int, str]:
+    """user_id → "Ruta · N2" (técnico) o "Ruta" (coordinador), para listas de Cuentas y Equipo."""
+    by_id = departments_by_id(db)
+    labels = {}
+    for user_id, dept_id, tier in db.query(models.StaffPlacement.user_id, models.StaffPlacement.department_id,
+                                           models.StaffPlacement.tier):
+        labels[user_id] = placement_text(by_id.get(dept_id), tier, by_id)
+    for user_id, dept_id in db.query(models.DepartmentCoordinator.user_id, models.DepartmentCoordinator.department_id):
+        labels[user_id] = placement_text(by_id.get(dept_id), None, by_id)
+    return labels
+
+
+def is_placed(db: Session, user: models.User, by_id: dict | None = None) -> bool:
+    """Tiene un departamento activo que atiende tickets ("cerrado por defecto": si no, no recibe tickets)."""
+    if user.role not in PLACED_ROLES:
+        return True
+    by_id = by_id if by_id is not None else departments_by_id(db)
+    dept_id = _placements(db).get(user.id)
+    return dept_id is not None and serves_tickets(by_id.get(dept_id), by_id)
+
+
+def unplaced_staff(db: Session) -> list[models.User]:
+    """Técnicos y coordinadores activos sin departamento, o en uno desactivado o que ya no atiende tickets."""
+    by_id = departments_by_id(db)
+    placements = _placements(db)
+    staff = db.query(models.User).filter(
+        models.User.role.in_(PLACED_ROLES), models.User.is_active.is_(True)
+    ).order_by(models.User.name).all()
+    return [u for u in staff if not (placements.get(u.id) and serves_tickets(by_id.get(placements[u.id]), by_id))]
+
+
+def staff_count(db: Session, department_ids) -> int:
+    """Personal activo (técnicos y coordinador) ubicado en esos departamentos."""
+    ids = list(department_ids)
+    if not ids:
+        return 0
+    technicians = db.query(models.StaffPlacement).join(models.User, models.User.id == models.StaffPlacement.user_id
+        ).filter(models.StaffPlacement.department_id.in_(ids), models.User.is_active.is_(True)).count()
+    coordinators = db.query(models.DepartmentCoordinator).join(
+        models.User, models.User.id == models.DepartmentCoordinator.user_id
+    ).filter(models.DepartmentCoordinator.department_id.in_(ids), models.User.is_active.is_(True)).count()
+    return technicians + coordinators
+
+
+def serving_department(db: Session, department_id: int | None) -> models.Department:
+    """El departamento elegido para el personal: obligatorio, activo y que atiende tickets (422)."""
+    if not department_id:
+        raise HTTPException(status_code=422, detail=DEPARTMENT_REQUIRED)
+    by_id = departments_by_id(db)
+    dept = by_id.get(department_id)
+    if not serves_tickets(dept, by_id):
+        raise HTTPException(status_code=422, detail=NOT_SERVING)
+    return dept
+
+
+def check_coordinator_free(db: Session, department_id: int, user_id: int | None = None) -> None:
+    row = coordinator_of(db, department_id)
+    if row is not None and row.user_id != user_id:
+        holder = db.get(models.User, row.user_id)
+        raise HTTPException(status_code=409, detail=COORDINATOR_TAKEN.format(name=holder.name or "otra persona"))
+
+
+def check_tier(role: str, tier: int | None) -> int | None:
+    if role != "technician":
+        return None
+    if tier not in TIER_NAMES:
+        raise HTTPException(status_code=422, detail=TIER_REQUIRED)
+    return tier
+
+
+def clear_placement(db: Session, user: models.User) -> None:
+    """Quita la ubicación (técnico o coordinador). No hace commit."""
+    db.query(models.StaffPlacement).filter(models.StaffPlacement.user_id == user.id).delete()
+    db.query(models.DepartmentCoordinator).filter(models.DepartmentCoordinator.user_id == user.id).delete()
+    db.flush()
+
+
+def set_placement(db: Session, actor: models.User | None, user: models.User, department_id: int | None,
+                  tier: int | None, audit_change: bool = True) -> None:
+    """Ubica a un técnico (departamento y nivel) o a un coordinador (su departamento). 422/409 si no se puede.
+    Queda en el Registro de cambios. No hace commit."""
+    if user.role not in PLACED_ROLES:
+        raise HTTPException(status_code=422, detail="Solo técnicos y coordinadores tienen departamento")
+    dept = serving_department(db, department_id)
+    tier = check_tier(user.role, tier)
+    if user.role == "coordinator":
+        check_coordinator_free(db, dept.id, user.id)
+    by_id = departments_by_id(db)
+    old_dept, old_tier = department_of(db, user)
+    old = placement_text(old_dept, old_tier, by_id)
+    clear_placement(db, user)
+    if user.role == "technician":
+        db.add(models.StaffPlacement(user_id=user.id, department_id=dept.id, tier=tier, updated_at=_now()))
+    else:
+        db.add(models.DepartmentCoordinator(department_id=dept.id, user_id=user.id, updated_at=_now()))
+    db.flush()
+    new = placement_text(dept, tier, by_id)
+    if audit_change and old != new:
+        audit.record(db, actor.id if actor is not None else None, "placement_changed", target=user,
+                     old=old[:150], new=new[:150])
+
+
+# ----- Invitaciones del personal -----
+
+def validate_invitation_placement(db: Session, role: str, department_id: int | None,
+                                  tier: int | None, email: str | None = None) -> tuple[int, int | None]:
+    """Departamento obligatorio (que atienda tickets) y nivel del técnico. El coordinador necesita un departamento
+    sin coordinador ni otra invitación de coordinador pendiente (sin contar la que se reemplaza para el mismo
+    correo)."""
+    dept = serving_department(db, department_id)
+    tier = check_tier(role, tier)
+    if role == "coordinator":
+        check_coordinator_free(db, dept.id)
+        pending = db.query(models.StaffInvitationPlacement).join(
+            models.StaffInvitation, models.StaffInvitation.id == models.StaffInvitationPlacement.invitation_id
+        ).filter(
+            models.StaffInvitationPlacement.department_id == dept.id,
+            models.StaffInvitation.role == "coordinator",
+            models.StaffInvitation.used_by.is_(None),
+            models.StaffInvitation.expires_at > _now(),
+        )
+        if email is not None:
+            pending = pending.filter(models.StaffInvitation.email != email)
+        if pending.first() is not None:
+            raise HTTPException(status_code=409, detail=COORDINATOR_PENDING)
+    return dept.id, tier
+
+
+def save_invitation_placement(db: Session, invitation: models.StaffInvitation, department_id: int,
+                              tier: int | None) -> None:
+    db.add(models.StaffInvitationPlacement(invitation_id=invitation.id, department_id=department_id, tier=tier))
+    db.flush()
+
+
+def invitation_placement(db: Session, invitation_id: int) -> models.StaffInvitationPlacement | None:
+    return db.query(models.StaffInvitationPlacement).filter(
+        models.StaffInvitationPlacement.invitation_id == invitation_id).first()
+
+
+def apply_invitation_placement(db: Session, invitation: models.StaffInvitation, user: models.User) -> None:
+    """Al activar la cuenta: el departamento (y nivel) de la invitación. Si ya no se puede (el departamento dejó de
+    atender o ya tiene coordinador), la persona queda sin departamento y aparece en la alerta. No hace commit."""
+    row = invitation_placement(db, invitation.id)
+    if row is None:
+        return
+    try:
+        set_placement(db, None, user, row.department_id, row.tier, audit_change=False)
+    except HTTPException:
+        return

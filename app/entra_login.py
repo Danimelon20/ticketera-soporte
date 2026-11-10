@@ -15,7 +15,7 @@ import msal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import audit, config, mailer, models
+from . import audit, config, mailer, models, routing
 from .security import hash_token, mask_email, unusable_password_hash
 
 # MSAL agrega openid y profile por su cuenta; offline_access se excluye. Nunca permisos de correo
@@ -199,6 +199,8 @@ def activate(db: Session, identity: Identity) -> models.User:
     invitation.used_by = user.id
     invitation.used_at = _now()
     audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
+    # Departamento (y nivel) elegidos al invitar
+    routing.apply_invitation_placement(db, invitation, user)
     _link(db, user, identity.oid)
     return user
 

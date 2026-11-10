@@ -436,6 +436,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "server_admin_created", "server_password_reset",
     # Departamentos del organigrama (target_label: la ruta; old/new: lo que cambió)
     "department_created", "department_changed", "departments_imported",
+    # Departamento (y nivel) de un técnico o coordinador (old/new: "Ruta · N2")
+    "placement_changed",
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
@@ -932,3 +934,41 @@ class DepartmentAlias(Base):
     # Ruta completa tal como venía (única) y normalizada (sin tildes, minúsculas, abreviaturas) para buscarla
     alias = Column(String(300), unique=True, nullable=False)
     normalized = Column(String(300), index=True, nullable=False)
+
+
+TECHNICIAN_TIERS = (1, 2, 3)
+
+
+class DepartmentCoordinator(Base):
+    """Coordinador de un departamento que atiende tickets: uno por departamento y un departamento por coordinador
+    (las dos columnas son únicas)."""
+    __tablename__ = "department_coordinators"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class StaffPlacement(Base):
+    """Departamento y nivel (1 = N1 … 3 = N3) de un técnico. Un técnico pertenece a un solo departamento."""
+    __tablename__ = "staff_placements"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=False)
+    tier = Column(Integer, nullable=False, default=1)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (CheckConstraint("tier BETWEEN 1 AND 3", name="chk_placement_tier"),)
+
+
+class StaffInvitationPlacement(Base):
+    """Departamento (y nivel, si es técnico) elegidos al invitar: se aplican al activar la cuenta."""
+    __tablename__ = "staff_invitation_placements"
+
+    id = Column(Integer, primary_key=True)
+    invitation_id = Column(Integer, ForeignKey("staff_invitations.id", ondelete="CASCADE"), unique=True,
+                           nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    tier = Column(Integer, nullable=True)

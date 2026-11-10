@@ -2,6 +2,7 @@ import pytest
 
 from app import accounts, audit, models
 from app.database import SessionLocal
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 ACTIONS = ("deactivate", "reactivate", "reset-access", "unlock")
@@ -160,7 +161,8 @@ def test_role_change_closes_sessions(client, make_user):
     admin = make_user("admin")
     user = make_user("technician")
     assert _sessions(user["id"]) == 1
-    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator"}, headers=admin["headers"])
+    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator", **placement_for("coordinator")},
+                 headers=admin["headers"])
     assert _sessions(user["id"]) == 0
     assert client.get("/api/auth/me", headers=user["headers"]).status_code == 401
 
@@ -293,7 +295,8 @@ def test_admin_switches_technician_and_coordinator_without_reason(client, make_u
     user = make_user("technician")
     for role in ("coordinator", "technician"):
         # Sin motivo: solo el rol
-        response = client.patch(f"/api/admin/users/{user['id']}", json={"role": role}, headers=admin["headers"])
+        response = client.patch(f"/api/admin/users/{user['id']}", json={"role": role, **placement_for(role)},
+                                headers=admin["headers"])
         assert response.status_code == 200, response.text
         assert _db_user(user["id"]).role == role
     assert _role_changes(user["id"]) == [
@@ -311,7 +314,8 @@ def test_reset_after_role_roundtrip_ignores_legacy_portal(client, make_user, sen
     admin = make_user("admin")
     user = make_user("technician")
     for role in ("coordinator", "technician"):
-        client.patch(f"/api/admin/users/{user['id']}", json={"role": role}, headers=admin["headers"])
+        client.patch(f"/api/admin/users/{user['id']}", json={"role": role, **placement_for(role)},
+                     headers=admin["headers"])
     body = {"email": user["email"]}
     if legacy_portal is not None:
         body["portal"] = legacy_portal

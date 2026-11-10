@@ -3,6 +3,7 @@ import uuid
 
 from app import config
 from conftest import code_from
+from org_helpers import placement_for
 
 
 def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplog):
@@ -21,7 +22,7 @@ def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplo
     staff_email = f"personal-{uuid.uuid4().hex}@test.com"
     client.post(
         "/api/staff-invitations",
-        json={"email": staff_email, "name": "Persona Nueva", "role": "technician"},
+        json={"email": staff_email, "name": "Persona Nueva", "role": "technician", **placement_for("technician")},
         headers=admin["headers"],
     )
     code = code_from(sent[-1][2])
@@ -61,7 +62,7 @@ def test_generated_password_not_logged_in_development(client, make_user, sent, c
     staff_email = f"personal-{uuid.uuid4().hex}@test.com"
     client.post(
         "/api/staff-invitations",
-        json={"email": staff_email, "name": "Persona Nueva", "role": "coordinator"},
+        json={"email": staff_email, "name": "Persona Nueva", "role": "coordinator", **placement_for("coordinator")},
         headers=admin["headers"],
     )
     code = code_from(sent[-1][2])

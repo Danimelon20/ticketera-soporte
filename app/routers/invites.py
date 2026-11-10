@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, models
+from .. import audit, models, routing
 from ..schemas import StaffInvitationCreate, StaffInvitationRead
 from ..security import get_current_user, mask_email
 from .auth import _can_resend, _find_user, _now, normalize_email, send_invitation
@@ -37,6 +37,7 @@ def _registered_message(user: models.User, invited_role: str) -> str:
 
 def _invitation_read(
     invitation: models.StaffInvitation, email_sent: bool | None = None, registered: bool = False,
+    placement: tuple[str | None, int | None] = (None, None),
 ) -> StaffInvitationRead:
     if invitation.used_by is not None:
         state = "used"
@@ -56,7 +57,16 @@ def _invitation_read(
         expires_at=invitation.expires_at,
         status=state,
         email_sent=email_sent,
+        department_name=placement[0],
+        tier=placement[1],
     )
+
+
+def _placement_of(db: Session, invitation: models.StaffInvitation, by_id: dict) -> tuple[str | None, int | None]:
+    row = routing.invitation_placement(db, invitation.id)
+    if row is None:
+        return None, None
+    return routing.path_label(by_id.get(row.department_id), by_id), row.tier
 
 
 @router.post("/staff-invitations", response_model=StaffInvitationRead, status_code=status.HTTP_201_CREATED)
@@ -72,6 +82,8 @@ def create_invitation(
     existing = _find_user(db, email)
     if existing is not None:
         raise HTTPException(status_code=409, detail=_registered_message(existing, data.role))
+    # Departamento obligatorio (que atienda tickets); técnico con nivel; un coordinador por departamento
+    department_id, tier = routing.validate_invitation_placement(db, data.role, data.department_id, data.tier, email)
 
     # Una sola invitación vigente por correo: la anterior deja de servir
     db.query(models.StaffInvitation).filter(
@@ -80,10 +92,13 @@ def create_invitation(
     invitation = models.StaffInvitation(email=email, name=data.name, role=data.role, created_by=current_user.id)
     db.add(invitation)
     sent = send_invitation(invitation)
+    db.flush()
+    routing.save_invitation_placement(db, invitation, department_id, tier)
     _record_sent(db, current_user, invitation)
     db.commit()
     db.refresh(invitation)
-    return _invitation_read(invitation, email_sent=sent)
+    return _invitation_read(invitation, email_sent=sent,
+                            placement=_placement_of(db, invitation, routing.departments_by_id(db)))
 
 
 @router.get("/staff-invitations", response_model=list[StaffInvitationRead])
@@ -96,7 +111,9 @@ def list_invitations(current_user: models.User = Depends(get_current_user), db: 
     registered = {
         email for (email,) in db.query(func.lower(models.User.email)).filter(func.lower(models.User.email).in_(emails))
     } if emails else set()
-    return [_invitation_read(i, registered=i.email.lower() in registered) for i in invitations]
+    by_id = routing.departments_by_id(db)
+    return [_invitation_read(i, registered=i.email.lower() in registered, placement=_placement_of(db, i, by_id))
+            for i in invitations]
 
 
 def _own_invitation(db: Session, current_user: models.User, invitation_id: int) -> models.StaffInvitation:
@@ -127,7 +144,8 @@ def resend_invitation(
     _record_sent(db, current_user, invitation)
     db.commit()
     db.refresh(invitation)
-    return _invitation_read(invitation, email_sent=sent)
+    return _invitation_read(invitation, email_sent=sent,
+                            placement=_placement_of(db, invitation, routing.departments_by_id(db)))
 
 
 @router.delete("/staff-invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)

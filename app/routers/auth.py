@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, schedules, throttle
+from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, routing, schedules, throttle
 from ..validators import INTERNAL_EMAIL, is_internal_email
 from ..schemas import (
     RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
@@ -296,6 +296,8 @@ def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Dep
     invitation.used_by = user.id
     invitation.used_at = _now()
     audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
+    # Departamento (y nivel) elegidos al invitar
+    routing.apply_invitation_placement(db, invitation, user)
     db.commit()
     # Única respuesta con la contraseña: que el navegador no la guarde
     response.headers["Cache-Control"] = "no-store"
@@ -547,7 +549,16 @@ def me_read(db: Session, user: models.User) -> MeRead:
         profile_complete=identity.profile_complete(user),
         identity_locked=locked,
         **_availability_fields(db, user),
+        **_department_fields(db, user),
     )
+
+
+def _department_fields(db: Session, user: models.User) -> dict:
+    """Técnicos y coordinadores: su departamento (y nivel)."""
+    if user.role not in routing.PLACED_ROLES:
+        return {}
+    dept, tier = routing.department_of(db, user)
+    return {"department_name": routing.path_label(dept, routing.departments_by_id(db)), "tier": tier}
 
 
 def _availability_fields(db: Session, user: models.User) -> dict:

@@ -15,6 +15,7 @@ from app import config, models
 from app.database import SessionLocal
 
 from conftest import assign_draft_to
+from org_helpers import placement_for
 
 ROLES = ("technician", "other_technician", "coordinator", "admin", "requester")
 
@@ -130,7 +131,8 @@ MATRIX = [
     ("cerrar sesiones", "post", lambda w: f"/api/accounts/{w['users']['target_technician']['id']}/close-sessions",
      None, _codes(403, 403, 403, 204, 403)),
     ("invitar", "post", lambda w: "/api/staff-invitations",
-     lambda w: {"email": f"nueva-{w['ticket_id']}@test.com", "name": "Nueva", "role": "technician"},
+     lambda w: {"email": f"nueva-{w['ticket_id']}@test.com", "name": "Nueva", "role": "technician",
+                **placement_for("technician")},
      _codes(403, 403, 403, 201, 403)),
     ("lista de invitaciones", "get", lambda w: "/api/staff-invitations", None, _codes(403, 403, 403, 200, 403)),
     # ----- Turnos y disponibilidad (decisión 5: los de coordinadores, el administrador) -----

@@ -8,6 +8,7 @@ import pytest
 from app import models
 from app.database import SessionLocal
 from conftest import code_from
+from org_helpers import placement_for
 
 
 def _email():
@@ -15,7 +16,8 @@ def _email():
 
 
 def _invite(client, admin, email, role="technician"):
-    return client.post("/api/staff-invitations", json={"email": email, "name": "Persona", "role": role},
+    return client.post("/api/staff-invitations", json={"email": email, "name": "Persona", "role": role,
+                                                                **placement_for(role)},
                        headers=admin["headers"])
 
 

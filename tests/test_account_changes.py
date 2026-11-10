@@ -5,6 +5,7 @@ import pytest
 from app import hacienda, identity, models
 from app.database import SessionLocal
 from conftest import code_from
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 
@@ -113,11 +114,15 @@ def test_contact_from_email_is_recorded_masked(client, make_user, monkeypatch):
 def test_role_and_activation_changes(client, make_user):
     admin = make_user("admin")
     user = make_user("technician")
-    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator"}, headers=admin["headers"])
+    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator", **placement_for("coordinator")},
+                 headers=admin["headers"])
     client.patch(f"/api/admin/users/{user['id']}", json={"is_active": False}, headers=admin["headers"])
     client.patch(f"/api/admin/users/{user['id']}", json={"is_active": True}, headers=admin["headers"])
     rows = _rows(user["id"])
-    assert [(r["action"], r["old"], r["new"]) for r in rows] == [
+    actions = [(r["action"], r["old"], r["new"]) for r in rows]
+    # Rol y departamento cambian juntos
+    assert actions[1][0] == "placement_changed" and actions[1][1] == "Sin departamento"
+    assert actions[:1] + actions[2:] == [
         ("role_changed", "Técnico", "Coordinador"),
         ("account_deactivated", None, None),
         ("account_activated", None, None),
@@ -128,7 +133,7 @@ def test_role_and_activation_changes(client, make_user):
 def test_invitation_sent_and_used(client, make_user, sent):
     admin = make_user("admin")
     email = f"personal-{uuid.uuid4().hex}@test.com"
-    client.post("/api/staff-invitations", json={"email": email, "name": "Nueva Persona", "role": "technician"},
+    client.post("/api/staff-invitations", json={"email": email, "name": "Nueva Persona", "role": "technician", **placement_for("technician")},
                 headers=admin["headers"])
     code = code_from(sent[-1][2])
     label = email[:2] + "***@test.com"
@@ -182,22 +187,24 @@ def test_admin_list_filters_and_pages(client, make_user):
     user = make_user("coordinator", f"Persona {uuid.uuid4().hex[:8]}")
     for i in range(23):
         client.put("/api/account/phone", json={"phone": f"8{i:07d}"}, headers=user["headers"])
-    client.patch(f"/api/admin/users/{user['id']}", json={"role": "technician"}, headers=admin["headers"])
+    client.patch(f"/api/admin/users/{user['id']}", json={"role": "technician", **placement_for("technician")},
+                 headers=admin["headers"])
 
     page1 = client.get("/api/admin/account-changes", params={"account": user["name"]}, headers=admin["headers"]).json()
-    assert page1["total"] == 24 and page1["pages"] == 2 and page1["page"] == 1
+    # 23 teléfonos, el rol y el departamento (que cambian juntos)
+    assert page1["total"] == 25 and page1["pages"] == 2 and page1["page"] == 1
     assert len(page1["items"]) == 20
     # Lo más reciente primero
-    assert page1["items"][0]["action"] == "role_changed"
-    assert page1["items"][0]["actor"] == admin["name"]
-    assert page1["items"][1]["new_value"] == "****0022"
-    assert user["name"] in page1["items"][0]["account"]
+    assert [i["action"] for i in page1["items"][:2]] == ["placement_changed", "role_changed"]
+    assert page1["items"][1]["actor"] == admin["name"]
+    assert page1["items"][2]["new_value"] == "****0022"
+    assert user["name"] in page1["items"][1]["account"]
     assert user["email"] not in str(page1)
 
     page2 = client.get(
         "/api/admin/account-changes", params={"account": user["name"], "page": 2}, headers=admin["headers"]
     ).json()
-    assert len(page2["items"]) == 4
+    assert len(page2["items"]) == 5
     assert page2["items"][-1]["new_value"] == "****0000"
 
     only_roles = client.get(

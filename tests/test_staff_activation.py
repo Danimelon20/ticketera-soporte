@@ -6,6 +6,7 @@ import pytest
 from app import models
 from app.database import SessionLocal
 from conftest import code_from
+from org_helpers import placement_for
 
 CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
 
@@ -17,7 +18,8 @@ def _email():
 def _invite(client, actor, role="technician", email=None, name="Nueva Persona"):
     email = email or _email()
     response = client.post(
-        "/api/staff-invitations", json={"email": email, "name": name, "role": role}, headers=actor["headers"]
+        "/api/staff-invitations", json={"email": email, "name": name, "role": role, **placement_for(role)},
+        headers=actor["headers"]
     )
     return email, response
 

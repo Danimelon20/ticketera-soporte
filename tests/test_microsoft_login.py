@@ -11,6 +11,7 @@ import pytest
 from app import config, entra_login, models
 from app.database import SessionLocal
 from conftest import code_from
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 TENANT = "inquilino-de-prueba"
@@ -430,7 +431,8 @@ def test_admin_login_without_flag_is_not_emergency(client, make_user, sent):
 def _invite(client, admin, sent, role="technician"):
     email = f"nuevo-{uuid.uuid4().hex}@test.com"
     response = client.post(
-        "/api/staff-invitations", json={"email": email, "name": "Persona Nueva", "role": role}, headers=admin["headers"]
+        "/api/staff-invitations", json={"email": email, "name": "Persona Nueva", "role": role, **placement_for(role)},
+        headers=admin["headers"]
     )
     assert response.status_code == 201, response.text
     return email, code_from(sent[-1][2])

@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import audit, departments, models, routing
+from .. import accounts, audit, departments, models, routing
 from ..schemas import (
     DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
-    DepartmentUpdate,
+    DepartmentUpdate, PlacementRead, PlacementUpdate, StaffAlerts, UnplacedPerson,
 )
 from .admin import require_admin
 
@@ -21,6 +21,8 @@ CYCLE = "Un departamento no puede quedar dentro de sí mismo"
 TAKEN_NAME = "Ya existe un departamento con ese nombre en el mismo lugar"
 TAKEN_ALIAS = "Ese alias ya existe"
 MAX_IMPORT_BYTES = 1_000_000
+HAS_STAFF = "Mueva primero a su personal ({count}): el departamento o uno de sus subdepartamentos lo tiene"
+NOT_FOUND_USER = "El usuario no existe"
 
 
 # ----- Departamentos -----
@@ -30,11 +32,29 @@ def _department_reads(db: Session) -> list[DepartmentRead]:
     aliases: dict[int, list[str]] = {}
     for alias in db.query(models.DepartmentAlias).order_by(models.DepartmentAlias.alias):
         aliases.setdefault(alias.department_id, []).append(alias.alias)
+    technicians: dict[int, int] = {}
+    for (dept_id,) in (
+        db.query(models.StaffPlacement.department_id)
+        .join(models.User, models.User.id == models.StaffPlacement.user_id)
+        .filter(models.User.is_active.is_(True), models.User.role == "technician")
+    ):
+        technicians[dept_id] = technicians.get(dept_id, 0) + 1
+    # Departamento → (id, nombre) de su coordinador activo
+    coordinators = {
+        dept_id: (user_id, name)
+        for dept_id, user_id, name in db.query(
+            models.DepartmentCoordinator.department_id, models.User.id, models.User.name
+        ).join(models.User, models.User.id == models.DepartmentCoordinator.user_id)
+        .filter(models.User.is_active.is_(True))
+    }
     rows = [
         DepartmentRead(
             id=dept.id, name=dept.name, parent_id=dept.parent_id, path=routing.path_label(dept, by_id),
             is_active=dept.is_active, active_path=routing.is_active_path(dept, by_id),
             handles_tickets=dept.handles_tickets, aliases=aliases.get(dept.id, []),
+            technicians=technicians.get(dept.id, 0),
+            coordinator_id=coordinators[dept.id][0] if dept.id in coordinators else None,
+            coordinator_name=(coordinators[dept.id][1] or "Sin nombre") if dept.id in coordinators else None,
         )
         for dept in by_id.values()
     ]
@@ -56,6 +76,12 @@ def _check_unique(db: Session, name: str, parent_id: int | None, skip_id: int | 
     for other in query:
         if other.id != skip_id and departments.normalize_name(other.name) == departments.normalize_name(name):
             raise HTTPException(status_code=409, detail=TAKEN_NAME)
+
+
+def _check_no_staff(db: Session, department_ids) -> None:
+    count = routing.staff_count(db, department_ids)
+    if count:
+        raise HTTPException(status_code=409, detail=HAS_STAFF.format(count=count))
 
 
 def _one(db: Session, department_id: int) -> DepartmentRead:
@@ -103,6 +129,15 @@ def update_department(department_id: int, data: DepartmentUpdate, db: Session = 
             _department_or_404(db, parent_id)
             if parent_id in routing.descendants(by_id, [dept.id]):
                 raise HTTPException(status_code=400, detail=CYCLE)
+    # Con personal no se deja a nadie sin departamento por accidente: primero hay que moverlo (409)
+    subtree = routing.descendants(by_id, [dept.id])
+    if data.is_active is False and dept.is_active:
+        _check_no_staff(db, subtree)
+    if data.handles_tickets is False and dept.handles_tickets:
+        _check_no_staff(db, [dept.id])
+    if parent_id != dept.parent_id and parent_id is not None and not routing.is_active_path(by_id[parent_id], by_id):
+        # Dentro de un padre desactivado, el subárbol también queda desactivado
+        _check_no_staff(db, subtree)
     name = " ".join(data.name.split()) if data.name is not None else dept.name
     if name != dept.name or parent_id != dept.parent_id:
         _check_unique(db, name, parent_id, skip_id=dept.id)
@@ -162,3 +197,48 @@ def confirm_import(data: DepartmentImportConfirm, db: Session = Depends(get_db),
                      new=f"{result['created']} nuevo(s), {result['aliases']} alias")
     db.commit()
     return result
+
+
+# ----- Ubicación del personal -----
+
+def _staff_or_404(db: Session, user_id: int) -> models.User:
+    user = db.get(models.User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=NOT_FOUND_USER)
+    return user
+
+
+def _placement_read(db: Session, user: models.User) -> PlacementRead:
+    by_id = routing.departments_by_id(db)
+    dept, tier = routing.department_of(db, user)
+    return PlacementRead(user_id=user.id, role=user.role, department_id=dept.id if dept else None,
+                         department_name=routing.path_label(dept, by_id), tier=tier,
+                         placed=routing.is_placed(db, user, by_id))
+
+
+@router.get("/users/{user_id}/placement", response_model=PlacementRead)
+def get_placement(user_id: int, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return _placement_read(db, _staff_or_404(db, user_id))
+
+
+@router.put("/users/{user_id}/placement", response_model=PlacementRead)
+def update_placement(user_id: int, data: PlacementUpdate, db: Session = Depends(get_db),
+                     admin=Depends(require_admin)):
+    """Mover a un técnico (departamento y nivel) o a un coordinador (su departamento) entre departamentos."""
+    user = _staff_or_404(db, user_id)
+    accounts.check_can_manage(admin, user, "department")
+    routing.set_placement(db, admin, user, data.department_id, data.tier)
+    db.commit()
+    return _placement_read(db, user)
+
+
+@router.get("/staff-alerts", response_model=StaffAlerts)
+def staff_alerts(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Personal sin departamento (o en uno desactivado o que ya no atiende tickets), con su botón Asignar."""
+    by_id = routing.departments_by_id(db)
+    unplaced = []
+    for user in routing.unplaced_staff(db):
+        dept, _tier = routing.department_of(db, user)
+        unplaced.append(UnplacedPerson(id=user.id, name=user.name or "Sin nombre", role=user.role,
+                                       department_name=routing.path_label(dept, by_id)))
+    return StaffAlerts(unplaced=unplaced)

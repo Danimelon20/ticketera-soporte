@@ -4,7 +4,7 @@ import logging
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 
-from . import audit, comments, config, daily_summary, mailer, models
+from . import audit, comments, config, daily_summary, mailer, models, routing
 
 NO_PERMISSION = "No tienes permiso para gestionar esta cuenta"
 SELF_CHANGE = "No puedes cambiar tu propio rol ni desactivarte"
@@ -32,6 +32,8 @@ PERMISSIONS = {
         "sessions": ("coordinator", "technician", "requester"),
         # Cambio directo de rol: técnico ↔ coordinador (nunca a administrador)
         "role": STAFF_ROLE_CHOICES,
+        # Departamento (y nivel del técnico)
+        "department": STAFF_ROLE_CHOICES,
     },
     # Desactivar, restablecer, desbloquear y cerrar sesiones: solo el administrador (cuida las cuentas).
     # El coordinador maneja turnos y disponibilidad de los técnicos
@@ -152,5 +154,7 @@ def change_role(db: Session, actor: models.User, user: models.User, role: str) -
     if user.role == "admin" and active_admins(db, excluding=user.id) == 0:
         raise HTTPException(status_code=400, detail=LAST_ADMIN)
     audit.record(db, actor.id, "role_changed", target=user, old=audit.role_name(user.role), new=audit.role_name(role))
+    # La ubicación anterior no sirve para el rol nuevo: quien cambia el rol elige la nueva (routing.set_placement)
+    routing.clear_placement(db, user)
     user.role = role
     close_sessions(db, user.id)

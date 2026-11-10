@@ -28,3 +28,17 @@ def changes(action: str, label_contains: str = "") -> list[models.AccountChange]
         return [r for r in rows if label_contains in (r.target_label or "")]
     finally:
         db.close()
+
+
+_shared_department: int | None = None
+
+
+def placement_for(role: str) -> dict:
+    """Departamento (y nivel) válidos para invitar o cambiar de rol: técnicos en un departamento compartido que
+    atiende tickets; cada coordinador en uno nuevo (un coordinador por departamento)."""
+    global _shared_department
+    if role == "coordinator":
+        return {"department_id": department(unique("Coordinación"))}
+    if _shared_department is None:
+        _shared_department = department(unique("Soporte compartido"))
+    return {"department_id": _shared_department, "tier": 1}

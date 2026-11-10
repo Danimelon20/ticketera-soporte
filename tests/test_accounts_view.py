@@ -6,6 +6,7 @@ import pytest
 
 from app import models
 from app.database import SessionLocal
+from org_helpers import placement_for
 
 FILTERS = ("all", "staff", "clients", "locked", "reported", "unverified", "invitations")
 
@@ -53,7 +54,7 @@ def _report(client, reporter, target):
 
 def _invite(client, actor, tag, role="technician"):
     response = client.post("/api/staff-invitations", json={
-        "email": f"inv-{uuid.uuid4().hex}@test.com", "name": f"Invitada {tag}", "role": role,
+        "email": f"inv-{uuid.uuid4().hex}@test.com", "name": f"Invitada {tag}", "role": role, **placement_for(role),
     }, headers=actor["headers"])
     assert response.status_code == 201, response.text
     return response.json()

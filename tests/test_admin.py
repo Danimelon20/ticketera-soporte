@@ -2,6 +2,7 @@ import pytest
 
 from app import models
 from app.database import SessionLocal
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 
@@ -91,7 +92,7 @@ def test_admin_changes_role_and_coordinator_cannot(client, make_user):
     assert response.json()["detail"] == "Solo el administrador puede hacer esto"
 
     # El administrador cambia técnico ↔ coordinador
-    response = _patch_user(client, admin, technician["id"], role="coordinator")
+    response = _patch_user(client, admin, technician["id"], role="coordinator", **placement_for("coordinator"))
     assert response.status_code == 200
     assert response.json()["role"] == "coordinator"
     assert _patch_user(client, admin, 999999, role="technician").status_code == 404

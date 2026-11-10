@@ -15,7 +15,7 @@ from starlette.background import BackgroundTask
 from ..database import engine, get_db
 from .. import (
     account_reports, accounts, alerts, auto_assign, availability, cancellations, config, daily_summary, email_analysis, email_poller,
-    identity, models, people_activity, schedules, throttle,
+    identity, models, people_activity, routing, schedules, throttle,
 )
 from ..schemas import (
     AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
@@ -138,6 +138,7 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
     users.sort(key=lambda u: order[u.role])
     periods = availability.periods_for(db, availability.ids_with_status(users))
     loads = auto_assign.loads(db, [u.id for u in users]) if current_user.role == "coordinator" else None
+    departments_of = routing.placement_labels(db)
     members = []
     for row in _directory_rows(db, users):
         member = TeamMember(
@@ -145,6 +146,7 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
             is_active=row.is_active, tickets_assigned_open=row.tickets_assigned_open, login_locked=row.login_locked,
             availability=row.availability, return_date=row.return_date, schedule=row.schedule,
             schedule_today=row.schedule_today, on_shift=row.on_shift, periods=periods.get(row.id, []),
+            department_name=departments_of.get(row.id),
         )
         if loads is not None:
             member.load = loads[row.id]
@@ -177,8 +179,18 @@ def update_user(
         # Con el rol que tiene ahora: un administrador no se desactiva desde aquí
         accounts.check_can_manage(admin, user, "active")
 
-    if data.role is not None:
-        accounts.change_role(db, admin, user, data.role)
+    if data.role is not None and data.role != user.role:
+        new_role = data.role
+        if new_role in routing.PLACED_ROLES:
+            # Rol y departamento juntos: se valida antes de cambiar nada (422 sin departamento o nivel, 409 si el
+            # departamento ya tiene coordinador)
+            dept = routing.serving_department(db, data.department_id)
+            tier = routing.check_tier(new_role, data.tier)
+            if new_role == "coordinator":
+                routing.check_coordinator_free(db, dept.id, user.id)
+        accounts.change_role(db, admin, user, new_role)
+        if new_role in routing.PLACED_ROLES:
+            routing.set_placement(db, admin, user, dept.id, tier)
     if data.is_active is not None:
         accounts.set_active(db, admin, user, data.is_active, background_tasks)
     db.commit()
@@ -352,6 +364,7 @@ def admin_accounts(
     identities = identity.hacienda_codes(db, [u.id for u in users if u.role == "requester"])
     sessions = _open_sessions(db, ids, now)
     shifts = schedules.for_users(db, ids) if by_schedule else {}
+    departments_of = routing.placement_labels(db)
 
     rows = []
     for u in users:
@@ -367,6 +380,7 @@ def admin_accounts(
             last_activity=max(sessions[u.id]) if sessions[u.id] else None,
             identity=identities.get(u.id),
             schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
+            department_name=departments_of.get(u.id),
         )
         if state and row.state != state:
             continue
@@ -515,6 +529,8 @@ def _account_actions(
     else:
         if _can(viewer, user, "role"):
             actions.append("change-role")
+        if _can(viewer, user, "department"):
+            actions.append("placement")
         if _can(viewer, user, "schedule"):
             actions.append("schedule")
         if _can(viewer, user, "availability"):
@@ -566,6 +582,7 @@ def account_list(
     reported = account_reports.reported_ids(db, requester_ids)
     open_counts = _open_tickets(db, users)
     shifts = schedules.for_users(db, ids) if by_schedule else {}
+    departments_of = routing.placement_labels(db)
 
     rows = []
     for u in users:
@@ -579,6 +596,7 @@ def account_list(
             kind="user", id=u.id, name=u.name or "Sin nombre", email=mask_email(u.email), role=u.role,
             state=_account_state(db, u, statuses), identity=identities.get(u.id), reported=u.id in reported,
             open_tickets=open_counts.get(u.id, 0), schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
+            department_name=departments_of.get(u.id),
         ))
 
     # Invitaciones pendientes: todavía no son cuentas (ni tienen horario). El coordinador solo ve las suyas

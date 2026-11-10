@@ -1288,6 +1288,33 @@
     </dialog>
 
     <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <!-- Departamento (y nivel del técnico) de una persona del personal: solo el administrador -->
+    <dialog id="placementDialog" class="app-dialog" aria-labelledby="placementDialogTitle">
+        <form id="placementForm" class="profile-form">
+            <h2 id="placementDialogTitle" class="modal-title">Departamento</h2>
+            <p id="placementTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="placementDept">Departamento</label>
+                <select id="placementDept" required></select>
+                <small class="help-text">Solo departamentos que atienden tickets.</small>
+            </div>
+            <div id="placementTierGroup" class="form-group" hidden>
+                <label for="placementTier">Nivel</label>
+                <select id="placementTier">
+                    <option value="">Seleccionar</option>
+                    <option value="1">N1</option>
+                    <option value="2">N2</option>
+                    <option value="3">N3</option>
+                </select>
+            </div>
+            <p id="placementError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="placementCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog id="deptMoveDialog" class="app-dialog" aria-labelledby="deptMoveDialogTitle">
         <form id="deptMoveForm" class="profile-form">
             <h2 id="deptMoveDialogTitle" class="modal-title">Mover departamento</h2>
@@ -1378,6 +1405,21 @@
             <div class="form-group">
                 <label for="roleSelect">Rol nuevo</label>
                 <select id="roleSelect"></select>
+            </div>
+            <!-- Administrador: el rol y el departamento cambian juntos -->
+            <div id="roleDeptGroup" class="form-group" hidden>
+                <label for="roleDept">Departamento</label>
+                <select id="roleDept"></select>
+                <small id="roleDeptHint" class="help-text">Solo departamentos que atienden tickets. Si pasa a coordinador, el departamento no puede tener otro coordinador.</small>
+            </div>
+            <div id="roleTierGroup" class="form-group" hidden>
+                <label for="roleTier">Nivel</label>
+                <select id="roleTier">
+                    <option value="">Seleccionar</option>
+                    <option value="1">N1</option>
+                    <option value="2">N2</option>
+                    <option value="3">N3</option>
+                </select>
             </div>
             <div id="roleReasonGroup" class="form-group" hidden>
                 <label for="roleReason">Motivo (obligatorio)</label>

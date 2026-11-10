@@ -3743,6 +3743,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const select = document.createElement('select');
                 select.className = 'directory-role-select';
                 select.setAttribute('aria-label', `Rol de ${user.name}`);
+                select.dataset.userName = user.name || '';
+                select.dataset.role = user.role;
                 ROLE_OPTIONS.forEach(([value, label]) => {
                     const option = document.createElement('option');
                     option.value = value;
@@ -3804,20 +3806,6 @@ document.addEventListener('DOMContentLoaded', () => {
         labelTableCells(directoryBody.closest('table'));
     }
 
-    async function updateDirectoryUser(userId, changes) {
-        try {
-            await apiFetch(`/admin/users/${userId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(changes)
-            });
-            showSuccess('Usuario actualizado');
-        } catch (err) {
-            // apiFetch ya mostró el error
-        }
-        await loadDirectory();
-    }
-
     directorySearch.addEventListener('input', () => {
         clearTimeout(directorySearchTimer);
         directorySearchTimer = setTimeout(loadDirectory, 300);
@@ -3846,11 +3834,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     directoryState.addEventListener('change', loadDirectory);
 
-    directoryBody.addEventListener('change', (e) => {
+    directoryBody.addEventListener('change', async (e) => {
         const select = e.target.closest('.directory-role-select');
-        if (select) {
-            select.disabled = true;
-            updateDirectoryUser(select.closest('tr').dataset.userId, { role: select.value });
+        if (!select) return;
+        // El rol y el departamento cambian juntos: se piden en el diálogo de Cambiar rol
+        const user = { id: Number(select.closest('tr').dataset.userId), name: select.dataset.userName,
+            role: select.dataset.role };
+        const chosen = select.value;
+        select.value = user.role;
+        if (await openRoleDialog(user, chosen)) {
+            showSuccess('Usuario actualizado');
+            await loadDirectory();
         }
     });
 
@@ -5187,7 +5181,8 @@ document.addEventListener('DOMContentLoaded', () => {
         server_password_reset: 'Contraseña restablecida desde el servidor',
         department_created: 'Departamento creado',
         department_changed: 'Departamento cambiado',
-        departments_imported: 'Organigrama importado'
+        departments_imported: 'Organigrama importado',
+        placement_changed: 'Departamento asignado'
     };
     const changesList = document.getElementById('changesList');
     const changesEmpty = document.getElementById('changesEmpty');
@@ -6134,11 +6129,39 @@ document.addEventListener('DOMContentLoaded', () => {
             option.textContent = INVITE_ROLES[value];
             role.appendChild(option);
         });
+        // Departamento obligatorio (solo los que atienden tickets); el técnico, además, su nivel
+        const department = document.createElement('select');
+        department.id = 'inviteDepartment';
+        department.required = true;
+        const tier = document.createElement('select');
+        tier.id = 'inviteTier';
+        [['', 'Seleccionar'], ['1', 'N1'], ['2', 'N2'], ['3', 'N3']].forEach(([value, label]) => {
+            tier.appendChild(staffOption(value, label, value === ''));
+        });
+        const tierField = inviteField('Nivel', tier);
+        const noDepartments = makeEl('p', 'help-text invite-no-departments',
+            'Cree primero un departamento que atienda tickets (Administración › Departamentos).');
+        noDepartments.hidden = true;
+        function syncInviteRole() {
+            const technician = role.value === 'technician';
+            tierField.hidden = !technician;
+            tier.required = technician;
+        }
+        role.addEventListener('change', syncInviteRole);
+        syncInviteRole();
+        loadOrgDepartments().then(() => {
+            departmentOptions(department, { servingOnly: true });
+            noDepartments.hidden = department.options.length > 1;
+        }).catch(() => {
+            // Sin la lista, el servidor igual exige el departamento al enviar
+        });
+
         const submit = document.createElement('button');
         submit.type = 'submit';
         submit.className = 'ui-btn ui-btn-primary';
         submit.textContent = 'Enviar invitación';
-        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role), submit);
+        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role),
+            inviteField('Departamento', department), tierField, noDepartments, submit);
 
         // Cada sección es nueva: el listener se registra una sola vez por formulario
         form.addEventListener('submit', async (e) => {
@@ -6148,9 +6171,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await apiFetch('/staff-invitations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: email.value.trim(), name: name.value.trim(), role: role.value })
+                    body: JSON.stringify({
+                        email: email.value.trim(), name: name.value.trim(), role: role.value,
+                        department_id: Number(department.value) || null,
+                        tier: role.value === 'technician' ? (Number(tier.value) || null) : null,
+                    })
                 });
                 form.reset();
+                syncInviteRole();
                 if (data.email_sent) {
                     showSuccess('Invitación enviada');
                 } else {
@@ -6171,7 +6199,7 @@ document.addEventListener('DOMContentLoaded', () => {
         table.className = 'invites-table ui-table';
         const head = document.createElement('thead');
         const headRow = document.createElement('tr');
-        ['Correo', 'Nombre', 'Rol', 'Vence', 'Estado', ''].forEach(text => {
+        ['Correo', 'Nombre', 'Rol', 'Departamento', 'Vence', 'Estado', ''].forEach(text => {
             const th = document.createElement('th');
             th.textContent = text;
             headRow.appendChild(th);
@@ -6215,7 +6243,9 @@ document.addEventListener('DOMContentLoaded', () => {
         tableBody.replaceChildren();
         invites.forEach(invite => {
             const row = document.createElement('tr');
-            [invite.email, invite.name, INVITE_ROLES[invite.role] || invite.role,
+            const placement = invite.department_name
+                ? `${invite.department_name}${invite.tier ? ` · N${invite.tier}` : ''}` : '—';
+            [invite.email, invite.name, INVITE_ROLES[invite.role] || invite.role, placement,
                 formatDate(invite.expires_at), INVITE_STATUS[invite.status] || invite.status].forEach(text => {
                 const td = document.createElement('td');
                 td.textContent = text;
@@ -9150,7 +9180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Grupos del menú "Acciones ▾", en este orden; la zona delicada va separada y en rojo
     const ACCOUNT_MENU_GROUPS = [
         { title: 'Seguimiento', actions: ['view-tickets', 'report', 'review-reports', 'request-name', 'request-id_number', 'full-data'] },
-        { title: 'Rol y turno', actions: ['change-role', 'schedule', 'availability'] },
+        { title: 'Rol y turno', actions: ['change-role', 'placement', 'schedule', 'availability'] },
         { title: 'Acceso', actions: ['unlock', 'close-sessions', 'reset-access'] },
         { title: 'Zona delicada', actions: ['deactivate', 'reactivate'], danger: true },
         { title: 'Invitación', actions: ['resend-invitation'] },
@@ -9159,7 +9189,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_MENU_LABELS = {
         'view-tickets': 'Ver sus tickets', report: 'Reportar cuenta', 'review-reports': 'Revisar reportes',
         'request-name': 'Corregir nombre', 'request-id_number': 'Corregir cédula', 'full-data': 'Ver datos completos',
-        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Vacaciones y ausencias',
+        'change-role': 'Cambiar rol…', placement: 'Departamento…', schedule: 'Editar horario',
+        availability: 'Vacaciones y ausencias',
         unlock: 'Desbloquear', 'close-sessions': 'Cerrar sesiones', 'reset-access': 'Forzar restablecimiento',
         deactivate: 'Desactivar', reactivate: 'Reactivar',
         'resend-invitation': 'Reenviar invitación', 'cancel-invitation': 'Cancelar invitación'
@@ -9286,6 +9317,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // El nombre completo siempre se ve (puede ocupar dos líneas); el correo ya viene enmascarado
             text.appendChild(makeEl('span', 'aa-row-name', row.name));
             let sub = `${ACCOUNT_TYPE_LABELS[row.role] || row.role} · ${row.email}`;
+            // Personal: su departamento (o "Sin departamento")
+            if (row.kind === 'user' && ROLE_CHANGE_ROLES.includes(row.role)) {
+                sub += ` · ${row.department_name || 'Sin departamento'}`;
+            }
             if (row.kind === 'user' && row.open_tickets) sub += ` · ${row.open_tickets} abiertos`;
             if (row.schedule_day) sub += ` · Turno: ${row.schedule_day}`;
             text.appendChild(makeEl('span', 'aa-row-sub', sub));
@@ -9579,6 +9614,8 @@ document.addEventListener('DOMContentLoaded', () => {
             done = await openReportDialog(item.id, item.name);
         } else if (action === 'change-role') {
             done = await openRoleDialog({ id: item.id, name: item.name, role: item.role });
+        } else if (action === 'placement') {
+            done = await openPlacementDialog({ id: item.id, name: item.name, role: item.role });
         } else if (action === 'schedule') {
             done = await openScheduleDialog(item.id, item.name, item.schedule || []);
         } else if (action === 'availability') {
@@ -10104,6 +10141,74 @@ document.addEventListener('DOMContentLoaded', () => {
         showDepartments();
     });
 
+    // ----- Departamento (y nivel) de una persona del personal: solo el administrador -----
+    const placementDialog = document.getElementById('placementDialog');
+    const placementDept = document.getElementById('placementDept');
+    const placementTier = document.getElementById('placementTier');
+    const placementError = document.getElementById('placementError');
+    let placementPerson = null;
+    let placementDone = null;
+
+    async function openPlacementDialog(person) {
+        let current;
+        try {
+            [current] = await Promise.all([
+                apiFetch(`/admin/users/${person.id}/placement`, { silent: true }),
+                loadOrgDepartments(),
+            ]);
+        } catch (err) {
+            showError(err.message);
+            return false;
+        }
+        return new Promise(resolve => {
+            placementPerson = person;
+            placementDone = resolve;
+            document.getElementById('placementTarget').textContent =
+                `${person.name || 'Sin nombre'} · ${ROLE_MAP[person.role] || person.role} · ${current.department_name || 'Sin departamento'}`;
+            departmentOptions(placementDept, { servingOnly: true, selected: current.placed ? current.department_id : null });
+            const technician = person.role === 'technician';
+            document.getElementById('placementTierGroup').hidden = !technician;
+            placementTier.required = technician;
+            placementTier.value = current.tier ? String(current.tier) : '';
+            placementError.hidden = true;
+            placementDialog.showModal();
+            placementDept.focus();
+        });
+    }
+
+    function closePlacementDialog(done) {
+        if (placementDialog.open) placementDialog.close();
+        const resolve = placementDone;
+        placementDone = null;
+        placementPerson = null;
+        if (resolve) resolve(done);
+    }
+
+    document.getElementById('placementCancel').addEventListener('click', () => closePlacementDialog(false));
+    placementDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closePlacementDialog(false);
+    });
+    document.getElementById('placementForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!placementPerson) return;
+        placementError.hidden = true;
+        const body = { department_id: Number(placementDept.value) || null };
+        if (placementPerson.role === 'technician') body.tier = Number(placementTier.value) || null;
+        try {
+            await apiFetch(`/admin/users/${placementPerson.id}/placement`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), silent: true,
+            });
+        } catch (err) {
+            // Mensaje del servidor (getErrorMessage en apiFetch): por ejemplo, que ya tiene coordinador
+            placementError.textContent = err.message || 'No se pudo guardar el departamento';
+            placementError.hidden = false;
+            return;
+        }
+        showSuccess('Departamento actualizado');
+        closePlacementDialog(true);
+    });
+
     // Importación del organigrama: vista previa (nada se guarda) y confirmación con las fusiones elegidas
     let importPaths = [];
     let importSuggestions = [];
@@ -10269,6 +10374,9 @@ document.addEventListener('DOMContentLoaded', () => {
             items.push({ action: 'availability', label: 'Vacaciones y ausencias' });
         }
         if (canChangeRole(user)) items.push({ action: 'change-role', label: 'Cambiar rol…' });
+        if (currentUser.role === 'admin' && ROLE_CHANGE_ROLES.includes(user.role)) {
+            items.push({ action: 'placement', label: 'Departamento…' });
+        }
         if (user.is_active && canManage(user, 'reset')) items.push({ action: 'reset-access', label: 'Forzar restablecimiento' });
         if (user.login_locked && canManage(user, 'unlock')) items.push({ action: 'unlock', label: 'Desbloquear' });
         if (canManage(user, 'sessions')) items.push({ action: 'close-sessions', label: 'Cerrar sesiones' });
@@ -10403,6 +10511,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const info = makeEl('div', 'team-selected-info');
         info.appendChild(makeEl('h2', 'team-selected-name', name));
         info.appendChild(makeEl('p', 'team-selected-detail', `${ROLE_MAP[user.role] || user.role} · ${teamStateText(user)} · ${user.email}`));
+        if (ROLE_CHANGE_ROLES.includes(user.role)) {
+            info.appendChild(makeEl('p', 'team-selected-detail', `Departamento: ${user.department_name || 'Sin departamento'}`));
+        }
         // Otro coordinador visto por un coordinador: el servidor no manda sus tickets
         const seesTickets = typeof user.tickets_assigned_open === 'number';
         if (seesTickets) {
@@ -10544,6 +10655,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (await openRoleDialog(user)) loadTeam();
             return;
         }
+        if (entry.dataset.action === 'placement') {
+            if (await openPlacementDialog(user)) loadTeam();
+            return;
+        }
         if (entry.dataset.action === 'close-sessions'
             && !confirm(`Se cerrarán todas las sesiones de ${user.name || 'esta cuenta'} en todos sus dispositivos. ¿Continuar?`)) {
             return;
@@ -10600,7 +10715,28 @@ document.addEventListener('DOMContentLoaded', () => {
     let roleUser = null;
     let roleDone = null;
 
-    function openRoleDialog(user) {
+    const roleDeptGroup = document.getElementById('roleDeptGroup');
+    const roleDept = document.getElementById('roleDept');
+    const roleTierGroup = document.getElementById('roleTierGroup');
+    const roleTier = document.getElementById('roleTier');
+
+    // Administrador: el nivel solo se pide si pasa a técnico
+    function syncRolePlacement() {
+        const admin = currentUser.role === 'admin';
+        roleDeptGroup.hidden = !admin;
+        roleTierGroup.hidden = !admin || roleSelect.value !== 'technician';
+    }
+    roleSelect.addEventListener('change', syncRolePlacement);
+
+    async function openRoleDialog(user, preselected = null) {
+        if (currentUser.role === 'admin') {
+            try {
+                await loadOrgDepartments();
+            } catch (err) {
+                showError(err.message);
+                return false;
+            }
+        }
         return new Promise(resolve => {
             roleUser = user;
             roleDone = resolve;
@@ -10612,7 +10748,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? [['requester', 'Solicitante']]
                 // Administrador: solo el otro rol del personal, sin motivo
                 : ROLE_OPTIONS.filter(([value]) => value !== user.role);
-            options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, false)));
+            options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, value === preselected)));
+            if (!isCoordinator) {
+                departmentOptions(roleDept, { servingOnly: true });
+                roleTier.value = '';
+            }
+            syncRolePlacement();
             document.getElementById('roleReasonGroup').hidden = !isCoordinator;
             roleReason.value = '';
             document.getElementById('roleSubmit').textContent = isCoordinator ? 'Enviar solicitud' : 'Cambiar rol';
@@ -10661,10 +10802,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     silent: true
                 });
             } else {
+                // Rol y departamento juntos (el nivel solo si pasa a técnico)
+                const body = { role: roleSelect.value, department_id: Number(roleDept.value) || null };
+                if (roleSelect.value === 'technician') body.tier = Number(roleTier.value) || null;
                 await apiFetch(`/admin/users/${roleUser.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ role: roleSelect.value }),
+                    body: JSON.stringify(body),
                     silent: true
                 });
             }
