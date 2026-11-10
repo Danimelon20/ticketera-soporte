@@ -29,7 +29,7 @@ from .routers.overdue import router as overdue_router
 from .routers.attachments import router as attachments_router
 from .routers.grouping import router as grouping_router
 from .routers.microsoft_auth import router as microsoft_auth_router
-from .routers.org import router as org_router
+from .routers.org import router as org_router, staff_router as org_staff_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -190,6 +190,7 @@ app.include_router(attachments_router)
 app.include_router(grouping_router)
 app.include_router(microsoft_auth_router)
 app.include_router(org_router)
+app.include_router(org_staff_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

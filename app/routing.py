@@ -422,3 +422,30 @@ def department_technicians(db: Session, department_id: int) -> list[models.User]
         models.StaffPlacement.department_id == department_id, models.User.is_active.is_(True),
         models.User.role == "technician",
     ).order_by(models.User.name).all()
+
+
+
+# ----- Asignación dentro del departamento -----
+
+def required_tier(level: int | None) -> int:
+    """Nivel del ticket → nivel mínimo del técnico: 0–2 (o sin nivel) N1, 3 N2, 4 N3."""
+    if level is None or level <= 2:
+        return 1
+    return 2 if level == 3 else 3
+
+
+def eligible_in_department(db: Session, technicians: list[models.User], department_id: int, level: int | None,
+                           creator_id: int | None = None) -> list[models.User]:
+    """De los candidatos, los técnicos del departamento con el nivel justo (y si no hay, los de nivel más alto).
+    El creador del ticket queda fuera, salvo que sea el único elegible."""
+    tiers = dict(db.query(models.StaffPlacement.user_id, models.StaffPlacement.tier)
+                 .filter(models.StaffPlacement.department_id == department_id))
+    inside = [u for u in technicians if u.id in tiers]
+    others = [u for u in inside if u.id != creator_id]
+    pool = others or inside
+    needed = required_tier(level)
+    for tier in range(needed, 4):
+        chosen = [u for u in pool if tiers[u.id] == tier]
+        if chosen:
+            return chosen
+    return []

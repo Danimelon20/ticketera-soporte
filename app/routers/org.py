@@ -9,13 +9,17 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import accounts, audit, auto_assign, config, departments, models, nav, routing
 from ..schemas import (
-    AdminOverview, DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    AdminOverview, DepartmentCreate, DepartmentOption, DepartmentOptions, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
     TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
+from ..security import get_current_user
 from .admin import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["org"])
+# Para el personal: solo nombres de departamentos (formulario de tickets y transferencias)
+staff_router = APIRouter(prefix="/api", tags=["org"])
+STAFF_ROLES = ("technician", "coordinator", "admin")
 
 NOT_FOUND_DEPARTMENT = "El departamento no existe"
 CYCLE = "Un departamento no puede quedar dentro de sí mismo"
@@ -338,3 +342,18 @@ def classify_ticket(ticket_id: int, data: TicketDepartmentUpdate, background_tas
     if ticket.assigned_to is None and ticket.status in ("new", "in_progress") and config.AUTO_ASSIGN_ENABLED:
         background_tasks.add_task(auto_assign.assign_new, ticket.id)
     return None
+
+
+# ----- Opciones para el personal -----
+
+@staff_router.get("/departments/options", response_model=DepartmentOptions)
+def department_options(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Departamentos que atienden tickets (para elegir quién atiende) y el organigrama activo completo (área de
+    quien reporta). Solo rutas: nada de personas."""
+    if current_user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
+    by_id = routing.departments_by_id(db)
+    active = sorted((d for d in by_id.values() if routing.is_active_path(d, by_id)),
+                    key=lambda d: routing.path_label(d, by_id).casefold())
+    options = [DepartmentOption(id=d.id, path=routing.path_label(d, by_id)) for d in active]
+    return DepartmentOptions(serving=[o for o, d in zip(options, active) if d.handles_tickets], areas=options)

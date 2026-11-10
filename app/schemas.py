@@ -314,10 +314,19 @@ class TicketCreate(BaseModel):
     # Nombre y cédula salen del perfil del dueño del ticket; el teléfono es opcional
     title: str
     description: str
-    category_id: int
-    priority_id: int
+    # Obligatorias en el formulario de siempre (se revisan en la ruta); el del personal usa valores por defecto
+    category_id: Optional[int] = None
+    priority_id: Optional[int] = None
     contact_phone: Optional[str] = None
     requester_id: Optional[int] = None
+    # Con tickets por departamento, el personal crea en nombre de quien reporta
+    department_id: Optional[int] = None
+    reporter_name: Optional[str] = Field(default=None, max_length=100)
+    reporter_email: Optional[str] = Field(default=None, max_length=150)
+    # Área de quien reporta: cualquier departamento del organigrama
+    reporter_area_id: Optional[int] = None
+    reporter_phone: Optional[str] = Field(default=None, max_length=30)
+    channel: Optional[Literal["email", "phone", "in_person"]] = None
 
     @field_validator("contact_phone")
     @classmethod
@@ -1205,3 +1214,24 @@ class UnclassifiedTicket(BaseModel):
 
 class TicketDepartmentUpdate(BaseModel):
     department_id: int
+
+
+
+class StaffTicketCreated(BaseModel):
+    """Confirmación inmediata al crear un ticket desde el personal: número y técnico (o pendiente)."""
+    id: int
+    title: str
+    department_name: str
+    assigned_to: Optional[int] = None
+    assigned_name: Optional[str] = None
+
+
+class DepartmentOption(BaseModel):
+    id: int
+    path: str
+
+
+class DepartmentOptions(BaseModel):
+    """Listas del formulario del personal: departamentos que atienden y el organigrama completo (áreas)."""
+    serving: list[DepartmentOption]
+    areas: list[DepartmentOption]

@@ -213,8 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 userAvatarEl.textContent = getInitials(currentUser.name);
             }
             if (openNewTicketBtn) {
-                // Ni el técnico ni el administrador crean tickets
-                openNewTicketBtn.style.display = ['technician', 'admin'].includes(currentUser.role) ? 'none' : 'block';
+                // Ni el técnico ni el administrador crean tickets, salvo con tickets por departamento
+                const staffCreates = staffCreatesTickets();
+                openNewTicketBtn.style.display = ['technician', 'admin'].includes(currentUser.role) && !staffCreates
+                    ? 'none' : 'block';
             }
         }
 
@@ -3973,6 +3975,80 @@ document.addEventListener('DOMContentLoaded', () => {
     const REPORT_REVIEW_ROLES = ['admin'];
     const OPERATION_ROLES = ['coordinator'];
 
+    // Tickets por departamento: técnico, coordinador y administrador crean con el mismo formulario
+    function staffCreatesTickets() {
+        return Boolean(currentUser) && ['technician', 'coordinator', 'admin'].includes(currentUser.role)
+            && Boolean(currentUser.routing_enforced);
+    }
+
+    // ----- Nuevo ticket del personal (tickets por departamento) -----
+    const staffTicketDialog = document.getElementById('staffTicketDialog');
+    const staffTicketForm = document.getElementById('staffTicketForm');
+    const staffTicketDone = document.getElementById('staffTicketDone');
+    const staffTicketError = document.getElementById('staffTicketError');
+
+    async function openStaffTicketDialog() {
+        let options;
+        try {
+            options = await apiFetch('/departments/options', { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        staffTicketForm.reset();
+        staffTicketForm.hidden = false;
+        staffTicketDone.hidden = true;
+        staffTicketError.hidden = true;
+        const fill = (select, list) => {
+            select.replaceChildren(staffOption('', 'Seleccionar', true));
+            list.forEach(d => select.appendChild(staffOption(String(d.id), d.path, false)));
+        };
+        fill(document.getElementById('stReporterArea'), options.areas);
+        fill(document.getElementById('stDepartment'), options.serving);
+        staffTicketDialog.showModal();
+        document.getElementById('stReporterName').focus();
+    }
+
+    document.getElementById('staffTicketCancel').addEventListener('click', () => staffTicketDialog.close());
+    document.getElementById('staffTicketClose').addEventListener('click', () => {
+        staffTicketDialog.close();
+        // La confirmación no queda visible: se vuelve a la lista
+        if (isStaffShell()) pollNavCounts();
+    });
+    staffTicketForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        staffTicketError.hidden = true;
+        const value = id => document.getElementById(id).value.trim();
+        const submit = document.getElementById('staffTicketSubmit');
+        submit.disabled = true;
+        let created;
+        try {
+            created = await apiFetch('/tickets', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({
+                    title: value('stTitle'), description: value('stDescription'),
+                    department_id: Number(value('stDepartment')) || null,
+                    reporter_name: value('stReporterName'), reporter_email: value('stReporterEmail') || null,
+                    reporter_area_id: Number(value('stReporterArea')) || null,
+                    reporter_phone: value('stReporterPhone') || null, channel: value('stChannel') || null,
+                }),
+            });
+        } catch (err) {
+            // Mensaje del servidor (getErrorMessage en apiFetch)
+            staffTicketError.textContent = err.message || 'No se pudo crear el ticket';
+            staffTicketError.hidden = false;
+            return;
+        } finally {
+            submit.disabled = false;
+        }
+        staffTicketForm.hidden = true;
+        document.getElementById('staffTicketDoneNumber').textContent = `Ticket #${created.id} · ${created.department_name}`;
+        document.getElementById('staffTicketDoneAssignee').textContent = created.assigned_name
+            ? `Asignado a ${created.assigned_name}.` : 'Pendiente de asignación: queda en la cola del departamento.';
+        staffTicketDone.hidden = false;
+        document.getElementById('staffTicketClose').focus();
+    });
+
     function canOperateTickets() {
         return Boolean(currentUser) && (OPERATION_ROLES.includes(currentUser.role)
             || (currentUser.role === 'admin' && Boolean(currentUser.routing_enforced)));
@@ -5805,6 +5881,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (openNewTicket) {
         openNewTicket.addEventListener('click', async () => {
             hideError();
+            // Tickets por departamento: el personal usa el formulario de quien reporta (diálogo)
+            if (staffCreatesTickets()) {
+                openStaffTicketDialog();
+                return;
+            }
             exitTicketPage();
             setSideNavActive(null);
             // Ruta propia: Atrás vuelve a la sección de donde vino
@@ -7346,8 +7427,8 @@ document.addEventListener('DOMContentLoaded', () => {
         [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => { select.value = ''; });
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
         while (queueDepartment.options.length > 2) queueDepartment.remove(2);
-        // El técnico no crea tickets (igual que el botón de la barra superior)
-        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
+        // El técnico no crea tickets (igual que el botón de la barra superior), salvo con tickets por departamento
+        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician' && !staffCreatesTickets();
         renderSideNav();
         startNavPolling();
     }
@@ -11228,7 +11309,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Crear a nombre de un cliente y reasignar: el coordinador (el administrador no entra al flujo de tickets)
     function canCreateTicket() {
-        return Boolean(currentUser && OPERATION_ROLES.includes(currentUser.role));
+        return Boolean(currentUser && (OPERATION_ROLES.includes(currentUser.role) || staffCreatesTickets()));
     }
 
     function canAssign() {

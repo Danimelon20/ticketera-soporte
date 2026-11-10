@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import StaffTicketCreated, AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
@@ -208,12 +208,83 @@ def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIA
     )
 
 
-@router.post("/tickets", response_model=TicketRead)
+STAFF_CREATE_ROLES = ("technician", "coordinator", "admin")
+REPORTER_REQUIRED = "Escriba el nombre de quien reporta"
+CHANNEL_REQUIRED = "Elija el canal: correo, teléfono o en persona"
+AREA_REQUIRED = "Elija el área de quien reporta"
+EMAIL_INVALID = "Escriba un correo válido para quien reporta"
+
+
+def _default_catalogs(db: Session) -> tuple[int, int]:
+    """Categoría y prioridad por defecto del formulario del personal (no las pide)."""
+    category = db.query(models.Category).order_by(models.Category.id).first()
+    priority = (db.query(models.Priority).filter(models.Priority.level == 2).first()
+                or db.query(models.Priority).order_by(models.Priority.id).first())
+    if category is None or priority is None:
+        raise HTTPException(status_code=500, detail="Faltan categorías o prioridades")
+    return category.id, priority.id
+
+
+def create_staff_ticket(db: Session, data: TicketCreate, user: models.User,
+                        background_tasks: BackgroundTasks) -> StaffTicketCreated:
+    """Técnico, coordinador o administrador crean un ticket en nombre de quien reporta. Asignación automática
+    solo con los técnicos del departamento (el creador, solo si es el único elegible)."""
+    title, description = (data.title or "").strip(), (data.description or "").strip()
+    if not title or not description:
+        raise HTTPException(status_code=422, detail="Escriba el título y la descripción")
+    reporter = " ".join((data.reporter_name or "").split())
+    if not reporter:
+        raise HTTPException(status_code=422, detail=REPORTER_REQUIRED)
+    if data.channel not in models.TICKET_CHANNELS:
+        raise HTTPException(status_code=422, detail=CHANNEL_REQUIRED)
+    email = (data.reporter_email or "").strip().lower() or None
+    if email is not None and "@" not in email:
+        raise HTTPException(status_code=422, detail=EMAIL_INVALID)
+    by_id = routing.departments_by_id(db)
+    area = by_id.get(data.reporter_area_id) if data.reporter_area_id else None
+    if area is None or not routing.is_active_path(area, by_id):
+        raise HTTPException(status_code=422, detail=AREA_REQUIRED)
+    dept = routing.serving_department(db, data.department_id)
+    category_id, priority_id = _default_catalogs(db)
+
+    db_ticket = models.Ticket(
+        title=title, description=description, category_id=category_id, priority_id=priority_id, status="new",
+        created_by=user.id, source="web",
+    )
+    db.add(db_ticket)
+    db.flush()
+    routing.set_ticket_department(db, db_ticket, dept.id)
+    db.add(models.TicketReporter(ticket_id=db_ticket.id, name=reporter, email=email, area_department_id=area.id,
+                                 phone=(data.reporter_phone or "").strip() or None, channel=data.channel))
+    db.add(models.History(
+        ticket_id=db_ticket.id, field="created_on_behalf", old_value=None, changed_by=user.id,
+        new_value=f"Creado por {user.name or 'Sin nombre'} en nombre de {reporter} vía "
+                  f"{models.TICKET_CHANNELS[data.channel]}"[:500],
+    ))
+    db.commit()
+    # Asignación inmediata para la confirmación (sin esperar el análisis); el análisis va después
+    if config.AUTO_ASSIGN_ENABLED:
+        auto_assign.assign_new(db_ticket.id)
+    if config.AI_ANALYSIS_ENABLED:
+        background_tasks.add_task(email_analysis.analyze_ticket_by_id, db_ticket.id)
+    db.refresh(db_ticket)
+    assignee = db.get(models.User, db_ticket.assigned_to) if db_ticket.assigned_to else None
+    return StaffTicketCreated(id=db_ticket.id, title=db_ticket.title, department_name=routing.path_label(dept, by_id),
+                              assigned_to=assignee.id if assignee else None,
+                              assigned_name=(assignee.name or "Sin nombre") if assignee else None)
+
+
+@router.post("/tickets", response_model=TicketRead | StaffTicketCreated)
 def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Tickets por departamento: técnico, coordinador y administrador usan el mismo formulario
+    if current_user.role in STAFF_CREATE_ROLES and routing.enforced(db):
+        return create_staff_ticket(db, ticket, current_user, background_tasks)
     if current_user.role == "technician":
         raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
     if current_user.role == "admin":
         raise HTTPException(status_code=403, detail="El administrador no crea tickets")
+    if ticket.category_id is None or ticket.priority_id is None:
+        raise HTTPException(status_code=422, detail="Elija la categoría y la prioridad")
     
     if ticket.requester_id is not None:
         if current_user.role not in OPERATION_ROLES:

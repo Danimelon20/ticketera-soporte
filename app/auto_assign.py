@@ -90,9 +90,23 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     return result
 
 
-def choose(db: Session, now: datetime) -> models.User | None:
+def _scoped(db: Session, users: list[models.User], ticket: models.Ticket | None) -> list[models.User]:
+    """Tickets por departamento: solo técnicos del departamento del ticket, según su nivel. Sin departamento,
+    nadie (el administrador lo clasifica primero). Apagado: todos los candidatos, como antes."""
+    if ticket is None or not routing.enforced(db):
+        return users
+    dept = routing.ticket_department(db, ticket.id)
+    if dept is None:
+        return []
+    level = email_analysis.effective_level(ticket.ai_analysis) if ticket.ai_analysis else None
+    creator = db.get(models.User, ticket.created_by)
+    creator_id = creator.id if creator is not None and creator.role == "technician" else None
+    return routing.eligible_in_department(db, users, dept.id, level, creator_id)
+
+
+def choose(db: Session, now: datetime, ticket: models.Ticket | None = None) -> models.User | None:
     """Menor carga; empate: la asignación automática más antigua (o ninguna) y luego el id."""
-    users = candidates(db, now)
+    users = _scoped(db, candidates(db, now), ticket)
     if not users:
         return None
     ids = [u.id for u in users]
@@ -111,7 +125,7 @@ def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment
     if row is None:
         row = models.TicketAutoAssignment(ticket_id=ticket.id, status="waiting", created_at=now)
         db.add(row)
-    user = choose(db, now)
+    user = choose(db, now, ticket)
     agent_id = audit.agent_id(db)
     if user is None or agent_id is None:
         return False

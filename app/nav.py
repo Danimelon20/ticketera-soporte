@@ -355,7 +355,7 @@ def suggestion(db: Session, ticket: models.Ticket, now: datetime | None = None) 
     current = ticket.assigned_user
     if current is not None and availability.is_available(db, current, now):
         return None
-    user = auto_assign.choose(db, now)
+    user = auto_assign.choose(db, now, ticket)
     if user is None or user.id == ticket.assigned_to:
         return None
     return {"user_id": user.id, "name": user.name or "Sin nombre", "load": auto_assign.loads(db, [user.id])[user.id]}

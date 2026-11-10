@@ -1375,3 +1375,16 @@
 .panel-links .org-checklist-link { margin-left: 0; }
 
 .panel-note { margin-top: var(--sp-2); }
+
+/* Nuevo ticket del personal (tickets por departamento) */
+.staff-ticket-dialog { width: min(560px, calc(100vw - 32px)); }
+
+.staff-ticket-group { margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+
+.staff-ticket-group legend { padding: 0 var(--sp-1); font-weight: 600; }
+
+.staff-ticket-number { font-size: 1.25rem; font-weight: 700; margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+
+.queue-flag-dept { color: var(--muted); font-size: 12px; }
+
+.td-solution-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 var(--sp-2); }

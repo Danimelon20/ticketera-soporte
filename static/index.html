@@ -1326,6 +1326,68 @@
     </dialog>
 
     <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <!-- Tickets por departamento: técnico, coordinador y administrador crean con el mismo formulario -->
+    <dialog id="staffTicketDialog" class="app-dialog staff-ticket-dialog" aria-labelledby="staffTicketTitle">
+        <form id="staffTicketForm" class="profile-form">
+            <h2 id="staffTicketTitle" class="modal-title">Nuevo ticket</h2>
+            <p class="help-text">En nombre de quien reportó el problema. Se asigna solo entre los técnicos del departamento.</p>
+            <fieldset class="staff-ticket-group">
+                <legend>Quién reporta</legend>
+                <div class="form-group">
+                    <label for="stReporterName">Nombre</label>
+                    <input type="text" id="stReporterName" maxlength="100" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="stReporterEmail">Correo (opcional)</label>
+                    <input type="email" id="stReporterEmail" maxlength="150" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="stReporterArea">Área</label>
+                    <select id="stReporterArea" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="stReporterPhone">Teléfono o extensión (opcional)</label>
+                    <input type="text" id="stReporterPhone" maxlength="30" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="stChannel">Canal</label>
+                    <select id="stChannel" required>
+                        <option value="">Seleccionar</option>
+                        <option value="email">Correo</option>
+                        <option value="phone">Teléfono</option>
+                        <option value="in_person">En persona</option>
+                    </select>
+                </div>
+            </fieldset>
+            <div class="form-group">
+                <label for="stTitle">Título</label>
+                <input type="text" id="stTitle" maxlength="200" required>
+            </div>
+            <div class="form-group">
+                <label for="stDescription">Descripción</label>
+                <textarea id="stDescription" rows="4" maxlength="5000" required></textarea>
+            </div>
+            <div class="form-group">
+                <label for="stDepartment">Departamento que atiende</label>
+                <select id="stDepartment" required></select>
+            </div>
+            <p id="staffTicketError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="staffTicketCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" id="staffTicketSubmit" class="btn-submit">Crear ticket</button>
+            </div>
+        </form>
+        <!-- Confirmación inmediata: número y técnico asignado (o pendiente). No queda visible después -->
+        <div id="staffTicketDone" class="profile-form" hidden>
+            <h2 class="modal-title">Ticket creado</h2>
+            <p id="staffTicketDoneNumber" class="staff-ticket-number"></p>
+            <p id="staffTicketDoneAssignee" class="help-text"></p>
+            <div class="dialog-actions">
+                <button type="button" id="staffTicketClose" class="btn-submit">Listo</button>
+            </div>
+        </div>
+    </dialog>
+
     <!-- Al marcar Resuelto con tickets por departamento: la solución es obligatoria -->
     <dialog id="solutionDialog" class="app-dialog" aria-labelledby="solutionDialogTitle">
         <form id="solutionForm" class="profile-form">
