@@ -3973,6 +3973,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const REPORT_REVIEW_ROLES = ['admin'];
     const OPERATION_ROLES = ['coordinator'];
 
+    function canOperateTickets() {
+        return Boolean(currentUser) && (OPERATION_ROLES.includes(currentUser.role)
+            || (currentUser.role === 'admin' && Boolean(currentUser.routing_enforced)));
+    }
+
     // "2026-11-03" → "03/11/2026" sin pasar por la zona horaria
     function formatPlainDate(value) {
         const [year, month, day] = value.split('-');
@@ -6412,6 +6417,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         context: 'Servicios, copias de seguridad y registros del servidor',
                     }),
                 ] },
+                // Tickets por departamento encendido: el administrador ve y gestiona los tickets de todos
+                ...(currentUser.routing_enforced ? [{ id: 'admin-tickets', label: 'Tickets', icon: 'tickets', sections: [
+                    queueSection('open', 'Todos', 'tickets/todos', {
+                        title: 'Tickets de todos los departamentos', count: 'open', aliases: ['due_soon', 'resolved_today'],
+                        tabs: [
+                            ['open', 'Abiertos', 'open', ''],
+                            ['due_soon', 'Por vencer', 'due_soon', 'warn'],
+                            ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
+                        ],
+                        context: 'Abiertos · ordenados por vencimiento · filtre por departamento',
+                    }),
+                    queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
+                        count: 'unassigned', tone: 'warn', context: 'Tickets abiertos sin responsable',
+                    }),
+                    queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
+                        count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
+                    }),
+                ] }] : []),
             ];
         }
         return [
@@ -7320,8 +7343,9 @@ document.addEventListener('DOMContentLoaded', () => {
         queueTitle.textContent = currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos';
         queueSearch = '';
         queuePageNum = 1;
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => { select.value = ''; });
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
+        while (queueDepartment.options.length > 2) queueDepartment.remove(2);
         // El técnico no crea tickets (igual que el botón de la barra superior)
         document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
         renderSideNav();
@@ -7354,6 +7378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const queueStatus = document.getElementById('queueStatus');
     const queueLevel = document.getElementById('queueLevel');
     const queueAssignee = document.getElementById('queueAssignee');
+    const queueDepartment = document.getElementById('queueDepartment');
     const queueSource = document.getElementById('queueSource');
     const queuePrev = document.getElementById('queuePrev');
     const queueNext = document.getElementById('queueNext');
@@ -7554,6 +7579,16 @@ document.addEventListener('DOMContentLoaded', () => {
         loadQueue();
     });
 
+    async function fillDepartmentFilter() {
+        try {
+            await loadOrgDepartments();
+        } catch (err) {
+            return; // Sin la lista, la cola funciona igual sin este filtro
+        }
+        orgDepartments.filter(d => d.handles_tickets && d.active_path)
+            .forEach(d => queueDepartment.appendChild(staffOption(String(d.id), `Depto.: ${d.path}`, false)));
+    }
+
     function queueParams() {
         const params = new URLSearchParams({ view: queueView, page: String(queuePageNum) });
         if (queueStatus.value) params.set('status', queueStatus.value);
@@ -7563,23 +7598,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (queueAssignee.value && currentUser.role !== 'technician') params.set('assigned_to', queueAssignee.value);
         if (queueSearch) params.set('search', queueSearch);
         if (queueRequester) params.set('requester_id', String(queueRequester.id));
+        if (queueDepartment.value && !queueDepartment.hidden) params.set('department_id', queueDepartment.value);
         return params;
     }
 
     function queueFiltersSet() {
-        return [queueStatus, queueLevel, queueSource].some(select => select.value)
+        return [queueStatus, queueLevel, queueSource, queueDepartment].some(select => select.value)
             || (queueAssignee.value && currentUser.role !== 'technician');
     }
 
     // Filtros como chips: punteados sin valor, azules con valor
     function renderQueueChips() {
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => {
             select.classList.toggle('is-set', Boolean(select.value));
         });
     }
 
     function clearQueueFilters() {
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => { select.value = ''; });
         renderQueueChips();
         queuePageNum = 1;
         loadQueue();
@@ -7593,6 +7629,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isStaffShell()) return;
         queueAssignee.hidden = currentUser.role === 'technician';
         if (queueAssignee.options.length <= 2) fillAssigneeFilter();
+        // Filtro por departamento: el administrador con tickets por departamento
+        const byDepartment = currentUser.role === 'admin' && Boolean(currentUser.routing_enforced);
+        queueDepartment.hidden = !byDepartment;
+        if (byDepartment && queueDepartment.options.length <= 2) await fillDepartmentFilter();
         renderQueueChips();
         const seq = ++queueSeq;
         if (!quiet) {
@@ -7770,6 +7810,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (item.reported) meta.appendChild(makeEl('span', 'queue-flag-reported', 'Reportada'));
             if (item.auto_assigned) meta.appendChild(makeEl('span', 'queue-flag-auto', 'asignado automáticamente'));
             if (item.incident) meta.appendChild(makeEl('span', 'ui-tag is-danger queue-flag-incident', 'Incidente'));
+            // Tickets por departamento: el administrador ve de qué departamento es cada uno
+            if (currentUser.role === 'admin' && currentUser.routing_enforced) {
+                meta.appendChild(makeEl('span', 'queue-flag-dept', item.department_name || 'Sin departamento'));
+            }
             subject.appendChild(meta);
 
             const level = queueCell('Nivel', 'col-level');
@@ -8195,7 +8239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         openQueueTicket(Number(row.dataset.id));
     });
-    [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+    [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => {
         select.addEventListener('change', () => {
             queuePageNum = 1;
             renderQueueChips();
@@ -8880,7 +8924,8 @@ document.addEventListener('DOMContentLoaded', () => {
         detailContent.replaceChildren();
         detailPanel.scrollTop = 0;
         const isClosed = ticket.status === 'closed';
-        const canManage = OPERATION_ROLES.includes(currentUser.role);
+        // Coordinador; con tickets por departamento, también el administrador (reasigna, transfiere, estado)
+        const canManage = canOperateTickets();
         // Técnico que lo tuvo antes o administrador con "Ver conversación": solo lectura
         const readOnly = Boolean(ticket.read_only);
         const clientName = userMap[ticket.created_by] || 'Solicitante';

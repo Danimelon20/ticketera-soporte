@@ -185,6 +185,8 @@ class MeRead(BaseModel):
     tier: Optional[int] = None
     # Con el interruptor encendido y sin departamento: aviso "Contacte al administrador" (no recibe tickets)
     placement_missing: bool = False
+    # Personal: tickets por departamento encendido (la página muestra crear, transferir y la cola del admin)
+    routing_enforced: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1180,7 +1182,7 @@ class OverviewDepartment(BaseModel):
     path: str
     coordinator_name: Optional[str] = None
     technicians: int = 0
-    # Se llenan cuando los tickets tengan departamento (Fase 2); por ahora None ("—")
+    # Tickets abiertos y vencidos del departamento
     open: Optional[int] = None
     overdue: Optional[int] = None
 

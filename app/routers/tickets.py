@@ -17,7 +17,13 @@ from .. import account_reports, alerts, attachments, assignment_notice, audit, a
 AI_ROLES = ("technician", "coordinator")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
 OPERATION_ROLES = ("coordinator",)
+
+
+def can_operate(db: Session, user) -> bool:
+    """Asignar y reasignar: el coordinador; con tickets por departamento, también el administrador."""
+    return user.role in OPERATION_ROLES or (user.role == "admin" and routing.enforced(db))
 FOLLOW_REQUESTERS_ONLY = "Solo el solicitante da seguimiento a un ticket por correo"
+OUTSIDE_DEPARTMENT = "Esa persona no pertenece al departamento del ticket: transfiéralo primero"
 SOLUTION_REQUIRED = "Documente la solución (al menos 10 caracteres) para marcar el ticket como Resuelto"
 SOLUTION_MIN = 10
 
@@ -269,8 +275,8 @@ def list_tickets(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    # Solicitante: los suyos; técnico: asignados y los que tuvo; administrador: ninguno
-    if current_user.role == "admin":
+    # Solicitante: los suyos; técnico: asignados y los que tuvo; administrador: ninguno (todos con el interruptor)
+    if current_user.role == "admin" and not routing.enforced(db):
         raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
     query = ticket_access.filter_visible(db, current_user, db.query(models.Ticket))
 
@@ -302,7 +308,8 @@ def list_tickets(
 # exclude_unset: el solicitante no recibe la clave ai_analysis
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail, response_model_exclude_unset=True)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    if current_user.role == "admin":
+    # Con tickets por departamento el administrador ve y gestiona todos (reemplaza el acceso a incidentes)
+    if current_user.role == "admin" and not routing.enforced(db):
         return incident_detail_for_admin(db, ticket_id, current_user)
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     return ticket_detail(db, db_ticket, current_user)
@@ -373,7 +380,8 @@ def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> Ticket
         is not None
     )
     extra = {}
-    if current_user.role == "admin" or ticket_access.access(db, current_user, db_ticket) == ticket_access.READ:
+    # Administrador: solo lectura, salvo con tickets por departamento (entonces los gestiona)
+    if ticket_access.access(db, current_user, db_ticket) != ticket_access.FULL:
         extra["read_only"] = True
     if current_user.role in AI_ROLES or current_user.role == "admin":
         row = db_ticket.ai_analysis
@@ -423,7 +431,7 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
 @router.get("/tickets/{ticket_id}/suggestion", response_model=Optional[SuggestionRead])
 def get_suggestion(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Sugerencia de responsable con la lógica de la asignación automática. No asigna nada."""
-    if current_user.role not in OPERATION_ROLES:
+    if not can_operate(db, current_user):
         raise HTTPException(status_code=403, detail="No tiene permiso para ver sugerencias de asignación")
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     found = nav.suggestion(db, db_ticket)
@@ -671,7 +679,12 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         if user.role not in ("technician", "coordinator"):
             raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos o coordinadores")
         # Regla: asignar y reasignar es del coordinador (el técnico solo atiende lo suyo)
-        if current_user.role not in OPERATION_ROLES and data.assigned_to != db_ticket.assigned_to:
+        # Tickets por departamento: el responsable es un técnico del departamento del ticket (o su coordinador)
+        if routing.enforced(db) and data.assigned_to != db_ticket.assigned_to:
+            ticket_dept = routing.ticket_department(db, db_ticket.id)
+            if ticket_dept is not None and not routing.belongs_to(db, user, ticket_dept.id):
+                raise HTTPException(status_code=400, detail=OUTSIDE_DEPARTMENT)
+        if not can_operate(db, current_user) and data.assigned_to != db_ticket.assigned_to:
             raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
         # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
         if (

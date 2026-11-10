@@ -403,3 +403,22 @@ def unclassified_open_tickets(db: Session):
         models.Ticket.status.in_(("new", "in_progress")),
         models.Ticket.id.notin_(db.query(models.TicketDepartment.ticket_id)),
     )
+
+
+def belongs_to(db: Session, user: models.User, department_id: int) -> bool:
+    """Técnico ubicado en ese departamento o su coordinador."""
+    if user.role == "technician":
+        row = technician_placement(db, user.id)
+        return row is not None and row.department_id == department_id
+    if user.role == "coordinator":
+        row = coordinator_row(db, user.id)
+        return row is not None and row.department_id == department_id
+    return False
+
+
+def department_technicians(db: Session, department_id: int) -> list[models.User]:
+    """Técnicos activos ubicados en el departamento."""
+    return db.query(models.User).join(models.StaffPlacement, models.StaffPlacement.user_id == models.User.id).filter(
+        models.StaffPlacement.department_id == department_id, models.User.is_active.is_(True),
+        models.User.role == "technician",
+    ).order_by(models.User.name).all()

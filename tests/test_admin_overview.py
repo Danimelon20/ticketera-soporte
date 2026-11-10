@@ -1,5 +1,5 @@
-"""Panel del administrador: una fila por departamento activo que atiende tickets, con su coordinador y sus
-técnicos; abiertos y vencidos llegan en la Fase 2 ("—"). Solo el administrador."""
+"""Panel del administrador: una fila por departamento activo que atiende tickets, con su coordinador, sus
+técnicos y sus tickets abiertos y vencidos. Solo el administrador."""
 from org_helpers import department, unique
 
 
@@ -30,7 +30,8 @@ def test_one_row_per_serving_department(client, make_user):
     rows = {r["id"]: r for r in data["departments"]}
     assert rows[serving]["coordinator_name"] == "Coordinadora del Panel"
     assert rows[serving]["technicians"] == 2
-    assert rows[serving]["open"] is None and rows[serving]["overdue"] is None
+    # Sin tickets clasificados en ese departamento todavía
+    assert rows[serving]["open"] == 0 and rows[serving]["overdue"] == 0
     assert rows[lonely]["coordinator_name"] is None and rows[lonely]["technicians"] == 0
     assert not_serving not in rows and inactive not in rows
     assert data["routing_enforced"] is False

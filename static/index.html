@@ -365,6 +365,12 @@
                             <option value="">+ Responsable</option>
                             <option value="0">Sin asignar</option>
                         </select>
+                        <!-- Administrador con tickets por departamento: filtro por departamento que atiende -->
+                        <label for="queueDepartment" class="sr-only">Departamento</label>
+                        <select id="queueDepartment" class="queue-chip" hidden>
+                            <option value="">+ Departamento</option>
+                            <option value="0">Sin departamento</option>
+                        </select>
                         <label for="queueSource" class="sr-only">Canal</label>
                         <select id="queueSource" class="queue-chip">
                             <option value="">+ Canal</option>
@@ -1114,7 +1120,7 @@
                             <tbody id="panelBody"></tbody>
                         </table>
                     </div>
-                    <p class="admin-text panel-note">Abiertos y vencidos se llenan cuando los tickets tengan departamento (Fase 2).</p>
+                    <p class="admin-text panel-note">Abiertos incluye los vencidos. Los tickets sin departamento no cuentan aquí: están en «Sin departamento».</p>
                     <div id="panelUnplacedBox" hidden>
                         <h3 class="org-subtitle">Personal sin departamento</h3>
                         <ul id="panelUnplaced" class="org-list"></ul>

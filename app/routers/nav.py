@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import cancellations, nav, ticket_access
+from .. import cancellations, nav, routing, ticket_access
 from ..schemas import NavCounts, QueuePage, SystemStatus
 from ..security import get_current_user
 
@@ -39,12 +39,16 @@ def ticket_queue(
     search: Optional[str] = Query(default=None, max_length=150),
     # Solo los tickets que creó ese cliente
     requester_id: Optional[int] = Query(default=None, ge=1),
+    # Filtro por departamento que atiende (0: sin departamento)
+    department_id: Optional[int] = Query(default=None, ge=0),
     page: int = Query(default=1, ge=1),
     db: Session = Depends(get_db),
     current_user=Depends(require_staff),
 ):
     # El administrador no entra al flujo de tickets; el técnico no ve los tickets sin asignar
-    if current_user.role == "admin" or (view == "unassigned" and current_user.role == "technician"):
+    # Con tickets por departamento, el administrador ve la cola de todos los departamentos
+    admin_blocked = current_user.role == "admin" and not routing.enforced(db)
+    if admin_blocked or (view == "unassigned" and current_user.role == "technician"):
         raise HTTPException(status_code=403, detail="No tiene permiso para ver esta información")
     # Cancelados: solo quien puede cancelar y reabrir
     if view == "cancelled":
@@ -52,5 +56,5 @@ def ticket_queue(
     ticket_access.check_assignee_filter(db, current_user, assigned_to)
     return QueuePage(**nav.queue(
         db, current_user, view=view, status=status, level=level, assigned_to=assigned_to,
-        source=source, search=search, requester_id=requester_id, page=page,
+        source=source, search=search, requester_id=requester_id, department_id=department_id, page=page,
     ))

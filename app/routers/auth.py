@@ -554,12 +554,14 @@ def me_read(db: Session, user: models.User) -> MeRead:
 
 
 def _department_fields(db: Session, user: models.User) -> dict:
-    """Técnicos y coordinadores: su departamento (y nivel)."""
+    """Técnicos y coordinadores: su departamento (y nivel). Personal y administrador: el interruptor."""
+    if user.role == "admin":
+        return {"routing_enforced": routing.enforced(db)}
     if user.role not in routing.PLACED_ROLES:
         return {}
     dept, tier = routing.department_of(db, user)
     return {"department_name": routing.path_label(dept, routing.departments_by_id(db)), "tier": tier,
-            "placement_missing": routing.placement_missing(db, user)}
+            "placement_missing": routing.placement_missing(db, user), "routing_enforced": routing.enforced(db)}
 
 
 def _availability_fields(db: Session, user: models.User) -> dict:

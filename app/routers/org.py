@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, auto_assign, config, departments, models, routing
+from .. import accounts, audit, auto_assign, config, departments, models, nav, routing
 from ..schemas import (
     AdminOverview, DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
@@ -252,10 +252,19 @@ def staff_alerts(db: Session = Depends(get_db), admin=Depends(require_admin)):
 
 @router.get("/overview", response_model=AdminOverview)
 def overview(db: Session = Depends(get_db), admin=Depends(require_admin)):
-    """Panel: una fila por departamento activo que atiende tickets. Los tickets abiertos y vencidos se llenan
-    cuando los tickets tengan departamento (Fase 2)."""
+    """Panel: una fila por departamento activo que atiende tickets, con sus tickets abiertos y vencidos."""
+    open_by_dept: dict[int, int] = {}
+    overdue_by_dept: dict[int, int] = {}
+    now = nav._now()
+    for ticket, dept_id in db.query(models.Ticket, models.TicketDepartment.department_id).join(
+        models.TicketDepartment, models.TicketDepartment.ticket_id == models.Ticket.id
+    ).filter(models.Ticket.status.in_(nav.OPEN_STATUSES)):
+        open_by_dept[dept_id] = open_by_dept.get(dept_id, 0) + 1
+        if nav.is_overdue(ticket, now):
+            overdue_by_dept[dept_id] = overdue_by_dept.get(dept_id, 0) + 1
     rows = [
-        OverviewDepartment(id=d.id, path=d.path, coordinator_name=d.coordinator_name, technicians=d.technicians)
+        OverviewDepartment(id=d.id, path=d.path, coordinator_name=d.coordinator_name, technicians=d.technicians,
+                           open=open_by_dept.get(d.id, 0), overdue=overdue_by_dept.get(d.id, 0))
         for d in _department_reads(db) if d.handles_tickets and d.active_path
     ]
     return AdminOverview(departments=rows, routing_enforced=routing.enforced(db), unplaced=_unplaced(db))
