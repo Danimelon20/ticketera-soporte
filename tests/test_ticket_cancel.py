@@ -1,4 +1,6 @@
 """Cancelar tickets (coordinador y administrador) y reabrirlos."""
+import uuid
+
 import pytest
 
 from app import models
@@ -17,8 +19,10 @@ def _cancel(client, actor, ids, reason="duplicate", notify=True, note=None):
     return client.post("/api/tickets/cancel", json=payload, headers=actor["headers"])
 
 
-def _queue_ids(client, actor, view):
-    response = client.get(f"/api/queue?view={view}", headers=actor["headers"])
+def _queue_ids(client, actor, view, search=None):
+    # search: título único, porque la base es compartida y la cola va de 25 en 25
+    params = {"view": view, **({"search": search} if search else {})}
+    response = client.get("/api/queue", params=params, headers=actor["headers"])
     assert response.status_code == 200, response.text
     return {item["id"] for item in response.json()["items"]}
 
@@ -134,15 +138,17 @@ def test_reopen_returns_to_queue_unassigned(client, make_user, make_ticket, requ
 
 def test_cancelled_leaves_work_queues_and_counts(client, make_user, make_ticket, requester):
     coordinator = make_user("coordinator")
-    ticket = make_ticket(requester)
+    title = f"Cancelado {uuid.uuid4().hex[:8]}"
+    ticket = make_ticket(requester, title=title)
     before = client.get("/api/nav/counts", headers=coordinator["headers"]).json()
-    assert ticket["id"] in _queue_ids(client, coordinator, "open")
+    assert ticket["id"] in _queue_ids(client, coordinator, "open", title)
 
     assert _cancel(client, coordinator, [ticket["id"]]).status_code == 200
 
     for view in ("open", "unassigned", "due_soon", "overdue", "resolved_today"):
-        assert ticket["id"] not in _queue_ids(client, coordinator, view), view
-    response = client.get("/api/queue?view=cancelled", headers=coordinator["headers"])
+        assert ticket["id"] not in _queue_ids(client, coordinator, view, title), view
+    response = client.get("/api/queue", params={"view": "cancelled", "search": title},
+                          headers=coordinator["headers"])
     row = [item for item in response.json()["items"] if item["id"] == ticket["id"]]
     assert row and row[0]["cancelled"] is True
 
