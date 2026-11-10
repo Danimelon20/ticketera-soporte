@@ -1866,7 +1866,8 @@ document.addEventListener('DOMContentLoaded', () => {
         followHint.className = 'follow-hint';
         followBox.appendChild(followBtn);
         followBox.appendChild(followHint);
-        titleRow.appendChild(followBox);
+        // "Dar seguimiento" por correo: solo el solicitante (el personal recibe 403 en el servidor)
+        if (currentUser && currentUser.role === 'requester') titleRow.appendChild(followBox);
         renderFollowButton(followBtn, followHint, Boolean(ticket.following));
         detailContent.appendChild(titleRow);
 
@@ -6398,7 +6399,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id: 'work', label: 'Mi trabajo', icon: 'tickets', sections: [
                     queueSection('mine_open', 'Mis tickets', 'mi-trabajo/tickets', {
                         // La pestaña Por vencer de aquí reemplaza la sección suelta que repetía lo mismo
-                        count: 'mine_open', aliases: ['mine_due_soon', 'mine_resolved_today', 'following'],
+                        count: 'mine_open', aliases: ['mine_due_soon', 'mine_resolved_today'],
                         tabs: [
                             ['mine_open', 'Abiertos', 'mine_open', ''],
                             ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
@@ -7716,7 +7717,6 @@ document.addEventListener('DOMContentLoaded', () => {
             resolved_today: ['Todavía no se resolvió ningún ticket hoy', 'Los que se resuelvan hoy aparecerán aquí.'],
             mine_open: ['No tiene tickets abiertos asignados', 'Puede tomar uno de los que están sin asignar.'],
             mine_due_soon: ['Ninguno de sus tickets está por vencer', 'Sus tickets abiertos están a tiempo.'],
-            following: ['No sigue ningún ticket abierto', 'Use "Seguir" en un ticket para tenerlo a mano aquí.'],
             mine_resolved_today: ['Todavía no resolvió tickets hoy', 'Los que resuelva hoy aparecerán aquí.'],
             cancelled: ['No hay tickets cancelados', 'Los tickets que se cancelen aparecen aquí y se pueden reabrir.'],
         };
@@ -8849,13 +8849,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const head = makeEl('header', 'td-head');
         const titleRow = makeEl('div', 'td-title-row');
         titleRow.appendChild(makeEl('h1', 'td-title', ticket.title));
-        const followBox = makeEl('div', 'follow-box');
-        const followBtn = makeEl('button', 'follow-btn');
-        followBtn.type = 'button';
-        const followHint = makeEl('p', 'follow-hint');
-        followBox.append(followBtn, followHint);
-        renderFollowButton(followBtn, followHint, Boolean(ticket.following));
-        if (currentUser.role !== 'admin') titleRow.appendChild(followBox);
+        // Sin "Dar seguimiento": el personal no sigue tickets por correo
         const status = staffStatusControl(ticket);
         if (!readOnly && status.tagName === 'SELECT') {
             const statusLabel = makeEl('label', 'td-status-label', 'Cambiar estado');

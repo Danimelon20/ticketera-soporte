@@ -15,9 +15,8 @@ def test_internal_note_is_hidden_from_requester(make_user, make_ticket, client, 
     ticket_id = make_ticket(requester)["id"]
     # El técnico comenta en su ticket (asignado por el coordinador)
     client.patch(f"/api/tickets/{ticket_id}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
-    # Seguidores: el solicitante y otra persona del personal
+    # Seguidor: el solicitante (el personal ya no da seguimiento por correo)
     _follow(client, ticket_id, requester)
-    _follow(client, ticket_id, coordinator)
     sent.clear()
 
     response = client.post(f"/api/tickets/{ticket_id}/comments",
@@ -25,7 +24,7 @@ def test_internal_note_is_hidden_from_requester(make_user, make_ticket, client, 
     assert response.status_code == 200
     assert response.json()["internal"] is True
 
-    # Ningún correo a los seguidores, ni al solicitante ni al personal
+    # Ningún correo al seguidor
     assert sent == []
 
     own = client.get(f"/api/tickets/{ticket_id}", headers=requester["headers"]).json()
@@ -49,14 +48,14 @@ def test_public_reply_still_notifies(make_user, make_ticket, client, sent):
     requester = make_user("requester")
     ticket_id = make_ticket(requester)["id"]
     client.patch(f"/api/tickets/{ticket_id}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
-    _follow(client, ticket_id, coordinator)
+    _follow(client, ticket_id, requester)
     sent.clear()
 
     response = client.post(f"/api/tickets/{ticket_id}/comments",
                            json={"content": "Respuesta al cliente"}, headers=technician["headers"])
     assert response.status_code == 200
     assert response.json()["internal"] is False
-    assert any(to == coordinator["email"] for to, _subject, _body in sent)
+    assert any(to == requester["email"] for to, _subject, _body in sent)
 
 
 def test_requester_cannot_add_internal_note(make_user, make_ticket, client):

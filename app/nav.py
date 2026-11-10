@@ -15,9 +15,9 @@ RESOLVED_STATUSES = ("resolved", "closed")
 PAGE_SIZE = 25
 QUEUE_VIEWS = (
     "all", "open", "unassigned", "due_soon", "overdue", "resolved_today",
-    "mine_open", "mine_due_soon", "following", "mine_resolved_today", "cancelled",
+    "mine_open", "mine_due_soon", "mine_resolved_today", "cancelled",
 )
-_OPEN_VIEWS = ("open", "unassigned", "due_soon", "overdue", "mine_open", "mine_due_soon", "following")
+_OPEN_VIEWS = ("open", "unassigned", "due_soon", "overdue", "mine_open", "mine_due_soon")
 
 
 def _now() -> datetime:
@@ -126,19 +126,12 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
         }
     if user.role == "technician":
         mine = _open_tickets(db, assigned_to=user.id)
-        following = ticket_access.filter_visible(db, user, (
-            db.query(models.Ticket)
-            .options(joinedload(models.Ticket.ai_analysis))
-            .join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id)
-            .filter(models.TicketFollower.user_id == user.id, models.Ticket.status.in_(OPEN_STATUSES))
-        )).all()
         mine_due_soon, mine_overdue = _due_counts(mine, now)
         return {
             "mine_open": len(mine) - mine_overdue,
             "mine_due_soon": mine_due_soon,
             # Solo sus vencidos
             "overdue": mine_overdue,
-            "following_open": len(_not_overdue(following, now)),
             "mine_resolved_today": _resolved_today(db, now, assigned_to=user.id),
             # Solo los borradores que le asignaron
             "drafts_pending": _drafts_pending(db, reviewer_id=user.id),
@@ -229,10 +222,6 @@ def queue(
     if view == "overdue" and user.role == "technician":
         # El técnico solo ve sus vencidos
         query = query.filter(models.Ticket.assigned_to == user.id)
-    if view == "following":
-        query = query.join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id).filter(
-            models.TicketFollower.user_id == user.id
-        )
     if view == "cancelled":
         query = query.filter(models.Ticket.id.in_(db.query(models.TicketCancellation.ticket_id)))
     if view in ("resolved_today", "mine_resolved_today"):

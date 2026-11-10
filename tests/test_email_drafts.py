@@ -617,7 +617,13 @@ def test_reply_adds_comment_without_quote(client, make_user, make_ticket, sent, 
     requester = make_user("requester", "Ana Cliente")
     follower = make_user("coordinator", "Carla Seguidora")
     ticket = make_ticket(requester, title="Sin red")
-    client.post(f"/api/tickets/{ticket['id']}/follow", headers=follower["headers"])
+    # Seguimiento de antes del cambio: el personal ya no recibe estos correos
+    db = SessionLocal()
+    try:
+        db.add(models.TicketFollower(ticket_id=ticket["id"], user_id=follower["id"]))
+        db.commit()
+    finally:
+        db.close()
 
     body = (
         "Ya reinicié el router y sigue igual.\n\n"
@@ -633,10 +639,8 @@ def test_reply_adds_comment_without_quote(client, make_user, make_ticket, sent, 
     finally:
         db.close()
     assert [(c.user_id, c.content) for c in comments] == [(requester["id"], "Ya reinicié el router y sigue igual.")]
-    assert [(to, subject) for to, subject, _ in sent] == [
-        (follower["email"], f"[Ticket #{ticket['id']}] Nuevo comentario de Ana Cliente")
-    ]
-    assert "Ya reinicié el router y sigue igual." in sent[0][2]
+    # Quien escribe no recibe su propio comentario y el personal ya no sigue tickets por correo
+    assert sent == []
 
 
 def test_reply_from_unrelated_sender_follows_normal_flow(make_user, make_ticket, sent, monkeypatch):

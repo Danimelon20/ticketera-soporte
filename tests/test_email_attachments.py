@@ -292,7 +292,7 @@ def test_template_ticket_gets_files_in_first_message(client, requester, monkeypa
 def followed_ticket(make_user, make_ticket, requester):
     ticket = make_ticket(requester)
     coordinator = make_user("coordinator", name="Coordinadora")
-    # Otro seguidor que ve el ticket (un técnico no asignado ya no lo ve ni recibe sus avisos)
+    # Seguidor del personal que quedó de antes: ya no recibe avisos (solo el solicitante)
     follower = make_user("coordinator", name="Coordinador Seguidor")
     db = SessionLocal()
     try:
@@ -324,9 +324,8 @@ def test_reply_with_files_goes_to_requester(client, followed_ticket, requester, 
     [(mail, files)] = sent_to(sent, requester["email"])
     assert [(name, data) for name, data, _ in files] == [("factura.pdf", PDF), ("foto.png", png(100))]
     assert "Adjuntó 2 archivo(s)." in mail[2]
-    [(other, other_files)] = sent_to(sent, follower["email"])
-    assert other_files is None
-    assert "Adjuntó 2 archivo(s)." in other[2]
+    # El seguimiento por correo es solo del solicitante: la fila antigua del coordinador no envía nada
+    assert sent_to(sent, follower["email"]) == []
 
     db = SessionLocal()
     try:

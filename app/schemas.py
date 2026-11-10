@@ -750,7 +750,6 @@ class NavCounts(BaseModel):
     active_admins: Optional[int] = None
     mine_open: Optional[int] = None
     mine_due_soon: Optional[int] = None
-    following_open: Optional[int] = None
     mine_resolved_today: Optional[int] = None
     cancelled: Optional[int] = None
     shift: Optional[NavShift] = None

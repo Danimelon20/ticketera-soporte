@@ -86,7 +86,8 @@ MATRIX = [
     ("corregir nivel IA", "patch", lambda w: f"/api/tickets/{w['ticket_id']}/ai-level", lambda w: {"level": 3},
      _codes(403, 403, 200, 403, 403)),
     ("sugerencia", "get", lambda w: f"/api/tickets/{w['ticket_id']}/suggestion", None, _codes(403, 403, 200, 403, 403)),
-    ("seguir", "post", lambda w: f"/api/tickets/{w['ticket_id']}/follow", None, _codes(204, 403, 204, 403, 204)),
+    # "Dar seguimiento" por correo: solo el solicitante
+    ("seguir", "post", lambda w: f"/api/tickets/{w['ticket_id']}/follow", None, _codes(403, 403, 403, 403, 204)),
     ("cancelar", "post", lambda w: "/api/tickets/cancel",
      lambda w: {"ticket_ids": [w["ticket_id"]], "reason": "duplicate", "notify_requester": False},
      _codes(403, 403, 200, 403, 403)),

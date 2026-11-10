@@ -79,8 +79,8 @@ def test_assigning_coordinator_sends_no_technician_notice(client, make_user, mak
 def test_follower_technician_gets_one_email(client, make_user, make_ticket, sent):
     coordinator = make_user("coordinator")
     technician = make_user("technician")
-    other_follower = make_user("coordinator")
-    ticket = make_ticket(make_user("requester"))
+    other_follower = make_user("requester")
+    ticket = make_ticket(other_follower)
     assert client.post(f"/api/tickets/{ticket['id']}/follow", headers=other_follower["headers"]).status_code == 204
     # El técnico ya no puede seguir un ticket ajeno: el seguimiento viene de antes de este cambio
     db = SessionLocal()

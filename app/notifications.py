@@ -44,6 +44,8 @@ def notify_followers(
             models.User.id != actor.id,
             models.User.id.notin_(exclude_ids),
             models.User.is_active.is_(True),
+            # Solo solicitantes: las filas antiguas del personal ("Dar seguimiento") ya no envían correo
+            models.User.role == "requester",
         )
         .all()
     )

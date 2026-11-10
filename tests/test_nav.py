@@ -15,7 +15,7 @@ COORDINATOR_KEYS = {
     "unassigned", "due_soon", "overdue", "open", "resolved_today", "drafts_pending", "cancelled", "shift",
 }
 TECHNICIAN_KEYS = {
-    "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "drafts_pending", "shift", "overdue",
+    "mine_open", "mine_due_soon", "mine_resolved_today", "drafts_pending", "shift", "overdue",
 }
 # El administrador no entra al flujo de tickets: solo contadores de cuentas
 ADMIN_KEYS = {"reports_open", "invitations_pending", "approvals_pending", "active_admins"}
@@ -169,8 +169,6 @@ def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkey
     assert set(counts) == TECHNICIAN_KEYS
     assert counts["mine_open"] == 1
     assert counts["mine_due_soon"] == 1
-    # Sigue un ticket de otro técnico (desde antes): ya no lo ve, así que no cuenta
-    assert counts["following_open"] == 0
     assert counts["mine_resolved_today"] == 1
     assert counts["overdue"] == 0
     assert counts["shift"] == {"start": "08:00", "end": "16:00", "on_shift": True, "load": 2}

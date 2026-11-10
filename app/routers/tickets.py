@@ -16,6 +16,7 @@ from .. import account_reports, alerts, attachments, assignment_notice, audit, a
 AI_ROLES = ("technician", "coordinator")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
 OPERATION_ROLES = ("coordinator",)
+FOLLOW_REQUESTERS_ONLY = "Solo el solicitante da seguimiento a un ticket por correo"
 OVERDUE_LOCKED = "El ticket está vencido: el coordinador decide su estado y su nivel"
 
 
@@ -377,6 +378,9 @@ def get_suggestion(ticket_id: int, db: Session = Depends(get_db), current_user =
 
 @router.post("/tickets/{ticket_id}/follow", status_code=204)
 def follow_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Seguimiento por correo: solo el solicitante (técnicos, coordinadores y administrador, 403)
+    if current_user.role != "requester":
+        raise HTTPException(status_code=403, detail=FOLLOW_REQUESTERS_ONLY)
     get_visible_ticket(db, ticket_id, current_user)
     exists = (
         db.query(models.TicketFollower)
