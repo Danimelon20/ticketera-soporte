@@ -434,6 +434,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "server_account_archived",
     # Administrador creado con app.create_admin y contraseña restablecida con admin_tools reset-password
     "server_admin_created", "server_password_reset",
+    # Departamentos del organigrama (target_label: la ruta; old/new: lo que cambió)
+    "department_created", "department_changed", "departments_imported",
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
@@ -899,3 +901,34 @@ class AutoReportIdOwner(Base):
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     __table_args__ = (UniqueConstraint("report_id", "owner_user_id", name="uq_auto_report_id_owner"),)
+
+
+# ===== Departamentos (organigrama) =====
+
+class Department(Base):
+    """Organigrama con jerarquía padre/hijo. Solo los marcados con handles_tickets reciben tickets, coordinador
+    y técnicos (la casilla no se hereda a los subdepartamentos). Tabla nueva: no altera tablas existentes."""
+    __tablename__ = "departments"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False)
+    parent_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    # "Atiende tickets"
+    handles_tickets = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (UniqueConstraint("parent_id", "name", name="uq_department_parent_name"),)
+
+    aliases = relationship("DepartmentAlias", cascade="all, delete-orphan")
+
+
+class DepartmentAlias(Base):
+    """Nombre alternativo de un departamento (importaciones del organigrama)."""
+    __tablename__ = "department_aliases"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), index=True, nullable=False)
+    # Ruta completa tal como venía (única) y normalizada (sin tildes, minúsculas, abreviaturas) para buscarla
+    alias = Column(String(300), unique=True, nullable=False)
+    normalized = Column(String(300), index=True, nullable=False)

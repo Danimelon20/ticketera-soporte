@@ -5182,7 +5182,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ticket_linked: 'Tickets relacionados',
         ticket_link_undone: 'Relación separada',
         incident_marked: 'Posible incidente',
-        conversation_viewed: 'Ver conversación'
+        conversation_viewed: 'Ver conversación',
+        server_admin_created: 'Administrador creado',
+        server_password_reset: 'Contraseña restablecida desde el servidor',
+        department_created: 'Departamento creado',
+        department_changed: 'Departamento cambiado',
+        departments_imported: 'Organigrama importado'
     };
     const changesList = document.getElementById('changesList');
     const changesEmpty = document.getElementById('changesEmpty');
@@ -6345,6 +6350,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }),
                     navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
                         context: 'Horarios de la semana, vacaciones y ausencias',
+                    }),
+                    navSection('departments', 'Departamentos', 'admin/departamentos', () => showAdminSection('departments'), {
+                        context: 'Organigrama y departamentos que atienden tickets',
                     }),
                     navSection('changes', 'Registro de cambios', 'admin/registro', () => {
                         closePerson();
@@ -9936,7 +9944,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Una sola sección por opción del menú =====
     const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };
-    const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
+    const ADMIN_SECTION_TITLES = {
+        health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
+        departments: 'Departamentos',
+    };
+    // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
+    const ADMIN_SECTION_LOADERS = {};
 
     function showAccountsSection(section) {
         accountsView.querySelectorAll('[data-account-section]').forEach(el => {
@@ -9954,7 +9967,142 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('adminTitle').textContent = ADMIN_SECTION_TITLES[section];
         showView('admin');
         setDocumentTitle(ADMIN_SECTION_TITLES[section]);
+        if (ADMIN_SECTION_LOADERS[section]) ADMIN_SECTION_LOADERS[section]();
     }
+
+    // ----- Administración › Departamentos (organigrama) -----
+    let orgDepartments = [];
+
+    async function loadOrgDepartments() {
+        orgDepartments = await apiFetch('/admin/departments', { silent: true });
+    }
+
+    // Opciones de un select con la ruta completa de cada departamento
+    function departmentOptions(select, { empty = 'Seleccionar', activeOnly = true, servingOnly = false,
+        ids = null, selected = null } = {}) {
+        select.replaceChildren(staffOption('', empty, selected === null));
+        orgDepartments
+            .filter(d => (!activeOnly || d.active_path) && (!servingOnly || (d.handles_tickets && d.active_path))
+                && (!ids || ids.includes(d.id)))
+            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, d.id === selected)));
+    }
+
+    async function showDepartments() {
+        try {
+            await loadOrgDepartments();
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        renderDepartments();
+    }
+    ADMIN_SECTION_LOADERS.departments = showDepartments;
+
+    function renderDepartments() {
+        departmentOptions(document.getElementById('deptCreateParent'), { empty: '(Raíz)' });
+        const list = document.getElementById('deptList');
+        list.replaceChildren();
+        if (!orgDepartments.length) {
+            list.appendChild(emptyState({ title: 'Todavía no hay departamentos', text: 'Agréguelos uno por uno o importe el organigrama.' }));
+            return;
+        }
+        orgDepartments.forEach(d => {
+            const li = makeEl('li', `org-row${d.active_path ? '' : ' is-off'}`);
+            const text = makeEl('div', 'org-row-text');
+            const title = makeEl('span', 'org-row-title', d.path);
+            if (d.handles_tickets) title.appendChild(makeEl('span', 'ui-tag is-info org-serving', 'Atiende tickets'));
+            text.appendChild(title);
+            const sub = [];
+            if (d.handles_tickets) {
+                sub.push(d.coordinator_name ? `Coordinador: ${d.coordinator_name}` : 'Sin coordinador');
+                sub.push(`${d.technicians} técnico(s)`);
+            }
+            if (!d.is_active) sub.push('Desactivado');
+            else if (!d.active_path) sub.push('Desactivado por su departamento padre');
+            if (d.aliases.length) sub.push(`Alias: ${d.aliases.join('; ')}`);
+            if (sub.length) text.appendChild(makeEl('span', 'org-row-sub', sub.join(' · ')));
+            const actions = makeEl('div', 'org-row-actions');
+            [['handles', d.handles_tickets ? 'No atiende tickets' : 'Atiende tickets'],
+                ['rename', 'Renombrar'], ['move', 'Mover'], ['alias', 'Agregar alias'],
+                ['toggle', d.is_active ? 'Desactivar' : 'Activar']].forEach(([action, label]) => {
+                const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', label);
+                button.type = 'button';
+                button.dataset.deptAction = action;
+                button.dataset.deptId = String(d.id);
+                actions.appendChild(button);
+            });
+            li.append(text, actions);
+            list.appendChild(li);
+        });
+    }
+
+    async function patchDepartment(id, body) {
+        try {
+            await apiFetch(`/admin/departments/${id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error del servidor (por ejemplo, que tiene personal)
+        }
+        showDepartments();
+    }
+
+    // Un solo listener para todas las filas
+    document.getElementById('deptList').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-dept-action]');
+        if (!button) return;
+        const dept = orgDepartments.find(d => d.id === Number(button.dataset.deptId));
+        if (!dept) return;
+        const action = button.dataset.deptAction;
+        if (action === 'rename') {
+            const name = window.prompt('Nombre nuevo del departamento', dept.name);
+            if (name && name.trim()) patchDepartment(dept.id, { name: name.trim() });
+        } else if (action === 'alias') {
+            const alias = window.prompt('Nombre alternativo (ruta completa, por ejemplo «Gerencias / Soporte Nivel 2»)');
+            if (alias && alias.trim()) patchDepartment(dept.id, { add_alias: alias.trim() });
+        } else if (action === 'toggle') {
+            patchDepartment(dept.id, { is_active: !dept.is_active });
+        } else if (action === 'handles') {
+            patchDepartment(dept.id, { handles_tickets: !dept.handles_tickets });
+        } else if (action === 'move') {
+            movingDepartment = dept;
+            document.getElementById('deptMoveTarget').textContent = dept.path;
+            const select = document.getElementById('deptMoveParent');
+            // Ni él mismo ni lo que cuelga de él (el servidor también lo revisa)
+            const inside = orgDepartments.filter(d => d.path === dept.path || d.path.startsWith(`${dept.path} / `)).map(d => d.id);
+            departmentOptions(select, { empty: '(Raíz)', activeOnly: false, selected: dept.parent_id,
+                ids: orgDepartments.filter(d => !inside.includes(d.id)).map(d => d.id) });
+            document.getElementById('deptMoveDialog').showModal();
+        }
+    });
+
+    let movingDepartment = null;
+    document.getElementById('deptMoveCancel').addEventListener('click', () => document.getElementById('deptMoveDialog').close());
+    document.getElementById('deptMoveForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('deptMoveDialog').close();
+        if (!movingDepartment) return;
+        patchDepartment(movingDepartment.id, { parent_id: Number(document.getElementById('deptMoveParent').value) || 0 });
+    });
+
+    document.getElementById('deptCreateForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('deptCreateName');
+        const parent = document.getElementById('deptCreateParent');
+        const handles = document.getElementById('deptCreateHandles');
+        try {
+            await apiFetch('/admin/departments', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.value.trim(), parent_id: Number(parent.value) || null,
+                    handles_tickets: handles.checked }),
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        name.value = '';
+        handles.checked = false;
+        showDepartments();
+    });
 
     // Verificación en el navegador: después de elegir una opción del menú debe verse una sola vista
     // y, dentro de Cuentas o Administración, una sola sección. Si no, queda el error en la consola.

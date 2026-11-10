@@ -1101,6 +1101,23 @@
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="departments">
+                    <div class="admin-card-head"><h2>Departamentos</h2></div>
+                    <p class="admin-text">El organigrama de la empresa. Marque «Atiende tickets» solo en los departamentos que reciben tickets: cada uno tiene un coordinador y sus técnicos. La casilla no se hereda a los subdepartamentos.</p>
+                    <form id="deptCreateForm" class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="deptCreateName">Nombre</label>
+                            <input type="text" id="deptCreateName" class="ui-input" maxlength="120" required>
+                        </div>
+                        <div class="ui-field">
+                            <label for="deptCreateParent">Dentro de</label>
+                            <select id="deptCreateParent" class="ui-input"></select>
+                        </div>
+                        <label class="org-check"><input type="checkbox" id="deptCreateHandles"> Atiende tickets</label>
+                        <button type="submit" class="ui-btn ui-btn-primary">Agregar</button>
+                    </form>
+                    <ul id="deptList" class="org-list"></ul>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="approvals">
                     <div class="admin-card-head">
                         <h2>Solicitudes pendientes</h2>
@@ -1259,6 +1276,21 @@
     </dialog>
 
     <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <dialog id="deptMoveDialog" class="app-dialog" aria-labelledby="deptMoveDialogTitle">
+        <form id="deptMoveForm" class="profile-form">
+            <h2 id="deptMoveDialogTitle" class="modal-title">Mover departamento</h2>
+            <p id="deptMoveTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptMoveParent">Nuevo departamento padre</label>
+                <select id="deptMoveParent"></select>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" id="deptMoveCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Mover</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog id="conversationDialog" class="app-dialog" aria-labelledby="conversationDialogTitle">
         <form id="conversationForm" class="profile-form">
             <h2 id="conversationDialogTitle" class="modal-title">Ver conversación</h2>

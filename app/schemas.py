@@ -1006,3 +1006,36 @@ class OverdueReport(BaseModel):
     timeline: list[OverdueTimelineEvent]
     cause: Optional[OverdueCauseRead] = None
     can_record_cause: bool = False
+
+
+# ===== Departamentos (organigrama) =====
+
+class DepartmentRead(BaseModel):
+    id: int
+    name: str
+    parent_id: Optional[int] = None
+    path: str
+    is_active: bool
+    # Activo él y todos sus padres
+    active_path: bool = True
+    handles_tickets: bool = False
+    aliases: list[str] = []
+    technicians: int = 0
+    coordinator_id: Optional[int] = None
+    coordinator_name: Optional[str] = None
+
+
+class DepartmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: Optional[int] = None
+    handles_tickets: bool = False
+
+
+class DepartmentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    # 0: sin padre (raíz)
+    parent_id: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
+    handles_tickets: Optional[bool] = None
+    add_alias: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    remove_alias: Optional[str] = Field(default=None, max_length=300)
