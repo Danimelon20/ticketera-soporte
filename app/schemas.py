@@ -508,6 +508,8 @@ class TicketDetail(TicketRead):
     solution: Optional[TicketSolutionRead] = None
     # Interruptor de tickets por departamento encendido (la pantalla pide la solución al resolver)
     routing_enforced: bool = False
+    # Con el interruptor y departamento: técnicos activos del departamento (los únicos para reasignar)
+    assignable_ids: Optional[list[int]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

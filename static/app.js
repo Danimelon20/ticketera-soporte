@@ -8536,7 +8536,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffAssigneeControl(ticket) {
         const name = ticket.assigned_to !== null ? (userMap[ticket.assigned_to] || 'Sin nombre') : null;
-        const canAssign = OPERATION_ROLES.includes(currentUser.role) && ticket.status !== 'closed';
+        const canAssign = canOperateTickets() && ticket.status !== 'closed';
         if (!canAssign) {
             // El técnico ve "Usted" en sus tickets
             const own = currentUser.role === 'technician' && ticket.assigned_to === currentUser.id;
@@ -8551,9 +8551,22 @@ document.addEventListener('DOMContentLoaded', () => {
             empty.disabled = true;
             select.appendChild(empty);
         }
+        // Tickets por departamento: solo los técnicos activos del departamento del ticket
+        const allowed = Array.isArray(ticket.assignable_ids) ? ticket.assignable_ids.map(String) : null;
+        if (allowed && ticket.assigned_to !== null && !allowed.includes(String(ticket.assigned_to))) {
+            // El responsable actual ya no es del departamento: se muestra, pero no se puede volver a elegir
+            const current = staffOption(String(ticket.assigned_to), `${name} (otro departamento)`, true);
+            current.disabled = true;
+            select.appendChild(current);
+        }
+        if (allowed && !allowed.length) {
+            const none = staffOption('', 'Sin técnicos activos en el departamento', false);
+            none.disabled = true;
+            select.appendChild(none);
+        }
         Object.keys(userMap).forEach(userId => {
             const role = userRoleMap[userId];
-            if (role !== 'technician' && role !== 'coordinator') return;
+            if (allowed ? !allowed.includes(userId) : (role !== 'technician' && role !== 'coordinator')) return;
             const availability = userAvailabilityMap[userId];
             // Se puede asignar a alguien no disponible, con confirmación del servidor
             const text = availability && availability !== 'available'

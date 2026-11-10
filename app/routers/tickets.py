@@ -34,6 +34,9 @@ def department_fields(db: Session, ticket: models.Ticket) -> dict:
     dept = routing.ticket_department(db, ticket.id)
     fields = {"department_id": dept.id if dept else None, "department_name": routing.path_label(dept, by_id),
               "routing_enforced": routing.enforced(db)}
+    if fields["routing_enforced"] and dept is not None:
+        # Reasignar: solo los técnicos activos del departamento (el servidor también rechaza a los de afuera)
+        fields["assignable_ids"] = [u.id for u in routing.department_technicians(db, dept.id)]
     reporter = db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == ticket.id).first()
     if reporter is not None:
         fields["reporter"] = {
