@@ -55,12 +55,13 @@ def test_load_creates_the_scenarios(client, sent):
         ).all()
         assert len(links) == 2
         # Incidente separado: el relacionado sigue con el técnico que recibió por el incidente
-        [separated] = db.query(models.TicketLink).filter(
-            models.TicketLink.principal_ticket_id.in_(ticket_ids), models.TicketLink.undone_at.isnot(None)
-        ).all()
-        related = db.get(models.Ticket, separated.related_ticket_id)
-        assert related.assigned_to == db.get(models.Ticket, separated.principal_ticket_id).assigned_to
-        assert related.assigned_to is not None
+        related = next(t for t in tickets if t.title.endswith(demo_data.SEPARATED[1]))
+        principal = next(t for t in tickets if t.title.endswith(demo_data.SEPARATED[0]))
+        separated = db.query(models.TicketLink).filter(
+            models.TicketLink.principal_ticket_id == principal.id, models.TicketLink.related_ticket_id == related.id,
+        ).one()
+        assert separated.undone_at is not None
+        assert related.assigned_to == principal.assigned_to and related.assigned_to is not None
         owners = {db.get(models.Ticket, link.related_ticket_id).created_by for link in links}
         owners.add(db.get(models.Ticket, links[0].principal_ticket_id).created_by)
         assert len(owners) == 3

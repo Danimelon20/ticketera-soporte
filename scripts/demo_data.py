@@ -339,8 +339,11 @@ def load(db) -> list[dict]:
     grouping.link_ticket(db, finger_related, grouping.Match(
         "link", finger.id, 0.86, f"{DEMO_TAG} Misma falla del lector de huellas"), b.agent.id)
     db.flush()
-    grouping.undo_link(db, db.query(models.TicketLink).filter(
-        models.TicketLink.related_ticket_id == finger_related.id).one(), coordinator)
+    finger_link = db.query(models.TicketLink).filter(
+        models.TicketLink.principal_ticket_id == finger.id, models.TicketLink.related_ticket_id == finger_related.id,
+        models.TicketLink.undone_at.is_(None),
+    ).order_by(models.TicketLink.id.desc()).first()
+    grouping.undo_link(db, finger_link, coordinator)
 
     # Vencimientos: por vencer (más del 80 % de las horas hábiles), vencido sin causa y vencido con causa
     start = now - timedelta(days=10)
@@ -415,8 +418,9 @@ class DemoApi:
         self.tokens: dict[str, str] = {}
         self.login_errors: dict[str, str] = {}
 
-    def login(self, local: str, portal: str) -> None:
-        response = self.http.post("/api/auth/login", json={"email": _email(local), "password": PASSWORD, "portal": portal})
+    def login(self, local: str) -> None:
+        # Un solo formulario: el rol sale de la cuenta
+        response = self.http.post("/api/auth/login", json={"email": _email(local), "password": PASSWORD})
         token = response.json().get("token") if response.status_code == 200 else None
         if token:
             self.tokens[local] = token
@@ -664,9 +668,8 @@ def verify(db, http) -> int:
     before = _fingerprint(db)
     api = DemoApi(http)
     try:
-        for local in (MORNING, EVENING, COORDINATOR):
-            api.login(local, "staff")
-        api.login(ANA, "requester")
+        for local in (MORNING, EVENING, COORDINATOR, ANA):
+            api.login(local)
         checks = _checks(api, ids)
     finally:
         api.logout_all()

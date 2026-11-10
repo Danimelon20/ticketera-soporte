@@ -819,7 +819,7 @@ class TicketLink(Base):
     similarity = Column(Float, nullable=True)
     ai_reason = Column(String(300), nullable=True)
     automatic = Column(Boolean, nullable=False, default=True)
-    # El responsable se le puso por el principal: al separar vuelve a la cola sin responsable
+    # El responsable se le puso por el principal (al separar lo conserva: sigue en la bandeja del técnico)
     assigned_by_link = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False)
     undone_by = Column(Integer, ForeignKey("users.id"), nullable=True)

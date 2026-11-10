@@ -127,7 +127,7 @@ servidor con `scripts.admin_tools` (ver el README).
 - Si escribió dos veces por el mismo problema, el aviso de que su mensaje se agregó a la solicitud que ya tenía.
 
 **Qué puede hacer**
-- Crear su cuenta en la pestaña **Cliente** (correo, contraseña y un código que llega al correo).
+- Crear su cuenta con **Crear una cuenta**, debajo del formulario de inicio (correo, contraseña y un código que llega al correo).
 - Completar su perfil: nombre, cédula y teléfono. Desde su primer ticket, el nombre y la cédula quedan fijos.
 - **Nueva solicitud** desde la página, o escribir al correo de soporte (con la plantilla o con sus palabras).
 - Comentar y adjuntar archivos en sus solicitudes.

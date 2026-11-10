@@ -79,17 +79,11 @@
                 <div id="loginPanel" class="auth-form-panel">
                     <div class="auth-head">
                         <h1 id="loginTitle" class="auth-title">Iniciar sesión</h1>
-                        <p class="auth-subtitle">Elija cómo entra al sistema.</p>
+                        <p class="auth-subtitle">Entre con su cuenta: el sistema lo lleva a la pantalla de su rol.</p>
                     </div>
-                    <!-- Cada opción solo deja entrar a sus roles (lo verifica el servidor) -->
-                    <div id="loginTabs" class="login-tabs" role="tablist" aria-label="Tipo de acceso">
-                        <button type="button" class="login-tab" role="tab" id="loginTabRequester" data-portal="requester" aria-controls="loginForm" aria-selected="false" tabindex="-1">Cliente</button>
-                        <button type="button" class="login-tab" role="tab" id="loginTabStaff" data-portal="staff" aria-controls="loginForm" aria-selected="true">Personal</button>
-                        <button type="button" class="login-tab" role="tab" id="loginTabAdmin" data-portal="admin" aria-controls="loginForm" aria-selected="false" tabindex="-1">Administración</button>
-                    </div>
-                    <!-- Personal y Administración con MS_LOGIN_ENABLED: cuenta Microsoft (botón con la marca oficial) -->
+                    <!-- Con MS_LOGIN_ENABLED: cuenta Microsoft (botón con la marca oficial). Debajo, correo y contraseña -->
                     <div id="microsoftLogin" class="ms-login" hidden>
-                        <a id="microsoftLoginBtn" class="ms-signin" href="/auth/microsoft/login?portal=staff">
+                        <a id="microsoftLoginBtn" class="ms-signin" href="/auth/microsoft/login">
                             <svg class="ms-signin-logo" xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 21 21" aria-hidden="true" focusable="false">
                                 <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
                                 <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
@@ -98,9 +92,9 @@
                             </svg>
                             <span>Entrar con Microsoft</span>
                         </a>
-                        <button type="button" id="emergencyAccessLink" class="auth-link auth-link-btn auth-link-small ms-emergency" hidden>Acceso de emergencia</button>
+                        <p class="ms-login-or" aria-hidden="true">o con correo y contraseña</p>
                     </div>
-                    <form id="loginForm" class="auth-form" role="tabpanel" aria-labelledby="loginTabStaff">
+                    <form id="loginForm" class="auth-form" aria-labelledby="loginTitle">
                         <div class="form-group">
                             <label for="loginEmail">Correo</label>
                             <input type="email" id="loginEmail" name="email" autocomplete="username" placeholder="usted@correo.com" required>
@@ -112,16 +106,19 @@
                             </div>
                             <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
                         </div>
-                        <p id="loginAdminNotice" class="auth-notice auth-info" hidden>Por seguridad, le enviaremos un código a su correo después de la contraseña.</p>
                         <button type="submit" class="btn-submit">Entrar</button>
                     </form>
                     <div id="confirmEmailNotice" class="auth-notice" hidden>
                         <p>Su cuenta todavía no está confirmada.</p>
                         <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
                     </div>
-                    <p id="loginExtra" class="login-extra" hidden>
-                        <span id="loginExtraText"></span>
-                        <a id="loginExtraLink" href="#crear-cuenta" class="auth-link auth-link-inline"></a>
+                    <p class="login-extra">
+                        <span>¿Recibió una invitación?</span>
+                        <a href="#activar-cuenta" class="auth-link auth-link-inline">Activar mi cuenta</a>
+                    </p>
+                    <p class="login-extra">
+                        <span>¿Es cliente y no tiene cuenta?</span>
+                        <a href="#crear-cuenta" class="auth-link auth-link-inline">Crear una cuenta</a>
                     </p>
                 </div>
                 <div id="signupPanel" class="auth-form-panel" hidden>
@@ -166,9 +163,9 @@
                         </div>
                         <div id="forgotPasswordFields">
                             <div class="form-group" style="margin-bottom: 16px;">
-                                <label for="forgotNewPassword">Contraseña nueva</label>
+                                <label for="forgotNewPassword">Contraseña nueva (cuentas de cliente)</label>
                                 <input type="password" id="forgotNewPassword" minlength="8" autocomplete="new-password">
-                                <small class="help-text">Mínimo 8 caracteres</small>
+                                <small class="help-text">Mínimo 8 caracteres. Si es del personal, déjela en blanco: se le genera una.</small>
                             </div>
                             <div class="form-group" style="margin-bottom: 24px;">
                                 <label for="forgotConfirmPassword">Confirmar contraseña nueva</label>

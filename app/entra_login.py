@@ -35,7 +35,6 @@ REJECT_REASONS = {
     "not_staff": "Correo que no es del personal",
     "requester": "Cuenta de cliente",
     "inactive": "Cuenta desactivada",
-    "wrong_portal": "Opción de inicio equivocada",
     "already_linked": "Ya enlazada a otra cuenta Microsoft",
     "invitation": "Invitación no válida",
     "invitation_email": "Correo distinto al de la invitación",
@@ -155,7 +154,11 @@ def _link(db: Session, user: models.User, oid: str) -> None:
     audit.record(db, user.id, "microsoft_linked", target=user)
 
 
-def resolve_user(db: Session, identity: Identity, allowed_roles: tuple) -> models.User:
+# Quién entra con Microsoft (un solo botón): el personal y el administrador; nunca solicitantes ni el Agente
+MICROSOFT_ROLES = ("technician", "coordinator", "admin")
+
+
+def resolve_user(db: Session, identity: Identity) -> models.User:
     """Cuenta del personal que ya existe y está activa. Primer ingreso: se enlaza por correo. No hace commit."""
     portal, email = identity.portal, identity.email
     link = db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.oid == identity.oid).first()
@@ -166,8 +169,9 @@ def resolve_user(db: Session, identity: Identity, allowed_roles: tuple) -> model
         raise LoginRejected("requester", portal=portal, user=user)
     if not user.is_active:
         raise LoginRejected("inactive", portal=portal, user=user)
-    if user.role not in allowed_roles:
-        raise LoginRejected("wrong_portal", portal=portal, user=user)
+    # Un solo botón: técnicos, coordinadores y el administrador (solicitantes y el Agente ya se rechazaron)
+    if user.role not in MICROSOFT_ROLES:
+        raise LoginRejected("not_staff", portal=portal, email=email)
     if link is None:
         if db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.user_id == user.id).first():
             raise LoginRejected("already_linked", portal=portal, user=user)

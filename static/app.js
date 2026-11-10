@@ -259,7 +259,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.remove('profile-required');
         sessionNotice.hidden = true;
         resetEmailChange();
-        loginPortal = null;
         forgotMode = false;
         stopDraftsPolling();
         teardownStaffShell();
@@ -279,47 +278,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Pantallas de inicio: iniciar sesión, crear cuenta de cliente, activar cuenta de personal =====
     const AUTH_ROUTES = { '#crear-cuenta': 'signup', '#activar-cuenta': 'activate' };
-    // Enlace del correo de restablecimiento: #restablecer?portal=staff&correo=...
+    // Enlace del correo de restablecimiento: #restablecer?correo=...
     const RESET_ROUTE = '#restablecer';
 
-    // Cada opción de inicio de sesión solo deja entrar a sus roles (lo verifica el servidor).
-    // Son las pestañas Cliente / Personal / Administración de la tarjeta.
-    const PORTALS = {
-        admin: { title: 'Administración', link: null },
-        staff: { title: 'Personal', link: { href: '#activar-cuenta', question: '¿Recibió una invitación?', text: 'Activar mi cuenta' } },
-        requester: { title: 'Cliente', link: { href: '#crear-cuenta', question: '¿No tiene cuenta?', text: 'Crear una cuenta' } }
-    };
-    const LOGIN_PORTAL_KEY = 'ticketeraLoginPortal';
+    // Un solo formulario: el rol sale de la cuenta y, al entrar, cada uno llega a la pantalla de su rol.
+    // Antes había pestañas (Cliente / Personal / Administración) y el navegador recordaba la última;
+    // ese valor viejo se borra una vez.
+    try {
+        localStorage.removeItem('ticketeraLoginPortal');
+    } catch (err) {
+        // Sin almacenamiento: no hay nada que borrar
+    }
 
-    // Personal y administración entran con Microsoft cuando el servidor lo tiene encendido (MS_LOGIN_ENABLED).
+    // Con MS_LOGIN_ENABLED el botón de Microsoft va arriba (técnicos, coordinadores y el administrador).
     // Vuelta de Microsoft: #microsoft?code=... (código de un solo uso) o #microsoft?error=clave
     const MICROSOFT_ROUTE = '#microsoft';
-    const MICROSOFT_PORTALS = ['staff', 'admin'];
     const MICROSOFT_ERRORS = {
         state: 'El inicio de sesión con Microsoft venció o no es válido. Intente de nuevo.',
         failed: 'Microsoft no confirmó su identidad. Intente de nuevo.',
         unavailable: 'No se pudo conectar con Microsoft. Intente más tarde.',
         tenant: 'Esa cuenta Microsoft no pertenece a la organización.',
         not_staff: 'Esa cuenta Microsoft no corresponde a nadie del personal. Si es nuevo, active su invitación.',
-        requester: 'Esa es una cuenta de cliente: entre por la pestaña Cliente.',
+        requester: 'Esa es una cuenta de cliente: entre con su correo y contraseña.',
         inactive: 'Su cuenta está desactivada. Comuníquese con el administrador.',
-        wrong_portal: 'Esta cuenta no entra por esta opción. Pruebe con la otra pestaña.',
         already_linked: 'Su cuenta ya está enlazada a otra cuenta Microsoft. Comuníquese con el administrador.',
         invitation: 'La invitación no es válida o venció. Pida una nueva al administrador.',
         invitation_email: 'Entre con la cuenta Microsoft del correo al que llegó la invitación.'
     };
     const MICROSOFT_AUTH_HOST = 'https://login.microsoftonline.com/';
     const microsoftLoginBox = document.getElementById('microsoftLogin');
-    const microsoftLoginBtn = document.getElementById('microsoftLoginBtn');
-    const emergencyAccessLink = document.getElementById('emergencyAccessLink');
     let microsoftLogin = false;
-    // Administración: el formulario de contraseña y código solo después de "Acceso de emergencia"
-    let emergencyAccess = false;
-    const loginTabs = document.getElementById('loginTabs');
-    const loginExtra = document.getElementById('loginExtra');
-    const loginExtraLink = document.getElementById('loginExtraLink');
-    let loginPortal = null;
-    // "Olvidé mi contraseña" de la opción elegida (loginPortal)
+    // "Olvidé mi contraseña" abierto
     let forgotMode = false;
 
     function showAuthPanel() {
@@ -332,9 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const route = AUTH_ROUTES[window.location.hash];
-        const panel = route || (forgotMode && loginPortal ? 'forgot' : 'login');
-        // Sin opción elegida: la última usada en este navegador, o Personal
-        if (panel === 'login' && !loginPortal) applyPortal(savedLoginPortal());
+        const panel = route || (forgotMode ? 'forgot' : 'login');
         loginPanel.hidden = panel !== 'login';
         signupPanel.hidden = panel !== 'signup';
         activatePanel.hidden = panel !== 'activate';
@@ -349,59 +336,18 @@ document.addEventListener('DOMContentLoaded', () => {
         history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
-    function savedLoginPortal() {
-        try {
-            const saved = localStorage.getItem(LOGIN_PORTAL_KEY);
-            return PORTALS[saved] ? saved : 'staff';
-        } catch (err) {
-            return 'staff';
-        }
-    }
-
-    // Marca la pestaña elegida y ajusta los textos de la tarjeta
-    function applyPortal(portal) {
-        const info = PORTALS[portal];
-        if (!info) return;
-        loginPortal = portal;
-        loginTabs.querySelectorAll('[data-portal]').forEach(tab => {
-            const selected = tab.dataset.portal === portal;
-            tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-            tab.tabIndex = selected ? 0 : -1;
-            if (selected) loginForm.setAttribute('aria-labelledby', tab.id);
-        });
-        document.getElementById('loginAdminNotice').hidden = portal !== 'admin';
-        applyMicrosoftLogin();
-        loginExtra.hidden = !info.link;
-        if (info.link) {
-            document.getElementById('loginExtraText').textContent = info.link.question;
-            loginExtraLink.href = info.link.href;
-            loginExtraLink.textContent = info.link.text;
-        }
-        try {
-            localStorage.setItem(LOGIN_PORTAL_KEY, portal);
-        } catch (err) {
-            // Sin almacenamiento: la próxima vez vuelve a Personal
-        }
-    }
-
-    function openPortal(portal, focusEmail = true) {
-        if (!PORTALS[portal]) return;
-        emergencyAccess = false;
-        applyPortal(portal);
-        // El correo escrito se conserva al cambiar de pestaña; la contraseña no
+    // Vuelve al formulario de inicio (el correo escrito se conserva; la contraseña no)
+    function openLogin(focusEmail = true) {
+        forgotMode = false;
         document.getElementById('loginPassword').value = '';
         clearHash();
         showAuthPanel();
         if (focusEmail) document.getElementById('loginEmail').focus();
     }
 
-    // Muestra el botón de Microsoft o el formulario según la pestaña elegida
+    // Botón de Microsoft arriba del formulario, solo si el servidor lo tiene encendido
     function applyMicrosoftLogin() {
-        const useMicrosoft = microsoftLogin && MICROSOFT_PORTALS.includes(loginPortal);
-        microsoftLoginBox.hidden = !useMicrosoft;
-        if (useMicrosoft) microsoftLoginBtn.href = `/auth/microsoft/login?portal=${loginPortal}`;
-        emergencyAccessLink.hidden = !(useMicrosoft && loginPortal === 'admin' && !emergencyAccess);
-        loginForm.hidden = useMicrosoft && !(loginPortal === 'admin' && emergencyAccess);
+        microsoftLoginBox.hidden = !microsoftLogin;
         document.getElementById('activateSubmit').textContent = microsoftLogin ? 'Activar con Microsoft' : 'Activar cuenta';
     }
 
@@ -416,18 +362,10 @@ document.addEventListener('DOMContentLoaded', () => {
         applyMicrosoftLogin();
     }
 
-    emergencyAccessLink.addEventListener('click', () => {
-        emergencyAccess = true;
-        applyMicrosoftLogin();
-        document.getElementById('loginEmail').focus();
-    });
-
     // Vuelta de Microsoft: se quita el código de la barra de direcciones antes de canjearlo
     function finishMicrosoftLogin() {
         const params = new URLSearchParams(window.location.hash.slice(MICROSOFT_ROUTE.length).replace(/^\?/, ''));
         clearHash();
-        const portal = params.get('portal');
-        if (PORTALS[portal]) applyPortal(portal);
         showAuthPanel();
         const code = params.get('code');
         if (code) exchangeMicrosoftCode(code);
@@ -449,31 +387,9 @@ document.addEventListener('DOMContentLoaded', () => {
         completeLogin(result.data);
     }
 
-    loginTabs.addEventListener('click', (e) => {
-        const tab = e.target.closest('[data-portal]');
-        if (tab) openPortal(tab.dataset.portal, false);
-    });
-
-    // Flechas izquierda/derecha, Inicio y Fin entre las pestañas
-    loginTabs.addEventListener('keydown', (e) => {
-        const tabs = [...loginTabs.querySelectorAll('[data-portal]')];
-        const index = tabs.indexOf(document.activeElement);
-        if (index === -1) return;
-        let next = null;
-        if (e.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
-        if (e.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
-        if (e.key === 'Home') next = tabs[0];
-        if (e.key === 'End') next = tabs[tabs.length - 1];
-        if (!next) return;
-        e.preventDefault();
-        openPortal(next.dataset.portal, false);
-        next.focus();
-    });
-
     window.addEventListener('hashchange', () => {
         if (currentUser) return;
-        // Desde registro o activación, "Volver al inicio de sesión" lleva a las opciones
-        loginPortal = null;
+        // Desde registro o activación, "Volver al inicio de sesión" lleva al formulario
         forgotMode = false;
         showAuthPanel();
     });
@@ -490,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await apiFetch('/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password, portal: loginPortal })
+                    body: JSON.stringify({ email, password })
                 });
                 loginForm.reset();
                 if (data.requires_code) {
@@ -621,7 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('activateToLogin').addEventListener('click', () => {
         clearActivationResult();
-        openPortal('staff');
+        openLogin();
     });
 
     activateResendBtn.addEventListener('click', async () => {
@@ -700,19 +616,14 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotResendBtn.textContent = 'Reenviar código';
     }
 
-    function forgotIsRequester() {
-        return loginPortal === 'requester';
-    }
-
     function openForgot() {
-        if (!PORTALS[loginPortal]) return;
         forgotMode = true;
         clearForgot();
-        forgotTitle.textContent = `Olvidé mi contraseña — ${PORTALS[loginPortal].title}`;
-        // El solicitante elige su contraseña; al personal se le genera una
-        forgotPasswordFields.hidden = !forgotIsRequester();
-        forgotNewPassword.required = forgotIsRequester();
-        forgotConfirmPassword.required = forgotIsRequester();
+        forgotTitle.textContent = 'Olvidé mi contraseña';
+        // El cliente elige su contraseña; al personal se le genera una (los campos son opcionales)
+        forgotPasswordFields.hidden = false;
+        forgotNewPassword.required = false;
+        forgotConfirmPassword.required = false;
         clearHash();
         showAuthPanel();
         forgotEmailInput.focus();
@@ -731,23 +642,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.hash.slice(RESET_ROUTE.length).replace(/^\?/, ''));
         // El correo no se queda en la barra de direcciones
         clearHash();
-        const portal = params.get('portal');
-        if (!PORTALS[portal]) {
-            loginPortal = null;
-            forgotMode = false;
-            showAuthPanel();
-            return;
-        }
-        loginPortal = portal;
         openForgot();
         showForgotCodeStep(params.get('correo') || '');
     }
 
     function backFromForgot() {
-        const portal = loginPortal;
-        forgotMode = false;
         clearForgot();
-        openPortal(portal);
+        openLogin();
     }
 
     function startForgotResendCountdown() {
@@ -782,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = forgotEmailInput.value.trim();
         let result;
         try {
-            result = await postAuth('/auth/password-reset', { email, portal: loginPortal });
+            result = await postAuth('/auth/password-reset', { email });
         } catch (err) {
             showError('No se pudo conectar con el servidor');
             return;
@@ -812,8 +713,9 @@ document.addEventListener('DOMContentLoaded', () => {
             showError('Escriba los 6 dígitos del código');
             return;
         }
-        const body = { email: forgotEmail, portal: loginPortal, code };
-        if (forgotIsRequester()) {
+        const body = { email: forgotEmail, code };
+        // Solo si escribió una contraseña nueva (cuentas de cliente); el servidor la exige al cliente
+        if (forgotNewPassword.value || forgotConfirmPassword.value) {
             if (forgotNewPassword.value.length < 8) {
                 showError('La contraseña debe tener al menos 8 caracteres');
                 return;
@@ -835,7 +737,8 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(getErrorMessage(result.data));
             return;
         }
-        if (forgotIsRequester()) {
+        // Cliente: eligió la suya. Personal: el servidor genera una y la muestra una sola vez
+        if (!result.data.password) {
             backFromForgot();
             showSuccess('Contraseña restablecida. Inicie sesión con la nueva.');
             return;
@@ -858,7 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotResendBtn.disabled = true;
         let result;
         try {
-            result = await postAuth('/auth/password-reset/resend', { email: forgotEmail, portal: loginPortal });
+            result = await postAuth('/auth/password-reset/resend', { email: forgotEmail });
         } catch (err) {
             forgotResendBtn.disabled = false;
             showError('No se pudo conectar con el servidor');
@@ -1204,7 +1107,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     signupHaveAccountBtn.addEventListener('click', () => {
         backToLogin();
-        openPortal('requester');
+        openLogin();
     });
 
     // ===== Asistente =====

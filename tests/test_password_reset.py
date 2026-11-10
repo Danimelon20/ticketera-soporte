@@ -214,9 +214,9 @@ def test_forgot_email_links_to_code_step(client, make_user, sent, role, portal):
     _request(client, user["email"], portal)
     links = _reset_links(sent, user["email"])
     assert len(links) == 1
-    # El enlace abre el paso del código con la opción de inicio y el correo ya puestos
+    # El enlace abre el paso del código con el correo ya puesto (sin pestaña: un solo formulario)
     params = parse_qs(links[0].split("#restablecer?", 1)[1])
-    assert params == {"portal": [portal], "correo": [user["email"]]}
+    assert params == {"correo": [user["email"]]}
 
 
 def test_forced_reset_email_links_to_code_step(client, make_user, sent):
@@ -225,7 +225,7 @@ def test_forced_reset_email_links_to_code_step(client, make_user, sent):
     client.post(f"/api/accounts/{technician['id']}/reset-access", headers=coordinator["headers"])
     links = _reset_links(sent, technician["email"])
     assert len(links) == 1
-    assert parse_qs(links[0].split("#restablecer?", 1)[1]) == {"portal": ["staff"], "correo": [technician["email"]]}
+    assert parse_qs(links[0].split("#restablecer?", 1)[1]) == {"correo": [technician["email"]]}
 
 
 def test_having_a_code_sends_no_new_email(client, make_user, sent):

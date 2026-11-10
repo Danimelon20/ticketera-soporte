@@ -92,12 +92,11 @@ def test_lock_message_is_the_same_whether_account_exists_or_not(client, make_use
     assert _login(client, user["email"], "requester").json() == _login(client, missing, "requester").json()
 
 
-def test_wrong_option_counts_as_failure(client, make_user):
+def test_old_tab_value_is_not_a_failure(client, make_user):
+    """Un solo formulario: la pestaña que mande una página vieja se ignora y no suma fallos."""
     user = make_user("technician")
-    for _ in range(4):
-        assert _login(client, user["email"], "requester").status_code == 401
-    assert _login(client, user["email"], "admin").status_code == 429
-    assert _login(client, user["email"], "staff").status_code == 429
+    for portal in ("requester", "admin", "staff", "requester", "admin", "staff"):
+        assert _login(client, user["email"], portal).status_code == 200
 
 
 def test_successful_login_resets_counter(client, make_user):

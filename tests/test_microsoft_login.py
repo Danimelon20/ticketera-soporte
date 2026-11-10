@@ -66,8 +66,10 @@ def _fragment(response):
     return {k: v[0] for k, v in parse_qs(location.split("?", 1)[1]).items()}
 
 
-def _go_to_microsoft(client, portal="staff"):
-    response = client.get("/auth/microsoft/login", params={"portal": portal}, follow_redirects=False)
+def _go_to_microsoft(client, portal=None):
+    # Un solo botón: un "portal" de una página vieja se ignora
+    params = {"portal": portal} if portal else None
+    response = client.get("/auth/microsoft/login", params=params, follow_redirects=False)
     assert response.status_code == 302, response.text
     return parse_qs(urlsplit(response.headers["location"]).query)["state"][0]
 
@@ -79,7 +81,7 @@ def _callback(client, state):
     return _fragment(response)
 
 
-def _microsoft_login(client, portal="staff"):
+def _microsoft_login(client, portal=None):
     return _callback(client, _go_to_microsoft(client, portal))
 
 
@@ -147,8 +149,9 @@ def test_first_login_links_by_email_then_by_oid(client, make_user, ms):
     assert response.json()["user"]["id"] == user["id"]
 
 
-@pytest.mark.parametrize("role,portal", [("coordinator", "staff"), ("admin", "admin")])
-def test_coordinator_and_admin_enter_with_microsoft(client, make_user, ms, role, portal):
+@pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
+@pytest.mark.parametrize("portal", [None, "staff", "admin"])
+def test_staff_and_admin_enter_with_the_same_button(client, make_user, ms, role, portal):
     user = make_user(role)
     ms.claims = _claims(user["email"])
     response = _exchange(client, _microsoft_login(client, portal)["code"])
@@ -227,10 +230,10 @@ def test_deactivated_account_is_rejected(client, make_user, ms):
     _assert_rejected(_microsoft_login(client), "inactive")
 
 
-def test_staff_portal_does_not_let_admin_in(client, make_user, ms):
-    user = make_user("admin")
+def test_requester_cannot_enter_with_microsoft(client, make_user, ms):
+    user = make_user("requester")
     ms.claims = _claims(user["email"])
-    _assert_rejected(_microsoft_login(client, "staff"), "wrong_portal")
+    _assert_rejected(_microsoft_login(client), "requester")
 
 
 def test_account_linked_to_another_oid_is_rejected(client, make_user, ms):
@@ -345,20 +348,19 @@ def test_callback_query_is_not_in_access_log():
 @pytest.mark.parametrize("role", ["technician", "coordinator"])
 def test_staff_password_login_is_blocked(client, make_user, ms, role):
     user = make_user(role)
-    response = client.post("/api/auth/login", json={"email": user["email"], "password": PASSWORD, "portal": "staff"})
+    response = client.post("/api/auth/login", json={"email": user["email"], "password": PASSWORD})
     assert response.status_code == 403
     assert response.json()["detail"] == STAFF_USE_MICROSOFT
 
 
 def test_staff_password_reset_is_blocked(client, make_user, ms, sent):
+    """Sin pestañas el servidor decide por el rol: responde 202 como a cualquiera y no envía código."""
     user = make_user("technician")
     for path in ("/api/auth/password-reset", "/api/auth/password-reset/resend"):
-        response = client.post(path, json={"email": user["email"], "portal": "staff"})
-        assert response.status_code == 403
-    response = client.post(
-        "/api/auth/password-reset/confirm", json={"email": user["email"], "portal": "staff", "code": "123456"}
-    )
-    assert response.status_code == 403
+        response = client.post(path, json={"email": user["email"]})
+        assert response.status_code == 202
+    response = client.post("/api/auth/password-reset/confirm", json={"email": user["email"], "code": "123456"})
+    assert response.status_code == 400
     assert sent == []
 
 

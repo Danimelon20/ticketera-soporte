@@ -96,11 +96,9 @@ class ActivationResult(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    """Un solo formulario: el rol sale de la cuenta. Un "portal" de una página vieja se ignora."""
     email: str
     password: str
-    # Opción de la pantalla de inicio: "admin", "staff" o "requester". Se valida en la ruta
-    # para que falte o no, la respuesta sea el mismo 401 genérico.
-    portal: Optional[str] = None
 
 
 class UserRead(BaseModel):
@@ -543,14 +541,12 @@ class DirectoryUser(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
+    # Sin pestaña: un "portal" de una página vieja se ignora
     email: str = Field(max_length=150)
-    # Opción de la pantalla de inicio; se valida en la ruta para responder siempre igual
-    portal: Optional[str] = None
 
 
 class PasswordResetConfirm(BaseModel):
     email: str = Field(max_length=150)
-    portal: Optional[str] = None
     code: str
     # Solo el solicitante elige su contraseña; al personal se le genera una
     new_password: Optional[str] = Field(default=None, max_length=200)

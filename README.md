@@ -81,7 +81,8 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
      llegando a su correo.
    - `reactivate --email <correo>`: solo si no hay otro administrador activo.
 
-6. Entre a **http://localhost:8000**, pestaña **Administración**. Después de la contraseña se pide un código
+6. Entre a **http://localhost:8000** con su correo y contraseña (un solo formulario para todos los roles: el
+   sistema lo lleva a la pantalla de su rol). Después de la contraseña se pide un código
    de 6 dígitos que llega al correo. Mientras `EMAIL_ENABLED=false`, el código no se envía y aparece en el
    registro del servidor:
 
@@ -92,7 +93,7 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
    La documentación interactiva de la API está en http://localhost:8000/docs.
 
 7. Desde **Administración › Invitaciones**, invite al personal (técnicos y coordinadores). Los clientes crean su
-   propia cuenta en la pestaña **Cliente** de la pantalla de inicio.
+   propia cuenta con **Crear una cuenta**, debajo del formulario de inicio.
 
 ## Variables del archivo .env
 
@@ -252,9 +253,10 @@ el inicio de sesión del personal nunca toca la sesión del buzón.
 
 El buzón no usa este secreto: renovarlo no lo afecta.
 
-**Acceso de emergencia del administrador.** Si Microsoft no responde o el secreto venció, en la pestaña
-**Administración** use el enlace **Acceso de emergencia**: correo, contraseña y el código por correo, como antes.
-Cada uso queda en el Registro de cambios y avisa por correo a los demás administradores.
+**Acceso de emergencia del administrador.** Si Microsoft no responde o el secreto venció, el administrador entra
+con correo y contraseña en el mismo formulario (debajo del botón de Microsoft) y el código por correo, como antes.
+Cada uso queda en el Registro de cambios. Técnicos y coordinadores no pueden entrar con contraseña mientras
+`MS_LOGIN_ENABLED=true`.
 
 **El día que la página use HTTPS:** la URI de redirección pasa a `https://<su dominio>/auth/microsoft/callback`,
 hay que registrarla igual en Azure y actualizar `MS_LOGIN_REDIRECT_URI`. Azure solo acepta `http` para

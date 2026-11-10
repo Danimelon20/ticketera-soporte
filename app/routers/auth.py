@@ -24,12 +24,10 @@ from ..security import (
 router = APIRouter(prefix="/api", tags=["auth"])
 
 TWO_FACTOR_ROLES = ("admin",)
-# Cada opción de la pantalla de inicio solo deja entrar a sus roles (el Agente virtual a ninguna)
-PORTAL_ROLES = {
-    "admin": ("admin",),
-    "staff": ("coordinator", "technician"),
-    "requester": ("requester",),
-}
+# Un solo formulario de inicio: el rol sale de la cuenta (el Agente virtual no entra nunca)
+LOGIN_ROLES = ("admin", "coordinator", "technician", "requester")
+# Con MS_LOGIN_ENABLED, técnicos y coordinadores entran solo con Microsoft
+MICROSOFT_ONLY_ROLES = ("coordinator", "technician")
 LOGIN_ERROR = "Correo o contraseña incorrectos"
 # Para que un correo sin cuenta tarde lo mismo que uno con cuenta
 _DUMMY_HASH = hash_password("contraseña-de-relleno")
@@ -50,10 +48,9 @@ RESET_PATH = "/#restablecer"
 STAFF_USE_MICROSOFT = accounts.STAFF_USE_MICROSOFT
 
 
-def check_staff_password_allowed(portal: str | None) -> None:
-    """403 en la opción Personal cuando el personal entra con Microsoft (sin revisar el correo: no revela nada)."""
-    if config.MS_LOGIN_ENABLED and portal == "staff":
-        raise HTTPException(status_code=403, detail=STAFF_USE_MICROSOFT)
+def uses_microsoft(user: models.User) -> bool:
+    """El personal (técnico o coordinador) entra con Microsoft cuando está encendido; nunca con contraseña."""
+    return config.MS_LOGIN_ENABLED and user.role in MICROSOFT_ONLY_ROLES
 
 
 def _now() -> datetime:
@@ -316,9 +313,8 @@ def resend_activation(data: EmailRequest, db: Session = Depends(get_db)):
 
 
 def reset_link(user: models.User) -> str:
-    """Enlace al paso de escribir el código, con la opción de inicio y el correo ya puestos."""
-    portal = next((p for p, roles in PORTAL_ROLES.items() if user.role in roles), "")
-    return f"{config.APP_URL.rstrip('/')}{RESET_PATH}?{urlencode({'portal': portal, 'correo': user.email})}"
+    """Enlace al paso de escribir el código, con el correo ya puesto (un solo formulario de inicio)."""
+    return f"{config.APP_URL.rstrip('/')}{RESET_PATH}?{urlencode({'correo': user.email})}"
 
 
 def send_reset_code(db: Session, user: models.User, requested_by: models.User | None = None) -> bool:
@@ -358,17 +354,16 @@ def send_reset_code(db: Session, user: models.User, requested_by: models.User | 
 RESET_ROLES = ("admin", "coordinator", "technician", "requester")
 
 
-def _reset_user(db: Session, email: str, portal: str | None = None) -> models.User | None:
+def _reset_user(db: Session, email: str) -> models.User | None:
     """Cuenta activa que puede restablecer su contraseña; si no, None (sin revelar por qué).
 
-    La pestaña del inicio de sesión (portal) ya no decide: el código va al buzón del dueño de la cuenta y el
-    enlace lleva la opción que corresponde a su rol. Antes, una pestaña recordada por el navegador (p. ej.,
-    Administración) hacía que el pedido de un técnico respondiera 202 sin enviar nada."""
+    No hay pestañas: el código va al buzón del dueño de la cuenta. Antes, una pestaña recordada por el
+    navegador (p. ej., Administración) hacía que el pedido de un técnico respondiera 202 sin enviar nada."""
     user = _find_user(db, email)
     if user is None or not user.is_active or user.role not in RESET_ROLES:
         return None
     # Con Microsoft, técnicos y coordinadores no tienen contraseña que restablecer
-    if config.MS_LOGIN_ENABLED and user.role in ("technician", "coordinator"):
+    if uses_microsoft(user):
         logging.info("Restablecimiento omitido para el usuario %s: el personal entra con Microsoft", user.id)
         return None
     return user
@@ -385,10 +380,9 @@ RESET_SENT = "Si el correo tiene una cuenta activa, le enviamos un código."
 
 @router.post("/auth/password-reset", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
 def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get_db)):
-    check_staff_password_allowed(data.portal)
     # Misma respuesta exista o no la cuenta
     email = normalize_email(data.email)
-    user = _reset_user(db, email, data.portal)
+    user = _reset_user(db, email)
     reset = _reset_row(db, user)
     if user is None:
         pass
@@ -403,9 +397,8 @@ def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get
 
 @router.post("/auth/password-reset/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
 def resend_password_reset(data: PasswordResetRequest, db: Session = Depends(get_db)):
-    check_staff_password_allowed(data.portal)
     email = normalize_email(data.email)
-    user = _reset_user(db, email, data.portal)
+    user = _reset_user(db, email)
     reset = _reset_row(db, user)
     # Solo si ya había un código pedido: el reenvío no crea uno de la nada
     if reset is not None and not throttle.is_locked(db, email) and _can_resend(reset.sent_at):
@@ -415,11 +408,10 @@ def resend_password_reset(data: PasswordResetRequest, db: Session = Depends(get_
 
 @router.post("/auth/password-reset/confirm", response_model=ActivationResult)
 def confirm_password_reset(data: PasswordResetConfirm, response: Response, db: Session = Depends(get_db)):
-    check_staff_password_allowed(data.portal)
     email = normalize_email(data.email)
     if throttle.is_locked(db, email):
         raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
-    user = _reset_user(db, email, data.portal)
+    user = _reset_user(db, email)
     reset = _reset_row(db, user)
     if reset is None or reset.expires_at <= _now() or reset.attempts >= MAX_CODE_ATTEMPTS:
         raise HTTPException(status_code=400, detail=CODE_INVALID)
@@ -454,29 +446,26 @@ def confirm_password_reset(data: PasswordResetConfirm, response: Response, db: S
 
 @router.post("/auth/login", response_model=AuthResponse | LoginChallengeResponse)
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
-    check_staff_password_allowed(credentials.portal)
+    # Un solo formulario: el rol sale de la cuenta. Un "portal" que mande una página vieja se ignora
     email = credentials.email.strip().lower()
     # Bloqueado: ni se revisa la contraseña, ni se crea reto, ni se envían correos
     if throttle.is_locked(db, email):
         raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
-    allowed_roles = PORTAL_ROLES.get(credentials.portal or "", ())
     user = db.query(models.User).filter(models.User.email == email).first()
     if user is None:
         pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-        # Solo quien sabe la contraseña y entra como solicitante se entera de que falta confirmar
-        if (
-            pending is not None
-            and verify_password(credentials.password, pending.password_hash)
-            and credentials.portal == "requester"
-        ):
+        # Solo quien sabe la contraseña se entera de que falta confirmar
+        if pending is not None and verify_password(credentials.password, pending.password_hash):
             raise HTTPException(status_code=403, detail=CONFIRM_EMAIL)
-    # La contraseña se revisa antes que la opción: rol equivocado y contraseña incorrecta responden igual
     password_ok = verify_password(credentials.password, user.password_hash if user else _DUMMY_HASH)
-    if not user or not password_ok or not user.is_active or user.role not in allowed_roles:
+    if not user or not password_ok or not user.is_active or user.role not in LOGIN_ROLES:
         # Cualquier 401 cuenta como fallo: el bloqueo no revela si la contraseña era correcta
         if throttle.register_failure(db, email, user):
             raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
         raise HTTPException(status_code=401, detail=LOGIN_ERROR)
+    # Con Microsoft, el personal no entra con contraseña. Solo lo sabe quien escribió la correcta
+    if uses_microsoft(user):
+        raise HTTPException(status_code=403, detail=STAFF_USE_MICROSOFT)
 
     if user.role in TWO_FACTOR_ROLES:
         # El contador se reinicia cuando el código también es correcto
