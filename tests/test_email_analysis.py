@@ -242,7 +242,7 @@ def test_requester_never_sees_analysis(client, make_user, llm):
     assert response.status_code == 403
 
 
-def test_assigned_technician_corrects_level(client, make_user, llm):
+def test_overdue_level_is_corrected_by_coordinator_not_technician(client, make_user, llm):
     requester = make_user("requester", profile=False)
     coordinator = make_user("coordinator")
     technician = make_user("technician")
@@ -258,7 +258,10 @@ def test_assigned_technician_corrects_level(client, make_user, llm):
     assert ai["ai_category_name"] == "Red"
     assert ai["overdue"] is True  # la fecha de prueba ya pasó y el ticket sigue abierto
 
+    # Vencido: el técnico ya no corrige el nivel (403); lo hace el coordinador
     response = client.patch(f"/api/tickets/{ticket_id}/ai-level", json={"level": 4}, headers=technician["headers"])
+    assert response.status_code == 403
+    response = client.patch(f"/api/tickets/{ticket_id}/ai-level", json={"level": 4}, headers=coordinator["headers"])
     assert response.status_code == 200
     data = response.json()
     assert data["human_level"] == 4 and data["effective_level"] == 4 and data["ai_level"] == 3
@@ -266,7 +269,7 @@ def test_assigned_technician_corrects_level(client, make_user, llm):
     assert data["due_at"].startswith("2026-10-12T19:00")  # lunes 13:00 en Costa Rica
 
     row = _row(ticket_id)
-    assert row.human_level_by == technician["id"]
+    assert row.human_level_by == coordinator["id"]
 
     # Nivel 0: sin tiempo meta. La prioridad y el estado no cambian.
     data = client.patch(f"/api/tickets/{ticket_id}/ai-level", json={"level": 0}, headers=coordinator["headers"]).json()

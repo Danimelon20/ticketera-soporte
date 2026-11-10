@@ -45,13 +45,22 @@ def test_load_creates_the_scenarios(client, sent):
         demo_ids = {u.id for u in users}
 
         tickets = _demo_tickets(db)
-        assert len(tickets) == 8
+        assert len(tickets) == 10
         ticket_ids = {t.id for t in tickets}
         # Agrupación: una fusión del mismo cliente y dos tickets ligados de clientes distintos
         merges = db.query(models.TicketMerge).filter(models.TicketMerge.target_ticket_id.in_(ticket_ids)).all()
         assert len(merges) == 1
-        links = db.query(models.TicketLink).filter(models.TicketLink.principal_ticket_id.in_(ticket_ids)).all()
+        links = db.query(models.TicketLink).filter(
+            models.TicketLink.principal_ticket_id.in_(ticket_ids), models.TicketLink.undone_at.is_(None)
+        ).all()
         assert len(links) == 2
+        # Incidente separado: el relacionado sigue con el técnico que recibió por el incidente
+        [separated] = db.query(models.TicketLink).filter(
+            models.TicketLink.principal_ticket_id.in_(ticket_ids), models.TicketLink.undone_at.isnot(None)
+        ).all()
+        related = db.get(models.Ticket, separated.related_ticket_id)
+        assert related.assigned_to == db.get(models.Ticket, separated.principal_ticket_id).assigned_to
+        assert related.assigned_to is not None
         owners = {db.get(models.Ticket, link.related_ticket_id).created_by for link in links}
         owners.add(db.get(models.Ticket, links[0].principal_ticket_id).created_by)
         assert len(owners) == 3
@@ -114,7 +123,7 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
     db = SessionLocal()
     try:
         before_users, before_tickets = _real_snapshot(db)
-        assert len(_demo_users(db)) == 8 and len(_demo_tickets(db)) == 8
+        assert len(_demo_users(db)) == 8 and len(_demo_tickets(db)) == 10
 
         # Uso de la página mezclado con datos reales: ticket real asignado a un técnico DEMO,
         # cambio de un admin real sobre una cuenta DEMO y un adjunto en un ticket DEMO
@@ -195,7 +204,7 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "13 de 13 correctos (2 omitidos)" in out
+    assert "14 de 14 correctos (2 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
     assert out.count("OMITIDO") == 2
@@ -221,7 +230,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "11 de 13 correctos" in out
+    assert out.count("| FALLA") == 2 and "12 de 14 correctos" in out
     demo_data.run("limpiar")
 
 

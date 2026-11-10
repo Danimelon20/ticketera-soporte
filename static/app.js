@@ -2331,8 +2331,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         correct.appendChild(label);
         correct.appendChild(select);
-        card.appendChild(correct);
+        // Vencido: el técnico no corrige el nivel (el servidor responde 403)
+        if (!technicianOverdueLocked(ticket)) card.appendChild(correct);
         return card;
+    }
+
+    // Vencidos: el técnico no cambia estado ni nivel; el coordinador decide (lo revisa también el servidor)
+    function technicianOverdueLocked(ticket) {
+        return Boolean(currentUser) && currentUser.role === 'technician' && ticket.due_state === 'overdue'
+            && ['new', 'in_progress'].includes(ticket.status);
     }
 
     // Texto de un cambio del historial: "Ana cambió el estado de Nuevo a En proceso"
@@ -6390,7 +6397,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return [
                 { id: 'work', label: 'Mi trabajo', icon: 'tickets', sections: [
                     queueSection('mine_open', 'Mis tickets', 'mi-trabajo/tickets', {
-                        count: 'mine_open', aliases: ['mine_resolved_today', 'following'],
+                        // La pestaña Por vencer de aquí reemplaza la sección suelta que repetía lo mismo
+                        count: 'mine_open', aliases: ['mine_due_soon', 'mine_resolved_today', 'following'],
                         tabs: [
                             ['mine_open', 'Abiertos', 'mine_open', ''],
                             ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
@@ -6404,9 +6412,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }),
                     draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
                         count: 'drafts_pending', context: 'Correos que le asignaron. Al confirmar uno, el ticket queda a su cargo.',
-                    }),
-                    queueSection('mine_due_soon', 'Por vencer', 'mi-trabajo/por-vencer', {
-                        count: 'mine_due_soon', tone: 'warn', context: 'Sus tickets cerca del tiempo de respuesta',
                     }),
                     queueSection('overdue', 'Vencidos', 'mi-trabajo/vencidos', {
                         count: 'overdue', tone: 'alert', context: 'Sus tickets que pasaron el tiempo de respuesta',
@@ -8264,7 +8269,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffStatusControl(ticket) {
         const next = STATUS_TRANSITIONS[ticket.status] || [];
-        if (ticket.status === 'closed' || next.length === 0) {
+        if (ticket.status === 'closed' || next.length === 0 || technicianOverdueLocked(ticket)) {
             return makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status);
         }
         const select = makeEl('select', 'sd-status-select');
@@ -8276,8 +8281,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffLevelControl(ticket) {
         const ai = ticket.ai_analysis;
-        // Sin análisis no hay nivel que corregir
-        if (!ai || ticket.status === 'closed') return levelText(ai ? ai.effective_level : null);
+        // Sin análisis no hay nivel que corregir; vencido, el técnico solo lo ve
+        if (!ai || ticket.status === 'closed' || technicianOverdueLocked(ticket)) {
+            return levelText(ai ? ai.effective_level : null);
+        }
         const select = makeEl('select', 'ai-level-select');
         select.setAttribute('aria-label', 'Nivel');
         if (ai.effective_level === null) select.appendChild(staffOption('', 'Sin nivel', true));

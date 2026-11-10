@@ -56,6 +56,8 @@ ANA, BETO, CARLA, IMPOSTOR = "ana.cliente", "beto.cliente", "carla.cliente", "su
 MAIL_TARGET = "No puedo entrar al correo de la oficina"
 MAIL_SOURCE = "Outlook me pide la contraseña todo el tiempo"
 NETWORK = ("Sin internet en el piso 2", "No carga ninguna página", "Se cayó la red")
+# Incidente separado: el relacionado sale del incidente y sigue a cargo del mismo técnico
+SEPARATED = ("Falla el lector de huellas de la entrada", "El lector de huellas no me reconoce")
 DUE_SOON = "La impresora del contador no imprime"
 OVERDUE = "No abre el sistema de planillas"
 OVERDUE_WITH_CAUSE = "Necesito acceso a la carpeta de Finanzas"
@@ -329,6 +331,17 @@ def load(db) -> list[dict]:
         grouping.link_ticket(db, related, grouping.Match(
             "link", net[0].id, 0.88, f"{DEMO_TAG} Misma falla de red en el mismo piso"), b.agent.id)
 
+    # Incidente separado: el relacionado recibió al técnico por el incidente y, al separarlo, lo conserva
+    finger = b.ticket(carla, SEPARATED[0], "Desde hoy el lector de la entrada no marca a nadie.",
+                      category="Hardware", created_at=now - timedelta(minutes=40), assigned=evening)
+    finger_related = b.ticket(beto, SEPARATED[1], "Pongo el dedo y no pasa nada.",
+                              category="Hardware", created_at=now - timedelta(minutes=30))
+    grouping.link_ticket(db, finger_related, grouping.Match(
+        "link", finger.id, 0.86, f"{DEMO_TAG} Misma falla del lector de huellas"), b.agent.id)
+    db.flush()
+    grouping.undo_link(db, db.query(models.TicketLink).filter(
+        models.TicketLink.related_ticket_id == finger_related.id).one(), coordinator)
+
     # Vencimientos: por vencer (más del 80 % de las horas hábiles), vencido sin causa y vencido con causa
     start = now - timedelta(days=10)
     used = business_hours_between(start, now) or 8.0
@@ -357,7 +370,8 @@ def load(db) -> list[dict]:
         {"rol": "Técnico", "correo": morning.email,
          "probar": "Turno L-V 07-15. Tiene el ticket por vencer y el borrador \"El monitor parpadea\"."},
         {"rol": "Técnico", "correo": evening.email,
-         "probar": "Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa."},
+         "probar": "Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
+                   "separado de un incidente, sigue en Mis tickets." % finger_related.id},
         {"rol": "Técnico", "correo": away.email,
          "probar": "De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
@@ -444,6 +458,7 @@ def _scenario_ids(db) -> dict | None:
         "mail_target": ticket(MAIL_TARGET), "mail_source": ticket(MAIL_SOURCE),
         "network": [ticket(t) for t in NETWORK],
         "due_soon": ticket(DUE_SOON), "overdue": ticket(OVERDUE), "overdue_cause": ticket(OVERDUE_WITH_CAUSE),
+        "separated": ticket(SEPARATED[1]),
         "draft_assigned": drafts.get(f"{DEMO_TAG} {DRAFT_ASSIGNED}"),
         "draft_unassigned": drafts.get(f"{DEMO_TAG} {DRAFT_UNASSIGNED}"),
     }
@@ -589,6 +604,17 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
             "Sin revisor" if draft.get("assigned_to") is None else "con revisor")
 
     add("Borradores", "Coordinador", f"borrador #{unassigned} visible, Sin revisor", coordinator_sees_unassigned)
+
+    separated = ids["separated"]
+
+    def separated_still_mine():
+        response = api.get(EVENING, "/api/queue", view="mine_open", search=DEMO_TAG)
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        mine = {i["id"] for i in response.json()["items"]}
+        return separated in mine, "en Mis tickets" if separated in mine else "no aparece en Mis tickets"
+
+    add("Agrupación", "Técnico (tarde)", f"#{separated} separado del incidente, en Mis tickets", separated_still_mine)
 
     def foreign_ticket():
         response = api.get(EVENING, f"/api/tickets/{soon}")

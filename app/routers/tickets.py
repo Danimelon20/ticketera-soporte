@@ -16,6 +16,16 @@ from .. import account_reports, alerts, attachments, assignment_notice, audit, a
 AI_ROLES = ("technician", "coordinator")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
 OPERATION_ROLES = ("coordinator",)
+OVERDUE_LOCKED = "El ticket está vencido: el coordinador decide su estado y su nivel"
+
+
+def check_overdue_lock(ticket: models.Ticket, user: models.User) -> None:
+    """Vencidos: el técnico no cambia estado, prioridad, categoría ni nivel (403); sí comenta y deja la causa."""
+    if user.role != "technician" or ticket.status not in nav.OPEN_STATUSES:
+        return
+    state, _percent = alerts.due_state(ticket, nav._now())
+    if state == alerts.OVERDUE:
+        raise HTTPException(status_code=403, detail=OVERDUE_LOCKED)
 
 router = APIRouter(prefix="/api", tags=["tickets"])
 
@@ -342,6 +352,7 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
     if current_user.role not in AI_ROLES:
         raise HTTPException(status_code=403, detail="No tienes permiso para corregir el análisis")
     db_ticket = get_visible_ticket(db, ticket_id, current_user, full=True)
+    check_overdue_lock(db_ticket, current_user)
     row = db_ticket.ai_analysis
     if row is None:
         raise HTTPException(status_code=404, detail="Este ticket no tiene análisis de la IA")
@@ -563,6 +574,8 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         raise HTTPException(status_code=403, detail="Los solicitantes no pueden modificar tickets")
     # Técnico: solo el que tiene asignado; el administrador no entra al flujo de tickets
     check_access(db, db_ticket, current_user, full=True)
+    if data.status is not None or data.priority_id is not None or data.category_id is not None:
+        check_overdue_lock(db_ticket, current_user)
 
     # Transiciones de status permitidas
     if data.status is not None:

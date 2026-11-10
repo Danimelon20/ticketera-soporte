@@ -364,7 +364,7 @@ def test_different_problems_from_other_clients_are_not_linked(make_user, make_ti
     assert active_link(other["id"]) is None
 
 
-def test_unlink_recalculates_incident_and_returns_to_queue(client, make_user, make_ticket, grouping_on, monkeypatch):
+def test_unlink_recalculates_incident_and_keeps_the_technician(client, make_user, make_ticket, grouping_on, monkeypatch):
     monkeypatch.setattr(config, "GROUPING_INCIDENT_MIN", 2)
     tag = new_tag()
     coordinator = make_user("coordinator")
@@ -381,7 +381,11 @@ def test_unlink_recalculates_incident_and_returns_to_queue(client, make_user, ma
     response = client.post(f"/api/links/{link.id}/undo", headers=coordinator["headers"])
     assert response.status_code == 204, response.text
     separated = get(models.Ticket, second["id"])
-    assert separated.assigned_to is None and separated.status == "new"
+    # Sigue asignado a su técnico y en su bandeja (antes desaparecía de "Mis tickets")
+    assert separated.assigned_to == technician["id"] and separated.status == "new"
+    queue = client.get("/api/queue", params={"view": "mine_open"}, headers=technician["headers"])
+    assert queue.status_code == 200, queue.text
+    assert second["id"] in [item["id"] for item in queue.json()["items"]]
     assert active_link(second["id"]) is None
     assert active_link(third["id"]) is not None
     assert rows(models.TicketIncident, models.TicketIncident.principal_ticket_id == principal["id"]) == []
