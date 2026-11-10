@@ -85,7 +85,8 @@ class StaffInvitationRead(BaseModel):
     role: str
     created_at: datetime
     expires_at: datetime
-    status: Literal["available", "expired", "used"]
+    # registered: no se usó, pero el correo ya tiene cuenta (no se reenvía)
+    status: Literal["available", "expired", "used", "registered"]
     email_sent: Optional[bool] = None
 
 

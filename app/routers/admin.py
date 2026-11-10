@@ -98,7 +98,8 @@ def _schedule_fields(rows: list[models.TechnicianSchedule] | None, now: datetime
 
 @router.get("/directory", response_model=list[DirectoryUser])
 def get_directory(
-    role: Optional[Literal["requester", "technician", "coordinator", "admin"]] = None,
+    # staff: técnicos, coordinadores y administradores (Invitaciones › Usuarios existentes)
+    role: Optional[Literal["requester", "technician", "coordinator", "admin", "staff"]] = None,
     q: Optional[str] = None,
     state: Optional[Literal["active", "inactive"]] = None,
     db: Session = Depends(get_db),
@@ -108,7 +109,9 @@ def get_directory(
         raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
 
     query = db.query(models.User).filter(models.User.role != "agent")
-    if role:
+    if role == "staff":
+        query = query.filter(models.User.role.in_(TEAM_ROLES))
+    elif role:
         query = query.filter(models.User.role == role)
     if state:
         query = query.filter(models.User.is_active.is_(state == "active"))

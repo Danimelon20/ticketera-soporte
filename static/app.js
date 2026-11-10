@@ -5912,6 +5912,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const usersList = document.getElementById('usersList');
 
+    // Invitaciones › Usuarios existentes: el personal ya registrado, filtrado por rol, nombre o correo
+    const usersRoleFilter = document.getElementById('usersRoleFilter');
+    const usersSearch = document.getElementById('usersSearch');
+    const usersEmpty = document.getElementById('usersEmpty');
+    let usersSearchTimer = null;
+    let usersSeq = 0;
+
+    async function loadExistingUsers() {
+        if (!usersList || !currentUser || !['coordinator', 'admin'].includes(currentUser.role)) return;
+        const params = new URLSearchParams({ role: usersRoleFilter.value || 'staff' });
+        const q = usersSearch.value.trim();
+        if (q) params.set('q', q);
+        const seq = ++usersSeq;
+        let users;
+        try {
+            users = await apiFetch(`/directory?${params}`, { silent: true });
+        } catch (err) {
+            // apiFetch ya armó el mensaje del servidor con getErrorMessage
+            if (seq === usersSeq) showError(err.message || 'No se pudo cargar la lista de usuarios');
+            return;
+        }
+        // Una respuesta vieja no pisa la del último filtro
+        if (seq !== usersSeq) return;
+        usersList.replaceChildren();
+        users.forEach(user => {
+            const li = document.createElement('li');
+            li.className = 'users-list-item';
+            li.textContent = `${user.name || 'Sin nombre'} (${user.email}) — ${ROLE_MAP[user.role] || user.role}`
+                + (user.is_active === false ? ' · inactivo' : '');
+            usersList.appendChild(li);
+        });
+        usersEmpty.hidden = users.length > 0;
+    }
+
+    if (usersRoleFilter) usersRoleFilter.addEventListener('change', loadExistingUsers);
+    if (usersSearch) {
+        usersSearch.addEventListener('input', () => {
+            clearTimeout(usersSearchTimer);
+            usersSearchTimer = setTimeout(loadExistingUsers, 300);
+        });
+    }
+
     async function loadUsers() {
         userMap = {};
         userRoleMap = {};
@@ -5925,14 +5967,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // El técnico recibe solo nombre y rol del personal: la lista con correos es para quien gestiona cuentas
         const showList = currentUser.role === 'coordinator' || currentUser.role === 'admin';
 
+        if (usersList && showList) loadExistingUsers();
+
         users.forEach(user => {
-            if (usersList && showList) {
-                const li = document.createElement('li');
-                li.className = 'users-list-item';
-                li.textContent = `${user.name} (${user.email}) — ${ROLE_MAP[user.role] || user.role}`;
-                usersList.appendChild(li);
-            }
-            
             userMap[user.id] = user.name;
             userRoleMap[user.id] = user.role || '';
             userAvailabilityMap[user.id] = user.availability || null;
@@ -6126,7 +6163,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----- Invitaciones del personal (admin: técnicos y coordinadores; coordinador: técnicos) -----
-    const INVITE_STATUS = { available: 'Disponible', expired: 'Vencida', used: 'Activada' };
+    const INVITE_STATUS = { available: 'Pendiente', expired: 'Vencida', used: 'Activada', registered: 'Ya registrado' };
+    // Solo las pendientes y las vencidas se reenvían (la vencida recibe un código nuevo)
+    const INVITE_RESENDABLE = ['available', 'expired'];
     const INVITE_ROLES = { technician: 'Técnico', coordinator: 'Coordinador' };
 
     function inviteField(labelText, input) {
@@ -6267,7 +6306,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.appendChild(td);
             });
             const actions = document.createElement('td');
-            if (invite.status !== 'used') {
+            if (INVITE_RESENDABLE.includes(invite.status)) {
                 const resend = document.createElement('button');
                 resend.type = 'button';
                 resend.className = 'ui-btn ui-btn-secondary ui-btn-sm';

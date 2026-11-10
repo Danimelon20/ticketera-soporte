@@ -570,7 +570,23 @@
             <div id="invitesHost" class="invites-host"></div>
             <details class="ui-card users-details">
                 <summary class="users-summary">Usuarios existentes</summary>
-                <ul id="usersList" class="users-list"></ul>
+                <div class="users-filters">
+                    <label class="users-filter">
+                        <span>Rol</span>
+                        <select id="usersRoleFilter">
+                            <option value="staff">Todo el personal</option>
+                            <option value="technician">Técnico</option>
+                            <option value="coordinator">Coordinador</option>
+                            <option value="admin">Administrador</option>
+                        </select>
+                    </label>
+                    <label class="users-filter users-filter-search">
+                        <span>Nombre o correo</span>
+                        <input type="search" id="usersSearch" autocomplete="off" placeholder="Buscar…">
+                    </label>
+                </div>
+                <ul id="usersList" class="users-list" aria-live="polite"></ul>
+                <p id="usersEmpty" class="view-note" hidden>Nadie coincide con el filtro.</p>
             </details>
         </section>
 

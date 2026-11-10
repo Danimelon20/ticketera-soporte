@@ -1103,6 +1103,13 @@
 
 .users-summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 
+/* Usuarios existentes: filtro por rol y por nombre o correo (en columna a 375 px) */
+.users-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 4px 18px 12px; }
+.users-filter { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; min-width: 0; }
+.users-filter-search { flex: 1 1 220px; }
+.users-filter select, .users-filter input { width: 100%; max-width: 100%; }
+#usersEmpty { padding: 0 18px 14px; }
+
 .users-list { list-style: none; margin: 0; padding: 0 18px 14px; display: flex; flex-direction: column; gap: 6px; }
 
 .users-list-item { padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--bg-side); overflow-wrap: anywhere; }
