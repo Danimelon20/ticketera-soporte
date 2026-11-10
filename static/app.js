@@ -6363,6 +6363,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (role === 'admin') {
             return [
                 { id: 'admin', label: 'Administración', icon: 'accounts', sections: [
+                    // Portada del administrador: una fila por departamento que atiende tickets
+                    navSection('panel', 'Panel', 'admin/panel', () => showAdminSection('panel'), {
+                        context: 'Departamentos que atienden tickets y personal sin departamento',
+                    }),
                     navSection('accounts', 'Cuentas', 'admin/cuentas', () => openAccounts(), {
                         context: 'Personal y clientes · datos de contacto enmascarados',
                     }),
@@ -6497,7 +6501,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function homeRoute() {
-        return { technician: 'mi-trabajo/tickets', coordinator: 'inicio', admin: 'admin/cuentas' }[currentUser.role];
+        return { technician: 'mi-trabajo/tickets', coordinator: 'inicio', admin: 'admin/panel' }[currentUser.role];
     }
 
     function routePath() {
@@ -9988,7 +9992,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };
     const ADMIN_SECTION_TITLES = {
         health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
-        departments: 'Departamentos', activation: 'Activación',
+        departments: 'Departamentos', activation: 'Activación', panel: 'Panel',
     };
     // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
     const ADMIN_SECTION_LOADERS = {};
@@ -10252,6 +10256,63 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!button) return;
         const person = { id: Number(button.dataset.placeId), name: button.dataset.placeName, role: button.dataset.placeRole };
         if (await openPlacementDialog(person)) showActivation();
+    });
+
+    // ----- Administración › Panel: una fila por departamento que atiende tickets -----
+    const panelBody = document.getElementById('panelBody');
+    const panelUnplaced = document.getElementById('panelUnplaced');
+
+    async function showPanel() {
+        let data;
+        try {
+            data = await apiFetch('/admin/overview', { silent: true });
+        } catch (err) {
+            panelBody.replaceChildren();
+            document.getElementById('panelStatus').replaceChildren(errorState(err, showPanel));
+            return;
+        }
+        const status = document.getElementById('panelStatus');
+        status.replaceChildren(document.createTextNode(
+            `Tickets por departamento: ${data.routing_enforced ? 'encendido' : 'apagado (todo funciona como antes)'}. `));
+        const activation = makeEl('a', 'org-checklist-link', 'Activación');
+        activation.href = '#/admin/activacion';
+        status.appendChild(activation);
+        panelBody.replaceChildren();
+        if (!data.departments.length) {
+            const row = document.createElement('tr');
+            const cell = makeEl('td', '', 'Ningún departamento atiende tickets todavía. Márquelos en Departamentos.');
+            cell.colSpan = 6;
+            row.appendChild(cell);
+            panelBody.appendChild(row);
+        }
+        data.departments.forEach(dept => {
+            const row = document.createElement('tr');
+            row.appendChild(makeEl('td', '', dept.path));
+            row.appendChild(makeEl('td', dept.coordinator_name ? '' : 'panel-missing', dept.coordinator_name || 'Sin coordinador'));
+            row.appendChild(makeEl('td', dept.technicians ? '' : 'panel-missing', String(dept.technicians)));
+            // Fase 2: tickets abiertos y vencidos del departamento
+            row.appendChild(makeEl('td', '', typeof dept.open === 'number' ? String(dept.open) : '—'));
+            row.appendChild(makeEl('td', '', typeof dept.overdue === 'number' ? String(dept.overdue) : '—'));
+            const links = makeEl('td', 'panel-links');
+            [['Personal', 'admin/turnos'], ['Departamento', 'admin/departamentos']].forEach(([label, route]) => {
+                const link = makeEl('a', 'org-checklist-link', label);
+                link.href = `#/${route}`;
+                links.appendChild(link);
+            });
+            row.appendChild(links);
+            panelBody.appendChild(row);
+        });
+        labelTableCells(document.getElementById('panelTable'));
+        document.getElementById('panelUnplacedBox').hidden = !data.unplaced.length;
+        renderUnplaced(panelUnplaced, data.unplaced);
+    }
+    ADMIN_SECTION_LOADERS.panel = showPanel;
+
+    panelUnplaced.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-place-id]');
+        if (!button) return;
+        const person = { id: Number(button.dataset.placeId), name: button.dataset.placeName, role: button.dataset.placeRole };
+        if (await openPlacementDialog(person)) showPanel();
     });
 
     // Aviso del personal sin departamento con el interruptor encendido (lo dice /auth/me)

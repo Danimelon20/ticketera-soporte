@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import accounts, audit, departments, models, routing
 from ..schemas import (
-    DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
-    DepartmentUpdate, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate, UnplacedPerson,
+    AdminOverview, DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
+    UnplacedPerson,
 )
 from .admin import require_admin
 
@@ -233,16 +234,31 @@ def update_placement(user_id: int, data: PlacementUpdate, db: Session = Depends(
     return _placement_read(db, user)
 
 
+def _unplaced(db: Session) -> list[UnplacedPerson]:
+    by_id = routing.departments_by_id(db)
+    result = []
+    for user in routing.unplaced_staff(db):
+        dept, _tier = routing.department_of(db, user)
+        result.append(UnplacedPerson(id=user.id, name=user.name or "Sin nombre", role=user.role,
+                                     department_name=routing.path_label(dept, by_id)))
+    return result
+
+
 @router.get("/staff-alerts", response_model=StaffAlerts)
 def staff_alerts(db: Session = Depends(get_db), admin=Depends(require_admin)):
     """Personal sin departamento (o en uno desactivado o que ya no atiende tickets), con su botón Asignar."""
-    by_id = routing.departments_by_id(db)
-    unplaced = []
-    for user in routing.unplaced_staff(db):
-        dept, _tier = routing.department_of(db, user)
-        unplaced.append(UnplacedPerson(id=user.id, name=user.name or "Sin nombre", role=user.role,
-                                       department_name=routing.path_label(dept, by_id)))
-    return StaffAlerts(unplaced=unplaced)
+    return StaffAlerts(unplaced=_unplaced(db))
+
+
+@router.get("/overview", response_model=AdminOverview)
+def overview(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Panel: una fila por departamento activo que atiende tickets. Los tickets abiertos y vencidos se llenan
+    cuando los tickets tengan departamento (Fase 2)."""
+    rows = [
+        OverviewDepartment(id=d.id, path=d.path, coordinator_name=d.coordinator_name, technicians=d.technicians)
+        for d in _department_reads(db) if d.handles_tickets and d.active_path
+    ]
+    return AdminOverview(departments=rows, routing_enforced=routing.enforced(db), unplaced=_unplaced(db))
 
 
 # ----- Activación: interruptor de tickets por departamento -----

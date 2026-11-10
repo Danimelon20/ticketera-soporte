@@ -1103,6 +1103,23 @@
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="panel">
+                    <div class="admin-card-head"><h2>Departamentos que atienden tickets</h2></div>
+                    <p id="panelStatus" class="admin-text"></p>
+                    <div class="panel-table-wrap">
+                        <table id="panelTable" class="ui-table panel-table">
+                            <thead>
+                                <tr><th>Departamento</th><th>Coordinador</th><th>Técnicos</th><th>Abiertos</th><th>Vencidos</th><th>Ir a</th></tr>
+                            </thead>
+                            <tbody id="panelBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="admin-text panel-note">Abiertos y vencidos se llenan cuando los tickets tengan departamento (Fase 2).</p>
+                    <div id="panelUnplacedBox" hidden>
+                        <h3 class="org-subtitle">Personal sin departamento</h3>
+                        <ul id="panelUnplaced" class="org-list"></ul>
+                    </div>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="departments">
                     <div class="admin-card-head"><h2>Departamentos</h2></div>
                     <p class="admin-text">El organigrama de la empresa. Marque «Atiende tickets» solo en los departamentos que reciben tickets: cada uno tiene un coordinador y sus técnicos. La casilla no se hereda a los subdepartamentos.</p>

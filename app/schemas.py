@@ -1144,3 +1144,20 @@ class SwitchRead(BaseModel):
 
 class SwitchUpdate(BaseModel):
     enabled: bool
+
+
+class OverviewDepartment(BaseModel):
+    id: int
+    path: str
+    coordinator_name: Optional[str] = None
+    technicians: int = 0
+    # Se llenan cuando los tickets tengan departamento (Fase 2); por ahora None ("—")
+    open: Optional[int] = None
+    overdue: Optional[int] = None
+
+
+class AdminOverview(BaseModel):
+    """Panel del administrador: una fila por departamento que atiende tickets."""
+    departments: list[OverviewDepartment]
+    routing_enforced: bool
+    unplaced: list[UnplacedPerson]
