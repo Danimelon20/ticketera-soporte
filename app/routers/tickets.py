@@ -227,14 +227,28 @@ AREA_REQUIRED = "Elija el área de quien reporta"
 EMAIL_INVALID = "Escriba un correo válido para quien reporta"
 
 
-def _default_catalogs(db: Session) -> tuple[int, int]:
-    """Categoría y prioridad por defecto del formulario del personal (no las pide)."""
-    category = db.query(models.Category).order_by(models.Category.id).first()
-    priority = (db.query(models.Priority).filter(models.Priority.level == 2).first()
-                or db.query(models.Priority).order_by(models.Priority.id).first())
-    if category is None or priority is None:
-        raise HTTPException(status_code=500, detail="Faltan categorías o prioridades")
-    return category.id, priority.id
+def _naive_utc(value: datetime) -> datetime:
+    """Fecha como la guarda la base: UTC sin zona."""
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+NO_CATEGORY = "Sin categoría"
+PRIORITY_REQUIRED = "Elija la prioridad: define el vencimiento"
+
+
+def _staff_category(db: Session, category_id: int | None) -> int:
+    """Categoría opcional: sin elegir, "Sin categoría" (se crea la primera vez que hace falta)."""
+    if category_id is not None:
+        category = db.get(models.Category, category_id)
+        if category is None:
+            raise HTTPException(status_code=422, detail="La categoría no existe")
+        return category.id
+    category = db.query(models.Category).filter(models.Category.name == NO_CATEGORY).first()
+    if category is None:
+        category = models.Category(name=NO_CATEGORY)
+        db.add(category)
+        db.flush()
+    return category.id
 
 
 def create_staff_ticket(db: Session, data: TicketCreate, user: models.User,
@@ -257,14 +271,23 @@ def create_staff_ticket(db: Session, data: TicketCreate, user: models.User,
     if area is None or not routing.is_active_path(area, by_id):
         raise HTTPException(status_code=422, detail=AREA_REQUIRED)
     dept = routing.serving_department(db, data.department_id)
-    category_id, priority_id = _default_catalogs(db)
+    # Prioridad obligatoria: fija el nivel del ticket (Baja 1 … Urgente 4) y con él el vencimiento
+    priority = db.get(models.Priority, data.priority_id) if data.priority_id else None
+    if priority is None or priority.level not in email_analysis.PRIORITY_BY_LEVEL:
+        raise HTTPException(status_code=422, detail=PRIORITY_REQUIRED)
+    category_id = _staff_category(db, data.category_id)
 
     db_ticket = models.Ticket(
-        title=title, description=description, category_id=category_id, priority_id=priority_id, status="new",
+        title=title, description=description, category_id=category_id, priority_id=priority.id, status="new",
         created_by=user.id, source="web",
     )
     db.add(db_ticket)
     db.flush()
+    # Nivel puesto por una persona: la IA no lo cambia (no analiza tickets que ya tienen nivel)
+    db.add(models.TicketAIAnalysis(
+        ticket_id=db_ticket.id, status="done", human_level=priority.level, human_level_by=user.id,
+        due_at=email_analysis.compute_due_at(_naive_utc(db_ticket.created_at), priority.level),
+    ))
     routing.set_ticket_department(db, db_ticket, dept.id)
     db.add(models.TicketReporter(ticket_id=db_ticket.id, name=reporter, email=email, area_department_id=area.id,
                                  phone=(data.reporter_phone or "").strip() or None, channel=data.channel))
@@ -274,11 +297,9 @@ def create_staff_ticket(db: Session, data: TicketCreate, user: models.User,
                   f"{models.TICKET_CHANNELS[data.channel]}"[:500],
     ))
     db.commit()
-    # Asignación inmediata para la confirmación (sin esperar el análisis); el análisis va después
+    # Asignación inmediata para la confirmación, con el nivel que fijó la prioridad
     if config.AUTO_ASSIGN_ENABLED:
         auto_assign.assign_new(db_ticket.id)
-    if config.AI_ANALYSIS_ENABLED:
-        background_tasks.add_task(email_analysis.analyze_ticket_by_id, db_ticket.id)
     db.refresh(db_ticket)
     assignee = db.get(models.User, db_ticket.assigned_to) if db_ticket.assigned_to else None
     return StaffTicketCreated(id=db_ticket.id, title=db_ticket.title, department_name=routing.path_label(dept, by_id),

@@ -1234,10 +1234,26 @@ class DepartmentOption(BaseModel):
     path: str
 
 
+class PriorityOption(BaseModel):
+    id: int
+    name: str
+    level: int
+    # Plazo que fija: "16 horas hábiles", "1 día hábil"
+    due_text: str
+
+
+class CategoryOption(BaseModel):
+    id: int
+    name: str
+
+
 class DepartmentOptions(BaseModel):
-    """Listas del formulario del personal: departamentos que atienden y el organigrama completo (áreas)."""
+    """Listas del formulario del personal: departamentos que atienden, el organigrama completo (áreas),
+    prioridades con su plazo y categorías."""
     serving: list[DepartmentOption]
     areas: list[DepartmentOption]
+    priorities: list[PriorityOption] = []
+    categories: list[CategoryOption] = []
 
 
 

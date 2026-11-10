@@ -10,7 +10,7 @@ def _staff_ticket(client, creator, dept):
     area = department(unique("Área"), handles=False)
     response = client.post("/api/tickets", headers=creator["headers"], json={
         "title": "La impresora no imprime", "description": "Sale en blanco", "department_id": dept,
-        "reporter_name": "Luis Mora", "reporter_area_id": area, "channel": "in_person"})
+        "reporter_name": "Luis Mora", "reporter_area_id": area, "channel": "in_person", "priority_id": 2})
     assert response.status_code == 200, response.text
     return response.json()["id"]
 

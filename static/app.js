@@ -4005,9 +4005,28 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         fill(document.getElementById('stReporterArea'), options.areas);
         fill(document.getElementById('stDepartment'), options.serving);
+        // Prioridad obligatoria con su plazo; categoría opcional ("Sin categoría" si no se elige)
+        staffPriorities = options.priorities;
+        const priority = document.getElementById('stPriority');
+        priority.replaceChildren(staffOption('', 'Seleccionar', true));
+        options.priorities.forEach(p => priority.appendChild(staffOption(String(p.id), `${p.name} · vence en ${p.due_text}`, false)));
+        const category = document.getElementById('stCategory');
+        category.replaceChildren(staffOption('', 'Sin categoría', true));
+        options.categories.forEach(c => category.appendChild(staffOption(String(c.id), c.name, false)));
+        showPriorityDue();
         staffTicketDialog.showModal();
         document.getElementById('stReporterName').focus();
     }
+
+    let staffPriorities = [];
+
+    // "Alta: vence en 16 horas hábiles": quien crea el ticket ve la consecuencia de la prioridad
+    function showPriorityDue() {
+        const chosen = staffPriorities.find(p => String(p.id) === document.getElementById('stPriority').value);
+        document.getElementById('stPriorityDue').textContent = chosen
+            ? `${chosen.name}: vence en ${chosen.due_text}.` : 'Define el vencimiento del ticket.';
+    }
+    document.getElementById('stPriority').addEventListener('change', showPriorityDue);
 
     document.getElementById('staffTicketCancel').addEventListener('click', () => staffTicketDialog.close());
     document.getElementById('staffTicketClose').addEventListener('click', () => {
@@ -4028,6 +4047,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     title: value('stTitle'), description: value('stDescription'),
                     department_id: Number(value('stDepartment')) || null,
+                    priority_id: Number(value('stPriority')) || null,
+                    category_id: Number(value('stCategory')) || null,
                     reporter_name: value('stReporterName'), reporter_email: value('stReporterEmail') || null,
                     reporter_area_id: Number(value('stReporterArea')) || null,
                     reporter_phone: value('stReporterPhone') || null, channel: value('stChannel') || null,

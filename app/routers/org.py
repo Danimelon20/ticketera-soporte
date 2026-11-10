@@ -7,9 +7,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, auto_assign, config, departments, models, nav, routing
+from .. import accounts, audit, auto_assign, config, departments, email_analysis, models, nav, routing
+from ..business_hours import day_hours
 from ..schemas import (
-    AdminOverview, DepartmentCreate, DepartmentOption, DepartmentOptions, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    AdminOverview, CategoryOption, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
     TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
@@ -356,4 +357,24 @@ def department_options(db: Session = Depends(get_db), current_user=Depends(get_c
     active = sorted((d for d in by_id.values() if routing.is_active_path(d, by_id)),
                     key=lambda d: routing.path_label(d, by_id).casefold())
     options = [DepartmentOption(id=d.id, path=routing.path_label(d, by_id)) for d in active]
-    return DepartmentOptions(serving=[o for o, d in zip(options, active) if d.handles_tickets], areas=options)
+    priorities = [
+        PriorityOption(id=p.id, name=p.name, level=p.level, due_text=due_text(p.level))
+        for p in db.query(models.Priority).order_by(models.Priority.level) if p.level in email_analysis.PRIORITY_BY_LEVEL
+    ]
+    categories = [CategoryOption(id=c.id, name=c.name) for c in db.query(models.Category).order_by(models.Category.name)
+                  if c.name != "Sin categoría"]
+    return DepartmentOptions(serving=[o for o, d in zip(options, active) if d.handles_tickets], areas=options,
+                             priorities=priorities, categories=categories)
+
+
+def due_text(level: int) -> str:
+    """Plazo del nivel en palabras: "16 horas hábiles", "1 día hábil", "3 días hábiles"."""
+    hours = email_analysis.level_hours(level)
+    day = day_hours()
+    if hours is None:
+        return "sin vencimiento"
+    if day and hours >= day and abs(hours / day - round(hours / day)) < 1e-9:
+        days = round(hours / day)
+        return f"{days} día hábil" if days == 1 else f"{days} días hábiles"
+    value = int(hours) if float(hours).is_integer() else round(hours, 1)
+    return f"{value} hora hábil" if value == 1 else f"{value} horas hábiles"

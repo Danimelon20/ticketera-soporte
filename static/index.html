@@ -1368,6 +1368,15 @@
                 <textarea id="stDescription" rows="4" maxlength="5000" required></textarea>
             </div>
             <div class="form-group">
+                <label for="stPriority">Prioridad</label>
+                <select id="stPriority" required aria-describedby="stPriorityDue"></select>
+                <small id="stPriorityDue" class="help-text" aria-live="polite">Define el vencimiento del ticket.</small>
+            </div>
+            <div class="form-group">
+                <label for="stCategory">Categoría (opcional)</label>
+                <select id="stCategory"></select>
+            </div>
+            <div class="form-group">
                 <label for="stDepartment">Departamento que atiende</label>
                 <select id="stDepartment" required></select>
             </div>

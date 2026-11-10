@@ -28,10 +28,19 @@ def _on_duty(make_user, name="Técnico"):
     return user
 
 
+def priority_id(name="Media"):
+    db = SessionLocal()
+    try:
+        return db.query(models.Priority).filter(models.Priority.name == name).one().id
+    finally:
+        db.close()
+
+
 def _body(dept, area, **extra):
     return {"title": "No imprime la impresora del segundo piso", "description": "Sale la hoja en blanco desde ayer.",
             "department_id": dept, "reporter_name": "María Rojas", "reporter_email": "maria@empresa.test",
-            "reporter_area_id": area, "reporter_phone": "Ext. 204", "channel": "phone", **extra}
+            "reporter_area_id": area, "reporter_phone": "Ext. 204", "channel": "phone",
+            "priority_id": priority_id(), **extra}
 
 
 def _create(client, user, body):
@@ -71,6 +80,9 @@ def test_switch_off_keeps_the_old_rules(client, make_user):
     ({"reporter_area_id": None}, "área de quien reporta"),
     ({"reporter_email": "sin-arroba"}, "correo válido"),
     ({"department_id": None}, "Elija el departamento"),
+    ({"priority_id": None}, "Elija la prioridad"),
+    ({"priority_id": 999999}, "Elija la prioridad"),
+    ({"category_id": 999999}, "categoría no existe"),
 ])
 def test_required_fields(client, make_user, routing_on, change, message):
     dept, area = department(), department(handles=False)
@@ -111,8 +123,48 @@ def test_tier_matching_climbs_and_unplaced_never_gets_tickets(client, make_user,
     senior = _on_duty(make_user, "N2")
     place(senior["id"], dept, 2)
     _on_duty(make_user, "Sin depto")
-    # Ticket sin nivel: pide N1; no hay, sube a N2
-    assert _create(client, make_user("admin"), _body(dept, area)).json()["assigned_to"] == senior["id"]
+    # Prioridad Baja (nivel 1): pide N1; no hay, sube a N2
+    body = _body(dept, area, priority_id=priority_id("Baja"))
+    assert _create(client, make_user("admin"), body).json()["assigned_to"] == senior["id"]
+
+
+def test_priority_sets_level_due_date_and_required_tier(client, make_user, routing_on, auto_on):
+    dept, area = department(unique("Prioridad")), department(handles=False)
+    junior, senior = _on_duty(make_user, "N1"), _on_duty(make_user, "N2")
+    place(junior["id"], dept, 1)
+    place(senior["id"], dept, 2)
+    creator = make_user("coordinator")
+    # Alta → nivel 3 (Incidente) → necesita N2
+    data = _create(client, creator, _body(dept, area, priority_id=priority_id("Alta"))).json()
+    assert data["assigned_to"] == senior["id"]
+    db = SessionLocal()
+    try:
+        ticket = db.get(models.Ticket, data["id"])
+        analysis = ticket.ai_analysis
+        # Nivel puesto por una persona: la IA no lo cambia
+        assert analysis.human_level == 3 and analysis.human_level_by == creator["id"]
+        assert analysis.due_at is not None and analysis.due_at > ticket.created_at
+        assert ticket.priority_id == priority_id("Alta")
+    finally:
+        db.close()
+
+
+def test_category_is_optional(client, make_user, routing_on):
+    dept, area = department(), department(handles=False)
+    creator = make_user("technician")
+    db = SessionLocal()
+    try:
+        red = db.query(models.Category).filter(models.Category.name == "Red").one().id
+    finally:
+        db.close()
+    loose = _create(client, creator, _body(dept, area)).json()["id"]
+    chosen = _create(client, creator, _body(dept, area, category_id=red)).json()["id"]
+    db = SessionLocal()
+    try:
+        assert db.get(models.Ticket, loose).category.name == "Sin categoría"
+        assert db.get(models.Ticket, chosen).category_id == red
+    finally:
+        db.close()
 
 
 def test_nobody_eligible_stays_pending_in_the_department(client, make_user, routing_on, auto_on):
@@ -133,4 +185,8 @@ def test_department_options_for_staff(client, make_user):
     options = client.get("/api/departments/options", headers=make_user("technician")["headers"]).json()
     assert dept in [o["id"] for o in options["serving"]] and area not in [o["id"] for o in options["serving"]]
     assert {dept, area} <= {o["id"] for o in options["areas"]}
+    # Prioridades con su plazo (definen el vencimiento) y categorías sin "Sin categoría"
+    due = {p["name"]: p["due_text"] for p in options["priorities"]}
+    assert due["Alta"] == "16 horas hábiles" and due["Urgente"] == "4 horas hábiles"
+    assert "Sin categoría" not in [c["name"] for c in options["categories"]]
     assert client.get("/api/departments/options", headers=make_user("requester")["headers"]).status_code == 403
