@@ -1039,3 +1039,36 @@ class DepartmentUpdate(BaseModel):
     handles_tickets: Optional[bool] = None
     add_alias: Optional[str] = Field(default=None, min_length=1, max_length=300)
     remove_alias: Optional[str] = Field(default=None, max_length=300)
+
+
+class DepartmentImportRow(BaseModel):
+    line: int
+    original: str
+    path: Optional[str] = None
+    status: Literal["new", "exists", "duplicate", "error"]
+    notes: list[str] = []
+
+
+class DepartmentMerge(BaseModel):
+    # "into" queda como nombre oficial y "merge" como alias
+    merge: str = Field(max_length=1000)
+    into: str = Field(max_length=1000)
+    reason: Optional[str] = None
+    # False: uno ya existe con otro padre y se conserva (no se puede invertir)
+    choosable: bool = True
+
+
+class DepartmentImportPreview(BaseModel):
+    rows: list[DepartmentImportRow]
+    suggestions: list[DepartmentMerge]
+    counts: dict[str, int]
+
+
+class DepartmentImportConfirm(BaseModel):
+    paths: list[str] = Field(max_length=2000)
+    merges: list[DepartmentMerge] = Field(default_factory=list, max_length=2000)
+
+
+class DepartmentImportResult(BaseModel):
+    created: int
+    aliases: int

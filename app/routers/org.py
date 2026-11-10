@@ -3,12 +3,15 @@
 Adaptado de la rama areas-y-clientes sin áreas de atención: el administrador crea, renombra, mueve y
 desactiva departamentos y marca los que atienden tickets.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import audit, departments, models, routing
-from ..schemas import DepartmentCreate, DepartmentRead, DepartmentUpdate
+from ..schemas import (
+    DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    DepartmentUpdate,
+)
 from .admin import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["org"])
@@ -17,6 +20,7 @@ NOT_FOUND_DEPARTMENT = "El departamento no existe"
 CYCLE = "Un departamento no puede quedar dentro de sí mismo"
 TAKEN_NAME = "Ya existe un departamento con ese nombre en el mismo lugar"
 TAKEN_ALIAS = "Ese alias ya existe"
+MAX_IMPORT_BYTES = 1_000_000
 
 
 # ----- Departamentos -----
@@ -129,3 +133,32 @@ def update_department(department_id: int, data: DepartmentUpdate, db: Session = 
                      old=old[:150] if old else None, new=new[:150] if new else None)
     db.commit()
     return _one(db, dept.id)
+
+
+# ----- Importación del organigrama (el archivo solo se lee en memoria: nunca se guarda) -----
+
+@router.post("/departments/import/preview", response_model=DepartmentImportPreview)
+async def preview_import(file: UploadFile = File(...), db: Session = Depends(get_db), admin=Depends(require_admin)):
+    content = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(content) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="El archivo pasa de 1 MB")
+    try:
+        paths = departments.read_paths(content)
+    except departments.ImportError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return departments.preview(db, paths)
+
+
+@router.post("/departments/import/confirm", response_model=DepartmentImportResult)
+def confirm_import(data: DepartmentImportConfirm, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Crea las rutas nuevas sin "Atiende tickets" (se marca después, departamento por departamento)."""
+    try:
+        result = departments.confirm(db, data.paths, [m.model_dump() for m in data.merges])
+    except departments.ImportError_ as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    if result["created"] or result["aliases"]:
+        audit.record(db, admin.id, "departments_imported", target_label="Organigrama",
+                     new=f"{result['created']} nuevo(s), {result['aliases']} alias")
+    db.commit()
+    return result

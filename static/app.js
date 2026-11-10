@@ -10104,6 +10104,105 @@ document.addEventListener('DOMContentLoaded', () => {
         showDepartments();
     });
 
+    // Importación del organigrama: vista previa (nada se guarda) y confirmación con las fusiones elegidas
+    let importPaths = [];
+    let importSuggestions = [];
+    const deptImportPreview = document.getElementById('deptImportPreview');
+    const IMPORT_STATUS = { new: 'Nuevo', exists: 'Ya existe', duplicate: 'Repetido', error: 'Error' };
+
+    document.getElementById('deptImportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = document.getElementById('deptImportFile').files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        let data;
+        try {
+            data = await apiFetch('/admin/departments/import/preview', { method: 'POST', body: form });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        importPaths = data.rows.filter(r => r.status === 'new' || r.status === 'exists').map(r => r.path);
+        importSuggestions = data.suggestions;
+        deptImportPreview.replaceChildren();
+        const c = data.counts;
+        deptImportPreview.appendChild(makeEl('p', 'admin-text',
+            `${c.new} nuevos · ${c.exists} ya existen · ${c.duplicate} repetidos · ${c.error} con error`));
+        const table = makeEl('ul', 'org-list org-preview-rows');
+        data.rows.forEach(r => {
+            const li = makeEl('li', `org-row is-${r.status}`);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `${r.line}. ${r.path || r.original || '(vacía)'}`));
+            text.appendChild(makeEl('span', 'org-row-sub', [IMPORT_STATUS[r.status], ...r.notes].join(' · ')));
+            li.appendChild(text);
+            table.appendChild(li);
+        });
+        deptImportPreview.appendChild(table);
+        if (importSuggestions.length) {
+            deptImportPreview.appendChild(makeEl('h3', 'org-subtitle',
+                'Posibles equivalencias: marque las que se fusionan y elija el nombre oficial (el otro queda como alias)'));
+            const merges = makeEl('ul', 'org-list');
+            importSuggestions.forEach((sug, i) => {
+                const li = makeEl('li', 'org-row org-merge-row');
+                const label = makeEl('label', 'org-merge');
+                const check = document.createElement('input');
+                check.type = 'checkbox';
+                check.className = 'org-merge-check';
+                check.dataset.index = String(i);
+                label.append(check, makeEl('span', '', `Fusionar · ${sug.reason}`));
+                li.appendChild(label);
+                // Nombre oficial: por defecto el propuesto (con tildes); se puede cambiar salvo que ya exista con otro padre
+                const choices = makeEl('div', 'org-merge-choices');
+                [sug.into, sug.merge].forEach((path, j) => {
+                    const option = makeEl('label', 'org-check');
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = `orgOfficial${i}`;
+                    radio.value = path;
+                    radio.checked = j === 0;
+                    radio.disabled = !sug.choosable && j === 1;
+                    option.append(radio, makeEl('span', '', `Oficial: ${path}`));
+                    choices.appendChild(option);
+                });
+                if (!sug.choosable) choices.appendChild(makeEl('span', 'org-row-sub', 'Ya existe con otro departamento padre: se conserva su nombre.'));
+                li.appendChild(choices);
+                merges.appendChild(li);
+            });
+            deptImportPreview.appendChild(merges);
+        }
+        const confirm = makeEl('button', 'ui-btn ui-btn-primary org-import-confirm', 'Confirmar importación');
+        confirm.type = 'button';
+        deptImportPreview.appendChild(confirm);
+        deptImportPreview.hidden = false;
+    });
+
+    deptImportPreview.addEventListener('click', async (e) => {
+        const button = e.target.closest('.org-import-confirm');
+        if (!button) return;
+        const merges = [...deptImportPreview.querySelectorAll('.org-merge-check:checked')].map(check => {
+            const i = Number(check.dataset.index);
+            const sug = importSuggestions[i];
+            const chosen = deptImportPreview.querySelector(`input[name="orgOfficial${i}"]:checked`);
+            const official = chosen ? chosen.value : sug.into;
+            return { merge: official === sug.into ? sug.merge : sug.into, into: official };
+        });
+        button.disabled = true;
+        let result;
+        try {
+            result = await apiFetch('/admin/departments/import/confirm', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: importPaths, merges }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        deptImportPreview.hidden = true;
+        document.getElementById('deptImportForm').reset();
+        showSuccess(`Importación lista: ${result.created} departamento(s) nuevo(s), ${result.aliases} alias`);
+        showDepartments();
+    });
+
     // Verificación en el navegador: después de elegir una opción del menú debe verse una sola vista
     // y, dentro de Cuentas o Administración, una sola sección. Si no, queda el error en la consola.
     function visibleViews() {

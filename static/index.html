@@ -1116,6 +1116,18 @@
                         <label class="org-check"><input type="checkbox" id="deptCreateHandles"> Atiende tickets</label>
                         <button type="submit" class="ui-btn ui-btn-primary">Agregar</button>
                     </form>
+                    <details class="org-import">
+                        <summary>Importar el organigrama desde CSV</summary>
+                        <p class="admin-text">Una columna «ruta» con la ruta completa separada por « / » (por ejemplo «Gerencias / Operaciones / Fibra Óptica / Mantenimiento»). Primero verá una vista previa: nada se guarda hasta confirmar. El archivo no se guarda en el servidor. Los departamentos importados quedan sin «Atiende tickets».</p>
+                        <form id="deptImportForm" class="org-inline-form">
+                            <div class="ui-field">
+                                <label for="deptImportFile">Archivo CSV</label>
+                                <input type="file" id="deptImportFile" class="ui-input" accept=".csv,text/csv" required>
+                            </div>
+                            <button type="submit" class="ui-btn ui-btn-secondary">Vista previa</button>
+                        </form>
+                        <div id="deptImportPreview" class="org-preview" hidden></div>
+                    </details>
                     <ul id="deptList" class="org-list"></ul>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="approvals">
