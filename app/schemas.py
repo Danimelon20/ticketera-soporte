@@ -183,6 +183,8 @@ class MeRead(BaseModel):
     # Técnicos y coordinadores: departamento (ruta) y nivel del técnico (1 = N1 … 3 = N3)
     department_name: Optional[str] = None
     tier: Optional[int] = None
+    # Con el interruptor encendido y sin departamento: aviso "Contacte al administrador" (no recibe tickets)
+    placement_missing: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1117,3 +1119,28 @@ class UnplacedPerson(BaseModel):
 
 class StaffAlerts(BaseModel):
     unplaced: list[UnplacedPerson]
+
+
+
+class ChecklistItem(BaseModel):
+    key: str
+    label: str
+    ok: bool
+    detail: Optional[str] = None
+    # Sección del menú donde se corrige (ruta)
+    link: Optional[str] = None
+
+
+class SwitchRead(BaseModel):
+    key: str
+    label: str
+    enabled: bool
+    checklist: list[ChecklistItem]
+    # Se puede encender: toda la lista está lista
+    ready: bool
+    updated_at: Optional[datetime] = None
+    updated_by_name: Optional[str] = None
+
+
+class SwitchUpdate(BaseModel):
+    enabled: bool

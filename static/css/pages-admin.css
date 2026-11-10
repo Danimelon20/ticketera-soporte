@@ -1358,3 +1358,9 @@
 .invite-no-departments { grid-column: 1 / -1; margin: 0; color: var(--due-soon); }
 
 .invite-no-departments[hidden] { display: none; }
+
+.org-switches { display: grid; gap: var(--sp-3); margin: var(--sp-3) 0; }
+
+.org-switch-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+.org-switch-head .org-subtitle { margin: 0; }

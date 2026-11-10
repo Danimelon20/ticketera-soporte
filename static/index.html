@@ -320,6 +320,8 @@
         </header>
         <!-- Administrador: más de un administrador activo (solo se corrige desde la terminal) -->
         <p id="manyAdminsNotice" class="ui-notice is-warn many-admins-notice" role="status" hidden></p>
+        <!-- Personal sin departamento con el interruptor encendido: puede entrar, pero no recibe tickets -->
+        <p id="placementNotice" class="placement-notice" role="status" hidden>Su cuenta no tiene departamento asignado. Contacte al administrador</p>
         <div class="split">
             <section id="queuePanel" class="queue-panel" aria-labelledby="queueHeading">
                 <header class="queue-head">
@@ -1129,6 +1131,14 @@
                         <div id="deptImportPreview" class="org-preview" hidden></div>
                     </details>
                     <ul id="deptList" class="org-list"></ul>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="activation">
+                    <div class="admin-card-head"><h2>Tickets por departamento</h2></div>
+                    <p class="admin-text">Encendido: cada departamento que atiende tickets trabaja con su coordinador y sus técnicos, y el personal sin departamento no recibe tickets. Apagado: todo funciona como antes. Para encenderlo, la lista tiene que estar completa.</p>
+                    <div id="switchList" class="org-switches"></div>
+                    <h3 class="org-subtitle">Personal sin departamento</h3>
+                    <p class="admin-text">No tienen departamento, o el suyo está desactivado o ya no atiende tickets. Con el interruptor encendido no reciben tickets.</p>
+                    <ul id="unplacedList" class="org-list"></ul>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="approvals">
                     <div class="admin-card-head">

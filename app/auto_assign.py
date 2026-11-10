@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
 
-from . import assignment_notice, audit, availability, config, email_analysis, models, schedules
+from . import assignment_notice, audit, availability, config, email_analysis, models, routing, schedules
 from .database import SessionLocal
 from .email_processing import _RunNow
 from .notifications import notify_followers
@@ -41,13 +41,17 @@ def _row(db: Session, ticket_id: int) -> models.TicketAutoAssignment | None:
 
 
 def candidates(db: Session, now: datetime) -> list[models.User]:
-    """Técnicos activos, Disponibles y en turno en este momento (sin horario: nunca)."""
+    """Técnicos activos, Disponibles y en turno en este momento (sin horario: nunca).
+    Con el interruptor de departamentos encendido, sin departamento que atienda tickets: nunca."""
     technicians = (
         db.query(models.User)
         .filter(models.User.role == "technician", models.User.is_active.is_(True))
         .order_by(models.User.id)
         .all()
     )
+    if routing.enforced(db):
+        unplaced = {u.id for u in routing.unplaced_staff(db)}
+        technicians = [u for u in technicians if u.id not in unplaced]
     by_user = schedules.for_users(db, [u.id for u in technicians])
     return [
         u for u in technicians

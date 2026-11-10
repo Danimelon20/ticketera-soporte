@@ -558,7 +558,8 @@ def _department_fields(db: Session, user: models.User) -> dict:
     if user.role not in routing.PLACED_ROLES:
         return {}
     dept, tier = routing.department_of(db, user)
-    return {"department_name": routing.path_label(dept, routing.departments_by_id(db)), "tier": tier}
+    return {"department_name": routing.path_label(dept, routing.departments_by_id(db)), "tier": tier,
+            "placement_missing": routing.placement_missing(db, user)}
 
 
 def _availability_fields(db: Session, user: models.User) -> dict:

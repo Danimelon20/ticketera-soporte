@@ -438,6 +438,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "department_created", "department_changed", "departments_imported",
     # Departamento (y nivel) de un técnico o coordinador (old/new: "Ruta · N2")
     "placement_changed",
+    # Interruptor de Administración › Activación (target_label: la clave; old/new: Apagado/Encendido)
+    "setting_changed",
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
@@ -972,3 +974,14 @@ class StaffInvitationPlacement(Base):
                            nullable=False)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
     tier = Column(Integer, nullable=True)
+
+
+class AppSetting(Base):
+    """Ajustes que cambia el administrador desde la página (clave y valor en texto). Ahí vive routing_enforced."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(50), unique=True, nullable=False)
+    value = Column(String(200), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))

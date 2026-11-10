@@ -224,6 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         renderInvitesSection();
+        renderPlacementNotice();
         updateRoleTabs();
         if (profileRequired()) {
             showProfile();
@@ -5182,7 +5183,8 @@ document.addEventListener('DOMContentLoaded', () => {
         department_created: 'Departamento creado',
         department_changed: 'Departamento cambiado',
         departments_imported: 'Organigrama importado',
-        placement_changed: 'Departamento asignado'
+        placement_changed: 'Departamento asignado',
+        setting_changed: 'Interruptor de activación'
     };
     const changesList = document.getElementById('changesList');
     const changesEmpty = document.getElementById('changesEmpty');
@@ -6383,6 +6385,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }),
                     navSection('departments', 'Departamentos', 'admin/departamentos', () => showAdminSection('departments'), {
                         context: 'Organigrama y departamentos que atienden tickets',
+                    }),
+                    navSection('activation', 'Activación', 'admin/activacion', () => showAdminSection('activation'), {
+                        context: 'Tickets por departamento: lista de verificación y personal sin departamento',
                     }),
                     navSection('changes', 'Registro de cambios', 'admin/registro', () => {
                         closePerson();
@@ -9983,7 +9988,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };
     const ADMIN_SECTION_TITLES = {
         health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
-        departments: 'Departamentos',
+        departments: 'Departamentos', activation: 'Activación',
     };
     // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
     const ADMIN_SECTION_LOADERS = {};
@@ -10140,6 +10145,119 @@ document.addEventListener('DOMContentLoaded', () => {
         handles.checked = false;
         showDepartments();
     });
+
+    // ----- Administración › Activación: interruptor, lista de verificación y personal sin departamento -----
+    const switchList = document.getElementById('switchList');
+    const unplacedList = document.getElementById('unplacedList');
+
+    async function showActivation() {
+        let switches;
+        let alerts;
+        try {
+            [switches, alerts] = await Promise.all([
+                apiFetch('/admin/activation', { silent: true }),
+                apiFetch('/admin/staff-alerts', { silent: true }),
+            ]);
+        } catch (err) {
+            switchList.replaceChildren(errorState(err, showActivation));
+            return;
+        }
+        renderSwitches(switches);
+        renderUnplaced(unplacedList, alerts.unplaced);
+    }
+    ADMIN_SECTION_LOADERS.activation = showActivation;
+
+    function renderSwitches(switches) {
+        switchList.replaceChildren();
+        switches.forEach(sw => {
+            const card = makeEl('section', 'org-switch');
+            const head = makeEl('div', 'org-switch-head');
+            head.appendChild(makeEl('h3', 'org-subtitle', sw.label));
+            head.appendChild(makeEl('span', `ui-tag ${sw.enabled ? 'is-ok' : 'is-warn'}`, sw.enabled ? 'Encendido' : 'Apagado'));
+            card.appendChild(head);
+            const list = makeEl('ul', 'org-checklist');
+            sw.checklist.forEach(item => {
+                const li = makeEl('li', item.ok ? 'is-ok' : 'is-pending');
+                li.appendChild(makeEl('span', '', `${item.ok ? '✓' : '•'} ${item.label}`));
+                if (item.detail) li.appendChild(makeEl('span', 'org-row-sub', ` · ${item.detail}`));
+                if (!item.ok && item.link) {
+                    const link = makeEl('a', 'org-checklist-link', 'Configurar');
+                    link.href = `#/${item.link}`;
+                    li.appendChild(link);
+                }
+                list.appendChild(li);
+            });
+            card.appendChild(list);
+            if (sw.updated_by_name) {
+                card.appendChild(makeEl('p', 'org-row-sub',
+                    `Último cambio: ${sw.updated_by_name} · ${formatDateTime(sw.updated_at)}`));
+            }
+            const button = makeEl('button', `ui-btn ${sw.enabled ? 'ui-btn-secondary' : 'ui-btn-primary'}`,
+                sw.enabled ? 'Apagar' : 'Encender');
+            button.type = 'button';
+            button.dataset.switchKey = sw.key;
+            button.dataset.enable = sw.enabled ? 'false' : 'true';
+            // Encender exige la lista completa (también lo revisa el servidor); apagar siempre se puede
+            button.disabled = !sw.enabled && !sw.ready;
+            card.appendChild(button);
+            switchList.appendChild(card);
+        });
+    }
+
+    // Personal sin departamento con su botón Asignar (Activación y Panel)
+    function renderUnplaced(list, people) {
+        list.replaceChildren();
+        if (!people.length) {
+            list.appendChild(makeEl('li', 'org-row org-row-sub', 'Todo el personal tiene departamento.'));
+            return;
+        }
+        people.forEach(person => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', person.name));
+            const where = person.department_name ? `Departamento sin uso: ${person.department_name}` : 'Sin departamento';
+            text.appendChild(makeEl('span', 'org-row-sub', `${ROLE_MAP[person.role] || person.role} · ${where}`));
+            const actions = makeEl('div', 'org-row-actions');
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Asignar');
+            button.type = 'button';
+            button.dataset.placeId = String(person.id);
+            button.dataset.placeName = person.name;
+            button.dataset.placeRole = person.role;
+            actions.appendChild(button);
+            li.append(text, actions);
+            list.appendChild(li);
+        });
+    }
+
+    switchList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-switch-key]');
+        if (!button) return;
+        const enable = button.dataset.enable === 'true';
+        if (!enable && !confirm('Al apagarlo, todo vuelve a funcionar como antes. ¿Continuar?')) return;
+        button.disabled = true;
+        try {
+            await apiFetch(`/admin/activation/${button.dataset.switchKey}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enable }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error (por ejemplo, la lista sin completar)
+        }
+        showSuccess(enable ? 'Tickets por departamento encendido' : 'Tickets por departamento apagado');
+        showActivation();
+    });
+
+    unplacedList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-place-id]');
+        if (!button) return;
+        const person = { id: Number(button.dataset.placeId), name: button.dataset.placeName, role: button.dataset.placeRole };
+        if (await openPlacementDialog(person)) showActivation();
+    });
+
+    // Aviso del personal sin departamento con el interruptor encendido (lo dice /auth/me)
+    function renderPlacementNotice() {
+        document.getElementById('placementNotice').hidden = !(currentUser && currentUser.placement_missing);
+    }
 
     // ----- Departamento (y nivel) de una persona del personal: solo el administrador -----
     const placementDialog = document.getElementById('placementDialog');

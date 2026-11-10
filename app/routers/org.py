@@ -10,7 +10,7 @@ from ..database import get_db
 from .. import accounts, audit, departments, models, routing
 from ..schemas import (
     DepartmentCreate, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
-    DepartmentUpdate, PlacementRead, PlacementUpdate, StaffAlerts, UnplacedPerson,
+    DepartmentUpdate, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate, UnplacedPerson,
 )
 from .admin import require_admin
 
@@ -23,6 +23,7 @@ TAKEN_ALIAS = "Ese alias ya existe"
 MAX_IMPORT_BYTES = 1_000_000
 HAS_STAFF = "Mueva primero a su personal ({count}): el departamento o uno de sus subdepartamentos lo tiene"
 NOT_FOUND_USER = "El usuario no existe"
+CHECKLIST_PENDING = "Revise la lista de verificación antes de encender"
 
 
 # ----- Departamentos -----
@@ -242,3 +243,34 @@ def staff_alerts(db: Session = Depends(get_db), admin=Depends(require_admin)):
         unplaced.append(UnplacedPerson(id=user.id, name=user.name or "Sin nombre", role=user.role,
                                        department_name=routing.path_label(dept, by_id)))
     return StaffAlerts(unplaced=unplaced)
+
+
+# ----- Activación: interruptor de tickets por departamento -----
+
+def _switch_read(db: Session, key: str) -> SwitchRead:
+    row = routing.setting_row(db, key)
+    checklist = routing.routing_checklist(db)
+    author = db.get(models.User, row.updated_by) if row is not None and row.updated_by else None
+    return SwitchRead(
+        key=key, label=routing.SWITCH_LABELS[key], enabled=row is not None and row.value == "true",
+        checklist=checklist, ready=all(item["ok"] for item in checklist),
+        updated_at=row.updated_at if author else None, updated_by_name=(author.name or "Sin nombre") if author else None,
+    )
+
+
+@router.get("/activation", response_model=list[SwitchRead])
+def activation(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return [_switch_read(db, key) for key in routing.SWITCHES]
+
+
+@router.put("/activation/{key}", response_model=SwitchRead)
+def set_switch(key: str, data: SwitchUpdate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Encender exige la lista de verificación completa (409); apagar siempre se puede. Las dos quedan en el
+    Registro de cambios (quién y cuándo)."""
+    if key not in routing.SWITCHES:
+        raise HTTPException(status_code=404, detail="Ese interruptor no existe")
+    if data.enabled and not all(item["ok"] for item in routing.routing_checklist(db)):
+        raise HTTPException(status_code=409, detail=CHECKLIST_PENDING)
+    routing.set_setting(db, key, "true" if data.enabled else "false", admin)
+    db.commit()
+    return _switch_read(db, key)

@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import accounts, auto_assign, chatbot, config, entra_login, mailer, models, people_activity
+from . import accounts, auto_assign, chatbot, config, entra_login, mailer, models, org_setup, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -92,6 +92,8 @@ def init_db():
             )
             db.add(agente)
             db.commit()
+        # Departamentos: interruptor routing_enforced (apagado si la base ya tenía datos)
+        org_setup.ensure_structure(db)
     finally:
         db.close()
 

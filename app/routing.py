@@ -99,7 +99,10 @@ def department_of(db: Session, user: models.User) -> tuple[models.Department | N
     """Departamento (y nivel, si es técnico) de la persona. (None, None) si no tiene."""
     if user.role == "technician":
         row = technician_placement(db, user.id)
-        return (db.get(models.Department, row.department_id), row.tier) if row else (None, None)
+        # Filas de una versión anterior pueden no tener departamento
+        if row is None or row.department_id is None:
+            return None, None
+        return db.get(models.Department, row.department_id), row.tier
     if user.role == "coordinator":
         row = coordinator_row(db, user.id)
         return (db.get(models.Department, row.department_id), None) if row else (None, None)
@@ -269,3 +272,87 @@ def apply_invitation_placement(db: Session, invitation: models.StaffInvitation, 
         set_placement(db, None, user, row.department_id, row.tier, audit_change=False)
     except HTTPException:
         return
+
+
+# ----- Interruptor de activación -----
+
+ROUTING_ENFORCED = "routing_enforced"
+SWITCHES = (ROUTING_ENFORCED,)
+SWITCH_LABELS = {ROUTING_ENFORCED: "Tickets por departamento"}
+NO_PLACEMENT = "Su cuenta no tiene departamento asignado. Contacte al administrador"
+
+
+def get_setting(db: Session, key: str) -> str | None:
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
+    return row.value if row is not None else None
+
+
+def setting_row(db: Session, key: str) -> models.AppSetting | None:
+    return db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
+
+
+def _switch_text(value: str | None) -> str:
+    return "Encendido" if value == "true" else "Apagado"
+
+
+def set_setting(db: Session, key: str, value: str | None, actor: models.User | None = None) -> None:
+    """Guarda el ajuste. Los interruptores cambiados por una persona quedan en el Registro de cambios. No hace
+    commit."""
+    row = setting_row(db, key)
+    old = row.value if row is not None else None
+    if row is None:
+        row = models.AppSetting(key=key)
+        db.add(row)
+    row.value = value
+    row.updated_by = actor.id if actor is not None else None
+    row.updated_at = _now()
+    if key in SWITCHES and actor is not None and old != value:
+        audit.record(db, actor.id, "setting_changed", target_label=SWITCH_LABELS.get(key, key),
+                     old=_switch_text(old), new=_switch_text(value))
+
+
+def enforced(db: Session) -> bool:
+    """Tickets por departamento encendido ("cerrado por defecto"). Apagado: todo funciona como antes."""
+    return get_setting(db, ROUTING_ENFORCED) == "true"
+
+
+def placement_missing(db: Session, user: models.User) -> bool:
+    """Con el interruptor encendido: técnico o coordinador sin departamento que atienda tickets."""
+    return user.role in PLACED_ROLES and enforced(db) and not is_placed(db, user)
+
+
+def routing_checklist(db: Session) -> list[dict]:
+    """Lo que tiene que estar listo antes de encender. Cada punto con el enlace a la sección que lo corrige."""
+    by_id = departments_by_id(db)
+    serving = [d for d in by_id.values() if serves_tickets(d, by_id)]
+    unplaced = unplaced_staff(db)
+    coordinated = {d for (d,) in db.query(models.DepartmentCoordinator.department_id)
+                   .join(models.User, models.User.id == models.DepartmentCoordinator.user_id)
+                   .filter(models.User.is_active.is_(True))}
+    staffed = {d for (d,) in db.query(models.StaffPlacement.department_id)
+               .join(models.User, models.User.id == models.StaffPlacement.user_id)
+               .filter(models.User.is_active.is_(True), models.User.role == "technician")}
+    without_coordinator = sorted(path_label(d, by_id) for d in serving if d.id not in coordinated)
+    without_technicians = sorted(path_label(d, by_id) for d in serving if d.id not in staffed)
+
+    def detail(names: list[str]) -> str | None:
+        if not names:
+            return None
+        shown = "; ".join(names[:3])
+        return f"{len(names)}: {shown}" + (" y otros" if len(names) > 3 else "")
+
+    return [
+        {"key": "serving_departments", "label": "Hay al menos un departamento que atiende tickets",
+         "ok": bool(serving), "detail": None if serving else "ninguno marcado", "link": "admin/departamentos"},
+        {"key": "unplaced_staff", "label": "Todo el personal tiene departamento",
+         # La lista con el botón Asignar está en la misma pantalla de Activación
+         "ok": not unplaced, "detail": f"{len(unplaced)} sin departamento (ver la lista de abajo)" if unplaced else None,
+         "link": None},
+        {"key": "departments_without_coordinator", "label": "Cada departamento que atiende tickets tiene coordinador",
+         "ok": bool(serving) and not without_coordinator, "detail": detail(without_coordinator),
+         "link": "admin/departamentos"},
+        {"key": "departments_without_technicians",
+         "label": "Cada departamento que atiende tickets tiene al menos un técnico",
+         "ok": bool(serving) and not without_technicians, "detail": detail(without_technicians),
+         "link": "admin/departamentos"},
+    ]

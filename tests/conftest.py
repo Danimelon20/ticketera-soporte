@@ -354,3 +354,35 @@ class only_active_admins:
         finally:
             db.close()
         return False
+
+
+def _set_switch(key: str, value: str) -> None:
+    from app.database import SessionLocal
+    from app import routing
+
+    db = SessionLocal()
+    try:
+        routing.set_setting(db, key, value)
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def routing_switch(client):
+    """La base de las pruebas es nueva, así que routing_enforced arranca encendido (test_activation lo revisa).
+    Las pruebas corren con el interruptor apagado, que es el comportamiento de siempre; las de los
+    departamentos lo encienden con routing_on."""
+    from app import routing
+
+    _set_switch(routing.ROUTING_ENFORCED, "false")
+    yield
+
+
+@pytest.fixture
+def routing_on(routing_switch):
+    from app import routing
+
+    _set_switch(routing.ROUTING_ENFORCED, "true")
+    yield
+    _set_switch(routing.ROUTING_ENFORCED, "false")
