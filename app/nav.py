@@ -119,6 +119,10 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
             "approvals_pending": (
                 db.query(models.AccountRequest).filter(models.AccountRequest.status == "pending").count()
             ),
+            # Más de uno: aviso fijo en Administración (se corrige desde la terminal)
+            "active_admins": db.query(models.User).filter(
+                models.User.role == "admin", models.User.is_active.is_(True)
+            ).count(),
         }
     if user.role == "technician":
         mine = _open_tickets(db, assigned_to=user.id)

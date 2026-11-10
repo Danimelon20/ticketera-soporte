@@ -312,3 +312,45 @@ def code_from(body: str) -> str:
     match = re.search(r"\b(\d{6})\b", body)
     assert match, "El correo no trae un código de 6 dígitos"
     return match.group(1)
+
+
+class only_active_admins:
+    """Mientras dura el bloque, solo las cuentas keep_ids quedan como administradoras activas.
+
+    La base de pruebas es compartida y otras pruebas dejan administradores; al salir se reactivan."""
+
+    def __init__(self, *keep_ids: int):
+        self.keep_ids = keep_ids
+        self.others: list[int] = []
+
+    def __enter__(self):
+        from app.database import SessionLocal
+        from app import models
+
+        db = SessionLocal()
+        try:
+            query = db.query(models.User).filter(models.User.role == "admin", models.User.is_active.is_(True))
+            if self.keep_ids:
+                query = query.filter(models.User.id.notin_(self.keep_ids))
+            self.others = [u.id for u in query]
+            db.query(models.User).filter(models.User.id.in_(self.others)).update(
+                {"is_active": False}, synchronize_session=False
+            )
+            db.commit()
+        finally:
+            db.close()
+        return self
+
+    def __exit__(self, *exc):
+        from app.database import SessionLocal
+        from app import models
+
+        db = SessionLocal()
+        try:
+            db.query(models.User).filter(models.User.id.in_(self.others)).update(
+                {"is_active": True}, synchronize_session=False
+            )
+            db.commit()
+        finally:
+            db.close()
+        return False

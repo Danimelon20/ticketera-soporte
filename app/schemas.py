@@ -605,7 +605,8 @@ class RejectRequest(BaseModel):
 
 
 class AdminUserUpdate(BaseModel):
-    role: Literal["requester", "technician", "coordinator", "admin"] | None = None
+    # Sin "admin": el administrador solo se crea con python -m app.create_admin (422 si se pide)
+    role: Literal["requester", "technician", "coordinator"] | None = None
     is_active: bool | None = None
 
 
@@ -745,6 +746,7 @@ class NavCounts(BaseModel):
     reports_open: Optional[int] = None
     invitations_pending: Optional[int] = None
     approvals_pending: Optional[int] = None
+    active_admins: Optional[int] = None
     mine_open: Optional[int] = None
     mine_due_soon: Optional[int] = None
     following_open: Optional[int] = None

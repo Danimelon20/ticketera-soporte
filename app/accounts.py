@@ -1,4 +1,6 @@
 """Gestión de cuentas por rol: quién puede desactivar, restablecer o desbloquear a quién."""
+import logging
+
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 
@@ -9,9 +11,12 @@ SELF_CHANGE = "No puedes cambiar tu propio rol ni desactivarte"
 AGENT_LOCKED = "El Agente virtual no se puede modificar"
 LAST_ADMIN = "Debe quedar al menos un administrador activo"
 STAFF_USE_MICROSOFT = "El personal entra con su cuenta Microsoft"
+NO_ADMIN_ROLE = "El rol de administrador no se asigna desde la página: solo con python -m app.create_admin"
 RELEASED_COMMENT = "Técnico desactivado; ticket liberado"
 RELEASED_LIST_MAX = 10
 OPEN_STATUSES = ("new", "in_progress")
+# Los únicos roles entre los que el administrador cambia a alguien (técnico ↔ coordinador)
+STAFF_ROLE_CHOICES = ("technician", "coordinator")
 
 # Roles de las cuentas que cada rol puede gestionar, por acción. Ningún administrador actúa sobre otro
 # administrador (el primero y los siguientes se crean con app.create_admin)
@@ -25,8 +30,8 @@ PERMISSIONS = {
         # Horario del coordinador: informativo (la asignación automática solo usa técnicos)
         "schedule": ("technician", "coordinator"),
         "sessions": ("coordinator", "technician", "requester"),
-        # Cambio directo de rol
-        "role": ("coordinator", "technician", "requester"),
+        # Cambio directo de rol: técnico ↔ coordinador (nunca a administrador)
+        "role": STAFF_ROLE_CHOICES,
     },
     # Desactivar, restablecer, desbloquear y cerrar sesiones: solo el administrador (cuida las cuentas).
     # El coordinador maneja turnos y disponibilidad de los técnicos
@@ -39,8 +44,11 @@ PERMISSIONS = {
 }
 
 
-def check_can_manage(actor: models.User, target: models.User, action: str) -> None:
-    """403 si el actor no puede hacer esa acción sobre la cuenta (nunca sobre sí mismo)."""
+def check_can_manage(actor: models.User, target: models.User, action: str, new_role: str | None = None) -> None:
+    """403 si el actor no puede hacer esa acción sobre la cuenta (nunca sobre sí mismo).
+    new_role: con action="role", el rol pedido; ninguna pantalla asigna el de administrador."""
+    if action == "role" and new_role == "admin":
+        raise HTTPException(status_code=403, detail=NO_ADMIN_ROLE)
     if target.role == "agent":
         raise HTTPException(status_code=403, detail=AGENT_LOCKED)
     if target.id == actor.id:
@@ -122,10 +130,24 @@ def active_admins(db: Session, excluding: int | None = None) -> int:
     return query.count()
 
 
+MANY_ADMINS = "Hay %d administradores activos y solo debe haber uno: corríjalo con python -m scripts.admin_tools list-admins y demote"
+
+
+def warn_if_many_admins(db: Session) -> int:
+    """Bases anteriores a la regla de un solo administrador: avisa en el log, sin cambiar a nadie."""
+    count = active_admins(db)
+    if count > 1:
+        logging.warning(MANY_ADMINS, count)
+    return count
+
+
 def change_role(db: Session, actor: models.User, user: models.User, role: str) -> None:
     """Cambia el rol y cierra sus sesiones. No hace commit."""
     if role == user.role:
         return
+    # Segunda defensa: el administrador solo se crea con app.create_admin
+    if role == "admin":
+        raise HTTPException(status_code=403, detail=NO_ADMIN_ROLE)
     if user.role == "admin" and active_admins(db, excluding=user.id) == 0:
         raise HTTPException(status_code=400, detail=LAST_ADMIN)
     audit.record(db, actor.id, "role_changed", target=user, old=audit.role_name(user.role), new=audit.role_name(role))

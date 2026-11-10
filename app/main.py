@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, entra_login, mailer, models, people_activity
+from . import accounts, auto_assign, chatbot, config, entra_login, mailer, models, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -110,6 +110,8 @@ async def lifespan(app: FastAPI):
     mailer.check_mail_config()
     logging.info(mailer.describe_mail_config())
     init_db()
+    with SessionLocal() as db:
+        accounts.warn_if_many_admins(db)
     start_warm_up()
 
     poller = None

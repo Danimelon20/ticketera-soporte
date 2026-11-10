@@ -64,13 +64,22 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
 
    El primero es para el asistente y el análisis de correos; el segundo, para la agrupación de tickets similares.
 
-5. Cree el primer administrador. Pide nombre, correo y contraseña (mínimo 8 caracteres):
+5. Cree el administrador. Pide nombre, correo y contraseña (mínimo 12 caracteres):
 
    ```bash
    docker compose exec -it app python -m app.create_admin
    ```
 
-   El rol de administrador **nunca** se obtiene registrándose ni con una invitación: solo con este comando.
+   El rol de administrador **nunca** se obtiene registrándose, con una invitación ni desde ninguna pantalla:
+   solo con este comando. Solo puede haber **un** administrador activo; si ya hay uno, el comando se niega.
+   Desde la terminal (`python -m scripts.admin_tools ...`):
+
+   - `list-admins`: lista los administradores con su correo completo y avisa si hay más de uno activo.
+   - `demote --email <correo> [--to coordinator|technician]` o `deactivate`: para dejar uno solo.
+   - `reset-password --email <correo>`: el administrador perdió el acceso. Genera una contraseña nueva (se
+     muestra una vez), quita el bloqueo por intentos y cierra sus sesiones. El código de 6 dígitos sigue
+     llegando a su correo.
+   - `reactivate --email <correo>`: solo si no hay otro administrador activo.
 
 6. Entre a **http://localhost:8000**, pestaña **Administración**. Después de la contraseña se pide un código
    de 6 dígitos que llega al correo. Mientras `EMAIL_ENABLED=false`, el código no se envía y aparece en el

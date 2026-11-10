@@ -165,7 +165,7 @@ def update_user(
     if user.id == admin.id:
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
     if data.role is not None and data.role != user.role:
-        accounts.check_can_manage(admin, user, "role")
+        accounts.check_can_manage(admin, user, "role", new_role=data.role)
     if data.is_active is not None and data.is_active != user.is_active:
         # Con el rol que tiene ahora: un administrador no se desactiva desde aquí
         accounts.check_can_manage(admin, user, "active")
@@ -701,6 +701,7 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
     return {
         "database": database,
         "users_by_role": users_by_role,
+        "active_admins": accounts.active_admins(db),
         "tickets_by_status": tickets_by_status,
         "email_enabled": config.MAIL_TRANSPORT != "log",
         "email_last_run": last_run.isoformat() if last_run else None,

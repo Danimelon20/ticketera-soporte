@@ -4,9 +4,16 @@ Uso:
     docker compose exec -it app python -m scripts.admin_tools deactivate --email persona@empresa.com
     docker compose exec -it app python -m scripts.admin_tools reactivate --email persona@empresa.com
     docker compose exec -it app python -m scripts.admin_tools demote --email persona@empresa.com [--to coordinator]
+    docker compose exec -it app python -m scripts.admin_tools reset-password --email persona@empresa.com
+    docker compose exec -it app python -m scripts.admin_tools list-admins
 
 Pide escribir el correo para confirmar, nunca deja el sistema sin un administrador activo, cierra las
 sesiones de la cuenta y queda en el registro de cambios como hecho por "Servidor".
+Solo puede haber un administrador activo: reactivate se niega si ya hay otro. Si hay varios (bases
+anteriores a esta regla), list-admins los muestra y se corrige a mano con demote o deactivate.
+reset-password es la recuperación del administrador que perdió el acceso: genera una contraseña nueva, la
+muestra una sola vez y quita el bloqueo por intentos fallidos.
+list-admins solo lista, con el correo completo (hace falta para los demás comandos).
 
 Solicitantes con correo de un dominio interno (INTERNAL_DOMAINS):
     docker compose exec -it app python -m scripts.admin_tools internal-requesters
@@ -24,14 +31,15 @@ import sys
 
 from sqlalchemy import func, or_
 
-from app import accounts, audit, config, models
+from app import accounts, audit, config, models, throttle
 from app.database import SessionLocal
 from app.main import init_db
-from app.security import mask_email
+from app.security import generate_password, hash_password, mask_email
 from app.validators import is_internal_email
 
 DEMOTE_ROLES = ("coordinator", "technician", "requester")
-ADMIN_COMMANDS = ("deactivate", "reactivate", "demote")
+ADMIN_COMMANDS = ("deactivate", "reactivate", "demote", "reset-password")
+ONE_ADMIN = "Ya hay un administrador activo y solo puede haber uno. Desactívelo o cámbiele el rol primero."
 # Columnas que apuntan a la cuenta y se borran con ella: sesiones, códigos pendientes y datos propios
 DELETED_WITH_ACCOUNT = {
     ("sessions", "user_id"), ("login_challenges", "user_id"), ("password_resets", "user_id"),
@@ -49,8 +57,8 @@ ARCHIVE_DOMAIN = "archivo.invalid"
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m scripts.admin_tools", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=ADMIN_COMMANDS + ("internal-requesters", "delete-requester", "archive-requester"))
-    parser.add_argument("--email", help="Correo de la cuenta (todos los comandos menos internal-requesters)")
+    parser.add_argument("command", choices=ADMIN_COMMANDS + ("list-admins", "internal-requesters", "delete-requester", "archive-requester"))
+    parser.add_argument("--email", help="Correo de la cuenta (todos los comandos menos list-admins e internal-requesters)")
     parser.add_argument("--to", choices=DEMOTE_ROLES, default="coordinator",
                         help="Solo con demote: rol nuevo (por defecto, coordinator)")
     return parser
@@ -75,29 +83,68 @@ def run(command: str, email: str, new_role: str = "coordinator", confirm=input) 
             return _fail("La cuenta ya está desactivada")
         if command == "reactivate" and user.is_active:
             return _fail("La cuenta ya está activa")
+        if command == "reactivate" and accounts.active_admins(db) > 0:
+            return _fail(ONE_ADMIN)
+        if command == "reset-password" and not user.is_active:
+            return _fail("La cuenta está desactivada: reactívela primero con reactivate")
         # Desactivar o quitar el rol a un administrador activo no puede dejar el sistema sin ninguno
         if command in ("deactivate", "demote") and user.is_active and accounts.active_admins(db, excluding=user.id) == 0:
             return _fail(accounts.LAST_ADMIN)
 
         label = {"deactivate": "desactivar", "reactivate": "reactivar",
-                 "demote": f"cambiar a {audit.role_name(new_role)}"}[command]
+                 "demote": f"cambiar a {audit.role_name(new_role)}",
+                 "reset-password": "restablecer la contraseña de"}[command]
         typed = confirm(f"Va a {label} la cuenta de administrador {user.name or email}. Escriba el correo para confirmar: ")
         if typed.strip().lower() != email:
             return _fail("El correo no coincide. No se hizo ningún cambio.")
 
+        password = None
         if command == "demote":
             audit.record(db, None, "server_role_changed", target=user,
                          old=audit.role_name(user.role), new=audit.role_name(new_role))
             user.role = new_role
+        elif command == "reset-password":
+            password = generate_password()
+            user.password_hash = hash_password(password)
+            # Los códigos pendientes y el bloqueo por intentos fallidos dejan de valer
+            db.query(models.PasswordReset).filter(models.PasswordReset.user_id == user.id).delete()
+            throttle.reset(db, email)
+            audit.record(db, None, "server_password_reset", target=user)
         else:
             active = command == "reactivate"
             audit.record(db, None, "server_account_activated" if active else "server_account_deactivated", target=user)
             user.is_active = active
         accounts.close_sessions(db, user.id)
         db.commit()
+        if password is not None:
+            # Solo en esta pantalla: no se guarda ni va a los registros
+            print(f"Listo. Contraseña nueva de {email} (se muestra una sola vez): {password}")
+            print("Se cerraron sus sesiones. Al entrar, cámbiela desde Mi cuenta.")
+            return 0
         done = {"deactivate": "desactivada", "reactivate": "reactivada",
                 "demote": f"como {audit.role_name(new_role)}"}[command]
         print(f"Listo. La cuenta {email} quedó {done} y se cerraron sus sesiones.")
+        return 0
+    finally:
+        db.close()
+
+
+def list_admins() -> int:
+    """Cuentas de administrador, activas e inactivas, con el correo completo. Solo lectura."""
+    db = SessionLocal()
+    try:
+        admins = db.query(models.User).filter(models.User.role == "admin").order_by(models.User.id).all()
+        if not admins:
+            print("No hay cuentas de administrador. Cree una con: python -m app.create_admin")
+            return 0
+        for user in admins:
+            state = "activo" if user.is_active else "inactivo"
+            created = user.created_at.strftime("%Y-%m-%d") if user.created_at else "-"
+            print(f"{user.id}\t{user.name or '-'}\t{user.email}\t{state}\t{created}")
+        active = sum(1 for user in admins if user.is_active)
+        if active > 1:
+            print(f"\nAVISO: hay {active} administradores activos y solo debe haber uno. "
+                  "Deje uno y corrija los demás con demote (o deactivate).")
         return 0
     finally:
         db.close()
@@ -223,9 +270,11 @@ def archive_requester(email: str, confirm=input) -> int:
 def main(argv: list[str] | None = None, confirm=input) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.command != "internal-requesters" and not args.email:
+    if args.command not in ("internal-requesters", "list-admins") and not args.email:
         parser.error(f"{args.command} necesita --email")
     init_db()
+    if args.command == "list-admins":
+        return list_admins()
     if args.command == "internal-requesters":
         return internal_requesters()
     if args.command == "delete-requester":

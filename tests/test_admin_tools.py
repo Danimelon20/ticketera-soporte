@@ -5,7 +5,7 @@ import pytest
 
 from app import accounts, models
 from app.database import SessionLocal
-from conftest import code_from
+from conftest import code_from, only_active_admins
 from scripts import admin_tools
 
 
@@ -54,7 +54,9 @@ def test_reactivate_admin(client, make_user):
     viewer = make_user("admin")
     target = make_user("admin", "Admin Vuelve")
     assert _run("deactivate", target["email"]) == 0
-    assert _run("reactivate", target["email"]) == 0
+    # Solo puede haber un administrador activo: se reactiva cuando no queda ninguno
+    with only_active_admins():
+        assert _run("reactivate", target["email"]) == 0
     assert _db_user(target["id"]).is_active
     row = next(c for c in _changes(client, viewer, "server_account_activated") if "Admin Vuelve" in c["account"])
     assert row["actor"] == "Servidor"

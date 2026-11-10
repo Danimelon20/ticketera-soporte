@@ -92,7 +92,7 @@ def test_coordinator_cannot_request_for_coordinators_admins_or_self(client, make
     assert _create(client, coordinator, make_user("admin"), "role", "technician").status_code == 403
     assert _create(client, coordinator, coordinator, "role", "technician").status_code == 403
     # Nunca se pide el rol de administrador
-    assert _create(client, coordinator, make_user("technician"), "role", "admin").status_code == 422
+    assert _create(client, coordinator, make_user("technician"), "role", "admin").status_code in (403, 422)
 
 
 def test_nobody_approves_own_request(client, make_user):

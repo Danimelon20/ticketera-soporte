@@ -84,15 +84,16 @@ def test_directory_filters(client, make_user):
 def test_admin_changes_role_and_coordinator_cannot(client, make_user):
     admin = make_user("admin")
     coordinator = make_user("coordinator")
-    requester = make_user("requester")
+    technician = make_user("technician")
 
-    response = _patch_user(client, coordinator, requester["id"], role="technician")
+    response = _patch_user(client, coordinator, technician["id"], role="coordinator")
     assert response.status_code == 403
     assert response.json()["detail"] == "Solo el administrador puede hacer esto"
 
-    response = _patch_user(client, admin, requester["id"], role="technician")
+    # El administrador cambia técnico ↔ coordinador
+    response = _patch_user(client, admin, technician["id"], role="coordinator")
     assert response.status_code == 200
-    assert response.json()["role"] == "technician"
+    assert response.json()["role"] == "coordinator"
     assert _patch_user(client, admin, 999999, role="technician").status_code == 404
 
 

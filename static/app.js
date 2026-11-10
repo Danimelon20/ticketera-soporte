@@ -3772,12 +3772,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let directorySearchTimer = null;
     let directorySeq = 0;
 
+    // Roles que el administrador asigna desde la página: técnico ↔ coordinador. Nunca administrador
+    // (solo con python -m app.create_admin; el servidor lo rechaza)
     const ROLE_OPTIONS = [
-        ['requester', 'Solicitante'],
         ['technician', 'Técnico'],
-        ['coordinator', 'Coordinador'],
-        ['admin', 'Administrador']
+        ['coordinator', 'Coordinador']
     ];
+    const ROLE_CHANGE_ROLES = ROLE_OPTIONS.map(([value]) => value);
 
     function maskIdNumber(value) {
         if (!value) return '';
@@ -3827,7 +3828,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(makeCell(user.email));
 
             const roleTd = document.createElement('td');
-            if (isAdmin && !isSelf) {
+            if (isAdmin && !isSelf && ROLE_CHANGE_ROLES.includes(user.role)) {
                 const select = document.createElement('select');
                 select.className = 'directory-role-select';
                 select.setAttribute('aria-label', `Rol de ${user.name}`);
@@ -3959,7 +3960,8 @@ document.addEventListener('DOMContentLoaded', () => {
             availability: ['technician', 'coordinator'],
             schedule: ['technician', 'coordinator'],
             sessions: ['coordinator', 'technician', 'requester'],
-            role: ['coordinator', 'technician', 'requester']
+            // Técnico ↔ coordinador; nunca a administrador
+            role: ['coordinator', 'technician']
         },
         // Las cuentas las cuida el administrador: el coordinador maneja turnos y disponibilidad de técnicos
         coordinator: {
@@ -6681,6 +6683,18 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMyWork();
     }
 
+    // Solo puede haber un administrador activo; las bases anteriores a esa regla se corrigen a mano
+    function renderManyAdmins() {
+        const notice = document.getElementById('manyAdminsNotice');
+        const count = navCounts.active_admins;
+        const many = currentUser && currentUser.role === 'admin' && typeof count === 'number' && count > 1;
+        notice.hidden = !many;
+        if (many) {
+            notice.textContent = `Hay ${count} administradores activos y solo debe haber uno. `
+                + 'Corríjalo desde la terminal: python -m scripts.admin_tools list-admins y luego demote.';
+        }
+    }
+
     function renderNavCounts() {
         sideNavGroups.querySelectorAll('.nav-count').forEach(el => {
             const value = navCounts[el.dataset.count];
@@ -6689,6 +6703,7 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
         });
         renderNavShift();
+        renderManyAdmins();
         renderQueueViews();
         renderPageHead();
         renderMyWork();
@@ -10044,8 +10059,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function canChangeRole(user) {
         if (!currentUser || user.id === currentUser.id) return false;
-        // Admin: directo. Coordinador: solicitud con doble aprobación, solo para técnicos (como hasta ahora)
-        return currentUser.role === 'admin' || (currentUser.role === 'coordinator' && user.role === 'technician');
+        // Admin: directo, técnico ↔ coordinador. Coordinador: solicitud con doble aprobación, solo para técnicos
+        if (currentUser.role === 'admin') return ROLE_CHANGE_ROLES.includes(user.role);
+        return currentUser.role === 'coordinator' && user.role === 'technician';
     }
 
     // Las mismas reglas de hoy (MANAGE_RULES); el servidor también las revisa. En esta tabla nadie ve
@@ -10396,6 +10412,7 @@ document.addEventListener('DOMContentLoaded', () => {
             roleSelect.replaceChildren();
             const options = isCoordinator
                 ? [['coordinator', 'Coordinador'], ['requester', 'Solicitante']]
+                // Administrador: solo el otro rol del personal, sin motivo
                 : ROLE_OPTIONS.filter(([value]) => value !== user.role);
             options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, false)));
             document.getElementById('roleReasonGroup').hidden = !isCoordinator;

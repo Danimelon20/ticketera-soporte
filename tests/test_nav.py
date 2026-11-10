@@ -18,7 +18,7 @@ TECHNICIAN_KEYS = {
     "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "drafts_pending", "shift", "overdue",
 }
 # El administrador no entra al flujo de tickets: solo contadores de cuentas
-ADMIN_KEYS = {"reports_open", "invitations_pending", "approvals_pending"}
+ADMIN_KEYS = {"reports_open", "invitations_pending", "approvals_pending", "active_admins"}
 
 
 @pytest.fixture(autouse=True)

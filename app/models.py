@@ -432,6 +432,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
     # Solicitante archivado (old_value: el correo original en claro; new_value: archivado-<id>@archivo.invalid)
     "server_account_archived",
+    # Administrador creado con app.create_admin y contraseña restablecida con admin_tools reset-password
+    "server_admin_created", "server_password_reset",
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
@@ -442,7 +444,7 @@ ACCOUNT_CHANGE_ACTIONS = (
 )
 SERVER_ACTIONS = (
     "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
-    "server_account_archived",
+    "server_account_archived", "server_admin_created", "server_password_reset",
 )
 
 
