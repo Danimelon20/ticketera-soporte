@@ -989,10 +989,13 @@ class OverdueNotice(BaseModel):
     ticket_id: Optional[int] = None
     draft_id: Optional[int] = None
     title: str
-    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned"]
+    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned", "ticket_transferred",
+                  "ticket_resolved"]
     created_at: datetime
     due_at: Optional[datetime] = None
     read: bool
+    # Avisos de la bandeja (transferido, resuelto): la frase completa
+    text: Optional[str] = None
     needs_review: bool = False
     suggestion: Optional[NoticeSuggestion] = None
 
@@ -1235,3 +1238,22 @@ class DepartmentOptions(BaseModel):
     """Listas del formulario del personal: departamentos que atienden y el organigrama completo (áreas)."""
     serving: list[DepartmentOption]
     areas: list[DepartmentOption]
+
+
+
+class TicketTransfer(BaseModel):
+    department_id: int
+    # Motivo obligatorio: al menos 15 caracteres
+    reason: str = Field(min_length=15, max_length=300)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value):
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+
+class TicketTransferResult(BaseModel):
+    department_name: str
+    assigned_to: Optional[int] = None
+    # Quien transfirió todavía puede ver el ticket (si no, la página vuelve a la lista)
+    still_visible: bool

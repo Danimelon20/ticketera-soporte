@@ -125,6 +125,7 @@ def items_for(db: Session, user: models.User, now: datetime | None = None) -> li
             "suggestion": suggestion,
         })
     items += _draft_items(db, user)
+    items += _inbox_items(db, user)
     items.sort(key=lambda i: (i["created_at"], i["ticket_id"] or 0, i.get("draft_id") or 0), reverse=True)
     return items
 
@@ -162,18 +163,53 @@ def _draft_items(db: Session, user: models.User) -> list[dict]:
     ]
 
 
+def _inbox_items(db: Session, user: models.User) -> list[dict]:
+    """Bandeja (sin correo): tickets transferidos a su departamento y tickets que creó que se resolvieron."""
+    rows = (
+        db.query(models.InboxNotification)
+        .filter(models.InboxNotification.user_id == user.id)
+        .order_by(models.InboxNotification.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    titles = dict(db.query(models.Ticket.id, models.Ticket.title)
+                  .filter(models.Ticket.id.in_([r.ticket_id for r in rows]))) if rows else {}
+    return [
+        {
+            "ticket_id": row.ticket_id,
+            "title": _redact(titles.get(row.ticket_id) or f"Ticket #{row.ticket_id}"),
+            "kind": row.kind,
+            "created_at": row.created_at,
+            "due_at": None,
+            "read": row.seen_at is not None,
+            "needs_review": False,
+            "suggestion": None,
+            "text": _redact(row.text),
+        }
+        for row in rows
+    ]
+
+
 def mark_read(db: Session, user: models.User, ticket_id: int | None = None, now: datetime | None = None,
               draft_id: int | None = None) -> int:
     """Marca como leídos los avisos que la persona ve (de un ticket, de un borrador o todos). Hace commit."""
     now = now or _now()
     count = 0
     every = ticket_id is None and draft_id is None
+    if draft_id is None:
+        inbox = db.query(models.InboxNotification).filter(
+            models.InboxNotification.user_id == user.id, models.InboxNotification.seen_at.is_(None))
+        if not every:
+            inbox = inbox.filter(models.InboxNotification.ticket_id == ticket_id)
+        for row in inbox:
+            row.seen_at = now
+            count += 1
     for row in _draft_rows(db, user):
         if row.seen_at is None and (every or row.draft_id == draft_id):
             row.seen_at = now
             count += 1
     for item in items_for(db, user, now):
-        if item["kind"] == "draft_assigned":
+        if item["kind"] in ("draft_assigned",) + models.INBOX_KINDS:
             continue
         if item["read"] or (not every and item["ticket_id"] != ticket_id):
             continue

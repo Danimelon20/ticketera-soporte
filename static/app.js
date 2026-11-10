@@ -8373,6 +8373,60 @@ document.addEventListener('DOMContentLoaded', () => {
         return card;
     }
 
+    // Transferir a otro departamento: departamento destino y motivo (mínimo 15 caracteres)
+    const transferDialog = document.getElementById('transferDialog');
+    const transferError = document.getElementById('transferError');
+
+    async function openTransferDialog(ticket) {
+        let options;
+        try {
+            options = await apiFetch('/departments/options', { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        const select = document.getElementById('transferTarget');
+        select.replaceChildren(staffOption('', 'Seleccionar', true));
+        options.serving.filter(d => d.id !== ticket.department_id)
+            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, false)));
+        document.getElementById('transferReason').value = '';
+        document.getElementById('transferTicket').textContent = `Ticket #${ticket.id} · ${ticket.department_name || ''}`;
+        transferError.hidden = true;
+        transferDialog.dataset.ticketId = String(ticket.id);
+        transferDialog.showModal();
+        select.focus();
+    }
+
+    document.getElementById('transferCancel').addEventListener('click', () => transferDialog.close());
+    document.getElementById('transferForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const reason = document.getElementById('transferReason').value.trim();
+        if (reason.length < 15) {
+            transferError.textContent = 'El motivo debe tener al menos 15 caracteres';
+            transferError.hidden = false;
+            return;
+        }
+        let result;
+        try {
+            result = await apiFetch(`/tickets/${transferDialog.dataset.ticketId}/transfer`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ department_id: Number(document.getElementById('transferTarget').value) || 0, reason }),
+            });
+        } catch (err) {
+            transferError.textContent = err.message || 'No se pudo transferir';
+            transferError.hidden = false;
+            return;
+        }
+        transferDialog.close();
+        showSuccess(`Transferido a ${result.department_name}`);
+        if (result.still_visible) await reloadSelectedTicketAndList();
+        else exitTicketPage();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.td-transfer') && currentTicket) openTransferDialog(currentTicket);
+    });
+
     // Diálogo de la solución: devuelve el texto o null si se cancela
     const solutionDialog = document.getElementById('solutionDialog');
     const solutionText = document.getElementById('solutionText');
@@ -11727,6 +11781,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function noticeText(item) {
         if (item.kind === 'draft_assigned') return `Nuevo borrador asignado · ${item.title}`;
+        // Bandeja: transferido a su departamento o resuelto (sin correo)
+        if (item.text) return item.text;
         const ticket = `El ticket #${item.ticket_id} · ${item.title}`;
         if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · ${item.title}`;
         if (item.kind === 'overdue') return `${ticket} venció hace ${durationText(-secondsUntil(item.due_at))}`;
@@ -11735,6 +11791,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function noticeToastText(item) {
         if (item.kind === 'draft_assigned') return `Nuevo borrador asignado · ${item.title}`;
+        if (item.text) return item.text;
         if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · pendiente de causa`;
         if (item.kind === 'overdue') return `El ticket #${item.ticket_id} acaba de vencer`;
         return `El ticket #${item.ticket_id} vence en ${durationText(secondsUntil(item.due_at))}`;

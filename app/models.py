@@ -1027,3 +1027,33 @@ class TicketSolution(Base):
     text = Column(Text, nullable=False)
     resolved_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     resolved_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DepartmentTransfer(Base):
+    """Transferencia de un ticket a otro departamento, con su motivo. El vencimiento nunca se reinicia."""
+    __tablename__ = "department_transfers"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    from_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    to_department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    reason = Column(String(300), nullable=False)
+    transferred_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    transferred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+INBOX_KINDS = ("ticket_transferred", "ticket_resolved")
+
+
+class InboxNotification(Base):
+    """Aviso en la campana de una persona (sin correo): ticket transferido a su departamento o resuelto."""
+    __tablename__ = "inbox_notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    # ticket_transferred o ticket_resolved (validado en Python)
+    kind = Column(String(30), nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    text = Column(String(500), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    seen_at = Column(DateTime, nullable=True)

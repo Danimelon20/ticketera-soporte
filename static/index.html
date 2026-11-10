@@ -1388,6 +1388,28 @@
         </div>
     </dialog>
 
+    <!-- Transferir un ticket a otro departamento, con motivo obligatorio -->
+    <dialog id="transferDialog" class="app-dialog" aria-labelledby="transferDialogTitle">
+        <form id="transferForm" class="profile-form">
+            <h2 id="transferDialogTitle" class="modal-title">Transferir a otro departamento</h2>
+            <p id="transferTicket" class="help-text"></p>
+            <div class="form-group">
+                <label for="transferTarget">Departamento destino</label>
+                <select id="transferTarget" required></select>
+            </div>
+            <div class="form-group">
+                <label for="transferReason">Motivo (mínimo 15 caracteres)</label>
+                <textarea id="transferReason" rows="3" minlength="15" maxlength="300" required></textarea>
+                <small class="help-text">El vencimiento sigue corriendo. Si el técnico asignado no es del destino, sale de su bandeja.</small>
+            </div>
+            <p id="transferError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="transferCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Transferir</button>
+            </div>
+        </form>
+    </dialog>
+
     <!-- Al marcar Resuelto con tickets por departamento: la solución es obligatoria -->
     <dialog id="solutionDialog" class="app-dialog" aria-labelledby="solutionDialogTitle">
         <form id="solutionForm" class="profile-form">

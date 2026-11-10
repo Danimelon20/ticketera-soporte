@@ -449,3 +449,13 @@ def eligible_in_department(db: Session, technicians: list[models.User], departme
         if chosen:
             return chosen
     return []
+
+
+# ----- Bandeja (avisos sin correo) -----
+
+def notify(db: Session, user_id: int, kind: str, ticket_id: int, text: str) -> None:
+    """Aviso en la campana de una persona. No hace commit."""
+    if kind not in models.INBOX_KINDS:
+        raise ValueError(f"Aviso desconocido: {kind}")
+    db.add(models.InboxNotification(user_id=user_id, kind=kind, ticket_id=ticket_id, text=text[:500],
+                                    created_at=_now()))

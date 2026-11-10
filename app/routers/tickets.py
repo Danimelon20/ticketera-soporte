@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import StaffTicketCreated, AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import StaffTicketCreated, TicketTransfer, TicketTransferResult, AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
@@ -398,6 +398,72 @@ def incident_detail_for_admin(db: Session, ticket_id: int, admin) -> TicketDetai
     detail.contact_phone = None
     detail.contact_id_number = None
     return detail
+
+
+TRANSFER_ROLES = ("technician", "coordinator", "admin")
+TRANSFER_OFF = "Encienda tickets por departamento para transferir (Administración › Activación)"
+TRANSFER_SAME = "El ticket ya es de ese departamento"
+TRANSFER_CLOSED = "Solo se transfieren tickets abiertos"
+TRANSFER_UNCLASSIFIED = "El ticket no tiene departamento: el administrador lo clasifica primero"
+
+
+@router.post("/tickets/{ticket_id}/transfer", response_model=TicketTransferResult)
+def transfer_ticket(ticket_id: int, data: TicketTransfer, background_tasks: BackgroundTasks,
+                    db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Transferir a otro departamento con motivo. Si el técnico asignado no pertenece al destino, sale de su
+    bandeja y el ticket entra a la asignación automática del destino. El vencimiento sigue corriendo."""
+    if current_user.role not in TRANSFER_ROLES:
+        raise HTTPException(status_code=403, detail="No tienes permiso para transferir tickets")
+    if not routing.enforced(db):
+        raise HTTPException(status_code=409, detail=TRANSFER_OFF)
+    db_ticket = get_visible_ticket(db, ticket_id, current_user, full=True)
+    if db_ticket.status not in nav.OPEN_STATUSES:
+        raise HTTPException(status_code=409, detail=TRANSFER_CLOSED)
+    source = routing.ticket_department(db, db_ticket.id)
+    if source is None:
+        raise HTTPException(status_code=409, detail=TRANSFER_UNCLASSIFIED)
+    target = routing.serving_department(db, data.department_id)
+    if target.id == source.id:
+        raise HTTPException(status_code=400, detail=TRANSFER_SAME)
+
+    by_id = routing.departments_by_id(db)
+    from_label, to_label = routing.path_label(source, by_id), routing.path_label(target, by_id)
+    actor = current_user.name or "Sin nombre"
+    routing.set_ticket_department(db, db_ticket, target.id)
+    db.add(models.DepartmentTransfer(ticket_id=db_ticket.id, from_department_id=source.id,
+                                     to_department_id=target.id, reason=data.reason, transferred_by=current_user.id))
+    db.add(models.History(ticket_id=db_ticket.id, field="department", old_value=from_label, changed_by=current_user.id,
+                          new_value=f"Transferido de {from_label} a {to_label} por {actor}: {data.reason}"[:500]))
+    # El técnico que no pertenece al destino sale de su bandeja; el ticket vuelve a la asignación automática
+    requeue = False
+    assignee = db.get(models.User, db_ticket.assigned_to) if db_ticket.assigned_to else None
+    if assignee is not None and not routing.belongs_to(db, assignee, target.id):
+        db.add(models.History(ticket_id=db_ticket.id, field="assigned_to", old_value=str(assignee.id),
+                              new_value=None, changed_by=current_user.id))
+        db_ticket.assigned_to = None
+        if db_ticket.status == "in_progress":
+            db.add(models.History(ticket_id=db_ticket.id, field="status", old_value="in_progress", new_value="new",
+                                  changed_by=current_user.id))
+            db_ticket.status = "new"
+    if db_ticket.assigned_to is None:
+        row = db.query(models.TicketAutoAssignment).filter(
+            models.TicketAutoAssignment.ticket_id == db_ticket.id).first()
+        if row is not None:
+            row.status, row.user_id, row.assigned_at, row.history_id = "waiting", None, None, None
+        requeue = True
+    # Aviso en la bandeja del coordinador del destino (sin correo)
+    coordinator = routing.coordinator_of(db, target.id)
+    if coordinator is not None and coordinator.user_id != current_user.id:
+        routing.notify(db, coordinator.user_id, "ticket_transferred", db_ticket.id,
+                       f"Ticket #{db_ticket.id} transferido de {from_label} a {to_label} por {actor}: {data.reason}")
+    db.commit()
+    if requeue and config.AUTO_ASSIGN_ENABLED:
+        background_tasks.add_task(auto_assign.assign_new, db_ticket.id)
+    db.refresh(db_ticket)
+    return TicketTransferResult(
+        department_name=to_label, assigned_to=db_ticket.assigned_to,
+        still_visible=ticket_access.access(db, current_user, db_ticket) is not None,
+    )
 
 
 @router.post("/tickets/{ticket_id}/view-conversation", response_model=TicketDetail, response_model_exclude_unset=True)
