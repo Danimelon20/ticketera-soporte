@@ -55,6 +55,10 @@ MORNING, EVENING, AWAY, COORDINATOR = "tecnica.manana", "tecnico.tarde", "tecnic
 # Departamentos: coordinador de Redes y un técnico sin departamento (con turno siempre)
 NET_COORDINATOR, UNPLACED = "coordinador.redes", "tecnico.sindepto"
 # Organigrama DEMO: (padre, nombre, atiende tickets). Los nombres llevan [DEMO] para limpiarlos
+# Fase 2: ticket sin departamento, ticket creado por el personal en nombre de alguien y transferido
+UNCLASSIFIED = "Pregunta por el horario de la oficina"
+TRANSFERRED = "No hay internet en la sala de reuniones"
+TRANSFER_REASON = "Es una falla de la red del edificio, no del equipo"
 DEMO_DEPARTMENTS = (
     (None, "Gerencia General", False),
     ("Gerencia General", "Soporte N1", True),
@@ -402,6 +406,40 @@ def load(db) -> list[dict]:
 
     # Suplantación: intenta usar la cédula de Ana (queda el reporte automático del Agente virtual)
     suspicion.id_number_conflict(db, impostor, ana.id_number, "profile", actor_id=impostor.id)
+
+    # Tickets por departamento: los de los escenarios anteriores los atiende Soporte N1 (la coordinadora sigue
+    # viéndolos con el interruptor encendido); uno queda "Sin departamento" para clasificarlo
+    for ticket in db.query(models.Ticket).filter(models.Ticket.created_by.in_([ana.id, beto.id, carla.id])).all():
+        db.add(models.TicketDepartment(ticket_id=ticket.id, department_id=depts["Soporte N1"].id))
+    b.ticket(beto, UNCLASSIFIED, "Quiero saber a qué hora abren el sábado.", created_at=now - timedelta(minutes=20))
+    # Creado por la coordinadora en nombre de alguien de RR. HH. y transferido a Redes con motivo
+    moved = models.Ticket(title=f"{DEMO_TAG} {TRANSFERRED}", description="La sala 3 no tiene conexión.",
+                          category_id=b.categories.get("Red") or next(iter(b.categories.values())),
+                          priority_id=b.priorities.get(2) or next(iter(b.priorities.values())),
+                          status="new", created_by=coordinator.id, source="web", created_at=now - timedelta(minutes=15))
+    db.add(moved)
+    db.flush()
+    # La instancia que esté corriendo no manda alertas por correo de los tickets DEMO
+    for kind in ALERT_KINDS:
+        db.add(models.AlertSent(kind=kind, ticket_id=moved.id, sent_at=now))
+    db.add(models.TicketAIAnalysis(ticket_id=moved.id, status="done", ai_level=2, summary=TRANSFERRED, model="demo",
+                                   analyzed_at=moved.created_at, created_at=moved.created_at))
+    db.add(models.TicketReporter(ticket_id=moved.id, name="Laura Jiménez (RR. HH.)", channel="phone",
+                                 area_department_id=depts["Recursos Humanos"].id, phone="Ext. 210"))
+    db.add(models.TicketDepartment(ticket_id=moved.id, department_id=depts["Redes"].id))
+    db.add(models.History(ticket_id=moved.id, field="created_on_behalf", changed_by=coordinator.id,
+                          new_value=f"Creado por {coordinator.name} en nombre de Laura Jiménez (RR. HH.) vía teléfono"))
+    from_label = f"{DEMO_TAG} Gerencia General / {DEMO_TAG} Soporte N1"
+    to_label = f"{DEMO_TAG} Gerencia General / {DEMO_TAG} Redes"
+    db.add(models.DepartmentTransfer(ticket_id=moved.id, from_department_id=depts["Soporte N1"].id,
+                                     to_department_id=depts["Redes"].id, reason=f"{DEMO_TAG} {TRANSFER_REASON}",
+                                     transferred_by=coordinator.id))
+    db.add(models.History(ticket_id=moved.id, field="department", old_value=from_label, changed_by=coordinator.id,
+                          new_value=f"Transferido de {from_label} a {to_label} por {coordinator.name}: "
+                                    f"{DEMO_TAG} {TRANSFER_REASON}"))
+    db.add(models.InboxNotification(user_id=net_coordinator.id, kind="ticket_transferred", ticket_id=moved.id,
+                                    text=f"Ticket #{moved.id} transferido de {from_label} a {to_label} "
+                                         f"por {coordinator.name}: {DEMO_TAG} {TRANSFER_REASON}", created_at=now))
     db.commit()
 
     rows += [
@@ -416,7 +454,9 @@ def load(db) -> list[dict]:
         {"rol": "Coordinador", "correo": coordinator.email,
          "probar": "Coordina Soporte N1. Agrupación (#%d en #%d y la red en #%d), vencimientos, "
                    "borrador \"Sin revisor\"." % (mail_2.id, mail_1.id, net[0].id)},
-        {"rol": "Coordinador", "correo": net_coordinator.email, "probar": "Coordina el departamento Redes."},
+        {"rol": "Coordinador", "correo": net_coordinator.email,
+         "probar": "Coordina Redes. Con el interruptor encendido ve el ticket transferido #%d (aviso en la campana) "
+                   "y no ve los de Soporte N1." % moved.id},
         {"rol": "Técnico", "correo": unplaced.email,
          "probar": "Sin departamento: con el interruptor encendido ve el aviso y no recibe tickets."},
         {"rol": "Cliente", "correo": ana.email,
@@ -502,6 +542,7 @@ def _scenario_ids(db) -> dict | None:
         "network": [ticket(t) for t in NETWORK],
         "due_soon": ticket(DUE_SOON), "overdue": ticket(OVERDUE), "overdue_cause": ticket(OVERDUE_WITH_CAUSE),
         "separated": ticket(SEPARATED[1]),
+        "unclassified": ticket(UNCLASSIFIED), "transferred": ticket(TRANSFERRED),
         "draft_assigned": drafts.get(f"{DEMO_TAG} {DRAFT_ASSIGNED}"),
         "draft_unassigned": drafts.get(f"{DEMO_TAG} {DRAFT_UNASSIGNED}"),
         "enforced": routing.enforced(db),
@@ -536,6 +577,8 @@ def _fingerprint(db) -> tuple:
             models.StaffPlacement.user_id.in_(users))),
         sorted((c.user_id, c.department_id) for c in db.query(models.DepartmentCoordinator).filter(
             models.DepartmentCoordinator.user_id.in_(users))),
+        sorted((r.ticket_id, r.department_id) for r in db.query(models.TicketDepartment).filter(
+            models.TicketDepartment.ticket_id.in_(tickets))),
         db.query(models.Ticket).filter(models.Ticket.created_by.in_(users)).count(),
     )
 
@@ -715,6 +758,36 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
                             "Interruptor de tickets por departamento apagado (Administración › Activación)", None))
     checks.append(Check("Departamentos", "Administrador", "el técnico sin departamento aparece en la alerta",
                         NO_ADMIN, None))
+
+    # ----- Tickets por departamento (solo con el interruptor encendido) -----
+    transferred, unclassified = ids["transferred"], ids["unclassified"]
+    switch_off = "Interruptor de tickets por departamento apagado (Administración › Activación)"
+
+    def status_of(local, ticket_id):
+        return api.get(local, f"/api/tickets/{ticket_id}").status_code
+
+    def scoped(local, ticket_id, expected):
+        code = status_of(local, ticket_id)
+        return code == expected, f"HTTP {code}"
+
+    def transfer_seen():
+        response = api.get(NET_COORDINATOR, f"/api/tickets/{transferred}")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        lines = [h.get("new_value") or "" for h in response.json()["history"] if h["field"] == "department"]
+        ok = any(line.startswith("Transferido de ") for line in lines)
+        return ok, "lo ve, con la transferencia en el historial" if ok else "lo ve, sin la transferencia"
+
+    scope_checks = [
+        ("Coordinador Redes", f"#{soon} (de Soporte N1): HTTP 403", lambda: scoped(NET_COORDINATOR, soon, 403)),
+        ("Coordinador Redes", f"#{transferred} transferido desde Soporte N1, con motivo", transfer_seen),
+        ("Coordinador", f"#{unclassified} (sin departamento): HTTP 403", lambda: scoped(COORDINATOR, unclassified, 403)),
+    ]
+    for role, expected_text, test in scope_checks:
+        if ids["enforced"]:
+            add("Por departamento", role, expected_text, test)
+        else:
+            checks.append(Check("Por departamento", role, expected_text, switch_off, None))
     return checks
 
 
@@ -745,7 +818,7 @@ def verify(db, http) -> int:
     before = _fingerprint(db)
     api = DemoApi(http)
     try:
-        for local in (MORNING, EVENING, COORDINATOR, UNPLACED, ANA):
+        for local in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED, ANA):
             api.login(local)
         checks = _checks(api, ids)
     finally:

@@ -55,7 +55,7 @@ def test_load_creates_the_scenarios(client, sent):
         assert [u.email for u in unplaced] == [demo_data._email(demo_data.UNPLACED)]
 
         tickets = _demo_tickets(db)
-        assert len(tickets) == 10
+        assert len(tickets) == 12
         ticket_ids = {t.id for t in tickets}
         # Agrupación: una fusión del mismo cliente y dos tickets ligados de clientes distintos
         merges = db.query(models.TicketMerge).filter(models.TicketMerge.target_ticket_id.in_(ticket_ids)).all()
@@ -134,7 +134,7 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
     db = SessionLocal()
     try:
         before_users, before_tickets = _real_snapshot(db)
-        assert len(_demo_users(db)) == 10 and len(_demo_tickets(db)) == 10
+        assert len(_demo_users(db)) == 10 and len(_demo_tickets(db)) == 12
 
         # Uso de la página mezclado con datos reales: ticket real asignado a un técnico DEMO,
         # cambio de un admin real sobre una cuenta DEMO y un adjunto en un ticket DEMO
@@ -216,10 +216,10 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
     # Interruptor apagado en las pruebas: el aviso del técnico sin departamento queda OMITIDO
-    assert "16 de 16 correctos (4 omitidos)" in out
+    assert "16 de 16 correctos (7 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
-    assert out.count("OMITIDO") == 4
+    assert out.count("OMITIDO") == 7
     # Ni contraseñas ni tokens; y cierra las sesiones que abrió
     assert demo_data.PASSWORD not in out and "Bearer" not in out
     assert _demo_sessions() == 0
@@ -271,5 +271,25 @@ def test_verify_checks_the_unplaced_notice_with_the_switch_on(client, sent, caps
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "17 de 17 correctos (3 omitidos)" in out
+    assert "20 de 20 correctos (3 omitidos)" in out
     assert "ve el aviso" in out
+
+
+
+def test_load_creates_department_tickets(client, sent):
+    """Fase 2: los tickets de los escenarios tienen departamento, uno queda sin departamento y uno se transfirió."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        tickets = {t.title: t for t in _demo_tickets(db)}
+        unclassified = tickets[f"[DEMO] {demo_data.UNCLASSIFIED}"]
+        moved = tickets[f"[DEMO] {demo_data.TRANSFERRED}"]
+        assert routing.ticket_department(db, unclassified.id) is None
+        assert routing.ticket_department(db, moved.id).name == "[DEMO] Redes"
+        assert db.query(models.DepartmentTransfer).filter(models.DepartmentTransfer.ticket_id == moved.id).count() == 1
+        assert db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == moved.id).count() == 1
+        others = [t for t in tickets.values() if t.id not in (unclassified.id, moved.id)]
+        assert all(routing.ticket_department(db, t.id).name == "[DEMO] Soporte N1" for t in others)
+    finally:
+        db.close()
+    assert sent == []
