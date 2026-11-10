@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 from sqlalchemy import delete, func, select, update
 
-from app import config, grouping, models, suspicion
+from app import config, departments, grouping, models, routing, suspicion
 from app.business_hours import add_business_hours, business_hours_between
 from app.database import SessionLocal
 from app.main import init_db
@@ -52,6 +52,15 @@ ALERT_KINDS = ("critical", "due_soon", "overdue")
 
 # Cuentas y títulos de los escenarios (verificar los busca por aquí: los números cambian en cada base)
 MORNING, EVENING, AWAY, COORDINATOR = "tecnica.manana", "tecnico.tarde", "tecnico.vacaciones", "coordinadora"
+# Departamentos: coordinador de Redes y un técnico sin departamento (con turno siempre)
+NET_COORDINATOR, UNPLACED = "coordinador.redes", "tecnico.sindepto"
+# Organigrama DEMO: (padre, nombre, atiende tickets). Los nombres llevan [DEMO] para limpiarlos
+DEMO_DEPARTMENTS = (
+    (None, "Gerencia General", False),
+    ("Gerencia General", "Soporte N1", True),
+    ("Gerencia General", "Redes", True),
+    (None, "Recursos Humanos", False),
+)
 ANA, BETO, CARLA, IMPOSTOR = "ana.cliente", "beto.cliente", "carla.cliente", "suplantador"
 MAIL_TARGET = "No puedo entrar al correo de la oficina"
 MAIL_SOURCE = "Outlook me pide la contraseña todo el tiempo"
@@ -100,7 +109,9 @@ def _demo_roots(db) -> dict[str, set[int]]:
     users = set(db.scalars(select(models.User.id).where(func.lower(models.User.email).like(f"%@{DEMO_DOMAIN}"))))
     tickets = set(db.scalars(select(models.Ticket.id).where(models.Ticket.created_by.in_(users)))) if users else set()
     drafts = set(db.scalars(select(models.EmailDraft.id).where(models.EmailDraft.requester_id.in_(users)))) if users else set()
-    return {"users": users, "tickets": tickets, "email_drafts": drafts}
+    # Departamentos DEMO por la etiqueta del nombre; lo que cuelga de ellos (alias, ubicaciones) sigue por FK
+    departments = set(db.scalars(select(models.Department.id).where(models.Department.name.like(f"{DEMO_TAG}%"))))
+    return {"users": users, "tickets": tickets, "email_drafts": drafts, "departments": departments}
 
 
 def _ticket_label_ids(label: str | None) -> set[int]:
@@ -301,6 +312,30 @@ def load(db) -> list[dict]:
     db.add(models.AvailabilityPeriod(user_id=away.id, kind="vacation", start_date=today,
                                      end_date=today + timedelta(days=6), created_by=None, created_at=now))
     coordinator = _user(db, COORDINATOR, "Coordinadora Demo", "coordinator")
+    net_coordinator = _user(db, NET_COORDINATOR, "Coordinador Redes", "coordinator")
+    unplaced = _user(db, UNPLACED, "Técnico Sin Departamento", "technician")
+    _schedule(db, unplaced, range(0, 7), "00:00", "23:59")
+
+    # Organigrama: dos departamentos que atienden tickets dentro de Gerencia General, y RR. HH. (no atiende)
+    depts = {}
+    for parent, name, handles in DEMO_DEPARTMENTS:
+        row = models.Department(name=f"{DEMO_TAG} {name}", parent_id=depts[parent].id if parent else None,
+                                is_active=True, handles_tickets=handles)
+        db.add(row)
+        db.flush()
+        depts[name] = row
+    db.add(models.DepartmentAlias(department_id=depts["Soporte N1"].id,
+                                  alias=f"{DEMO_TAG} Gerencia General / {DEMO_TAG} Soporte Nivel 1",
+                                  normalized=departments.normalize_path([f"{DEMO_TAG} Gerencia General",
+                                                                         f"{DEMO_TAG} Soporte Nivel 1"])))
+    db.add_all([
+        models.DepartmentCoordinator(department_id=depts["Soporte N1"].id, user_id=coordinator.id),
+        models.DepartmentCoordinator(department_id=depts["Redes"].id, user_id=net_coordinator.id),
+        models.StaffPlacement(user_id=morning.id, department_id=depts["Soporte N1"].id, tier=1),
+        models.StaffPlacement(user_id=evening.id, department_id=depts["Redes"].id, tier=2),
+        models.StaffPlacement(user_id=away.id, department_id=depts["Soporte N1"].id, tier=1),
+    ])
+    db.flush()
 
     # Clientes con perfil completo y uno sin cédula que intenta usar la de otro
     ids = _free_id_numbers(db, 3)
@@ -371,15 +406,19 @@ def load(db) -> list[dict]:
 
     rows += [
         {"rol": "Técnico", "correo": morning.email,
-         "probar": "Turno L-V 07-15. Tiene el ticket por vencer y el borrador \"El monitor parpadea\"."},
+         "probar": "Soporte N1 · N1. Turno L-V 07-15. Tiene el ticket por vencer y el borrador "
+                   "\"El monitor parpadea\"."},
         {"rol": "Técnico", "correo": evening.email,
-         "probar": "Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
+         "probar": "Redes · N2. Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
                    "separado de un incidente, sigue en Mis tickets." % finger_related.id},
         {"rol": "Técnico", "correo": away.email,
-         "probar": "De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
+         "probar": "Soporte N1 · N1. De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
-         "probar": "Agrupación (#%d en #%d y la red en #%d), vencimientos, borrador \"Sin revisor\"."
-                   % (mail_2.id, mail_1.id, net[0].id)},
+         "probar": "Coordina Soporte N1. Agrupación (#%d en #%d y la red en #%d), vencimientos, "
+                   "borrador \"Sin revisor\"." % (mail_2.id, mail_1.id, net[0].id)},
+        {"rol": "Coordinador", "correo": net_coordinator.email, "probar": "Coordina el departamento Redes."},
+        {"rol": "Técnico", "correo": unplaced.email,
+         "probar": "Sin departamento: con el interruptor encendido ve el aviso y no recibe tickets."},
         {"rol": "Cliente", "correo": ana.email,
          "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
         {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y borrador sin revisor."},
@@ -465,9 +504,10 @@ def _scenario_ids(db) -> dict | None:
         "separated": ticket(SEPARATED[1]),
         "draft_assigned": drafts.get(f"{DEMO_TAG} {DRAFT_ASSIGNED}"),
         "draft_unassigned": drafts.get(f"{DEMO_TAG} {DRAFT_UNASSIGNED}"),
+        "enforced": routing.enforced(db),
     }
-    needed = [found[k] for k in found if k not in ("users", "network")] + found["network"]
-    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR)]
+    needed = [found[k] for k in found if k not in ("users", "network", "enforced")] + found["network"]
+    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED, ANA, IMPOSTOR)]
     return found if all(needed) else None
 
 
@@ -492,6 +532,10 @@ def _fingerprint(db) -> tuple:
             models.TicketLink.principal_ticket_id.in_(tickets))),
         sorted((c.ticket_id, c.cause) for c in db.query(models.OverdueCause).filter(
             models.OverdueCause.ticket_id.in_(tickets))),
+        sorted((p.user_id, p.department_id, p.tier) for p in db.query(models.StaffPlacement).filter(
+            models.StaffPlacement.user_id.in_(users))),
+        sorted((c.user_id, c.department_id) for c in db.query(models.DepartmentCoordinator).filter(
+            models.DepartmentCoordinator.user_id.in_(users))),
         db.query(models.Ticket).filter(models.Ticket.created_by.in_(users)).count(),
     )
 
@@ -638,6 +682,39 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
 
     add("Suplantación", "Coordinador", "reporte abierto y sin la etiqueta \"Reportada\"", impostor_report)
     checks.append(Check("Suplantación", "Administrador", "el reporte lo abrió el Agente virtual", NO_ADMIN, None))
+
+    # ----- Departamentos -----
+    def me(local):
+        response = api.get(local, "/api/auth/me")
+        if response.status_code != 200:
+            raise LookupError(f"HTTP {response.status_code}")
+        return response.json()
+
+    def coordinator_department():
+        name = me(COORDINATOR).get("department_name") or ""
+        return name.endswith(f"{DEMO_TAG} Soporte N1"), name or "sin departamento"
+
+    add("Departamentos", "Coordinador", f"dirige {DEMO_TAG} Soporte N1", coordinator_department)
+
+    def technician_tier():
+        data = me(EVENING)
+        ok = (data.get("department_name") or "").endswith(f"{DEMO_TAG} Redes") and data.get("tier") == 2
+        return ok, f"{data.get('department_name') or 'sin departamento'} · N{data.get('tier')}"
+
+    add("Departamentos", "Técnico (tarde)", f"{DEMO_TAG} Redes · N2", technician_tier)
+
+    expected = "ve el aviso «Su cuenta no tiene departamento asignado»"
+    if ids["enforced"]:
+        def unplaced_notice():
+            missing = me(UNPLACED).get("placement_missing")
+            return missing is True, "ve el aviso" if missing else "no ve el aviso"
+
+        add("Departamentos", "Técnico sin departamento", expected, unplaced_notice)
+    else:
+        checks.append(Check("Departamentos", "Técnico sin departamento", expected,
+                            "Interruptor de tickets por departamento apagado (Administración › Activación)", None))
+    checks.append(Check("Departamentos", "Administrador", "el técnico sin departamento aparece en la alerta",
+                        NO_ADMIN, None))
     return checks
 
 
@@ -668,7 +745,7 @@ def verify(db, http) -> int:
     before = _fingerprint(db)
     api = DemoApi(http)
     try:
-        for local in (MORNING, EVENING, COORDINATOR, ANA):
+        for local in (MORNING, EVENING, COORDINATOR, UNPLACED, ANA):
             api.login(local)
         checks = _checks(api, ids)
     finally:

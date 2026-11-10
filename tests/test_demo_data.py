@@ -3,7 +3,7 @@ import os
 
 from sqlalchemy import func
 
-from app import attachments, audit, config, graph, mailer, models
+from app import routing, attachments, audit, config, graph, mailer, models
 from app.alerts import due_state
 from app.database import SessionLocal, engine
 from scripts import demo_data
@@ -41,8 +41,18 @@ def test_load_creates_the_scenarios(client, sent):
         users = _demo_users(db)
         assert all(u.name.startswith("[DEMO] ") for u in users)
         roles = sorted(u.role for u in users)
-        assert roles == ["coordinator"] + ["requester"] * 4 + ["technician"] * 3
+        assert roles == ["coordinator"] * 2 + ["requester"] * 4 + ["technician"] * 4
         demo_ids = {u.id for u in users}
+
+        # Departamentos: dos atienden tickets (con su coordinador), un técnico sin departamento
+        by_id = routing.departments_by_id(db)
+        demo_depts = {routing.path_label(d, by_id): d for d in by_id.values() if d.name.startswith("[DEMO] ")}
+        serving = sorted(path for path, d in demo_depts.items() if d.handles_tickets)
+        assert serving == ["[DEMO] Gerencia General / [DEMO] Redes", "[DEMO] Gerencia General / [DEMO] Soporte N1"]
+        assert len(demo_depts) == 4
+        assert all(routing.coordinator_of(db, demo_depts[path].id) is not None for path in serving)
+        unplaced = [u for u in routing.unplaced_staff(db) if u.id in demo_ids]
+        assert [u.email for u in unplaced] == [demo_data._email(demo_data.UNPLACED)]
 
         tickets = _demo_tickets(db)
         assert len(tickets) == 10
@@ -124,7 +134,7 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
     db = SessionLocal()
     try:
         before_users, before_tickets = _real_snapshot(db)
-        assert len(_demo_users(db)) == 8 and len(_demo_tickets(db)) == 10
+        assert len(_demo_users(db)) == 10 and len(_demo_tickets(db)) == 10
 
         # Uso de la página mezclado con datos reales: ticket real asignado a un técnico DEMO,
         # cambio de un admin real sobre una cuenta DEMO y un adjunto en un ticket DEMO
@@ -205,10 +215,11 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "14 de 14 correctos (2 omitidos)" in out
+    # Interruptor apagado en las pruebas: el aviso del técnico sin departamento queda OMITIDO
+    assert "16 de 16 correctos (4 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
-    assert out.count("OMITIDO") == 2
+    assert out.count("OMITIDO") == 4
     # Ni contraseñas ni tokens; y cierra las sesiones que abrió
     assert demo_data.PASSWORD not in out and "Bearer" not in out
     assert _demo_sessions() == 0
@@ -231,7 +242,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "12 de 14 correctos" in out
+    assert out.count("| FALLA") == 2 and "14 de 16 correctos" in out
     demo_data.run("limpiar")
 
 
@@ -252,3 +263,13 @@ def test_verify_without_demo_data(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     assert "Ejecute primero" in capsys.readouterr().out
+
+
+def test_verify_checks_the_unplaced_notice_with_the_switch_on(client, sent, capsys, routing_on):
+    """Con el interruptor encendido, el aviso del técnico sin departamento se comprueba de verdad."""
+    demo_data.run("cargar")
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 0
+    out = capsys.readouterr().out
+    assert "17 de 17 correctos (3 omitidos)" in out
+    assert "ve el aviso" in out
