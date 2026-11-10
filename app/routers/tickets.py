@@ -49,6 +49,18 @@ def department_fields(db: Session, ticket: models.Ticket) -> dict:
     return fields
 
 
+def notify_creator_resolved(db: Session, ticket: models.Ticket, resolver: models.User) -> None:
+    """Aviso en la campana de quien creó el ticket (técnico, coordinador o administrador) para que le avise a quien
+    reportó. Si lo resolvió la misma persona, no hace falta. No hace commit."""
+    creator = db.get(models.User, ticket.created_by)
+    if creator is None or creator.role not in STAFF_CREATE_ROLES or creator.id == resolver.id:
+        return
+    reporter = db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == ticket.id).first()
+    who = f": avísele a {reporter.name}" if reporter is not None else ""
+    routing.notify(db, creator.id, "ticket_resolved", ticket.id,
+                   f"Ticket #{ticket.id} resuelto por {resolver.name or 'Sin nombre'}{who}. Vea la solución.")
+
+
 def save_solution(db: Session, ticket: models.Ticket, text: str, user: models.User) -> None:
     """La última documentación de la solución (si se reabre y se vuelve a resolver, se reemplaza). No hace commit."""
     row = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
@@ -921,14 +933,20 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         if assignment_notice.should_notify(assignee, current_user):
             assignment_notice.schedule(background_tasks, db_ticket, assignee)
             notified = (assignee.id,)
-    if lines:
+    # Tickets por departamento: al resolverse no sale ningún correo; avisa la campana de quien lo creó
+    resolved_now = db_ticket.status == "resolved" and old_status != "resolved"
+    quiet_resolution = resolved_now and routing.enforced(db)
+    if lines and not quiet_resolution:
         notify_followers(db, background_tasks, db_ticket, current_user, subject, lines, exclude_ids=notified)
+    if quiet_resolution:
+        notify_creator_resolved(db, db_ticket, current_user)
+        db.commit()
 
     # Tickets relacionados (posible incidente): se resuelven y se asignan junto con el principal
-    if db_ticket.status == "resolved" and old_status != "resolved":
+    if resolved_now:
         mails = grouping.resolve_related(db, db_ticket, current_user)
         db.commit()
-        for to, mail_subject, body in mails:
+        for to, mail_subject, body in ([] if quiet_resolution else mails):
             background_tasks.add_task(mailer.send_email, to, mail_subject, body)
     if db_ticket.assigned_to != old_assigned_to and db_ticket.assigned_to is not None:
         assigned = grouping.propagate_assignment(db, db_ticket, current_user)

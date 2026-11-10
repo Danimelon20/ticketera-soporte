@@ -11892,7 +11892,13 @@ document.addEventListener('DOMContentLoaded', () => {
         closeSideNav();
         if (item.kind === 'draft_assigned') openDraftById(item.draft_id);
         else if (item.kind === 'overdue' || item.kind === 'report') openOverdueReport(item.ticket_id);
-        else openTicketById(item.ticket_id);
+        else if (item.kind === 'ticket_resolved') {
+            // Enlace a la documentación de la solución
+            openTicketById(item.ticket_id).then(() => {
+                const solution = document.getElementById('ticketSolution');
+                if (solution) solution.scrollIntoView({ block: 'start' });
+            });
+        } else openTicketById(item.ticket_id);
     }
 
     navBell.addEventListener('click', () => {
