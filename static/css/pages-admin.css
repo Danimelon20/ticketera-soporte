@@ -1368,6 +1368,11 @@
 /* Panel del administrador */
 .panel-table-wrap { overflow-x: auto; }
 
+/* Tablas con desplazamiento horizontal propio (Panel, Invitaciones, Directorio): el encabezado fijo se medía
+   dentro de ese contenedor y bajaba "top" píxeles, quedando debajo de las filas. Aquí va en su lugar; en el
+   celular estas tablas ya pasan a tarjetas. */
+body.staff-shell :is(.panel-table-wrap, .invites-table-wrap, #directoryView .table-scroll) th { position: static; }
+
 .panel-missing { color: var(--due-soon); font-weight: 600; }
 
 .panel-links { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
