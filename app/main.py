@@ -107,9 +107,6 @@ def start_warm_up() -> threading.Thread | None:
     return thread
 
 
-DUE_DATES_CHECK_SECONDS = 60
-
-
 def fill_due_dates() -> int:
     """Ningún ticket abierto sin vencimiento (respaldo). Nunca lanza excepciones."""
     try:
@@ -122,7 +119,7 @@ def fill_due_dates() -> int:
 
 async def due_dates_forever() -> None:
     while True:
-        await asyncio.sleep(DUE_DATES_CHECK_SECONDS)
+        await asyncio.sleep(config.DUE_DATES_CHECK_SECONDS)
         await asyncio.to_thread(fill_due_dates)
 
 
@@ -135,7 +132,7 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         accounts.warn_if_many_admins(db)
     fill_due_dates()
-    due_task = asyncio.create_task(due_dates_forever())
+    due_task = asyncio.create_task(due_dates_forever()) if config.DUE_DATES_CHECK_SECONDS > 0 else None
     start_warm_up()
 
     poller = None

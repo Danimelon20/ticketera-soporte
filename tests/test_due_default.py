@@ -136,3 +136,24 @@ def test_human_level_zero_keeps_level_and_standard_due(client, make_user, make_t
     data = client.patch(f"/api/tickets/{ticket['id']}/ai-level", json={"level": 0},
                         headers=coordinator["headers"]).json()
     assert data["human_level"] == 0 and data["due_at"] is not None
+
+
+def test_periodic_check_is_configurable(monkeypatch):
+    """0 (las pruebas): solo al arrancar; con un valor, el ciclo usa ese intervalo."""
+    import asyncio
+
+    assert config.DUE_DATES_CHECK_SECONDS == 0
+    calls, waits = [], []
+
+    async def _fake_sleep(seconds):
+        waits.append(seconds)
+        if len(waits) > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(config, "DUE_DATES_CHECK_SECONDS", 90)
+    monkeypatch.setattr(main.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(main, "fill_due_dates", lambda: calls.append(1) or 0)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.due_dates_forever())
+    assert waits == [90, 90] and calls == [1]
+

@@ -73,6 +73,9 @@ AUTO_ASSIGN_ENABLED = os.getenv("AUTO_ASSIGN_ENABLED", "false").lower() == "true
 AUTO_ASSIGN_LOAD_MODE = os.getenv("AUTO_ASSIGN_LOAD_MODE", "levels").lower()
 AUTO_ASSIGN_CHECK_SECONDS = int(os.getenv("AUTO_ASSIGN_CHECK_SECONDS", "60"))
 
+# Ningún ticket abierto sin vencimiento: cada cuántos segundos se revisa (0: solo al arrancar)
+DUE_DATES_CHECK_SECONDS = int(os.getenv("DUE_DATES_CHECK_SECONDS", "60"))
+
 # Agrupación de tickets similares (mismo cliente: se fusiona; varios clientes: incidente)
 GROUPING_ENABLED = os.getenv("GROUPING_ENABLED", "false").lower() == "true"
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen3-embedding:0.6b")
