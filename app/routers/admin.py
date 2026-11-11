@@ -771,10 +771,8 @@ def analyze_missing(background_tasks: BackgroundTasks, db: Session = Depends(get
         .outerjoin(models.TicketAIAnalysis, models.TicketAIAnalysis.ticket_id == models.Ticket.id)
         .filter(
             models.Ticket.status.in_(("new", "in_progress")),
-            # Sin fila, o solo con el nivel Estándar por defecto (o un análisis fallido)
-            models.TicketAIAnalysis.id.is_(None)
-            | (models.TicketAIAnalysis.model.is_(None) & models.TicketAIAnalysis.human_level.is_(None)
-               & (models.TicketAIAnalysis.status != "pending")),
+            # Sin análisis, o en Estándar por defecto (con su línea automática); nunca un nivel de una persona
+            email_analysis.retry_filter(db),
         )
         .order_by(models.Ticket.id)
         .all()

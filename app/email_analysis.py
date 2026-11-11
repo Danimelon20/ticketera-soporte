@@ -109,7 +109,8 @@ def apply_default_level(db: Session, ticket: models.Ticket, row: models.TicketAI
         changed = True
         from . import audit
         agent_id = audit.agent_id(db)
-        if agent_id is not None:
+        # Una sola línea por ticket aunque la IA vuelva a fallar al reintentar
+        if agent_id is not None and not has_default_line(db, ticket.id):
             db.add(models.History(ticket_id=ticket.id, field=DEFAULT_LEVEL_FIELD, old_value=None,
                                   new_value=DEFAULT_LEVEL_TEXT, changed_by=agent_id))
     if row.due_at is None:
@@ -118,10 +119,29 @@ def apply_default_level(db: Session, ticket: models.Ticket, row: models.TicketAI
     return changed
 
 
-def waits_for_ai(row: models.TicketAIAnalysis | None) -> bool:
-    """Sin análisis de la IA todavía: sin fila, o solo con el nivel por defecto o un análisis fallido (sin
-    modelo ni nivel de una persona). "Analizar tickets sin nivel" los vuelve a intentar."""
-    return row is None or (row.model is None and row.human_level is None and row.status != "pending")
+def has_default_line(db: Session, ticket_id: int) -> bool:
+    return db.query(models.History.id).filter(models.History.ticket_id == ticket_id,
+                                              models.History.field == DEFAULT_LEVEL_FIELD).first() is not None
+
+
+def retry_filter(db: Session):
+    """Condición de "Analizar tickets sin nivel" (con TicketAIAnalysis en outer join): sin análisis, o que quedó
+    en Estándar por defecto (tiene la línea automática del historial) y la IA todavía no lo analizó. Nunca un
+    nivel puesto por una persona (aunque sea Estándar)."""
+    row = models.TicketAIAnalysis
+    defaulted = db.query(models.History.ticket_id).filter(models.History.field == DEFAULT_LEVEL_FIELD)
+    return row.id.is_(None) | (
+        models.Ticket.id.in_(defaulted) & row.human_level.is_(None) & row.model.is_(None) & (row.status != "pending")
+    )
+
+
+def waits_for_ai(db: Session, ticket: models.Ticket) -> bool:
+    """La misma condición para un ticket (se revisa otra vez justo antes de analizarlo)."""
+    row = ticket.ai_analysis
+    if row is None:
+        return True
+    return (row.human_level is None and row.model is None and row.status != "pending"
+            and has_default_line(db, ticket.id))
 
 
 def fill_missing_due_dates(db: Session, now: datetime | None = None) -> int:
@@ -340,7 +360,7 @@ def analyze_ticket_by_id(ticket_id: int) -> str:
         try:
             ticket = db.get(models.Ticket, ticket_id)
             # Otro análisis pudo terminarlo mientras esperaba el turno
-            if ticket is None or not waits_for_ai(ticket.ai_analysis):
+            if ticket is None or not waits_for_ai(db, ticket):
                 return "skipped"
             return analyze_ticket(db, ticket)
         except Exception:
