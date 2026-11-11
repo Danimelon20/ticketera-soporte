@@ -2253,7 +2253,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function appendHistoryText(target, entry, changedByName) {
         // Departamentos: el servidor ya guarda la frase completa ("Transferido de X a Y por Z: motivo",
         // "Creado por X en nombre de Y vía teléfono", "Clasificado en X por Z")
-        if (entry.field === 'department' || entry.field === 'created_on_behalf') {
+        if (entry.field === 'department' || entry.field === 'created_on_behalf' || entry.field === 'level_default') {
             target.appendChild(document.createTextNode(entry.new_value || ''));
             return;
         }

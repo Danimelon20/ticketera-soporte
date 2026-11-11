@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import accounts, auto_assign, chatbot, config, entra_login, mailer, models, org_setup, people_activity
+from . import accounts, auto_assign, chatbot, config, email_analysis, entra_login, mailer, models, org_setup, people_activity
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -107,6 +107,25 @@ def start_warm_up() -> threading.Thread | None:
     return thread
 
 
+DUE_DATES_CHECK_SECONDS = 60
+
+
+def fill_due_dates() -> int:
+    """Ningún ticket abierto sin vencimiento (respaldo). Nunca lanza excepciones."""
+    try:
+        with SessionLocal() as db:
+            return email_analysis.fill_missing_due_dates(db)
+    except Exception:
+        logging.exception("Falló la revisión de tickets sin vencimiento")
+        return 0
+
+
+async def due_dates_forever() -> None:
+    while True:
+        await asyncio.sleep(DUE_DATES_CHECK_SECONDS)
+        await asyncio.to_thread(fill_due_dates)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Antes que nada: con una configuración de correo peligrosa la app no arranca
@@ -115,6 +134,8 @@ async def lifespan(app: FastAPI):
     init_db()
     with SessionLocal() as db:
         accounts.warn_if_many_admins(db)
+    fill_due_dates()
+    due_task = asyncio.create_task(due_dates_forever())
     start_warm_up()
 
     poller = None
@@ -158,7 +179,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    for task in (poller, summary, alerts_task, assign_task):
+    for task in (poller, summary, alerts_task, assign_task, due_task):
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):

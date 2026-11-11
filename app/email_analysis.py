@@ -83,6 +83,72 @@ def effective_level(row: models.TicketAIAnalysis) -> int | None:
     return row.human_level if row.human_level is not None else row.ai_level
 
 
+# Ningún ticket abierto queda sin vencimiento: sin nivel de la IA (o "No es soporte") se usa Estándar
+DEFAULT_LEVEL = 2
+DEFAULT_LEVEL_FIELD = "level_default"
+DEFAULT_LEVEL_TEXT = "Nivel 2 (Solicitud estándar) por defecto: la IA no indicó el nivel"
+TICKET_OPEN_STATUSES = ("new", "in_progress")
+# Sin fila de análisis después de este tiempo: el análisis en segundo plano ya no la va a crear
+MISSING_ANALYSIS_MINUTES = 30
+
+
+def due_level(level: int | None) -> int:
+    """Nivel con el que se calcula el vencimiento: sin nivel o "No es soporte" vence como Estándar."""
+    return level if level_hours(level) is not None else DEFAULT_LEVEL
+
+
+def apply_default_level(db: Session, ticket: models.Ticket, row: models.TicketAIAnalysis) -> bool:
+    """Ticket abierto sin nivel de la IA: Estándar por defecto, para revisión y con su línea en el historial.
+    Un nivel puesto por una persona no se cambia (solo se le calcula el vencimiento). No hace commit."""
+    if ticket.status not in TICKET_OPEN_STATUSES:
+        return False
+    changed = False
+    if row.human_level is None and level_hours(row.ai_level) is None:
+        row.ai_level = DEFAULT_LEVEL
+        row.needs_review = True
+        changed = True
+        from . import audit
+        agent_id = audit.agent_id(db)
+        if agent_id is not None:
+            db.add(models.History(ticket_id=ticket.id, field=DEFAULT_LEVEL_FIELD, old_value=None,
+                                  new_value=DEFAULT_LEVEL_TEXT, changed_by=agent_id))
+    if row.due_at is None:
+        row.due_at = compute_due_at(ticket.created_at, due_level(effective_level(row)))
+        changed = True
+    return changed
+
+
+def waits_for_ai(row: models.TicketAIAnalysis | None) -> bool:
+    """Sin análisis de la IA todavía: sin fila, o solo con el nivel por defecto o un análisis fallido (sin
+    modelo ni nivel de una persona). "Analizar tickets sin nivel" los vuelve a intentar."""
+    return row is None or (row.model is None and row.human_level is None and row.status != "pending")
+
+
+def fill_missing_due_dates(db: Session, now: datetime | None = None) -> int:
+    """Respaldo: tickets abiertos sin vencimiento (análisis terminado o fallido, o sin análisis cuando la IA está
+    apagada o ya no lo va a hacer). Los que esperan el análisis no se tocan. Hace commit. Devuelve cuántos."""
+    now = now or _now()
+    open_tickets = db.query(models.Ticket).filter(models.Ticket.status.in_(TICKET_OPEN_STATUSES))
+    count = 0
+    # Con la IA apagada, los "pending" (correos) nunca se analizan
+    finished = ("done", "error") if config.AI_ANALYSIS_ENABLED else ("done", "error", "pending")
+    with_row = open_tickets.join(models.TicketAIAnalysis).filter(
+        models.TicketAIAnalysis.status.in_(finished), models.TicketAIAnalysis.due_at.is_(None))
+    for ticket in with_row.all():
+        count += apply_default_level(db, ticket, ticket.ai_analysis)
+    without_row = open_tickets.filter(models.Ticket.id.notin_(db.query(models.TicketAIAnalysis.ticket_id)))
+    if config.AI_ANALYSIS_ENABLED:
+        without_row = without_row.filter(models.Ticket.created_at < now - timedelta(minutes=MISSING_ANALYSIS_MINUTES))
+    for ticket in without_row.all():
+        row = models.TicketAIAnalysis(ticket_id=ticket.id, status="done", attempts=0)
+        db.add(row)
+        count += apply_default_level(db, ticket, row)
+    db.commit()
+    if count:
+        logging.info("Vencimiento por defecto (Estándar) para %s tickets abiertos sin nivel", count)
+    return count
+
+
 def _clean(text: str | None) -> str:
     # Sin datos personales y sin forma de cerrar el marcador desde el correo
     return chatbot._redact(text).replace("<<<", "").replace(">>>", "")
@@ -208,6 +274,8 @@ def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
         row.attempts = (row.attempts or 0) + 1
         if row.attempts >= MAX_ATTEMPTS:
             row.status = "error"
+            # Sin más intentos: vence como Estándar
+            apply_default_level(db, ticket, row)
         logging.warning("No se pudo analizar el ticket %s (intento %s): %s", ticket.id, row.attempts, type(exc).__name__)
         db.commit()
         return row.status
@@ -223,6 +291,8 @@ def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
     row.analyzed_at = _now()
     row.due_at = compute_due_at(ticket.created_at, effective_level(row))
     row.status = "done"
+    # La IA no indicó el nivel (o dijo "No es soporte"): Estándar por defecto
+    apply_default_level(db, ticket, row)
     db.commit()
     logging.info("Ticket %s analizado por la IA", ticket.id)
     return row.status
@@ -270,7 +340,7 @@ def analyze_ticket_by_id(ticket_id: int) -> str:
         try:
             ticket = db.get(models.Ticket, ticket_id)
             # Otro análisis pudo terminarlo mientras esperaba el turno
-            if ticket is None or ticket.ai_analysis is not None:
+            if ticket is None or not waits_for_ai(ticket.ai_analysis):
                 return "skipped"
             return analyze_ticket(db, ticket)
         except Exception:

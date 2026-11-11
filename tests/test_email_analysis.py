@@ -143,8 +143,9 @@ def test_invalid_json_needs_review(make_user, llm):
     row = _row(ticket_id)
     assert row.status == "done"
     assert row.needs_review is True
-    assert row.ai_level is None and row.ai_category_id is None and row.summary is None
-    assert row.due_at is None
+    # Sin nivel de la IA: Estándar por defecto, con vencimiento y su línea en el historial
+    assert row.ai_level == email_analysis.DEFAULT_LEVEL and row.ai_category_id is None and row.summary is None
+    assert row.due_at is not None
 
 
 def test_made_up_category_needs_review(make_user, llm):
@@ -169,7 +170,8 @@ def test_invalid_level_needs_review(make_user, llm, level):
 
     row = _row(ticket_id)
     assert row.needs_review is True
-    assert row.ai_level is None
+    # Nivel no válido: Estándar por defecto
+    assert row.ai_level == email_analysis.DEFAULT_LEVEL
 
 
 def test_injection_stays_inside_markers(make_user, llm):
@@ -271,9 +273,10 @@ def test_overdue_level_is_corrected_by_coordinator_not_technician(client, make_u
     row = _row(ticket_id)
     assert row.human_level_by == coordinator["id"]
 
-    # Nivel 0: sin tiempo meta. La prioridad y el estado no cambian.
+    # Nivel 0 puesto por una persona: se respeta, pero un ticket abierto vence como Estándar.
+    # La prioridad y el estado no cambian.
     data = client.patch(f"/api/tickets/{ticket_id}/ai-level", json={"level": 0}, headers=coordinator["headers"]).json()
-    assert data["due_at"] is None and data["overdue"] is False
+    assert data["human_level"] == 0 and data["due_at"] is not None
     detail = client.get(f"/api/tickets/{ticket_id}", headers=coordinator["headers"]).json()
     assert detail["status"] == before["status"]
     assert detail["priority_id"] == before["priority_id"]
@@ -286,6 +289,7 @@ def test_web_ticket_has_no_analysis(client, make_user, make_ticket):
     requester = make_user("requester")
     coordinator = make_user("coordinator")
     ticket = make_ticket(requester)
+    # Con la IA apagada el nivel Estándar lo pone la revisión periódica (main.fill_due_dates), no la creación
     detail = client.get(f"/api/tickets/{ticket['id']}", headers=coordinator["headers"]).json()
     assert detail["ai_analysis"] is None
     response = client.patch(f"/api/tickets/{ticket['id']}/ai-level", json={"level": 2}, headers=coordinator["headers"])

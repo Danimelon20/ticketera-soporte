@@ -240,7 +240,7 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
             content=f"Ticket creado a partir de un correo y confirmado por {reviewer.name}.",
         ))
     # El análisis de la IA ya está hecho: el del borrador
-    db.add(models.TicketAIAnalysis(
+    analysis = models.TicketAIAnalysis(
         ticket_id=ticket.id,
         status="done",
         ai_level=draft.ai_level,
@@ -250,7 +250,10 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
         model=config.LLM_MODEL,
         analyzed_at=_now().replace(tzinfo=None),
         due_at=email_analysis.compute_due_at(ticket.created_at, draft.ai_level),
-    ))
+    )
+    db.add(analysis)
+    # Sin nivel del borrador (o "No es soporte"): vence como Estándar
+    email_analysis.apply_default_level(db, ticket, analysis)
     # Al perfil con las mismas reglas que "Complete su perfil"; desde aquí queda fijo
     identity.apply_contact_from_email(
         db, requester, requester.phone or contact_phone, contact_id_number, actor_id=reviewer.id

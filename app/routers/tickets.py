@@ -595,7 +595,8 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
     # Solo el análisis cambia: prioridad, estado y asignación quedan igual
     row.human_level = data.level
     row.human_level_by = current_user.id
-    row.due_at = email_analysis.compute_due_at(db_ticket.created_at, data.level)
+    # Un ticket abierto nunca queda sin vencimiento: "No es soporte" vence como Estándar
+    row.due_at = email_analysis.compute_due_at(db_ticket.created_at, email_analysis.due_level(data.level))
     db.commit()
     db.refresh(row)
     return ai_analysis_read(row, db_ticket)

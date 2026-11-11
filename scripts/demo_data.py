@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 from sqlalchemy import delete, func, select, update
 
-from app import config, departments, grouping, models, routing, suspicion
+from app import config, departments, email_analysis, grouping, models, routing, suspicion
 from app.business_hours import add_business_hours, business_hours_between
 from app.database import SessionLocal
 from app.main import init_db
@@ -260,6 +260,9 @@ class Builder:
         db.add(ticket)
         db.flush()
         db.add(models.TicketFollower(ticket_id=ticket.id, user_id=owner.id))
+        # Sin fecha dada: la del nivel (antes quedaban "Sin fecha límite")
+        if due_at is None:
+            due_at = email_analysis.compute_due_at(created_at, email_analysis.due_level(level))
         db.add(models.TicketAIAnalysis(
             ticket_id=ticket.id, status="done", ai_level=level, summary=summary or title[:300],
             due_at=due_at, model="demo", analyzed_at=created_at, created_at=created_at,
@@ -423,6 +426,7 @@ def load(db) -> list[dict]:
     for kind in ALERT_KINDS:
         db.add(models.AlertSent(kind=kind, ticket_id=moved.id, sent_at=now))
     db.add(models.TicketAIAnalysis(ticket_id=moved.id, status="done", ai_level=2, summary=TRANSFERRED, model="demo",
+                                   due_at=email_analysis.compute_due_at(moved.created_at, 2),
                                    analyzed_at=moved.created_at, created_at=moved.created_at))
     db.add(models.TicketReporter(ticket_id=moved.id, name="Laura Jiménez (RR. HH.)", channel="phone",
                                  area_department_id=depts["Recursos Humanos"].id, phone="Ext. 210"))

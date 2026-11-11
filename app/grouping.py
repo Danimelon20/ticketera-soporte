@@ -33,7 +33,7 @@ SEPARATE_ROLES = ("coordinator",)
 NO_PERMISSION = "No tienes permiso para separar estos tickets"
 # Llevan el número del ticket de otro cliente: el solicitante no los recibe
 # El solicitante no ve los cambios de departamento ni quién creó el ticket en su nombre
-STAFF_HISTORY_FIELDS = ("linked", "unlinked", "department", "created_on_behalf")
+STAFF_HISTORY_FIELDS = ("linked", "unlinked", "department", "created_on_behalf", "level_default")
 # Desde aquí empieza una firma: lo que sigue no se compara
 SIGNATURE_RE = re.compile(
     r"^\s*(?:--\s*$|saludos\b|atentamente\b|cordialmente\b|enviado desde\b|sent from\b)",
