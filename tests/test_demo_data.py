@@ -76,6 +76,23 @@ def test_load_creates_the_scenarios(client, sent):
         owners.add(db.get(models.Ticket, links[0].principal_ticket_id).created_by)
         assert len(owners) == 3
 
+        # Tickets de red en Redes; los demás con departamento, en Soporte N1 (salvo el sin clasificar)
+        redes = demo_depts["[DEMO] Gerencia General / [DEMO] Redes"]
+        soporte = demo_depts["[DEMO] Gerencia General / [DEMO] Soporte N1"]
+        network = [t for t in tickets if any(t.title.endswith(title) for title in demo_data.NETWORK)]
+        assert len(network) == 3
+        assert all(routing.ticket_department(db, t.id).id == redes.id for t in network)
+        others = [routing.ticket_department(db, t.id) for t in tickets if t not in network]
+        assert {d.id for d in others if d is not None} == {soporte.id, redes.id}
+        # Escalamiento de ejemplo: Soporte N1 → Redes
+        assert routing.next_level(db, soporte.id).id == redes.id
+        # Sin nivel del técnico (la columna queda con su valor por defecto)
+        assert {p.tier for p in db.query(models.StaffPlacement).filter(
+            models.StaffPlacement.user_id.in_(demo_ids))} == {1}
+        # Ningún ticket abierto sin fecha límite
+        assert all(t.ai_analysis is not None and t.ai_analysis.due_at is not None
+                   for t in tickets if t.status in ("new", "in_progress"))
+
         # Vencimientos
         now = demo_data._now()
         states = [due_state(t, now) for t in tickets if t.ai_analysis.due_at]
@@ -216,10 +233,11 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
     # Interruptor apagado en las pruebas: el aviso del técnico sin departamento queda OMITIDO
-    assert "16 de 16 correctos (7 omitidos)" in out
+    assert "17 de 17 correctos (10 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
-    assert out.count("OMITIDO") == 7
+    assert out.count("OMITIDO") == 10
+    assert "ningún ticket abierto sin fecha límite" in out
     # Ni contraseñas ni tokens; y cierra las sesiones que abrió
     assert demo_data.PASSWORD not in out and "Bearer" not in out
     assert _demo_sessions() == 0
@@ -242,7 +260,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "14 de 16 correctos" in out
+    assert out.count("| FALLA") == 2 and "15 de 17 correctos" in out
     demo_data.run("limpiar")
 
 
@@ -271,8 +289,10 @@ def test_verify_checks_the_unplaced_notice_with_the_switch_on(client, sent, caps
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "20 de 20 correctos (3 omitidos)" in out
+    assert "24 de 24 correctos (3 omitidos)" in out
     assert "ve el aviso" in out
+    # Tickets de red en Redes y Escalar en Soporte N1 con Redes ya elegido
+    assert "(de red, en Redes): HTTP 403" in out and "Escalar con [DEMO] Redes ya elegido" in out
 
 
 
@@ -288,7 +308,10 @@ def test_load_creates_department_tickets(client, sent):
         assert routing.ticket_department(db, moved.id).name == "[DEMO] Redes"
         assert db.query(models.DepartmentTransfer).filter(models.DepartmentTransfer.ticket_id == moved.id).count() == 1
         assert db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == moved.id).count() == 1
-        others = [t for t in tickets.values() if t.id not in (unclassified.id, moved.id)]
+        # Los de red, en Redes; los demás, en Soporte N1
+        network = [tickets[f"[DEMO] {title}"] for title in demo_data.NETWORK]
+        assert all(routing.ticket_department(db, t.id).name == "[DEMO] Redes" for t in network)
+        others = [t for t in tickets.values() if t.id not in (unclassified.id, moved.id) and t not in network]
         assert all(routing.ticket_department(db, t.id).name == "[DEMO] Soporte N1" for t in others)
     finally:
         db.close()

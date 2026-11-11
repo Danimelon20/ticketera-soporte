@@ -189,6 +189,12 @@ def clean(db) -> dict[str, int]:
     if not any(ids.values()):
         return {}
     files = _stored_names(db, ids)
+    # Siguiente nivel (sin columna id): las filas que salen de un departamento DEMO o llegan a uno
+    demo_departments = ids.get("departments", set())
+    if demo_departments:
+        escalation = models.DepartmentEscalation
+        db.execute(delete(escalation).where(escalation.department_id.in_(demo_departments)
+                                            | escalation.next_department_id.in_(demo_departments)))
     tables = {table.name: table for table in models.Base.metadata.sorted_tables}
     for table_name, column_name, rows in references:
         table = tables[table_name]
@@ -338,9 +344,12 @@ def load(db) -> list[dict]:
     db.add_all([
         models.DepartmentCoordinator(department_id=depts["Soporte N1"].id, user_id=coordinator.id),
         models.DepartmentCoordinator(department_id=depts["Redes"].id, user_id=net_coordinator.id),
-        models.StaffPlacement(user_id=morning.id, department_id=depts["Soporte N1"].id, tier=1),
-        models.StaffPlacement(user_id=evening.id, department_id=depts["Redes"].id, tier=2),
-        models.StaffPlacement(user_id=away.id, department_id=depts["Soporte N1"].id, tier=1),
+        # Sin nivel del técnico: los niveles de soporte son departamentos
+        models.StaffPlacement(user_id=morning.id, department_id=depts["Soporte N1"].id),
+        models.StaffPlacement(user_id=evening.id, department_id=depts["Redes"].id),
+        models.StaffPlacement(user_id=away.id, department_id=depts["Soporte N1"].id),
+        # Escalamiento de ejemplo: lo que Soporte N1 no resuelve sube a Redes
+        models.DepartmentEscalation(department_id=depts["Soporte N1"].id, next_department_id=depts["Redes"].id),
     ])
     db.flush()
 
@@ -410,10 +419,12 @@ def load(db) -> list[dict]:
     # Suplantación: intenta usar la cédula de Ana (queda el reporte automático del Agente virtual)
     suspicion.id_number_conflict(db, impostor, ana.id_number, "profile", actor_id=impostor.id)
 
-    # Tickets por departamento: los de los escenarios anteriores los atiende Soporte N1 (la coordinadora sigue
+    # Tickets por departamento: los de red los atiende Redes y los demás Soporte N1 (la coordinadora sigue
     # viéndolos con el interruptor encendido); uno queda "Sin departamento" para clasificarlo
+    network_ids = {t.id for t in net}
     for ticket in db.query(models.Ticket).filter(models.Ticket.created_by.in_([ana.id, beto.id, carla.id])).all():
-        db.add(models.TicketDepartment(ticket_id=ticket.id, department_id=depts["Soporte N1"].id))
+        dept = depts["Redes"] if ticket.id in network_ids else depts["Soporte N1"]
+        db.add(models.TicketDepartment(ticket_id=ticket.id, department_id=dept.id))
     b.ticket(beto, UNCLASSIFIED, "Quiero saber a qué hora abren el sábado.", created_at=now - timedelta(minutes=20))
     # Creado por la coordinadora en nombre de alguien de RR. HH. y transferido a Redes con motivo
     moved = models.Ticket(title=f"{DEMO_TAG} {TRANSFERRED}", description="La sala 3 no tiene conexión.",
@@ -448,19 +459,19 @@ def load(db) -> list[dict]:
 
     rows += [
         {"rol": "Técnico", "correo": morning.email,
-         "probar": "Soporte N1 · N1. Turno L-V 07-15. Tiene el ticket por vencer y el borrador "
+         "probar": "Soporte N1. Turno L-V 07-15. Tiene el ticket por vencer y el borrador "
                    "\"El monitor parpadea\"."},
         {"rol": "Técnico", "correo": evening.email,
-         "probar": "Redes · N2. Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
+         "probar": "Redes. Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
                    "separado de un incidente, sigue en Mis tickets." % finger_related.id},
         {"rol": "Técnico", "correo": away.email,
-         "probar": "Soporte N1 · N1. De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
+         "probar": "Soporte N1. De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
-         "probar": "Coordina Soporte N1. Agrupación (#%d en #%d y la red en #%d), vencimientos, "
-                   "borrador \"Sin revisor\"." % (mail_2.id, mail_1.id, net[0].id)},
+         "probar": "Coordina Soporte N1. Agrupación (#%d en #%d), vencimientos, borrador \"Sin revisor\". "
+                   "Escalar en el #%d: Redes ya elegido, motivo obligatorio." % (mail_2.id, mail_1.id, soon.id)},
         {"rol": "Coordinador", "correo": net_coordinator.email,
-         "probar": "Coordina Redes. Con el interruptor encendido ve el ticket transferido #%d (aviso en la campana) "
-                   "y no ve los de Soporte N1." % moved.id},
+         "probar": "Coordina Redes. Con el interruptor encendido ve los tickets de red (#%d y sus ligados), el "
+                   "transferido #%d (aviso en la campana) y no ve los de Soporte N1." % (net[0].id, moved.id)},
         {"rol": "Técnico", "correo": unplaced.email,
          "probar": "Sin departamento: con el interruptor encendido ve el aviso y no recibe tickets."},
         {"rol": "Cliente", "correo": ana.email,
@@ -556,6 +567,13 @@ def _scenario_ids(db) -> dict | None:
     return found if all(needed) else None
 
 
+def _open_without_due(db, ids: dict) -> list[int]:
+    """Tickets DEMO abiertos sin fecha límite (deberían ser ninguno)."""
+    tickets = db.query(models.Ticket).filter(models.Ticket.created_by.in_(ids["users"].values()),
+                                             models.Ticket.status.in_(("new", "in_progress"))).all()
+    return sorted(t.id for t in tickets if t.ai_analysis is None or t.ai_analysis.due_at is None)
+
+
 def _fingerprint(db) -> tuple:
     """Estado de lo DEMO que verificar no debe cambiar (no incluye sesiones ni avisos de la campana)."""
     roots = _demo_roots(db)
@@ -577,8 +595,9 @@ def _fingerprint(db) -> tuple:
             models.TicketLink.principal_ticket_id.in_(tickets))),
         sorted((c.ticket_id, c.cause) for c in db.query(models.OverdueCause).filter(
             models.OverdueCause.ticket_id.in_(tickets))),
-        sorted((p.user_id, p.department_id, p.tier) for p in db.query(models.StaffPlacement).filter(
+        sorted((p.user_id, p.department_id) for p in db.query(models.StaffPlacement).filter(
             models.StaffPlacement.user_id.in_(users))),
+        sorted((e.department_id, e.next_department_id) for e in db.query(models.DepartmentEscalation)),
         sorted((c.user_id, c.department_id) for c in db.query(models.DepartmentCoordinator).filter(
             models.DepartmentCoordinator.user_id.in_(users))),
         sorted((r.ticket_id, r.department_id) for r in db.query(models.TicketDepartment).filter(
@@ -621,13 +640,14 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
     def linked():
         found = []
         for ticket_id in related:
-            response = api.get(COORDINATOR, f"/api/tickets/{ticket_id}")
+            # Los tickets de red son de Redes
+            response = api.get(NET_COORDINATOR, f"/api/tickets/{ticket_id}")
             group = response.json().get("grouping") or {} if response.status_code == 200 else {}
             found.append(((group.get("principal") or {}).get("ticket_id"), ticket_id))
         ok = all(p == principal for p, _ in found)
         return ok, ", ".join(f"#{t} → #{p}" if p else f"#{t} sin ligar" for p, t in found)
 
-    add("Agrupación", "Coordinador", ", ".join(f"#{t} → #{principal}" for t in related), linked)
+    add("Agrupación", "Coordinador Redes", ", ".join(f"#{t} → #{principal}" for t in related), linked)
     add("Agrupación", "Cliente (Ana)", f"ve que #{source} se agregó a #{target}", lambda: merged_into(ANA))
 
     def bell():
@@ -783,7 +803,18 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
         ok = any(line.startswith("Transferido de ") for line in lines)
         return ok, "lo ve, con la transferencia en el historial" if ok else "lo ve, sin la transferencia"
 
+    def escalate_offered():
+        response = api.get(COORDINATOR, f"/api/tickets/{soon}")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        target = response.json().get("escalate_to") or {}
+        ok = (target.get("path") or "").endswith(f"{DEMO_TAG} Redes")
+        return ok, f"Escalar a {target['path']}" if target else "sin Escalar"
+
     scope_checks = [
+        ("Coordinador Redes", f"#{principal} (de red): lo ve", lambda: scoped(NET_COORDINATOR, principal, 200)),
+        ("Coordinador", f"#{principal} (de red, en Redes): HTTP 403", lambda: scoped(COORDINATOR, principal, 403)),
+        ("Coordinador", f"#{soon}: Escalar con {DEMO_TAG} Redes ya elegido", escalate_offered),
         ("Coordinador Redes", f"#{soon} (de Soporte N1): HTTP 403", lambda: scoped(NET_COORDINATOR, soon, 403)),
         ("Coordinador Redes", f"#{transferred} transferido desde Soporte N1, con motivo", transfer_seen),
         ("Coordinador", f"#{unclassified} (sin departamento): HTTP 403", lambda: scoped(COORDINATOR, unclassified, 403)),
@@ -821,6 +852,7 @@ def verify(db, http) -> int:
         return 1
 
     before = _fingerprint(db)
+    without_due = _open_without_due(db, ids)
     api = DemoApi(http)
     try:
         for local in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED, ANA):
@@ -830,6 +862,9 @@ def verify(db, http) -> int:
         api.logout_all()
     db.expire_all()
     after = _fingerprint(db)
+    checks.append(Check("Vencimientos", "—", "ningún ticket abierto sin fecha límite",
+                        "todos con fecha" if not without_due else "sin fecha: " + ", ".join(f"#{t}" for t in without_due),
+                        not without_due))
     checks.append(Check("Solo lectura", "—", "los datos DEMO no cambian",
                         "sin cambios" if after == before else "CAMBIARON", after == before))
 
