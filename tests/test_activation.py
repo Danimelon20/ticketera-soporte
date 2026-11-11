@@ -111,9 +111,9 @@ def clean_org():
     _restore(users, depts)
 
 
-def _place(client, admin, user_id, dept_id, tier=None):
+def _place(client, admin, user_id, dept_id):
     response = client.put(f"/api/admin/users/{user_id}/placement", headers=admin["headers"],
-                          json={"department_id": dept_id, "tier": tier})
+                          json={"department_id": dept_id})
     assert response.status_code == 200, response.text
 
 
@@ -136,7 +136,7 @@ def test_checklist_blocks_turning_on_item_by_item(client, make_user, clean_org):
     assert items["departments_without_technicians"]["ok"] is False
     assert _set(client, admin, True).status_code == 409
 
-    _place(client, admin, technician["id"], dept, 1)
+    _place(client, admin, technician["id"], dept)
     items = _items(_activation(client, admin))
     assert items["unplaced_staff"]["ok"] and items["departments_without_technicians"]["ok"]
     assert items["departments_without_coordinator"]["ok"] is False
@@ -201,7 +201,7 @@ def test_switch_on_unplaced_staff_gets_no_tickets_and_sees_the_notice(client, ma
     admin = make_user("admin")
     unplaced = _on_duty(make_user, "Sin depto, encendido")
     placed = _on_duty(make_user, "Con depto, encendido")
-    _place(client, admin, placed["id"], department(), 1)
+    _place(client, admin, placed["id"], department())
     ids = _candidate_ids()
     assert unplaced["id"] not in ids and placed["id"] in ids
     # Puede entrar y ve el aviso

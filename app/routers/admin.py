@@ -182,15 +182,14 @@ def update_user(
     if data.role is not None and data.role != user.role:
         new_role = data.role
         if new_role in routing.PLACED_ROLES:
-            # Rol y departamento juntos: se valida antes de cambiar nada (422 sin departamento o nivel, 409 si el
+            # Rol y departamento juntos: se valida antes de cambiar nada (422 sin departamento, 409 si el
             # departamento ya tiene coordinador)
             dept = routing.serving_department(db, data.department_id)
-            tier = routing.check_tier(new_role, data.tier)
             if new_role == "coordinator":
                 routing.check_coordinator_free(db, dept.id, user.id)
         accounts.change_role(db, admin, user, new_role)
         if new_role in routing.PLACED_ROLES:
-            routing.set_placement(db, admin, user, dept.id, tier)
+            routing.set_placement(db, admin, user, dept.id)
     if data.is_active is not None:
         accounts.set_active(db, admin, user, data.is_active, background_tasks)
     db.commit()

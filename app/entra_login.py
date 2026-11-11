@@ -199,7 +199,7 @@ def activate(db: Session, identity: Identity) -> models.User:
     invitation.used_by = user.id
     invitation.used_at = _now()
     audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
-    # Departamento (y nivel) elegidos al invitar
+    # Departamento elegido al invitar
     routing.apply_invitation_placement(db, invitation, user)
     _link(db, user, identity.oid)
     return user

@@ -296,7 +296,7 @@ def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Dep
     invitation.used_by = user.id
     invitation.used_at = _now()
     audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
-    # Departamento (y nivel) elegidos al invitar
+    # Departamento elegido al invitar
     routing.apply_invitation_placement(db, invitation, user)
     db.commit()
     # Única respuesta con la contraseña: que el navegador no la guarde
@@ -554,13 +554,13 @@ def me_read(db: Session, user: models.User) -> MeRead:
 
 
 def _department_fields(db: Session, user: models.User) -> dict:
-    """Técnicos y coordinadores: su departamento (y nivel). Personal y administrador: el interruptor."""
+    """Técnicos y coordinadores: su departamento. Personal y administrador: el interruptor."""
     if user.role == "admin":
         return {"routing_enforced": routing.enforced(db)}
     if user.role not in routing.PLACED_ROLES:
         return {}
-    dept, tier = routing.department_of(db, user)
-    return {"department_name": routing.path_label(dept, routing.departments_by_id(db)), "tier": tier,
+    dept = routing.department_of(db, user)
+    return {"department_name": routing.path_label(dept, routing.departments_by_id(db)),
             "placement_missing": routing.placement_missing(db, user), "routing_enforced": routing.enforced(db)}
 
 

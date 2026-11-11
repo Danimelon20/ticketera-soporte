@@ -353,11 +353,11 @@
                         <label for="queueLevel" class="sr-only">Nivel</label>
                         <select id="queueLevel" class="queue-chip">
                             <option value="">+ Nivel</option>
-                            <option value="4">Nivel 4 · Crítico</option>
-                            <option value="3">Nivel 3 · Incidente</option>
-                            <option value="2">Nivel 2 · Solicitud estándar</option>
-                            <option value="1">Nivel 1 · Consulta</option>
-                            <option value="0">Nivel 0 · No es soporte</option>
+                            <option value="4">Urgente</option>
+                            <option value="3">Alta</option>
+                            <option value="2">Media</option>
+                            <option value="1">Baja</option>
+                            <option value="0">No es soporte</option>
                             <option value="none">Sin nivel</option>
                         </select>
                         <label for="queueAssignee" class="sr-only">Responsable</label>
@@ -1437,7 +1437,7 @@
         </form>
     </dialog>
 
-    <!-- Departamento (y nivel del técnico) de una persona del personal: solo el administrador -->
+    <!-- Departamento de una persona del personal: solo el administrador -->
     <dialog id="placementDialog" class="app-dialog" aria-labelledby="placementDialogTitle">
         <form id="placementForm" class="profile-form">
             <h2 id="placementDialogTitle" class="modal-title">Departamento</h2>
@@ -1446,15 +1446,6 @@
                 <label for="placementDept">Departamento</label>
                 <select id="placementDept" required></select>
                 <small class="help-text">Solo departamentos que atienden tickets.</small>
-            </div>
-            <div id="placementTierGroup" class="form-group" hidden>
-                <label for="placementTier">Nivel</label>
-                <select id="placementTier">
-                    <option value="">Seleccionar</option>
-                    <option value="1">N1</option>
-                    <option value="2">N2</option>
-                    <option value="3">N3</option>
-                </select>
             </div>
             <p id="placementError" class="dialog-error" role="alert" hidden></p>
             <div class="dialog-actions">
@@ -1475,6 +1466,23 @@
             <div class="dialog-actions">
                 <button type="button" id="deptMoveCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-submit">Mover</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Siguiente nivel de un departamento que atiende tickets: Escalar transfiere a ese departamento -->
+    <dialog id="deptNextDialog" class="app-dialog" aria-labelledby="deptNextDialogTitle">
+        <form id="deptNextForm" class="profile-form">
+            <h2 id="deptNextDialogTitle" class="modal-title">Siguiente nivel</h2>
+            <p id="deptNextTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptNextSelect">Al escalar, el ticket pasa a</label>
+                <select id="deptNextSelect"></select>
+                <small class="help-text">Solo departamentos que atienden tickets. Por ejemplo Soporte N1 → Soporte N2 → Ingeniería N3.</small>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" id="deptNextCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
             </div>
         </form>
     </dialog>
@@ -1560,15 +1568,6 @@
                 <label for="roleDept">Departamento</label>
                 <select id="roleDept"></select>
                 <small id="roleDeptHint" class="help-text">Solo departamentos que atienden tickets. Si pasa a coordinador, el departamento no puede tener otro coordinador.</small>
-            </div>
-            <div id="roleTierGroup" class="form-group" hidden>
-                <label for="roleTier">Nivel</label>
-                <select id="roleTier">
-                    <option value="">Seleccionar</option>
-                    <option value="1">N1</option>
-                    <option value="2">N2</option>
-                    <option value="3">N3</option>
-                </select>
             </div>
             <div id="roleReasonGroup" class="form-group" hidden>
                 <label for="roleReason">Motivo (obligatorio)</label>

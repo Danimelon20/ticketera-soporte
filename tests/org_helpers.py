@@ -34,22 +34,22 @@ _shared_department: int | None = None
 
 
 def placement_for(role: str) -> dict:
-    """Departamento (y nivel) válidos para invitar o cambiar de rol: técnicos en un departamento compartido que
+    """Departamento válido para invitar o cambiar de rol: técnicos en un departamento compartido que
     atiende tickets; cada coordinador en uno nuevo (un coordinador por departamento)."""
     global _shared_department
     if role == "coordinator":
         return {"department_id": department(unique("Coordinación"))}
     if _shared_department is None:
         _shared_department = department(unique("Soporte compartido"))
-    return {"department_id": _shared_department, "tier": 1}
+    return {"department_id": _shared_department}
 
 
-def place(user_id: int, department_id: int, tier: int = 1) -> None:
+def place(user_id: int, department_id: int) -> None:
     """Técnico en un departamento (directo en la base)."""
     db = SessionLocal()
     try:
         db.query(models.StaffPlacement).filter(models.StaffPlacement.user_id == user_id).delete()
-        db.add(models.StaffPlacement(user_id=user_id, department_id=department_id, tier=tier))
+        db.add(models.StaffPlacement(user_id=user_id, department_id=department_id))
         db.commit()
     finally:
         db.close()
@@ -88,11 +88,11 @@ def history(ticket_id: int, field: str) -> list[models.History]:
         db.close()
 
 
-def team(make_user, tier: int = 1):
+def team(make_user):
     """Departamento que atiende tickets con su coordinador y un técnico. Devuelve (dept_id, coordinador, técnico)."""
     dept = department(unique("Equipo"))
     coordinator = make_user("coordinator", unique("Coordinador"))
     technician = make_user("technician", unique("Técnico"))
     coordinate(coordinator["id"], dept)
-    place(technician["id"], dept, tier)
+    place(technician["id"], dept)
     return dept, coordinator, technician

@@ -54,6 +54,7 @@ def _department_reads(db: Session) -> list[DepartmentRead]:
         ).join(models.User, models.User.id == models.DepartmentCoordinator.user_id)
         .filter(models.User.is_active.is_(True))
     }
+    next_ids = routing.escalations(db)
     rows = [
         DepartmentRead(
             id=dept.id, name=dept.name, parent_id=dept.parent_id, path=routing.path_label(dept, by_id),
@@ -62,6 +63,8 @@ def _department_reads(db: Session) -> list[DepartmentRead]:
             technicians=technicians.get(dept.id, 0),
             coordinator_id=coordinators[dept.id][0] if dept.id in coordinators else None,
             coordinator_name=(coordinators[dept.id][1] or "Sin nombre") if dept.id in coordinators else None,
+            next_department_id=next_ids.get(dept.id),
+            next_department_path=routing.path_label(by_id.get(next_ids.get(dept.id)), by_id),
         )
         for dept in by_id.values()
     ]
@@ -159,6 +162,14 @@ def update_department(department_id: int, data: DepartmentUpdate, db: Session = 
         dept.handles_tickets = data.handles_tickets
         changes.append((f"Atiende tickets: {_yes_no(not data.handles_tickets)}",
                         f"Atiende tickets: {_yes_no(data.handles_tickets)}"))
+    if data.next_department_id is not None:
+        current = routing.escalations(db).get(dept.id)
+        wanted = data.next_department_id or None
+        if wanted != current:
+            routing.set_next_level(db, dept, wanted)
+            names = routing.departments_by_id(db)
+            changes.append((f"Siguiente nivel: {routing.path_label(names.get(current), names)}" if current else None,
+                            f"Siguiente nivel: {routing.path_label(names.get(wanted), names)}" if wanted else None))
     if data.add_alias:
         if not departments.add_alias(db, dept, data.add_alias):
             raise HTTPException(status_code=409, detail=TAKEN_ALIAS)
@@ -217,9 +228,9 @@ def _staff_or_404(db: Session, user_id: int) -> models.User:
 
 def _placement_read(db: Session, user: models.User) -> PlacementRead:
     by_id = routing.departments_by_id(db)
-    dept, tier = routing.department_of(db, user)
+    dept = routing.department_of(db, user)
     return PlacementRead(user_id=user.id, role=user.role, department_id=dept.id if dept else None,
-                         department_name=routing.path_label(dept, by_id), tier=tier,
+                         department_name=routing.path_label(dept, by_id),
                          placed=routing.is_placed(db, user, by_id))
 
 
@@ -231,10 +242,10 @@ def get_placement(user_id: int, db: Session = Depends(get_db), admin=Depends(req
 @router.put("/users/{user_id}/placement", response_model=PlacementRead)
 def update_placement(user_id: int, data: PlacementUpdate, db: Session = Depends(get_db),
                      admin=Depends(require_admin)):
-    """Mover a un técnico (departamento y nivel) o a un coordinador (su departamento) entre departamentos."""
+    """Mover a un técnico o a un coordinador entre departamentos."""
     user = _staff_or_404(db, user_id)
     accounts.check_can_manage(admin, user, "department")
-    routing.set_placement(db, admin, user, data.department_id, data.tier)
+    routing.set_placement(db, admin, user, data.department_id)
     db.commit()
     return _placement_read(db, user)
 
@@ -243,7 +254,7 @@ def _unplaced(db: Session) -> list[UnplacedPerson]:
     by_id = routing.departments_by_id(db)
     result = []
     for user in routing.unplaced_staff(db):
-        dept, _tier = routing.department_of(db, user)
+        dept = routing.department_of(db, user)
         result.append(UnplacedPerson(id=user.id, name=user.name or "Sin nombre", role=user.role,
                                      department_name=routing.path_label(dept, by_id)))
     return result

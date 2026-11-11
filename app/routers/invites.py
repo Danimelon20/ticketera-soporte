@@ -37,7 +37,7 @@ def _registered_message(user: models.User, invited_role: str) -> str:
 
 def _invitation_read(
     invitation: models.StaffInvitation, email_sent: bool | None = None, registered: bool = False,
-    placement: tuple[str | None, int | None] = (None, None),
+    placement: str | None = None,
 ) -> StaffInvitationRead:
     if invitation.used_by is not None:
         state = "used"
@@ -57,16 +57,15 @@ def _invitation_read(
         expires_at=invitation.expires_at,
         status=state,
         email_sent=email_sent,
-        department_name=placement[0],
-        tier=placement[1],
+        department_name=placement,
     )
 
 
-def _placement_of(db: Session, invitation: models.StaffInvitation, by_id: dict) -> tuple[str | None, int | None]:
+def _placement_of(db: Session, invitation: models.StaffInvitation, by_id: dict) -> str | None:
     row = routing.invitation_placement(db, invitation.id)
     if row is None:
-        return None, None
-    return routing.path_label(by_id.get(row.department_id), by_id), row.tier
+        return None
+    return routing.path_label(by_id.get(row.department_id), by_id)
 
 
 @router.post("/staff-invitations", response_model=StaffInvitationRead, status_code=status.HTTP_201_CREATED)
@@ -82,8 +81,8 @@ def create_invitation(
     existing = _find_user(db, email)
     if existing is not None:
         raise HTTPException(status_code=409, detail=_registered_message(existing, data.role))
-    # Departamento obligatorio (que atienda tickets); técnico con nivel; un coordinador por departamento
-    department_id, tier = routing.validate_invitation_placement(db, data.role, data.department_id, data.tier, email)
+    # Departamento obligatorio (que atienda tickets); un coordinador por departamento
+    department_id = routing.validate_invitation_placement(db, data.role, data.department_id, email)
 
     # Una sola invitación vigente por correo: la anterior deja de servir
     db.query(models.StaffInvitation).filter(
@@ -93,7 +92,7 @@ def create_invitation(
     db.add(invitation)
     sent = send_invitation(invitation)
     db.flush()
-    routing.save_invitation_placement(db, invitation, department_id, tier)
+    routing.save_invitation_placement(db, invitation, department_id)
     _record_sent(db, current_user, invitation)
     db.commit()
     db.refresh(invitation)

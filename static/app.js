@@ -6244,26 +6244,13 @@ document.addEventListener('DOMContentLoaded', () => {
             option.textContent = INVITE_ROLES[value];
             role.appendChild(option);
         });
-        // Departamento obligatorio (solo los que atienden tickets); el técnico, además, su nivel
+        // Departamento obligatorio (solo los que atienden tickets). Sin nivel: los niveles son departamentos
         const department = document.createElement('select');
         department.id = 'inviteDepartment';
         department.required = true;
-        const tier = document.createElement('select');
-        tier.id = 'inviteTier';
-        [['', 'Seleccionar'], ['1', 'N1'], ['2', 'N2'], ['3', 'N3']].forEach(([value, label]) => {
-            tier.appendChild(staffOption(value, label, value === ''));
-        });
-        const tierField = inviteField('Nivel', tier);
         const noDepartments = makeEl('p', 'help-text invite-no-departments',
             'Cree primero un departamento que atienda tickets (Administración › Departamentos).');
         noDepartments.hidden = true;
-        function syncInviteRole() {
-            const technician = role.value === 'technician';
-            tierField.hidden = !technician;
-            tier.required = technician;
-        }
-        role.addEventListener('change', syncInviteRole);
-        syncInviteRole();
         loadOrgDepartments().then(() => {
             departmentOptions(department, { servingOnly: true });
             noDepartments.hidden = department.options.length > 1;
@@ -6276,7 +6263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         submit.className = 'ui-btn ui-btn-primary';
         submit.textContent = 'Enviar invitación';
         form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role),
-            inviteField('Departamento', department), tierField, noDepartments, submit);
+            inviteField('Departamento', department), noDepartments, submit);
 
         // Cada sección es nueva: el listener se registra una sola vez por formulario
         form.addEventListener('submit', async (e) => {
@@ -6289,11 +6276,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({
                         email: email.value.trim(), name: name.value.trim(), role: role.value,
                         department_id: Number(department.value) || null,
-                        tier: role.value === 'technician' ? (Number(tier.value) || null) : null,
                     })
                 });
                 form.reset();
-                syncInviteRole();
                 if (data.email_sent) {
                     showSuccess('Invitación enviada');
                 } else {
@@ -6358,8 +6343,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tableBody.replaceChildren();
         invites.forEach(invite => {
             const row = document.createElement('tr');
-            const placement = invite.department_name
-                ? `${invite.department_name}${invite.tier ? ` · N${invite.tier}` : ''}` : '—';
+            const placement = invite.department_name || '—';
             [invite.email, invite.name, INVITE_ROLES[invite.role] || invite.role, placement,
                 formatDate(invite.expires_at), INVITE_STATUS[invite.status] || invite.status].forEach(text => {
                 const td = document.createElement('td');
@@ -7841,11 +7825,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos';
     }
 
-    // Nivel con color: 1 gris, 2 azul, 3 azul marino, 4 rojo
+    // Nivel con las palabras del formulario de creación (no "N1…N4": esos son departamentos) y su color:
+    // 1 gris, 2 azul, 3 azul marino, 4 rojo
+    const LEVEL_LABELS = { 0: 'No es soporte', 1: 'Baja', 2: 'Media', 3: 'Alta', 4: 'Urgente' };
+
     function levelTag(level) {
-        if (level === null || level === undefined) return makeEl('span', 'ui-tag is-mono', '—');
+        if (level === null || level === undefined) return makeEl('span', 'ui-tag', '—');
         const tone = { 2: ' is-info', 3: ' is-navy', 4: ' is-danger' }[level] || '';
-        const tag = makeEl('span', `ui-tag is-mono${tone}`, `N${level}`);
+        const tag = makeEl('span', `ui-tag${tone}`, LEVEL_LABELS[level] || `Nivel ${level}`);
         tag.title = AI_LEVEL_NAMES[level] ? `Nivel ${level} · ${AI_LEVEL_NAMES[level]}` : `Nivel ${level}`;
         return tag;
     }
@@ -8368,6 +8355,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const transfer = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm route-change td-transfer', 'Transferir');
             transfer.type = 'button';
             box.appendChild(transfer);
+            // Escalar: la misma transferencia, con el siguiente nivel del departamento ya elegido
+            if (ticket.escalate_to) {
+                const escalate = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm route-change td-escalate', 'Escalar');
+                escalate.type = 'button';
+                escalate.title = `Escalar a ${ticket.escalate_to.path}`;
+                box.appendChild(escalate);
+            }
         }
         return box;
     }
@@ -8398,7 +8392,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const transferDialog = document.getElementById('transferDialog');
     const transferError = document.getElementById('transferError');
 
-    async function openTransferDialog(ticket) {
+    // escalate: {id, path} del siguiente nivel; el destino queda elegido y solo falta el motivo
+    async function openTransferDialog(ticket, escalate = null) {
         let options;
         try {
             options = await apiFetch('/departments/options', { silent: true });
@@ -8409,13 +8404,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const select = document.getElementById('transferTarget');
         select.replaceChildren(staffOption('', 'Seleccionar', true));
         options.serving.filter(d => d.id !== ticket.department_id)
-            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, false)));
+            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, Boolean(escalate) && d.id === escalate.id)));
+        document.getElementById('transferDialogTitle').textContent = escalate
+            ? `Escalar a ${escalate.path}` : 'Transferir a otro departamento';
+        transferDialog.querySelector('button[type="submit"]').textContent = escalate ? 'Escalar' : 'Transferir';
         document.getElementById('transferReason').value = '';
         document.getElementById('transferTicket').textContent = `Ticket #${ticket.id} · ${ticket.department_name || ''}`;
         transferError.hidden = true;
         transferDialog.dataset.ticketId = String(ticket.id);
         transferDialog.showModal();
-        select.focus();
+        (escalate ? document.getElementById('transferReason') : select).focus();
     }
 
     document.getElementById('transferCancel').addEventListener('click', () => transferDialog.close());
@@ -8446,6 +8444,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('click', (e) => {
         if (e.target.closest('.td-transfer') && currentTicket) openTransferDialog(currentTicket);
+        else if (e.target.closest('.td-escalate') && currentTicket && currentTicket.escalate_to) {
+            openTransferDialog(currentTicket, currentTicket.escalate_to);
+        }
     });
 
     // Diálogo de la solución: devuelve el texto o null si se cancela
@@ -10378,15 +10379,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (d.handles_tickets) {
                 sub.push(d.coordinator_name ? `Coordinador: ${d.coordinator_name}` : 'Sin coordinador');
                 sub.push(`${d.technicians} técnico(s)`);
+                if (d.next_department_path) sub.push(`Siguiente nivel: ${d.next_department_path}`);
             }
             if (!d.is_active) sub.push('Desactivado');
             else if (!d.active_path) sub.push('Desactivado por su departamento padre');
             if (d.aliases.length) sub.push(`Alias: ${d.aliases.join('; ')}`);
             if (sub.length) text.appendChild(makeEl('span', 'org-row-sub', sub.join(' · ')));
             const actions = makeEl('div', 'org-row-actions');
-            [['handles', d.handles_tickets ? 'No atiende tickets' : 'Atiende tickets'],
-                ['rename', 'Renombrar'], ['move', 'Mover'], ['alias', 'Agregar alias'],
-                ['toggle', d.is_active ? 'Desactivar' : 'Activar']].forEach(([action, label]) => {
+            const buttons = [['handles', d.handles_tickets ? 'No atiende tickets' : 'Atiende tickets']];
+            if (d.handles_tickets) buttons.push(['next', 'Siguiente nivel']);
+            buttons.push(['rename', 'Renombrar'], ['move', 'Mover'], ['alias', 'Agregar alias'],
+                ['toggle', d.is_active ? 'Desactivar' : 'Activar']);
+            buttons.forEach(([action, label]) => {
                 const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', label);
                 button.type = 'button';
                 button.dataset.deptAction = action;
@@ -10435,7 +10439,26 @@ document.addEventListener('DOMContentLoaded', () => {
             departmentOptions(select, { empty: '(Raíz)', activeOnly: false, selected: dept.parent_id,
                 ids: orgDepartments.filter(d => !inside.includes(d.id)).map(d => d.id) });
             document.getElementById('deptMoveDialog').showModal();
+        } else if (action === 'next') {
+            nextLevelDepartment = dept;
+            document.getElementById('deptNextTarget').textContent = dept.path;
+            // Ni él mismo; el servidor también rechaza los ciclos
+            departmentOptions(document.getElementById('deptNextSelect'), {
+                empty: 'Ninguno', servingOnly: true, selected: dept.next_department_id,
+                ids: orgDepartments.filter(d => d.id !== dept.id).map(d => d.id),
+            });
+            document.getElementById('deptNextDialog').showModal();
         }
+    });
+
+    let nextLevelDepartment = null;
+    document.getElementById('deptNextCancel').addEventListener('click', () => document.getElementById('deptNextDialog').close());
+    document.getElementById('deptNextForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('deptNextDialog').close();
+        if (!nextLevelDepartment) return;
+        patchDepartment(nextLevelDepartment.id,
+            { next_department_id: Number(document.getElementById('deptNextSelect').value) || 0 });
     });
 
     let movingDepartment = null;
@@ -10700,10 +10723,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('placementNotice').hidden = !(currentUser && currentUser.placement_missing);
     }
 
-    // ----- Departamento (y nivel) de una persona del personal: solo el administrador -----
+    // ----- Departamento de una persona del personal: solo el administrador -----
     const placementDialog = document.getElementById('placementDialog');
     const placementDept = document.getElementById('placementDept');
-    const placementTier = document.getElementById('placementTier');
     const placementError = document.getElementById('placementError');
     let placementPerson = null;
     let placementDone = null;
@@ -10725,10 +10747,6 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('placementTarget').textContent =
                 `${person.name || 'Sin nombre'} · ${ROLE_MAP[person.role] || person.role} · ${current.department_name || 'Sin departamento'}`;
             departmentOptions(placementDept, { servingOnly: true, selected: current.placed ? current.department_id : null });
-            const technician = person.role === 'technician';
-            document.getElementById('placementTierGroup').hidden = !technician;
-            placementTier.required = technician;
-            placementTier.value = current.tier ? String(current.tier) : '';
             placementError.hidden = true;
             placementDialog.showModal();
             placementDept.focus();
@@ -10753,7 +10771,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!placementPerson) return;
         placementError.hidden = true;
         const body = { department_id: Number(placementDept.value) || null };
-        if (placementPerson.role === 'technician') body.tier = Number(placementTier.value) || null;
         try {
             await apiFetch(`/admin/users/${placementPerson.id}/placement`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), silent: true,
@@ -11276,14 +11293,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const roleDeptGroup = document.getElementById('roleDeptGroup');
     const roleDept = document.getElementById('roleDept');
-    const roleTierGroup = document.getElementById('roleTierGroup');
-    const roleTier = document.getElementById('roleTier');
 
-    // Administrador: el nivel solo se pide si pasa a técnico
+    // Administrador: el rol y el departamento cambian juntos
     function syncRolePlacement() {
-        const admin = currentUser.role === 'admin';
-        roleDeptGroup.hidden = !admin;
-        roleTierGroup.hidden = !admin || roleSelect.value !== 'technician';
+        roleDeptGroup.hidden = currentUser.role !== 'admin';
     }
     roleSelect.addEventListener('change', syncRolePlacement);
 
@@ -11310,7 +11323,6 @@ document.addEventListener('DOMContentLoaded', () => {
             options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, value === preselected)));
             if (!isCoordinator) {
                 departmentOptions(roleDept, { servingOnly: true });
-                roleTier.value = '';
             }
             syncRolePlacement();
             document.getElementById('roleReasonGroup').hidden = !isCoordinator;
@@ -11363,7 +11375,6 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 // Rol y departamento juntos (el nivel solo si pasa a técnico)
                 const body = { role: roleSelect.value, department_id: Number(roleDept.value) || null };
-                if (roleSelect.value === 'technician') body.tier = Number(roleTier.value) || null;
                 await apiFetch(`/admin/users/${roleUser.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },

@@ -37,6 +37,10 @@ def department_fields(db: Session, ticket: models.Ticket) -> dict:
     if fields["routing_enforced"] and dept is not None:
         # Reasignar: solo los técnicos activos del departamento (el servidor también rechaza a los de afuera)
         fields["assignable_ids"] = [u.id for u in routing.department_technicians(db, dept.id)]
+        # Escalar: transferir al siguiente nivel del departamento (con motivo, como la transferencia)
+        target = routing.next_level(db, dept.id, by_id) if ticket.status in nav.OPEN_STATUSES else None
+        if target is not None:
+            fields["escalate_to"] = {"id": target.id, "path": routing.path_label(target, by_id)}
     reporter = db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == ticket.id).first()
     if reporter is not None:
         fields["reporter"] = {

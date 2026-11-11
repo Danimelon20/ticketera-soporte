@@ -436,7 +436,7 @@ ACCOUNT_CHANGE_ACTIONS = (
     "server_admin_created", "server_password_reset",
     # Departamentos del organigrama (target_label: la ruta; old/new: lo que cambió)
     "department_created", "department_changed", "departments_imported",
-    # Departamento (y nivel) de un técnico o coordinador (old/new: "Ruta · N2")
+    # Departamento de un técnico o coordinador (old/new: la ruta)
     "placement_changed",
     # Interruptor de Administración › Activación (target_label: la clave; old/new: Apagado/Encendido)
     "setting_changed",
@@ -938,7 +938,14 @@ class DepartmentAlias(Base):
     normalized = Column(String(300), index=True, nullable=False)
 
 
-TECHNICIAN_TIERS = (1, 2, 3)
+class DepartmentEscalation(Base):
+    """Siguiente nivel de un departamento que atiende tickets (Soporte N1 → Soporte N2 → Ingeniería N3): Escalar
+    transfiere el ticket a ese departamento. Tabla nueva: no altera tablas existentes."""
+    __tablename__ = "department_escalations"
+
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
+    next_department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class DepartmentCoordinator(Base):
@@ -953,7 +960,8 @@ class DepartmentCoordinator(Base):
 
 
 class StaffPlacement(Base):
-    """Departamento y nivel (1 = N1 … 3 = N3) de un técnico. Un técnico pertenece a un solo departamento."""
+    """Departamento de un técnico. Un técnico pertenece a un solo departamento. La columna tier (nivel N1–N3 de
+    una versión anterior) queda sin usarse: los niveles de soporte son departamentos."""
     __tablename__ = "staff_placements"
 
     id = Column(Integer, primary_key=True)
@@ -966,7 +974,7 @@ class StaffPlacement(Base):
 
 
 class StaffInvitationPlacement(Base):
-    """Departamento (y nivel, si es técnico) elegidos al invitar: se aplican al activar la cuenta."""
+    """Departamento elegido al invitar: se aplica al activar la cuenta (tier queda sin usarse)."""
     __tablename__ = "staff_invitation_placements"
 
     id = Column(Integer, primary_key=True)

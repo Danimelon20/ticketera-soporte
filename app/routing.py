@@ -69,11 +69,9 @@ def serves_tickets(dept: models.Department | None, by_id: dict[int, models.Depar
 # ----- Ubicación del personal -----
 
 PLACED_ROLES = ("technician", "coordinator")
-TIER_NAMES = {1: "N1", 2: "N2", 3: "N3"}
 NO_DEPARTMENT_TEXT = "Sin departamento"
 DEPARTMENT_REQUIRED = "Elija el departamento"
 NOT_SERVING = "Ese departamento no atiende tickets o está desactivado"
-TIER_REQUIRED = "Elija el nivel del técnico (N1, N2 o N3)"
 COORDINATOR_TAKEN = "Ese departamento ya tiene coordinador: {name}"
 COORDINATOR_PENDING = "Ese departamento ya tiene una invitación de coordinador pendiente"
 
@@ -95,25 +93,22 @@ def coordinator_of(db: Session, department_id: int) -> models.DepartmentCoordina
         models.DepartmentCoordinator.department_id == department_id).first()
 
 
-def department_of(db: Session, user: models.User) -> tuple[models.Department | None, int | None]:
-    """Departamento (y nivel, si es técnico) de la persona. (None, None) si no tiene."""
+def department_of(db: Session, user: models.User) -> models.Department | None:
+    """Departamento del técnico o del coordinador. None si no tiene."""
     if user.role == "technician":
         row = technician_placement(db, user.id)
         # Filas de una versión anterior pueden no tener departamento
         if row is None or row.department_id is None:
-            return None, None
-        return db.get(models.Department, row.department_id), row.tier
+            return None
+        return db.get(models.Department, row.department_id)
     if user.role == "coordinator":
         row = coordinator_row(db, user.id)
-        return (db.get(models.Department, row.department_id), None) if row else (None, None)
-    return None, None
+        return db.get(models.Department, row.department_id) if row else None
+    return None
 
 
-def placement_text(dept: models.Department | None, tier: int | None, by_id: dict) -> str:
-    if dept is None:
-        return NO_DEPARTMENT_TEXT
-    label = path_label(dept, by_id)
-    return f"{label} · {TIER_NAMES[tier]}" if tier in TIER_NAMES else label
+def placement_text(dept: models.Department | None, by_id: dict) -> str:
+    return path_label(dept, by_id) if dept is not None else NO_DEPARTMENT_TEXT
 
 
 def _placements(db: Session) -> dict[int, int]:
@@ -124,15 +119,9 @@ def _placements(db: Session) -> dict[int, int]:
 
 
 def placement_labels(db: Session) -> dict[int, str]:
-    """user_id → "Ruta · N2" (técnico) o "Ruta" (coordinador), para listas de Cuentas y Equipo."""
+    """user_id → ruta del departamento (técnicos y coordinadores), para listas de Cuentas y Equipo."""
     by_id = departments_by_id(db)
-    labels = {}
-    for user_id, dept_id, tier in db.query(models.StaffPlacement.user_id, models.StaffPlacement.department_id,
-                                           models.StaffPlacement.tier):
-        labels[user_id] = placement_text(by_id.get(dept_id), tier, by_id)
-    for user_id, dept_id in db.query(models.DepartmentCoordinator.user_id, models.DepartmentCoordinator.department_id):
-        labels[user_id] = placement_text(by_id.get(dept_id), None, by_id)
-    return labels
+    return {user_id: placement_text(by_id.get(dept_id), by_id) for user_id, dept_id in _placements(db).items()}
 
 
 def is_placed(db: Session, user: models.User, by_id: dict | None = None) -> bool:
@@ -185,14 +174,6 @@ def check_coordinator_free(db: Session, department_id: int, user_id: int | None 
         raise HTTPException(status_code=409, detail=COORDINATOR_TAKEN.format(name=holder.name or "otra persona"))
 
 
-def check_tier(role: str, tier: int | None) -> int | None:
-    if role != "technician":
-        return None
-    if tier not in TIER_NAMES:
-        raise HTTPException(status_code=422, detail=TIER_REQUIRED)
-    return tier
-
-
 def clear_placement(db: Session, user: models.User) -> None:
     """Quita la ubicación (técnico o coordinador). No hace commit."""
     db.query(models.StaffPlacement).filter(models.StaffPlacement.user_id == user.id).delete()
@@ -201,25 +182,24 @@ def clear_placement(db: Session, user: models.User) -> None:
 
 
 def set_placement(db: Session, actor: models.User | None, user: models.User, department_id: int | None,
-                  tier: int | None, audit_change: bool = True) -> None:
-    """Ubica a un técnico (departamento y nivel) o a un coordinador (su departamento). 422/409 si no se puede.
+                  audit_change: bool = True) -> None:
+    """Ubica a un técnico o a un coordinador en su departamento. 422/409 si no se puede.
     Queda en el Registro de cambios. No hace commit."""
     if user.role not in PLACED_ROLES:
         raise HTTPException(status_code=422, detail="Solo técnicos y coordinadores tienen departamento")
     dept = serving_department(db, department_id)
-    tier = check_tier(user.role, tier)
     if user.role == "coordinator":
         check_coordinator_free(db, dept.id, user.id)
     by_id = departments_by_id(db)
-    old_dept, old_tier = department_of(db, user)
-    old = placement_text(old_dept, old_tier, by_id)
+    old = placement_text(department_of(db, user), by_id)
     clear_placement(db, user)
     if user.role == "technician":
-        db.add(models.StaffPlacement(user_id=user.id, department_id=dept.id, tier=tier, updated_at=_now()))
+        # Los niveles son departamentos (Soporte N1, N2…): la columna tier queda sin usarse
+        db.add(models.StaffPlacement(user_id=user.id, department_id=dept.id, tier=1, updated_at=_now()))
     else:
         db.add(models.DepartmentCoordinator(department_id=dept.id, user_id=user.id, updated_at=_now()))
     db.flush()
-    new = placement_text(dept, tier, by_id)
+    new = placement_text(dept, by_id)
     if audit_change and old != new:
         audit.record(db, actor.id if actor is not None else None, "placement_changed", target=user,
                      old=old[:150], new=new[:150])
@@ -228,12 +208,11 @@ def set_placement(db: Session, actor: models.User | None, user: models.User, dep
 # ----- Invitaciones del personal -----
 
 def validate_invitation_placement(db: Session, role: str, department_id: int | None,
-                                  tier: int | None, email: str | None = None) -> tuple[int, int | None]:
-    """Departamento obligatorio (que atienda tickets) y nivel del técnico. El coordinador necesita un departamento
+                                  email: str | None = None) -> int:
+    """Departamento obligatorio (que atienda tickets). El coordinador necesita un departamento
     sin coordinador ni otra invitación de coordinador pendiente (sin contar la que se reemplaza para el mismo
     correo)."""
     dept = serving_department(db, department_id)
-    tier = check_tier(role, tier)
     if role == "coordinator":
         check_coordinator_free(db, dept.id)
         pending = db.query(models.StaffInvitationPlacement).join(
@@ -248,12 +227,11 @@ def validate_invitation_placement(db: Session, role: str, department_id: int | N
             pending = pending.filter(models.StaffInvitation.email != email)
         if pending.first() is not None:
             raise HTTPException(status_code=409, detail=COORDINATOR_PENDING)
-    return dept.id, tier
+    return dept.id
 
 
-def save_invitation_placement(db: Session, invitation: models.StaffInvitation, department_id: int,
-                              tier: int | None) -> None:
-    db.add(models.StaffInvitationPlacement(invitation_id=invitation.id, department_id=department_id, tier=tier))
+def save_invitation_placement(db: Session, invitation: models.StaffInvitation, department_id: int) -> None:
+    db.add(models.StaffInvitationPlacement(invitation_id=invitation.id, department_id=department_id))
     db.flush()
 
 
@@ -263,13 +241,13 @@ def invitation_placement(db: Session, invitation_id: int) -> models.StaffInvitat
 
 
 def apply_invitation_placement(db: Session, invitation: models.StaffInvitation, user: models.User) -> None:
-    """Al activar la cuenta: el departamento (y nivel) de la invitación. Si ya no se puede (el departamento dejó de
+    """Al activar la cuenta: el departamento de la invitación. Si ya no se puede (el departamento dejó de
     atender o ya tiene coordinador), la persona queda sin departamento y aparece en la alerta. No hace commit."""
     row = invitation_placement(db, invitation.id)
     if row is None:
         return
     try:
-        set_placement(db, None, user, row.department_id, row.tier, audit_change=False)
+        set_placement(db, None, user, row.department_id, audit_change=False)
     except HTTPException:
         return
 
@@ -425,30 +403,67 @@ def department_technicians(db: Session, department_id: int) -> list[models.User]
 
 
 
+# ----- Siguiente nivel (Escalar) -----
+
+ESCALATION_SELF = "El siguiente nivel no puede ser el mismo departamento"
+ESCALATION_CYCLE = "Ese siguiente nivel forma un ciclo: el escalamiento volvería a este departamento"
+ESCALATION_NOT_SERVING = "Solo un departamento que atiende tickets tiene siguiente nivel"
+
+
+def escalations(db: Session) -> dict[int, int]:
+    """department_id → next_department_id."""
+    return dict(db.query(models.DepartmentEscalation.department_id, models.DepartmentEscalation.next_department_id))
+
+
+def next_level(db: Session, department_id: int, by_id: dict | None = None) -> models.Department | None:
+    """Siguiente nivel del departamento, solo si está activo y atiende tickets."""
+    row = db.get(models.DepartmentEscalation, department_id)
+    if row is None:
+        return None
+    by_id = by_id if by_id is not None else departments_by_id(db)
+    target = by_id.get(row.next_department_id)
+    return target if serves_tickets(target, by_id) else None
+
+
+def set_next_level(db: Session, dept: models.Department, next_id: int | None) -> None:
+    """Fija (o quita, con None) el siguiente nivel. 422 si no atiende tickets, 400 si es él mismo o hay ciclo.
+    No hace commit."""
+    row = db.get(models.DepartmentEscalation, dept.id)
+    if next_id is None:
+        if row is not None:
+            db.delete(row)
+            db.flush()
+        return
+    if not dept.handles_tickets:
+        raise HTTPException(status_code=422, detail=ESCALATION_NOT_SERVING)
+    if next_id == dept.id:
+        raise HTTPException(status_code=400, detail=ESCALATION_SELF)
+    target = serving_department(db, next_id)
+    chain, seen = escalations(db), set()
+    current = target.id
+    while current is not None and current not in seen:
+        if current == dept.id:
+            raise HTTPException(status_code=400, detail=ESCALATION_CYCLE)
+        seen.add(current)
+        current = chain.get(current)
+    if row is None:
+        db.add(models.DepartmentEscalation(department_id=dept.id, next_department_id=target.id, updated_at=_now()))
+    else:
+        row.next_department_id, row.updated_at = target.id, _now()
+    db.flush()
+
+
 # ----- Asignación dentro del departamento -----
 
-def required_tier(level: int | None) -> int:
-    """Nivel del ticket → nivel mínimo del técnico: 0–2 (o sin nivel) N1, 3 N2, 4 N3."""
-    if level is None or level <= 2:
-        return 1
-    return 2 if level == 3 else 3
-
-
-def eligible_in_department(db: Session, technicians: list[models.User], department_id: int, level: int | None,
+def eligible_in_department(db: Session, technicians: list[models.User], department_id: int,
                            creator_id: int | None = None) -> list[models.User]:
-    """De los candidatos, los técnicos del departamento con el nivel justo (y si no hay, los de nivel más alto).
-    El creador del ticket queda fuera, salvo que sea el único elegible."""
-    tiers = dict(db.query(models.StaffPlacement.user_id, models.StaffPlacement.tier)
-                 .filter(models.StaffPlacement.department_id == department_id))
-    inside = [u for u in technicians if u.id in tiers]
+    """De los candidatos, los técnicos del departamento (sin nivel: elige la carga). El creador del ticket queda
+    fuera, salvo que sea el único elegible."""
+    placed = {user_id for (user_id,) in db.query(models.StaffPlacement.user_id)
+              .filter(models.StaffPlacement.department_id == department_id)}
+    inside = [u for u in technicians if u.id in placed]
     others = [u for u in inside if u.id != creator_id]
-    pool = others or inside
-    needed = required_tier(level)
-    for tier in range(needed, 4):
-        chosen = [u for u in pool if tiers[u.id] == tier]
-        if chosen:
-            return chosen
-    return []
+    return others or inside
 
 
 # ----- Bandeja (avisos sin correo) -----

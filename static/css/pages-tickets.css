@@ -421,7 +421,7 @@ body.staff-shell .queue-panel {
 
 #queuePanel col.col-num { width: 72px; }
 
-#queuePanel col.col-level { width: 72px; }
+#queuePanel col.col-level { width: 120px; }
 
 #queuePanel col.col-owner { width: 200px; }
 

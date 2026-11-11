@@ -1,5 +1,5 @@
 """Crear tickets desde el personal (interruptor encendido): mismo formulario para técnico, coordinador y
-administrador, asignación solo dentro del departamento (según nivel, carga y disponibilidad), el creador fuera
+administrador, asignación solo dentro del departamento (por carga y disponibilidad, sin nivel), el creador fuera
 salvo que sea el único elegible y el historial "Creado por X en nombre de Y vía Z"."""
 import pytest
 
@@ -100,8 +100,8 @@ def test_assignment_stays_inside_the_department(client, make_user, routing_on, a
     dept, other = department(unique("Soporte")), department(unique("Redes"))
     area = department(handles=False)
     inside, outside = _on_duty(make_user, "Adentro"), _on_duty(make_user, "Afuera")
-    place(inside["id"], dept, 1)
-    place(outside["id"], other, 1)
+    place(inside["id"], dept)
+    place(outside["id"], other)
     data = _create(client, make_user("coordinator"), _body(dept, area)).json()
     assert data["assigned_to"] == inside["id"] and data["assigned_name"] == inside["name"]
 
@@ -109,34 +109,57 @@ def test_assignment_stays_inside_the_department(client, make_user, routing_on, a
 def test_creator_is_excluded_unless_only_one(client, make_user, routing_on, auto_on):
     dept, area = department(unique("Mesa")), department(handles=False)
     creator, colleague = _on_duty(make_user, "Creador"), _on_duty(make_user, "Colega")
-    place(creator["id"], dept, 1)
-    place(colleague["id"], dept, 1)
+    place(creator["id"], dept)
+    place(colleague["id"], dept)
     assert _create(client, creator, _body(dept, area)).json()["assigned_to"] == colleague["id"]
     # Solo él es elegible: se le asigna
     alone = department(unique("Uno solo"))
-    place(creator["id"], alone, 1)
+    place(creator["id"], alone)
     assert _create(client, creator, _body(alone, area)).json()["assigned_to"] == creator["id"]
 
 
-def test_tier_matching_climbs_and_unplaced_never_gets_tickets(client, make_user, routing_on, auto_on):
-    dept, area = department(unique("Niveles")), department(handles=False)
-    senior = _on_duty(make_user, "N2")
-    place(senior["id"], dept, 2)
+def test_any_level_goes_to_the_least_loaded_and_unplaced_never_gets_tickets(client, make_user, routing_on, auto_on):
+    """Sin nivel del técnico: un ticket Urgente lo toma el de menor carga del departamento."""
+    dept, area = department(unique("Sin niveles")), department(handles=False)
+    busy, free = _on_duty(make_user, "Ocupado"), _on_duty(make_user, "Libre")
+    place(busy["id"], dept)
+    place(free["id"], dept)
     _on_duty(make_user, "Sin depto")
-    # Prioridad Baja (nivel 1): pide N1; no hay, sube a N2
-    body = _body(dept, area, priority_id=priority_id("Baja"))
-    assert _create(client, make_user("admin"), body).json()["assigned_to"] == senior["id"]
+    admin = make_user("admin")
+    # El primero (empate en carga) se lo lleva uno; el Urgente va al otro, el de menor carga
+    first = _create(client, admin, _body(dept, area)).json()["assigned_to"]
+    second = _create(client, admin, _body(dept, area, priority_id=priority_id("Urgente"))).json()["assigned_to"]
+    assert {first, second} == {busy["id"], free["id"]}
 
 
-def test_priority_sets_level_due_date_and_required_tier(client, make_user, routing_on, auto_on):
+def test_unavailable_or_off_shift_technician_is_skipped(client, make_user, routing_on, auto_on):
+    from datetime import date, datetime, timedelta, timezone
+    dept, area = department(unique("Disponibilidad")), department(handles=False)
+    away, no_shift, ready = (_on_duty(make_user, "Vacaciones"), make_user("technician", unique("Sin turno")),
+                             _on_duty(make_user, "Disponible"))
+    for user in (away, no_shift, ready):
+        place(user["id"], dept)
+    db = SessionLocal()
+    try:
+        # De vacaciones no recibe; sin turno, tampoco: el disponible es el único aunque sume carga
+        db.add(models.AvailabilityPeriod(user_id=away["id"], kind="vacation", start_date=date.today() - timedelta(days=1),
+                                         end_date=date.today() + timedelta(days=5), created_by=None,
+                                         created_at=datetime.now(timezone.utc)))
+        db.commit()
+    finally:
+        db.close()
+    for _ in range(2):
+        data = _create(client, make_user("admin"), _body(dept, area, priority_id=priority_id("Urgente"))).json()
+        assert data["assigned_to"] == ready["id"]
+
+
+def test_priority_sets_level_and_due_date(client, make_user, routing_on, auto_on):
     dept, area = department(unique("Prioridad")), department(handles=False)
-    junior, senior = _on_duty(make_user, "N1"), _on_duty(make_user, "N2")
-    place(junior["id"], dept, 1)
-    place(senior["id"], dept, 2)
+    technician = _on_duty(make_user, "Técnico")
+    place(technician["id"], dept)
     creator = make_user("coordinator")
-    # Alta → nivel 3 (Incidente) → necesita N2
     data = _create(client, creator, _body(dept, area, priority_id=priority_id("Alta"))).json()
-    assert data["assigned_to"] == senior["id"]
+    assert data["assigned_to"] == technician["id"]
     db = SessionLocal()
     try:
         ticket = db.get(models.Ticket, data["id"])

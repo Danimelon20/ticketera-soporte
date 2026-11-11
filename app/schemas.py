@@ -71,8 +71,6 @@ class StaffInvitationCreate(BaseModel):
     role: Literal["technician", "coordinator"]
     # Obligatorio (se valida en la ruta para dar el mensaje): departamento que atiende tickets
     department_id: Optional[int] = None
-    # Solo técnicos: 1 = N1 … 3 = N3
-    tier: Optional[int] = Field(default=None, ge=1, le=3)
 
     @field_validator("name")
     @classmethod
@@ -93,7 +91,6 @@ class StaffInvitationRead(BaseModel):
     status: Literal["available", "expired", "used", "registered"]
     email_sent: Optional[bool] = None
     department_name: Optional[str] = None
-    tier: Optional[int] = None
 
 
 class ActivationResult(BaseModel):
@@ -180,9 +177,8 @@ class MeRead(BaseModel):
     schedule_summary: Optional[str] = None
     # Vacaciones e incapacidades vigentes y futuras (las registra la persona o quien gestiona su cuenta)
     periods: list[AvailabilityPeriodRead] = []
-    # Técnicos y coordinadores: departamento (ruta) y nivel del técnico (1 = N1 … 3 = N3)
+    # Técnicos y coordinadores: departamento (ruta)
     department_name: Optional[str] = None
-    tier: Optional[int] = None
     # Con el interruptor encendido y sin departamento: aviso "Contacte al administrador" (no recibe tickets)
     placement_missing: bool = False
     # Personal: tickets por departamento encendido (la página muestra crear, transferir y la cola del admin)
@@ -483,6 +479,11 @@ class TicketSolutionRead(BaseModel):
     resolved_at: datetime
 
 
+class EscalationTarget(BaseModel):
+    id: int
+    path: str
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
@@ -510,6 +511,8 @@ class TicketDetail(TicketRead):
     routing_enforced: bool = False
     # Con el interruptor y departamento: técnicos activos del departamento (los únicos para reasignar)
     assignable_ids: Optional[list[int]] = None
+    # Siguiente nivel del departamento (botón "Escalar"): solo con el interruptor y el ticket abierto
+    escalate_to: Optional[EscalationTarget] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -653,9 +656,8 @@ class AdminUserUpdate(BaseModel):
     # Sin "admin": el administrador solo se crea con python -m app.create_admin (422 si se pide)
     role: Literal["requester", "technician", "coordinator"] | None = None
     is_active: bool | None = None
-    # Con el cambio técnico ↔ coordinador: el departamento nuevo (y el nivel si pasa a técnico)
+    # Con el cambio técnico ↔ coordinador: el departamento nuevo
     department_id: Optional[int] = None
-    tier: Optional[int] = Field(default=None, ge=1, le=3)
 
 
 class ChatTurn(BaseModel):
@@ -1086,6 +1088,9 @@ class DepartmentRead(BaseModel):
     technicians: int = 0
     coordinator_id: Optional[int] = None
     coordinator_name: Optional[str] = None
+    # Siguiente nivel (Escalar transfiere a ese departamento)
+    next_department_id: Optional[int] = None
+    next_department_path: Optional[str] = None
 
 
 class DepartmentCreate(BaseModel):
@@ -1102,6 +1107,8 @@ class DepartmentUpdate(BaseModel):
     handles_tickets: Optional[bool] = None
     add_alias: Optional[str] = Field(default=None, min_length=1, max_length=300)
     remove_alias: Optional[str] = Field(default=None, max_length=300)
+    # Siguiente nivel; 0: quitarlo
+    next_department_id: Optional[int] = Field(default=None, ge=0)
 
 
 class DepartmentImportRow(BaseModel):
@@ -1139,8 +1146,6 @@ class DepartmentImportResult(BaseModel):
 
 class PlacementUpdate(BaseModel):
     department_id: Optional[int] = None
-    # Solo técnicos: 1 = N1 … 3 = N3
-    tier: Optional[int] = Field(default=None, ge=1, le=3)
 
 
 class PlacementRead(BaseModel):
@@ -1148,7 +1153,6 @@ class PlacementRead(BaseModel):
     role: str
     department_id: Optional[int] = None
     department_name: Optional[str] = None
-    tier: Optional[int] = None
     placed: bool
 
 

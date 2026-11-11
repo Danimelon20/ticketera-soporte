@@ -32,7 +32,7 @@ PERMISSIONS = {
         "sessions": ("coordinator", "technician", "requester"),
         # Cambio directo de rol: técnico ↔ coordinador (nunca a administrador)
         "role": STAFF_ROLE_CHOICES,
-        # Departamento (y nivel del técnico)
+        # Departamento del técnico o coordinador
         "department": STAFF_ROLE_CHOICES,
     },
     # Desactivar, restablecer, desbloquear y cerrar sesiones: solo el administrador (cuida las cuentas).

@@ -743,12 +743,13 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
 
     add("Departamentos", "Coordinador", f"dirige {DEMO_TAG} Soporte N1", coordinator_department)
 
-    def technician_tier():
+    def technician_department():
+        # Sin nivel del técnico: los niveles de soporte son departamentos
         data = me(EVENING)
-        ok = (data.get("department_name") or "").endswith(f"{DEMO_TAG} Redes") and data.get("tier") == 2
-        return ok, f"{data.get('department_name') or 'sin departamento'} · N{data.get('tier')}"
+        ok = (data.get("department_name") or "").endswith(f"{DEMO_TAG} Redes") and "tier" not in data
+        return ok, data.get("department_name") or "sin departamento"
 
-    add("Departamentos", "Técnico (tarde)", f"{DEMO_TAG} Redes · N2", technician_tier)
+    add("Departamentos", "Técnico (tarde)", f"{DEMO_TAG} Redes, sin nivel", technician_department)
 
     expected = "ve el aviso «Su cuenta no tiene departamento asignado»"
     if ids["enforced"]:
