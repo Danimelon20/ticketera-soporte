@@ -436,6 +436,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "server_admin_created", "server_password_reset",
     # Departamentos del organigrama (target_label: la ruta; old/new: lo que cambió)
     "department_created", "department_changed", "departments_imported",
+    # Ficha de un departamento para la clasificación de correos (target_label: la ruta; new: qué cambió)
+    "department_profile_changed",
     # Departamento de un técnico o coordinador (old/new: la ruta)
     "placement_changed",
     # Interruptor de Administración › Activación (target_label: la clave; old/new: Apagado/Encendido)
@@ -946,6 +948,33 @@ class DepartmentEscalation(Base):
     department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
     next_department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DepartmentProfile(Base):
+    """Ficha de un departamento que atiende tickets: qué atiende, ejemplos de correos (uno por línea) y qué no
+    atiende (y a dónde va). La IA la lee con cada correo: es instrucción, no entrenamiento. Tabla nueva."""
+    __tablename__ = "department_profiles"
+
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
+    handles = Column(Text, nullable=False, default="")
+    examples = Column(Text, nullable=False, default="")
+    not_handles = Column(Text, nullable=False, default="")
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DepartmentExampleEmbedding(Base):
+    """Vector de un ejemplo de la ficha (enmascarado) para no recalcularlo. Se identifica por el texto y el modelo:
+    al cambiar la ficha, los vectores de ejemplos que ya no están se borran. Tabla nueva."""
+    __tablename__ = "department_example_embeddings"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), index=True, nullable=False)
+    text_hash = Column(String(64), nullable=False)
+    vector = Column(Text, nullable=False)  # JSON
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (UniqueConstraint("department_id", "text_hash", name="uq_department_example"),)
 
 
 class DepartmentCoordinator(Base):

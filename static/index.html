@@ -1132,8 +1132,12 @@
                     <ul id="unclassifiedList" class="org-list"></ul>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="departments">
-                    <div class="admin-card-head"><h2>Departamentos</h2></div>
+                    <div class="admin-card-head">
+                        <h2>Departamentos</h2>
+                        <button type="button" id="classifyTestOpen" class="ui-btn ui-btn-secondary ui-btn-sm">Probar clasificación</button>
+                    </div>
                     <p class="admin-text">El organigrama de la empresa. Marque «Atiende tickets» solo en los departamentos que reciben tickets: cada uno tiene un coordinador y sus técnicos. La casilla no se hereda a los subdepartamentos.</p>
+                    <p class="admin-text">La «Ficha» de cada departamento que atiende tickets le dice a la IA qué correos le corresponden. La IA la lee con cada correo: un cambio aplica en el siguiente correo.</p>
                     <form id="deptCreateForm" class="org-inline-form">
                         <div class="ui-field">
                             <label for="deptCreateName">Nombre</label>
@@ -1466,6 +1470,55 @@
             <div class="dialog-actions">
                 <button type="button" id="deptMoveCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-submit">Mover</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Ficha de un departamento: instrucción que la IA lee con cada correo (solo el administrador) -->
+    <dialog id="deptProfileDialog" class="app-dialog classify-dialog" aria-labelledby="deptProfileDialogTitle">
+        <form id="deptProfileForm" class="profile-form">
+            <h2 id="deptProfileDialogTitle" class="modal-title">Ficha del departamento</h2>
+            <p id="deptProfileTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptProfileHandles">Qué atiende</label>
+                <textarea id="deptProfileHandles" rows="3" maxlength="1000"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="deptProfileExamples">Ejemplos de correos (uno por línea, máximo 20)</label>
+                <textarea id="deptProfileExamples" rows="6" maxlength="7000" aria-describedby="deptProfileExamplesHint"></textarea>
+                <small id="deptProfileExamplesHint" class="help-text">Frases como las escribiría un empleado. Sin ejemplos, los correos de este departamento siempre pasan por «Por clasificar».</small>
+            </div>
+            <div class="form-group">
+                <label for="deptProfileNot">Qué NO atiende y a dónde va</label>
+                <textarea id="deptProfileNot" rows="3" maxlength="1000" placeholder="Por ejemplo: Impresoras y monitores → Soporte N1"></textarea>
+            </div>
+            <small class="help-text">No escriba cédulas, teléfonos ni correos: se ocultan antes de enviarlos a la IA.</small>
+            <p id="deptProfileError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="deptProfileCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Probar clasificación: qué departamento elegiría la IA para un correo de ejemplo (no crea nada) -->
+    <dialog id="classifyTestDialog" class="app-dialog classify-dialog" aria-labelledby="classifyTestDialogTitle">
+        <form id="classifyTestForm" class="profile-form">
+            <h2 id="classifyTestDialogTitle" class="modal-title">Probar clasificación</h2>
+            <p class="help-text">Pegue un correo de ejemplo. Se usa la ficha actual de cada departamento; no se crea ningún borrador ni ticket.</p>
+            <div class="form-group">
+                <label for="classifyTestSubject">Asunto</label>
+                <input type="text" id="classifyTestSubject" maxlength="300">
+            </div>
+            <div class="form-group">
+                <label for="classifyTestBody">Correo</label>
+                <textarea id="classifyTestBody" rows="6" maxlength="5000" required></textarea>
+            </div>
+            <p id="classifyTestError" class="dialog-error" role="alert" hidden></p>
+            <div id="classifyTestResult" class="classify-result" aria-live="polite" hidden></div>
+            <div class="dialog-actions">
+                <button type="button" id="classifyTestClose" class="btn-secondary">Cerrar</button>
+                <button type="submit" id="classifyTestSubmit" class="btn-submit">Probar</button>
             </div>
         </form>
     </dialog>

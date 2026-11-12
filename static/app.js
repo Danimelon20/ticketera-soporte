@@ -5290,6 +5290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         server_password_reset: 'Contraseña restablecida desde el servidor',
         department_created: 'Departamento creado',
         department_changed: 'Departamento cambiado',
+        department_profile_changed: 'Ficha de departamento cambiada',
         departments_imported: 'Organigrama importado',
         placement_changed: 'Departamento asignado',
         setting_changed: 'Interruptor de activación'
@@ -10387,7 +10388,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sub.length) text.appendChild(makeEl('span', 'org-row-sub', sub.join(' · ')));
             const actions = makeEl('div', 'org-row-actions');
             const buttons = [['handles', d.handles_tickets ? 'No atiende tickets' : 'Atiende tickets']];
-            if (d.handles_tickets) buttons.push(['next', 'Siguiente nivel']);
+            if (d.handles_tickets) buttons.push(['profile', 'Ficha'], ['next', 'Siguiente nivel']);
             buttons.push(['rename', 'Renombrar'], ['move', 'Mover'], ['alias', 'Agregar alias'],
                 ['toggle', d.is_active ? 'Desactivar' : 'Activar']);
             buttons.forEach(([action, label]) => {
@@ -10439,6 +10440,8 @@ document.addEventListener('DOMContentLoaded', () => {
             departmentOptions(select, { empty: '(Raíz)', activeOnly: false, selected: dept.parent_id,
                 ids: orgDepartments.filter(d => !inside.includes(d.id)).map(d => d.id) });
             document.getElementById('deptMoveDialog').showModal();
+        } else if (action === 'profile') {
+            openProfileDialog(dept);
         } else if (action === 'next') {
             nextLevelDepartment = dept;
             document.getElementById('deptNextTarget').textContent = dept.path;
@@ -10448,6 +10451,118 @@ document.addEventListener('DOMContentLoaded', () => {
                 ids: orgDepartments.filter(d => d.id !== dept.id).map(d => d.id),
             });
             document.getElementById('deptNextDialog').showModal();
+        }
+    });
+
+    // Ficha del departamento: la IA la lee con cada correo (solo el administrador; el servidor también lo exige)
+    const deptProfileDialog = document.getElementById('deptProfileDialog');
+    const deptProfileError = document.getElementById('deptProfileError');
+    let profileDepartment = null;
+
+    async function openProfileDialog(dept) {
+        let profile;
+        try {
+            profile = await apiFetch(`/admin/departments/${dept.id}/profile`, { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        profileDepartment = dept;
+        document.getElementById('deptProfileTarget').textContent = profile.path;
+        document.getElementById('deptProfileHandles').value = profile.handles;
+        document.getElementById('deptProfileExamples').value = profile.examples;
+        document.getElementById('deptProfileNot').value = profile.not_handles;
+        deptProfileError.hidden = true;
+        deptProfileDialog.showModal();
+        document.getElementById('deptProfileHandles').focus();
+    }
+
+    document.getElementById('deptProfileCancel').addEventListener('click', () => deptProfileDialog.close());
+    document.getElementById('deptProfileForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!profileDepartment) return;
+        deptProfileError.hidden = true;
+        try {
+            await apiFetch(`/admin/departments/${profileDepartment.id}/profile`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({
+                    handles: document.getElementById('deptProfileHandles').value,
+                    examples: document.getElementById('deptProfileExamples').value,
+                    not_handles: document.getElementById('deptProfileNot').value,
+                }),
+            });
+        } catch (err) {
+            deptProfileError.textContent = err.message || 'No se pudo guardar la ficha';
+            deptProfileError.hidden = false;
+            return;
+        }
+        deptProfileDialog.close();
+        showSuccess('Ficha guardada: aplica desde el siguiente correo');
+    });
+
+    // Probar clasificación: no crea borradores ni tickets
+    const classifyTestDialog = document.getElementById('classifyTestDialog');
+    const classifyTestError = document.getElementById('classifyTestError');
+    const classifyTestResult = document.getElementById('classifyTestResult');
+    const classifyTestSubmit = document.getElementById('classifyTestSubmit');
+
+    function similarityText(value) {
+        return value === null || value === undefined ? 'sin similitud' : `similitud ${value.toFixed(3)}`;
+    }
+
+    function renderClassification(data) {
+        classifyTestResult.replaceChildren();
+        const verdict = makeEl('p', `classify-verdict ${data.passes ? 'is-direct' : 'is-pending'}`,
+            data.passes ? `Iría directo a ${data.llm_department_path}` : 'Iría a «Por clasificar»');
+        classifyTestResult.appendChild(verdict);
+        const list = makeEl('dl');
+        const rows = [
+            ['Elección de la IA', data.llm_department_path || 'Ninguno'],
+            ['Motivo', data.reason || '—'],
+            ['1.ª opción', data.options[0] ? `${data.options[0].path} (${similarityText(data.options[0].similarity)})` : '—'],
+            ['2.ª opción', data.options[1] ? `${data.options[1].path} (${similarityText(data.options[1].similarity)})` : '—'],
+            ['IA y similitud', data.agrees ? 'Coinciden' : 'No coinciden'],
+            ['Seguridad (margen)', data.margin === null || data.margin === undefined
+                ? 'sin dato' : `${data.margin.toFixed(3)} · umbral ${data.threshold.toFixed(3)}`],
+        ];
+        rows.forEach(([term, value]) => list.append(makeEl('dt', '', term), makeEl('dd', '', value)));
+        classifyTestResult.appendChild(list);
+        if (data.notes.length) {
+            const notes = makeEl('ul', 'classify-notes');
+            data.notes.forEach(note => notes.appendChild(makeEl('li', '', note)));
+            classifyTestResult.appendChild(notes);
+        }
+        classifyTestResult.hidden = false;
+    }
+
+    document.getElementById('classifyTestOpen').addEventListener('click', () => {
+        classifyTestError.hidden = true;
+        classifyTestResult.hidden = true;
+        classifyTestDialog.showModal();
+        document.getElementById('classifyTestBody').focus();
+    });
+    document.getElementById('classifyTestClose').addEventListener('click', () => classifyTestDialog.close());
+    document.getElementById('classifyTestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        classifyTestError.hidden = true;
+        classifyTestSubmit.disabled = true;
+        classifyTestSubmit.textContent = 'Probando…';
+        try {
+            const data = await apiFetch('/admin/classification/test', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({
+                    subject: document.getElementById('classifyTestSubject').value,
+                    body: document.getElementById('classifyTestBody').value,
+                }),
+            });
+            renderClassification(data);
+        } catch (err) {
+            classifyTestResult.hidden = true;
+            classifyTestError.textContent = err.message || 'No se pudo probar la clasificación';
+            classifyTestError.hidden = false;
+        } finally {
+            classifyTestSubmit.disabled = false;
+            classifyTestSubmit.textContent = 'Probar';
         }
     });
 

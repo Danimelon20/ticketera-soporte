@@ -1393,3 +1393,31 @@ body.staff-shell :is(.panel-table-wrap, .invites-table-wrap, #directoryView .tab
 .queue-flag-dept { color: var(--muted); font-size: 12px; }
 
 .td-solution-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 var(--sp-2); }
+
+/* Ficha del departamento y Probar clasificación */
+.classify-dialog { width: min(560px, calc(100vw - 32px)); }
+
+.classify-dialog textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+
+.classify-result { display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow-wrap: anywhere; }
+
+.classify-result[hidden] { display: none; }
+
+.classify-verdict { margin: 0; font-weight: 600; }
+
+.classify-verdict.is-direct { color: var(--ok); }
+
+.classify-verdict.is-pending { color: var(--due-soon); }
+
+.classify-result dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--sp-3); margin: 0; }
+
+.classify-result dt { color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.classify-result dd { margin: 0; }
+
+.classify-notes { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 480px) {
+    .classify-result dl { grid-template-columns: minmax(0, 1fr); }
+}
+

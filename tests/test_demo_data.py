@@ -296,6 +296,27 @@ def test_verify_checks_the_unplaced_notice_with_the_switch_on(client, sent, caps
 
 
 
+def test_clean_removes_demo_department_profiles(client, sent):
+    """La ficha de la clasificación (sin columna id) se borra con su departamento DEMO."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        dept_id = db.query(models.Department).filter(models.Department.name == "[DEMO] Redes").one().id
+        db.add(models.DepartmentProfile(department_id=dept_id, handles="Internet", examples="Sin internet"))
+        db.add(models.DepartmentExampleEmbedding(department_id=dept_id, text_hash="x" * 64, vector="[1.0]"))
+        db.commit()
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        assert db.query(models.DepartmentProfile).filter(models.DepartmentProfile.department_id == dept_id).count() == 0
+        assert db.query(models.DepartmentExampleEmbedding).filter(
+            models.DepartmentExampleEmbedding.department_id == dept_id).count() == 0
+    finally:
+        db.close()
+
+
 def test_load_creates_department_tickets(client, sent):
     """Fase 2: los tickets de los escenarios tienen departamento, uno queda sin departamento y uno se transfirió."""
     demo_data.run("cargar")

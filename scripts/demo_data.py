@@ -195,6 +195,9 @@ def clean(db) -> dict[str, int]:
         escalation = models.DepartmentEscalation
         db.execute(delete(escalation).where(escalation.department_id.in_(demo_departments)
                                             | escalation.next_department_id.in_(demo_departments)))
+        # Ficha de la clasificación (tampoco tiene columna id)
+        profile = models.DepartmentProfile
+        db.execute(delete(profile).where(profile.department_id.in_(demo_departments)))
     tables = {table.name: table for table in models.Base.metadata.sorted_tables}
     for table_name, column_name, rows in references:
         table = tables[table_name]

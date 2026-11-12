@@ -1144,6 +1144,47 @@ class DepartmentImportResult(BaseModel):
     aliases: int
 
 
+class DepartmentProfileRead(BaseModel):
+    department_id: int
+    path: str
+    handles: str = ""
+    # Uno por línea
+    examples: str = ""
+    not_handles: str = ""
+    updated_at: Optional[datetime] = None
+
+
+class DepartmentProfileUpdate(BaseModel):
+    handles: str = Field(default="", max_length=1000)
+    examples: str = Field(default="", max_length=7000)
+    not_handles: str = Field(default="", max_length=1000)
+
+
+class ClassificationTestRequest(BaseModel):
+    subject: str = Field(default="", max_length=300)
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class ClassificationOption(BaseModel):
+    department_id: int
+    path: str
+    similarity: Optional[float] = None
+
+
+class ClassificationTestResult(BaseModel):
+    # Lo que la IA eligió (None: ninguno o no respondió) y su motivo
+    llm_department_id: Optional[int] = None
+    llm_department_path: Optional[str] = None
+    reason: Optional[str] = None
+    # Las dos opciones más probables, con su similitud si hay embeddings
+    options: list[ClassificationOption] = []
+    margin: Optional[float] = None
+    threshold: float
+    agrees: bool
+    passes: bool
+    notes: list[str] = []
+
+
 class PlacementUpdate(BaseModel):
     department_id: Optional[int] = None
 

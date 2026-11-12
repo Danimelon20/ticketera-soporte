@@ -7,10 +7,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, auto_assign, config, departments, email_analysis, models, nav, routing
+from .. import accounts, audit, auto_assign, classifier, config, departments, email_analysis, models, nav, routing
 from ..business_hours import day_hours
 from ..schemas import (
-    AdminOverview, CategoryOption, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    AdminOverview, CategoryOption, ClassificationOption, ClassificationTestRequest, ClassificationTestResult,
+    DepartmentProfileRead, DepartmentProfileUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
     TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
@@ -186,6 +187,82 @@ def update_department(department_id: int, data: DepartmentUpdate, db: Session = 
                      old=old[:150] if old else None, new=new[:150] if new else None)
     db.commit()
     return _one(db, dept.id)
+
+
+# ----- Ficha del departamento (clasificación de correos) -----
+
+PROFILE_NOT_SERVING = "Solo los departamentos que atienden tickets tienen ficha"
+TOO_MANY_EXAMPLES = f"Máximo {classifier.MAX_EXAMPLES} ejemplos (uno por línea)"
+LONG_EXAMPLE = f"Cada ejemplo puede tener hasta {classifier.EXAMPLE_CHARS} caracteres"
+
+
+def _serving_or_422(db: Session, department_id: int) -> models.Department:
+    dept = _department_or_404(db, department_id)
+    if not routing.serves_tickets(dept, routing.departments_by_id(db)):
+        raise HTTPException(status_code=422, detail=PROFILE_NOT_SERVING)
+    return dept
+
+
+def _profile_read(db: Session, dept: models.Department) -> DepartmentProfileRead:
+    row = db.get(models.DepartmentProfile, dept.id)
+    return DepartmentProfileRead(
+        department_id=dept.id, path=routing.path_label(dept, routing.departments_by_id(db)),
+        handles=row.handles if row else "", examples=row.examples if row else "",
+        not_handles=row.not_handles if row else "", updated_at=row.updated_at if row else None,
+    )
+
+
+@router.get("/departments/{department_id}/profile", response_model=DepartmentProfileRead)
+def get_profile(department_id: int, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return _profile_read(db, _serving_or_422(db, department_id))
+
+
+@router.put("/departments/{department_id}/profile", response_model=DepartmentProfileRead)
+def update_profile(department_id: int, data: DepartmentProfileUpdate, db: Session = Depends(get_db),
+                   admin=Depends(require_admin)):
+    """Instrucción que la IA lee con cada correo: el cambio aplica en el siguiente correo (no es entrenamiento)."""
+    dept = _serving_or_422(db, department_id)
+    examples = classifier.split_examples(data.examples)
+    if len(examples) > classifier.MAX_EXAMPLES:
+        raise HTTPException(status_code=422, detail=TOO_MANY_EXAMPLES)
+    if any(len(e) > classifier.EXAMPLE_CHARS for e in examples):
+        raise HTTPException(status_code=422, detail=LONG_EXAMPLE)
+    row = db.get(models.DepartmentProfile, dept.id)
+    if row is None:
+        row = models.DepartmentProfile(department_id=dept.id)
+        db.add(row)
+    row.handles = data.handles.strip()
+    row.examples = "\n".join(examples)
+    row.not_handles = data.not_handles.strip()
+    row.updated_by = admin.id
+    row.updated_at = routing._now()
+    classifier.forget_examples(db, dept.id, examples)
+    # Sin el texto de la ficha (podría traer datos personales): solo qué quedó
+    audit.record(db, admin.id, "department_profile_changed",
+                 target_label=routing.path_label(dept, routing.departments_by_id(db))[:150],
+                 new=f"Ficha actualizada: {len(examples)} ejemplo(s)")
+    db.commit()
+    return _profile_read(db, dept)
+
+
+@router.post("/classification/test", response_model=ClassificationTestResult)
+def test_classification(data: ClassificationTestRequest, db: Session = Depends(get_db),
+                        admin=Depends(require_admin)):
+    """Probar clasificación: qué departamento elegiría la IA, con qué margen y por qué. No crea nada."""
+    result = classifier.classify(db, data.subject, data.body)
+    by_id = routing.departments_by_id(db)
+    sims = dict(result.similarities)
+
+    def label(dept_id):
+        return routing.path_label(by_id.get(dept_id), by_id)
+
+    return ClassificationTestResult(
+        llm_department_id=result.llm_department_id, llm_department_path=label(result.llm_department_id),
+        reason=result.reason, margin=result.margin, threshold=result.threshold,
+        agrees=result.agrees, passes=result.passes, notes=result.notes,
+        options=[ClassificationOption(department_id=d, path=label(d), similarity=sims.get(d))
+                 for d in result.options],
+    )
 
 
 # ----- Importación del organigrama (el archivo solo se lee en memoria: nunca se guarda) -----
