@@ -30,7 +30,7 @@ TIMEOUT_SECONDS = 120
 KEEP_ALIVE = "24h"
 # Tope de tokens de la respuesta por tarea (en CPU se generan ~20 tokens/s)
 NUM_PREDICT = {"chat": 400, "ticket_analysis": 300, "draft_analysis": 300, "group_check": 80,
-               "department_classification": 160}
+               "department_classification": 300}
 WARM_UP_TIMEOUT_SECONDS = 180
 COMMENT_CHARS = 300
 

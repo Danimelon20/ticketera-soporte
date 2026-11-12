@@ -236,3 +236,78 @@ def test_only_serving_departments_participate(client, make_user, ai):
     _test(client, admin, "No tengo internet")
     enum = ai["payloads"][-1]["format"]["properties"]["department"]["enum"]
     assert _path(redes) in enum and _path(off) not in enum and classifier.NONE_CHOICE in enum
+
+
+# ----- Corrección de la Fase 1: el modelo pequeño elegía «Ninguno» -----
+
+def _people(*paths):
+    return [classifier.Participant(n, path, "", [], "") for n, path in enumerate(paths, start=1)]
+
+
+def test_reason_goes_before_the_department_in_the_schema(client, make_user, ai):
+    admin = make_user("admin")
+    redes, _ = _two_departments(client, admin)
+    ai["choice"] = _path(redes)
+    _test(client, admin, "No tengo internet")
+    payload = ai["payloads"][-1]
+    assert list(payload["format"]["properties"]) == ["reason", "department"]
+    assert payload["format"]["required"] == ["reason", "department"]
+
+
+def test_short_labels_without_tags_and_without_repeats():
+    assert classifier.labels(_people("[DEMO] Gerencia General / [DEMO] Redes",
+                                     "[DEMO] Gerencia General / [DEMO] Soporte N1")) == ["Redes", "Soporte N1"]
+    # Mismo nombre en dos lugares: se agrega el nivel de arriba
+    assert classifier.labels(_people("Sede Norte / Redes", "Sede Sur / Redes", "Soporte")) == [
+        "Sede Norte / Redes", "Sede Sur / Redes", "Soporte"]
+    # Un departamento que se llama como la opción "Ninguno" no se confunde con ella
+    assert classifier.NONE_CHOICE not in classifier.labels(_people("Ninguno"))
+
+
+def test_short_label_maps_back_to_the_nested_department(client, make_user, ai):
+    admin = make_user("admin")
+    parent = department(f"[DEMO] {unique('Gerencia')}", handles=False)
+    leaf = unique("Redes")
+    nested = department(f"[DEMO] {leaf}", parent_id=parent)
+    _put(client, admin, nested, handles="Internet", examples="Sin internet en el piso")
+    ai["choice"] = leaf
+    data = _test(client, admin, "No tengo internet").json()
+    enum = ai["payloads"][-1]["format"]["properties"]["department"]["enum"]
+    assert leaf in enum and not any("[DEMO]" in label for label in enum)
+    assert data["llm_department_id"] == nested
+    # En pantalla sigue la ruta completa
+    assert data["llm_department_path"] == _path(nested)
+
+
+def test_not_handled_goes_outside_each_profile(client, make_user, ai):
+    admin = make_user("admin")
+    redes, soporte = _two_departments(client, admin)
+    ai["choice"] = _path(redes)
+    _test(client, admin, "No tengo internet")
+    system = ai["payloads"][-1]["messages"][0]["content"]
+    rules = system.index("Reglas para casos que se confunden")
+    # La regla queda al final, después de todas las fichas, y no dentro del bloque de Redes
+    assert "Impresoras → Soporte N1" in system[rules:]
+    assert system.index(f"Departamento: {_path(soporte)}") < rules
+    assert "No atiende" not in system[:rules]
+    assert "no lo busques en el texto" in system
+
+
+def test_long_reason_is_not_cut_at_300(client, make_user, ai):
+    admin = make_user("admin")
+    redes, _ = _two_departments(client, admin)
+    ai["choice"] = _path(redes)
+    ai["reason"] = "palabra " * 50  # 400 caracteres
+    data = _test(client, admin, "No tengo internet").json()
+    assert len(data["reason"]) > 300 and not data["reason"].endswith("…")
+    ai["reason"] = "palabra " * 100  # 800 caracteres
+    data = _test(client, admin, "No tengo internet").json()
+    assert data["reason"].endswith("…") and len(data["reason"]) <= classifier.REASON_CHARS + 1
+
+
+def test_examples_lose_leading_bullets(client, make_user, ai):
+    admin = make_user("admin")
+    dept = department(unique("Redes"))
+    _put(client, admin, dept, examples="- -Sin internet\n• El wifi no conecta\n* La VPN no entra\nTexto - con guion")
+    data = client.get(f"/api/admin/departments/{dept}/profile", headers=admin["headers"]).json()
+    assert data["examples"] == "Sin internet\nEl wifi no conecta\nLa VPN no entra\nTexto - con guion"
