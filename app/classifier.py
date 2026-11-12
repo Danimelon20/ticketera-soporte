@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -280,16 +281,17 @@ def forget_examples(db: Session, department_id: int, examples: list[str], handle
 
 # ----- Resultado -----
 
-def classify(db: Session, subject: str, body: str, cache: bool = True) -> Classification:
+def classify(db: Session, subject: str, body: str, cache: bool = True, lock: bool = True) -> Classification:
     """Clasifica un correo. No crea borradores ni tickets. Nunca lanza excepciones por la IA o los embeddings.
-    cache=False: no guarda los vectores de los ejemplos (solo lectura, para scripts.eval_classifier)."""
+    cache=False: no guarda los vectores de los ejemplos (solo lectura, para scripts.eval_classifier).
+    lock=False: quien llama ya tiene el turno del modelo (el análisis de los borradores)."""
     result = Classification(threshold=threshold(db))
     people = participants(db)
     if not people:
         result.notes.append(NO_DEPARTMENTS)
         return result
     # Un solo uso del modelo a la vez (el mismo turno que los análisis)
-    with email_analysis.ANALYSIS_LOCK:
+    with email_analysis.ANALYSIS_LOCK if lock else nullcontext():
         result.llm_department_id, result.reason, answered = _llm_choice(people, subject, body)
         try:
             result.similarities = _similarities(db, people, subject, body, cache)

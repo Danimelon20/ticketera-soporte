@@ -308,6 +308,7 @@ def assign_draft(draft_id: int, now: datetime | None = None) -> str:
     """Al quedar un borrador pendiente de revisión. Nunca lanza excepciones.
 
     Con la asignación automática apagada no se asigna: queda "Sin revisor" y lo reparte un coordinador.
+    Con tickets por departamento, los borradores no se asignan a técnicos: van al coordinador o a «Por clasificar».
     """
     if not config.AUTO_ASSIGN_ENABLED:
         return "disabled"
@@ -315,6 +316,8 @@ def assign_draft(draft_id: int, now: datetime | None = None) -> str:
     with AUTO_ASSIGN_LOCK:
         db = SessionLocal()
         try:
+            if routing.enforced(db):
+                return "skipped"
             draft = db.get(models.EmailDraft, draft_id)
             if draft is None or draft.status not in DRAFT_PENDING_STATUSES:
                 return "skipped"
@@ -335,7 +338,8 @@ def assign_draft(draft_id: int, now: datetime | None = None) -> str:
 
 
 def run_pending_drafts(now: datetime | None = None) -> int:
-    """Borradores sin revisor (en espera o sin fila), del más antiguo al más nuevo. Devuelve cuántos asignó."""
+    """Borradores sin revisor (en espera o sin fila), del más antiguo al más nuevo. Devuelve cuántos asignó.
+    Con tickets por departamento no asigna borradores a técnicos."""
     if not config.AUTO_ASSIGN_ENABLED:
         return 0
     now = now or _now()
@@ -343,6 +347,8 @@ def run_pending_drafts(now: datetime | None = None) -> int:
     with AUTO_ASSIGN_LOCK:
         db = SessionLocal()
         try:
+            if routing.enforced(db):
+                return 0
             assigned += _drafts_baseline(db, now)
             db.commit()
             # Los que ya no esperan a una persona salen de la espera

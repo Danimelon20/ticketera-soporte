@@ -3440,6 +3440,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return [DRAFT_STATUS_LABELS[draft.status] || draft.status, ''];
     }
 
+    // Tickets por departamento: elegido por la IA, por el administrador o todavía «Por clasificar»
+    function draftDepartmentText(draft) {
+        if (!draft.department_name) return 'Por clasificar';
+        return draft.classification === 'routed' ? `${draft.department_name} (IA)` : draft.department_name;
+    }
+
     function draftOwnerText(draft) {
         return draft.assigned_name ? `Asignado a ${draft.assigned_name}` : 'Sin revisor';
     }
@@ -3478,6 +3484,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tags = makeEl('span', 'draft-item-tags');
             tags.appendChild(makeEl('span', `ui-tag ${tone}`, tag));
             tags.appendChild(makeEl('span', draft.assigned_name ? 'ui-tag' : 'ui-tag is-warn', draftOwnerText(draft)));
+            if (draft.classification) tags.appendChild(makeEl('span', draft.department_name ? 'ui-tag is-info' : 'ui-tag is-warn', draftDepartmentText(draft)));
             btn.appendChild(tags);
             li.appendChild(btn);
             draftsList.appendChild(li);
@@ -3530,6 +3537,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftReason = document.getElementById('draftReason');
         draftReason.textContent = draft.pending_reason ? `Pendiente: ${draft.pending_reason}` : '';
         draftReason.hidden = !draft.pending_reason;
+        const draftDepartment = document.getElementById('draftDepartment');
+        draftDepartment.textContent = draft.classification ? `Departamento: ${draftDepartmentText(draft)}` : '';
+        draftDepartment.hidden = !draft.classification;
         document.getElementById('draftBody').textContent = draft.body;
         // Adjuntos del correo y lo que no se tomó (rechazados, más de 5, enlaces a la nube)
         const draftAttachments = document.getElementById('draftAttachments');
@@ -6484,6 +6494,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }),
                     navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
                         context: 'Horarios de la semana, vacaciones y ausencias',
+                    }),
+                    navSection('drafts-unclassified', 'Por clasificar', 'admin/por-clasificar', () => showAdminSection('drafts-unclassified'), {
+                        count: 'drafts_unclassified', tone: 'warn', context: 'Correos que la IA no envió directo a un coordinador',
                     }),
                     navSection('unclassified', 'Sin departamento', 'admin/sin-departamento', () => showAdminSection('unclassified'), {
                         count: 'unclassified', tone: 'warn', context: 'Tickets abiertos que todavía no tienen departamento',
@@ -10311,6 +10324,7 @@ document.addEventListener('DOMContentLoaded', () => {
         health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
         departments: 'Departamentos', activation: 'Activación', panel: 'Panel',
         unclassified: 'Tickets sin departamento',
+        'drafts-unclassified': 'Correos por clasificar',
     };
     // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
     const ADMIN_SECTION_LOADERS = {};
@@ -10774,6 +10788,115 @@ document.addEventListener('DOMContentLoaded', () => {
         showSuccess(`Ticket #${button.dataset.classifyId} clasificado`);
         showUnclassified();
         pollNavCounts(false);
+    });
+
+    // ----- Administración › Por clasificar: correos que la IA no envió directo a un coordinador -----
+    const draftsUnclassifiedList = document.getElementById('draftsUnclassifiedList');
+    const thresholdInput = document.getElementById('thresholdInput');
+
+    function similarityLabel(value) {
+        return value === null || value === undefined ? 'sin similitud' : `similitud ${value.toFixed(3)}`;
+    }
+
+    async function showDraftsUnclassified() {
+        let data;
+        try {
+            [data] = await Promise.all([
+                apiFetch('/admin/drafts/pending-classification', { silent: true }), loadOrgDepartments(),
+            ]);
+        } catch (err) {
+            draftsUnclassifiedList.replaceChildren(errorState(err, showDraftsUnclassified));
+            return;
+        }
+        document.getElementById('draftsUnclassifiedOff').hidden = data.routing_enforced;
+        if (document.activeElement !== thresholdInput) thresholdInput.value = data.threshold.toFixed(3);
+        draftsUnclassifiedList.replaceChildren();
+        if (!data.items.length) {
+            draftsUnclassifiedList.appendChild(emptyState({ title: 'No hay correos por clasificar', text: 'La IA envió todos los correos a un coordinador.' }));
+            return;
+        }
+        data.items.forEach(item => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `Borrador #${item.draft_id} · ${item.subject}`));
+            text.appendChild(makeEl('span', 'org-row-sub', `${item.requester_name} · ${formatDateTime(item.created_at)}`
+                + (item.pending_reason ? ` · ${item.pending_reason}` : '')));
+            if (item.summary) text.appendChild(makeEl('span', 'org-row-sub', `Resumen: ${item.summary}`));
+            if (item.excerpt) text.appendChild(makeEl('span', 'org-row-sub', `«${item.excerpt}»`));
+            if (item.ai_reason) {
+                const margin = item.ai_margin === null || item.ai_margin === undefined ? '' : ` · margen ${item.ai_margin.toFixed(3)}`;
+                text.appendChild(makeEl('span', 'org-row-sub', `IA: ${item.ai_department_path || 'Ninguno'}${margin} — ${item.ai_reason}`));
+            }
+            const actions = makeEl('div', 'org-row-actions');
+            // Un clic: las dos opciones más probables
+            item.options.forEach((option, index) => {
+                const label = `${index === 0 ? '1.ª' : '2.ª'}: ${option.path} (${option.has_coordinator
+                    ? similarityLabel(option.similarity) : 'sin coordinador activo'})`;
+                const button = makeEl('button', `ui-btn ui-btn-sm ${index === 0 ? 'ui-btn-primary' : 'ui-btn-secondary'}`, label);
+                button.type = 'button';
+                button.dataset.chooseDraft = String(item.draft_id);
+                button.dataset.chooseDept = String(option.department_id);
+                if (!option.has_coordinator) {
+                    button.disabled = true;
+                    button.title = 'Sin coordinador activo';
+                }
+                actions.appendChild(button);
+            });
+            // Otro departamento (o sin sugerencia de la IA)
+            const select = makeEl('select', 'ui-input drafts-unclassified-dept');
+            select.setAttribute('aria-label', `Otro departamento para el borrador #${item.draft_id}`);
+            departmentOptions(select, { servingOnly: true, empty: 'Otro departamento' });
+            const other = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Enviar');
+            other.type = 'button';
+            other.dataset.chooseDraft = String(item.draft_id);
+            other.dataset.chooseOther = 'true';
+            actions.append(select, other);
+            li.append(text, actions);
+            draftsUnclassifiedList.appendChild(li);
+        });
+    }
+    ADMIN_SECTION_LOADERS['drafts-unclassified'] = showDraftsUnclassified;
+
+    draftsUnclassifiedList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-choose-draft]');
+        if (!button) return;
+        let departmentId = Number(button.dataset.chooseDept);
+        if (button.dataset.chooseOther) {
+            departmentId = Number(button.closest('li').querySelector('.drafts-unclassified-dept').value);
+            if (!departmentId) {
+                showError('Elija el departamento');
+                return;
+            }
+        }
+        button.disabled = true;
+        let result;
+        try {
+            result = await apiFetch(`/admin/drafts/${button.dataset.chooseDraft}/department`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ department_id: departmentId }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            showError(err.message);
+            return;
+        }
+        showSuccess(`Borrador #${result.draft_id} enviado a ${result.department_name}`);
+        showDraftsUnclassified();
+        pollNavCounts(false);
+    });
+
+    document.getElementById('thresholdForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const data = await apiFetch('/admin/classification/threshold', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ threshold: Number(thresholdInput.value) }),
+            });
+            thresholdInput.value = data.threshold.toFixed(3);
+            showSuccess('Umbral guardado: aplica desde el siguiente correo');
+        } catch (err) {
+            showError(err.message);
+        }
     });
 
     // ----- Administración › Panel: una fila por departamento que atiende tickets -----

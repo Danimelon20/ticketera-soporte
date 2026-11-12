@@ -198,6 +198,19 @@ def clean(db) -> dict[str, int]:
         # Ficha de la clasificación (tampoco tiene columna id)
         profile = models.DepartmentProfile
         db.execute(delete(profile).where(profile.department_id.in_(demo_departments)))
+    # Clasificación de los borradores (sin columna id): la de los borradores DEMO y la que apunta a un
+    # departamento DEMO (en ese caso el borrador real vuelve a «sin clasificación»)
+    demo_drafts = ids.get("email_drafts", set())
+    classification = models.DraftClassification
+    condition = classification.draft_id.in_(demo_drafts) if demo_drafts else None
+    if demo_departments:
+        to_demo = (classification.department_id.in_(demo_departments)
+                   | classification.ai_department_id.in_(demo_departments)
+                   | classification.option1_id.in_(demo_departments)
+                   | classification.option2_id.in_(demo_departments))
+        condition = to_demo if condition is None else (condition | to_demo)
+    if condition is not None:
+        db.execute(delete(classification).where(condition))
     tables = {table.name: table for table in models.Base.metadata.sorted_tables}
     for table_name, column_name, rows in references:
         table = tables[table_name]

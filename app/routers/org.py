@@ -7,11 +7,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import accounts, audit, auto_assign, classifier, config, departments, email_analysis, models, nav, routing
+from .. import (
+    accounts, audit, auto_assign, classifier, config, departments, draft_classification, email_analysis, models, nav,
+    routing,
+)
 from ..business_hours import day_hours
 from ..schemas import (
     AdminOverview, CategoryOption, ClassificationOption, ClassificationTestRequest, ClassificationTestResult,
-    DepartmentProfileRead, DepartmentProfileUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    DepartmentProfileRead, DepartmentProfileUpdate, DraftDepartmentChoice, DraftDepartmentChosen, PendingDraft,
+    PendingDraftOption, PendingDrafts, ThresholdRead, ThresholdUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
     TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
@@ -265,6 +269,57 @@ def test_classification(data: ClassificationTestRequest, db: Session = Depends(g
     )
 
 
+# ----- Por clasificar: borradores que la IA no envió a un coordinador -----
+
+EXCERPT_CHARS = 300
+
+
+@router.get("/drafts/pending-classification", response_model=PendingDrafts)
+def pending_classification(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Solo lo necesario para elegir el departamento: asunto y un fragmento enmascarados (sin teléfono ni
+    cédula), el resumen y las dos opciones de la IA."""
+    by_id = routing.departments_by_id(db)
+    items = []
+    for draft, row in draft_classification.pending_query(db).all():
+        options = []
+        for dept_id, sim in ((row.option1_id, row.option1_similarity), (row.option2_id, row.option2_similarity)):
+            dept = by_id.get(dept_id)
+            if dept is not None and routing.serves_tickets(dept, by_id):
+                options.append(PendingDraftOption(
+                    department_id=dept.id, path=routing.path_label(dept, by_id), similarity=sim,
+                    has_coordinator=draft_classification.has_coordinator(db, dept.id)))
+        items.append(PendingDraft(
+            draft_id=draft.id, created_at=draft.created_at,
+            requester_name=(draft.requester.name if draft.requester else None) or "Sin nombre",
+            subject=classifier.mask(draft.subject) or "(Sin asunto)",
+            excerpt=" ".join(classifier.mask(draft.body).split())[:EXCERPT_CHARS],
+            summary=draft.summary,
+            pending_reason=models.DRAFT_PENDING_REASONS.get(row.pending_reason),
+            ai_department_path=routing.path_label(by_id.get(row.ai_department_id), by_id),
+            ai_reason=row.ai_reason, ai_margin=row.ai_margin, options=options,
+        ))
+    return PendingDrafts(threshold=classifier.threshold(db), routing_enforced=routing.enforced(db), items=items)
+
+
+@router.post("/drafts/{draft_id}/department", response_model=DraftDepartmentChosen)
+def choose_draft_department(draft_id: int, data: DraftDepartmentChoice, db: Session = Depends(get_db),
+                            admin=Depends(require_admin)):
+    """Un clic: el borrador va al coordinador de ese departamento. Queda si coincidió con la 1.ª opción de la IA."""
+    row = draft_classification.choose(db, admin, draft_id, data.department_id)
+    db.commit()
+    by_id = routing.departments_by_id(db)
+    return DraftDepartmentChosen(draft_id=draft_id, department_name=routing.path_label(by_id[row.department_id], by_id),
+                                 matched_first=row.matched_first)
+
+
+@router.put("/classification/threshold", response_model=ThresholdRead)
+def update_threshold(data: ThresholdUpdate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Margen mínimo para enviar un borrador directo al coordinador. Aplica desde el siguiente correo."""
+    draft_classification.set_threshold(db, admin, data.threshold)
+    db.commit()
+    return ThresholdRead(threshold=classifier.threshold(db))
+
+
 # ----- Importación del organigrama (el archivo solo se lee en memoria: nunca se guarda) -----
 
 @router.post("/departments/import/preview", response_model=DepartmentImportPreview)
@@ -391,6 +446,9 @@ def set_switch(key: str, data: SwitchUpdate, db: Session = Depends(get_db), admi
         raise HTTPException(status_code=409, detail=CHECKLIST_PENDING)
     routing.set_setting(db, key, "true" if data.enabled else "false", admin)
     db.commit()
+    if data.enabled:
+        # Los borradores que esperaban revisión pasan a «Por clasificar»
+        draft_classification.install_pending(db)
     return _switch_read(db, key)
 
 

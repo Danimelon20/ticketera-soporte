@@ -1421,3 +1421,10 @@ body.staff-shell :is(.panel-table-wrap, .invites-table-wrap, #directoryView .tab
     .classify-result dl { grid-template-columns: minmax(0, 1fr); }
 }
 
+
+/* Por clasificar: las opciones llevan la ruta completa del departamento */
+#draftsUnclassifiedList .org-row-actions { flex: 1 1 280px; min-width: 0; }
+
+#draftsUnclassifiedList .org-row-actions .ui-btn { white-space: normal; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+
+#draftsUnclassifiedList .drafts-unclassified-dept { flex: 1 1 180px; min-width: 0; }

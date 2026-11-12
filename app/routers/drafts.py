@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, email_analysis, email_attachments, grouping, identity, models, suspicion
+from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, draft_classification, email_analysis, email_attachments, grouping, identity, models, routing, suspicion
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import AttachmentRead, DraftAssign, DraftConfirm, DraftRead
@@ -111,6 +111,12 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
         reviewer = db.get(models.User, reviewer_id)
         data.assigned_to = reviewer_id
         data.assigned_name = person_name(reviewer) if reviewer else None
+    classification = draft_classification.row_of(db, draft.id) if routing.enforced(db) else None
+    if classification is not None:
+        data.classification = classification.status
+        if classification.department_id is not None:
+            data.department_name = routing.path_label(db.get(models.Department, classification.department_id),
+                                                      routing.departments_by_id(db))
     pending = draft.status in DEFAULT_STATUSES
     data.can_review = pending and can_review(db, draft, viewer)
     data.can_reassign = pending and viewer.role in MANAGER_ROLES

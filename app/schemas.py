@@ -704,6 +704,9 @@ class DraftRead(BaseModel):
     assigned_name: Optional[str] = None
     can_review: bool = False
     can_reassign: bool = False
+    # Tickets por departamento: departamento elegido por la IA o el administrador; «Por clasificar» si todavía no
+    department_name: Optional[str] = None
+    classification: Optional[Literal["routed", "pending", "classified"]] = None
 
 
 class DraftAssign(BaseModel):
@@ -798,6 +801,8 @@ class NavCounts(BaseModel):
     approvals_pending: Optional[int] = None
     active_admins: Optional[int] = None
     unclassified: Optional[int] = None
+    # Borradores en «Por clasificar» (administrador, con tickets por departamento)
+    drafts_unclassified: Optional[int] = None
     mine_open: Optional[int] = None
     mine_due_soon: Optional[int] = None
     mine_resolved_today: Optional[int] = None
@@ -1183,6 +1188,53 @@ class ClassificationTestResult(BaseModel):
     agrees: bool
     passes: bool
     notes: list[str] = []
+
+
+class PendingDraftOption(BaseModel):
+    department_id: int
+    path: str
+    similarity: Optional[float] = None
+    # Sin coordinador activo no se puede elegir (el servidor responde 409)
+    has_coordinator: bool = True
+
+
+class PendingDraft(BaseModel):
+    """Borrador en «Por clasificar»: solo lo necesario para elegir el departamento (enmascarado)."""
+    draft_id: int
+    created_at: datetime
+    requester_name: str
+    subject: str
+    excerpt: str
+    summary: Optional[str] = None
+    pending_reason: Optional[str] = None
+    ai_department_path: Optional[str] = None
+    ai_reason: Optional[str] = None
+    ai_margin: Optional[float] = None
+    options: list[PendingDraftOption] = []
+
+
+class PendingDrafts(BaseModel):
+    threshold: float
+    routing_enforced: bool
+    items: list[PendingDraft] = []
+
+
+class DraftDepartmentChoice(BaseModel):
+    department_id: int
+
+
+class DraftDepartmentChosen(BaseModel):
+    draft_id: int
+    department_name: str
+    matched_first: Optional[bool] = None
+
+
+class ThresholdUpdate(BaseModel):
+    threshold: float = Field(ge=0, le=1)
+
+
+class ThresholdRead(BaseModel):
+    threshold: float
 
 
 class PlacementUpdate(BaseModel):

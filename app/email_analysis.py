@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from . import chatbot, config, mailer, models
+from . import chatbot, config, mailer, models, routing
 from .business_hours import add_business_hours, day_hours
 from .database import SessionLocal
 from .email_parser import _PREFIX_RE, _SUPPORT_TAG_RE, _clean_title, normalize, strip_quoted
@@ -580,9 +580,14 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         logging.warning("No se pudo analizar el borrador %s (intento %s): %s", draft.id, draft.attempts, type(exc).__name__)
         db.commit()
         if draft.status == "error":
-            # Con error también lo revisa una persona
-            from . import auto_assign
-            auto_assign.assign_draft(draft.id)
+            # Con error también lo revisa una persona: con tickets por departamento, desde «Por clasificar»
+            if routing.enforced(db):
+                from . import draft_classification
+                draft_classification.mark_ai_error(db, draft)
+                db.commit()
+            else:
+                from . import auto_assign
+                auto_assign.assign_draft(draft.id)
         return draft.status
 
     result = _parse_draft(content, categories)
@@ -624,9 +629,16 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         missing_contact = missing_contact and not has_reason
         draft.status = "waiting_contact" if missing_contact else "pending_review"
         db.commit()
-        # Ya espera a una persona: se le busca revisor (import local: auto_assign importa este módulo)
-        from . import auto_assign
-        auto_assign.assign_draft(draft.id)
+        if routing.enforced(db):
+            # Tickets por departamento: la IA elige el departamento con las fichas (al coordinador o a
+            # «Por clasificar»). Ya tiene el turno del modelo: la clasificación no lo vuelve a pedir
+            from . import draft_classification
+            draft_classification.classify_draft(db, draft, lock=False)
+            db.commit()
+        else:
+            # Ya espera a una persona: se le busca revisor (import local: auto_assign importa este módulo)
+            from . import auto_assign
+            auto_assign.assign_draft(draft.id)
         mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user, missing_contact))
 
     logging.info("Borrador %s analizado por la IA: %s", draft.id, draft.status)

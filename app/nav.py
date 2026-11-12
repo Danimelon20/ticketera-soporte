@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, routing, schedules, ticket_access
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, draft_classification, grouping, models, routing, schedules, ticket_access
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -133,7 +133,9 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
             # Tickets abiertos sin departamento (los clasifica el administrador)
             "unclassified": routing.unclassified_open_tickets(db).count(),
             # Con tickets por departamento, el administrador también ve la operación de todos los departamentos
-            **(_ticket_counts(db, user, now) if routing.enforced(db) else {}),
+            # y los borradores que la IA no envió a un coordinador («Por clasificar»)
+            **({**_ticket_counts(db, user, now), "drafts_unclassified": draft_classification.pending_query(db).count()}
+               if routing.enforced(db) else {}),
         }
     if user.role == "technician":
         mine = _open_tickets(db, assigned_to=user.id)

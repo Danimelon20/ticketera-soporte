@@ -963,6 +963,46 @@ class DepartmentProfile(Base):
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+# Estado de la clasificación de un borrador (validado en Python)
+# routed: la IA lo envió al coordinador del departamento; pending: «Por clasificar» (lo decide el administrador);
+# classified: el administrador eligió el departamento
+DRAFT_CLASSIFICATION_STATUSES = ("routed", "pending", "classified")
+# Por qué quedó en «Por clasificar»
+DRAFT_PENDING_REASONS = {
+    "below_threshold": "La IA no estuvo segura",
+    "no_coordinator": "El departamento elegido no tiene coordinador activo",
+    "ai_error": "La IA no pudo analizar el correo",
+    "installed": "Llegó antes de la clasificación por departamento",
+}
+
+
+class DraftClassification(Base):
+    """Departamento de un borrador según la IA (con las fichas) o el administrador. Tabla nueva: no altera
+    email_drafts. La 1.ª y 2.ª opción quedan guardadas para «Por clasificar» y para medir la precisión."""
+    __tablename__ = "draft_classifications"
+
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), primary_key=True)
+    status = Column(String(20), nullable=False)
+    # Departamento actual (nulo mientras está «Por clasificar»)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    pending_reason = Column(String(30), nullable=True)
+    # Lo que dijo la IA
+    ai_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    ai_reason = Column(String(600), nullable=True)
+    ai_margin = Column(Float, nullable=True)
+    ai_agrees = Column(Boolean, nullable=False, default=False)
+    option1_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    option2_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    option1_similarity = Column(Float, nullable=True)
+    option2_similarity = Column(Float, nullable=True)
+    threshold = Column(Float, nullable=True)
+    # El administrador desde «Por clasificar»: si coincidió con la 1.ª opción (para calibrar el umbral)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    matched_first = Column(Boolean, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class DepartmentExampleEmbedding(Base):
     """Vector de un ejemplo de la ficha (enmascarado) para no recalcularlo. Se identifica por el texto y el modelo:
     al cambiar la ficha, los vectores de ejemplos que ya no están se borran. Tabla nueva."""

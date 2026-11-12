@@ -9,7 +9,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import accounts, auto_assign, chatbot, config, email_analysis, entra_login, mailer, models, org_setup, people_activity
+from . import (
+    accounts, auto_assign, chatbot, config, draft_classification, email_analysis, entra_login, mailer, models,
+    org_setup, people_activity,
+)
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -132,6 +135,9 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         accounts.warn_if_many_admins(db)
     fill_due_dates()
+    # Con tickets por departamento: los borradores pendientes sin clasificación pasan a «Por clasificar»
+    with SessionLocal() as db:
+        draft_classification.install_pending(db)
     due_task = asyncio.create_task(due_dates_forever()) if config.DUE_DATES_CHECK_SECONDS > 0 else None
     start_warm_up()
 

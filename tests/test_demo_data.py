@@ -317,6 +317,28 @@ def test_clean_removes_demo_department_profiles(client, sent):
         db.close()
 
 
+def test_clean_removes_draft_classifications_of_demo(client, sent):
+    """La clasificación de los borradores (sin columna id) no impide borrar los departamentos DEMO."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        dept_id = db.query(models.Department).filter(models.Department.name == "[DEMO] Redes").one().id
+        draft = db.query(models.EmailDraft).filter(models.EmailDraft.title.like("[DEMO]%")).first()
+        draft_id = draft.id
+        db.add(models.DraftClassification(draft_id=draft_id, status="routed", department_id=dept_id,
+                                          ai_department_id=dept_id, option1_id=dept_id))
+        db.commit()
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        assert db.get(models.DraftClassification, draft_id) is None
+        assert db.query(models.Department).filter(models.Department.id == dept_id).count() == 0
+    finally:
+        db.close()
+
+
 def test_load_creates_department_tickets(client, sent):
     """Fase 2: los tickets de los escenarios tienen departamento, uno queda sin departamento y uno se transfirió."""
     demo_data.run("cargar")
