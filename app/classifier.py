@@ -43,7 +43,8 @@ NO_EMBEDDINGS = ("Sin similitud: el modelo de embeddings {model} no está dispon
                  "El correo iría a «Por clasificar»")
 NO_LLM = "La IA no respondió: el correo iría a «Por clasificar»"
 LLM_NONE = "La IA no encontró un departamento que corresponda"
-NO_EXAMPLES = "Sin ejemplos en la ficha: {path} nunca recibe correos directo, siempre pasan por «Por clasificar»"
+NO_EXAMPLES = ("Sin ejemplos en la ficha: {path} participa solo con «Qué atiende» y nunca recibe correos directo "
+               "(siempre pasan por «Por clasificar»)")
 DISAGREE = "La IA y la similitud eligen departamentos distintos"
 LOW_MARGIN = "El margen ({margin:.3f}) no alcanza el umbral ({threshold:.3f})"
 
@@ -218,15 +219,24 @@ def _hash(text: str) -> str:
     return hashlib.sha256(f"{config.EMBEDDING_MODEL}\n{text}".encode("utf-8")).hexdigest()
 
 
+def _similarity_texts(examples: list[str], handles: str) -> list[str]:
+    """Textos de la ficha para la similitud (enmascarados): los ejemplos y «Qué atiende» como uno más, para que
+    un departamento sin ejemplos también aparezca entre las opciones."""
+    texts = [mask(e)[:EXAMPLE_CHARS] for e in examples[:MAX_EXAMPLES]]
+    if handles.strip():
+        texts.append(mask(handles)[:FIELD_CHARS])
+    return texts
+
+
 def _example_texts(p: Participant) -> list[str]:
-    return [mask(e)[:EXAMPLE_CHARS] for e in p.examples[:MAX_EXAMPLES]]
+    return _similarity_texts(p.examples, p.handles)
 
 
 def _example_vectors(db: Session, people: list[Participant], deadline: float,
                      cache: bool = True) -> dict[int, list[list[float]]]:
-    """Vectores de los ejemplos (enmascarados) por departamento. Guarda los nuevos (salvo cache=False);
-    lanza si no hay embeddings."""
-    wanted = {p.id: _example_texts(p) for p in people if p.examples}
+    """Vectores de los ejemplos y de «Qué atiende» (enmascarados) por departamento. Guarda los nuevos (salvo
+    cache=False); lanza si no hay embeddings."""
+    wanted = {p.id: texts for p in people if (texts := _example_texts(p))}
     cached = {}
     if wanted:
         for row in db.query(models.DepartmentExampleEmbedding).filter(
@@ -258,9 +268,10 @@ def _similarities(db: Session, people: list[Participant], subject: str, body: st
     return sorted(scores, key=lambda pair: pair[1], reverse=True)
 
 
-def forget_examples(db: Session, department_id: int, examples: list[str]) -> None:
-    """Borra los vectores de los ejemplos que ya no están en la ficha. No hace commit."""
-    keep = {_hash(mask(e)[:EXAMPLE_CHARS]) for e in examples[:MAX_EXAMPLES]}
+def forget_examples(db: Session, department_id: int, examples: list[str], handles: str = "") -> None:
+    """Borra los vectores de los ejemplos (y del «Qué atiende» anterior) que ya no están en la ficha.
+    No hace commit."""
+    keep = {_hash(text) for text in _similarity_texts(examples, handles)}
     for row in db.query(models.DepartmentExampleEmbedding).filter(
             models.DepartmentExampleEmbedding.department_id == department_id):
         if row.text_hash not in keep:
@@ -297,12 +308,14 @@ def classify(db: Session, subject: str, body: str, cache: bool = True) -> Classi
         result.agrees = result.llm_department_id is not None and sims[0][0] == result.llm_department_id
         if result.llm_department_id is not None and not result.agrees:
             result.notes.append(DISAGREE)
-    result.passes = result.agrees and result.margin is not None and result.margin >= result.threshold
-    if result.agrees and not result.passes:
-        result.notes.append(LOW_MARGIN.format(margin=result.margin, threshold=result.threshold))
     chosen = next((p for p in people if p.id == result.llm_department_id), None)
-    if chosen is not None and not chosen.examples:
-        result.notes.append(NO_EXAMPLES.format(path=chosen.path))
+    margin_ok = result.margin is not None and result.margin >= result.threshold
+    # Sin ejemplos nunca va directo: «Qué atiende» es más general y daría falsos «directo»
+    result.passes = result.agrees and margin_ok and chosen is not None and bool(chosen.examples)
+    if result.agrees and not margin_ok:
+        result.notes.append(LOW_MARGIN.format(margin=result.margin, threshold=result.threshold))
+    # Siempre, por cada departamento sin ejemplos (elija lo que elija la IA): hay que completar su ficha
+    result.notes += [NO_EXAMPLES.format(path=p.path) for p in people if not p.examples]
 
     # Opciones: la de la IA (o la más parecida) y la siguiente más parecida
     first = result.llm_department_id if result.llm_department_id is not None else (sims[0][0] if sims else None)

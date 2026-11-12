@@ -236,7 +236,7 @@ def update_profile(department_id: int, data: DepartmentProfileUpdate, db: Sessio
     row.not_handles = data.not_handles.strip()
     row.updated_by = admin.id
     row.updated_at = routing._now()
-    classifier.forget_examples(db, dept.id, examples)
+    classifier.forget_examples(db, dept.id, examples, row.handles)
     # Sin el texto de la ficha (podría traer datos personales): solo qué quedó
     audit.record(db, admin.id, "department_profile_changed",
                  target_label=routing.path_label(dept, routing.departments_by_id(db))[:150],

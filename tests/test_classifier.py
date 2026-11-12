@@ -12,7 +12,8 @@ from org_helpers import changes, department, unique
 PHONE = "8888-1234"
 ID_NUMBER = "1-1234-5678"
 EMAIL = "persona@empresa.test"
-KEYWORDS = (("internet", "red", "wifi", "conexion", "conexión"), ("impresora", "imprime", "monitor", "pantalla"))
+KEYWORDS = (("internet", "red", "wifi", "conexion", "conexión"), ("impresora", "imprime", "monitor", "pantalla"),
+            ("factura", "erp", "base de datos", "servidor"))
 
 
 def _vector(text):
@@ -215,7 +216,8 @@ def test_profile_change_applies_on_the_next_email(client, make_user, ai):
     ai["choice"] = _path(redes)
     _test(client, admin, "No tengo internet")
     with SessionLocal() as db:
-        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=redes).count() == 2
+        # Los 2 ejemplos y «Qué atiende»
+        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=redes).count() == 3
     # Cambia la ficha: los vectores de los ejemplos quitados se borran y el siguiente correo ya la usa
     _put(client, admin, redes, handles="Solo cableado", examples="El cable de red está roto")
     with SessionLocal() as db:
@@ -225,7 +227,7 @@ def test_profile_change_applies_on_the_next_email(client, make_user, ai):
     system = ai["payloads"][0]["messages"][0]["content"]
     assert "Solo cableado" in system and "El cable de red está roto" in system and "El wifi no conecta" not in system
     with SessionLocal() as db:
-        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=redes).count() == 1
+        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=redes).count() == 2
 
 
 def test_only_serving_departments_participate(client, make_user, ai):
@@ -311,3 +313,65 @@ def test_examples_lose_leading_bullets(client, make_user, ai):
     _put(client, admin, dept, examples="- -Sin internet\n• El wifi no conecta\n* La VPN no entra\nTexto - con guion")
     data = client.get(f"/api/admin/departments/{dept}/profile", headers=admin["headers"]).json()
     assert data["examples"] == "Sin internet\nEl wifi no conecta\nLa VPN no entra\nTexto - con guion"
+
+
+# ----- Corrección de la Fase 1: departamentos sin ejemplos (solo «Qué atiende») -----
+
+N2_HANDLES = "Servidores y sistemas internos: facturación, ERP y bases de datos"
+INVOICE = "El sistema de facturación no deja generar facturas, sale un error de base de datos"
+
+
+def _with_n2(client, admin):
+    redes, soporte = _two_departments(client, admin)
+    n2 = department(unique("Soporte N2"))
+    assert _put(client, admin, n2, handles=N2_HANDLES).status_code == 200
+    return redes, soporte, n2
+
+
+def test_department_with_only_handles_appears_in_similarity_and_options(client, make_user, ai):
+    admin = make_user("admin")
+    _, soporte, n2 = _with_n2(client, admin)
+    # La IA se equivoca: aun así Soporte N2 queda entre las dos opciones de «Por clasificar»
+    ai["choice"] = _path(soporte)
+    data = _test(client, admin, INVOICE).json()
+    assert data["passes"] is False
+    assert [o["department_id"] for o in data["options"]] == [soporte, n2]
+    assert data["options"][1]["similarity"] is not None
+    # La nota sale aunque la IA haya elegido otro departamento
+    assert classifier.NO_EXAMPLES.format(path=_path(n2)) in data["notes"]
+
+
+def test_department_without_examples_is_never_direct_even_if_similarity_wins(client, make_user, ai):
+    admin = make_user("admin")
+    _, _, n2 = _with_n2(client, admin)
+    ai["choice"] = _path(n2)
+    data = _test(client, admin, INVOICE).json()
+    # La IA y la similitud coinciden con buen margen, pero sin ejemplos no va directo
+    assert data["agrees"] is True and data["margin"] >= data["threshold"]
+    assert data["passes"] is False
+    # Con ejemplos, sí
+    _put(client, admin, n2, handles=N2_HANDLES, examples="El ERP no carga\nLa base de datos de facturas no responde")
+    data = _test(client, admin, INVOICE).json()
+    assert data["passes"] is True
+    assert classifier.NO_EXAMPLES.format(path=_path(n2)) not in data["notes"]
+
+
+def test_handles_change_recomputes_its_vector(client, make_user, ai):
+    admin = make_user("admin")
+    _, _, n2 = _with_n2(client, admin)
+    ai["choice"] = _path(n2)
+    _test(client, admin, INVOICE)
+    embedded_before = list(ai["embedded"])
+    assert any("facturación, ERP" in text for text in embedded_before)
+    with SessionLocal() as db:
+        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=n2).count() == 1
+    _put(client, admin, n2, handles="Solo el ERP")
+    with SessionLocal() as db:
+        # El vector del «Qué atiende» anterior se borra al guardar
+        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=n2).count() == 0
+    ai["embedded"].clear()
+    _test(client, admin, INVOICE)
+    assert "Solo el ERP" in ai["embedded"]
+    with SessionLocal() as db:
+        assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=n2).count() == 1
+
