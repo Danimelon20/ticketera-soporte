@@ -3463,10 +3463,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             selectedDraftId = null;
             draftContent.hidden = true;
-            draftPlaceholder.hidden = false;
+            // Sin borradores el mensaje va en la lista (se ve también a 375 px): el detalle queda vacío
+            draftPlaceholder.hidden = !drafts.length;
             draftPlaceholder.replaceChildren(drafts.length
                 ? emptyState({ title: 'Elija un correo de la lista', text: 'Verá el correo original y lo que propone la IA.' })
-                : emptyState({ title: 'No hay borradores pendientes', text: 'Cuando llegue un correo que la IA no pueda convertir sola, aparecerá aquí.' }));
+                : '');
         }
     }
 
@@ -3509,6 +3510,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderDraftList() {
         draftsList.replaceChildren();
+        if (!drafts.length) {
+            const empty = makeEl('li', 'drafts-empty');
+            empty.appendChild(draftsByDepartment()
+                ? emptyState({ title: 'No hay borradores de su departamento', text: 'Cuando la IA o el administrador le envíen un correo de soporte, aparecerá aquí.' })
+                : emptyState({ title: 'No hay borradores pendientes', text: 'Cuando llegue un correo que la IA no pueda convertir sola, aparecerá aquí.' }));
+            draftsList.appendChild(empty);
+            return;
+        }
         drafts.forEach(draft => {
             const li = document.createElement('li');
             const btn = makeEl('button', 'draft-item');
