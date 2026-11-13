@@ -24,9 +24,10 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
 - docs/             requisitos, diseño y bitácora
 
 ## Comandos
-- Levantar: docker compose up --build -d
-- Detener: docker compose down
-- Pruebas: docker compose exec app pytest -v
+- Nunca ejecutes docker compose sin -f docker-compose.pruebas.yml: sin -f se toca la instancia real.
+- Levantar: docker compose -f docker-compose.pruebas.yml up --build -d
+- Detener: docker compose -f docker-compose.pruebas.yml down
+- Pruebas: docker compose -f docker-compose.pruebas.yml exec app pytest -v
 
 ## Reglas que no se deben romper
 - En main.py, app.mount de static va SIEMPRE al final, después de
@@ -38,7 +39,7 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
   el backend y responden 403.
 - El rol admin nunca se obtiene registrándose ni con un código de
   invitación: el primer administrador se crea con
-  `docker compose exec -it app python -m app.create_admin`.
+  `docker compose -f docker-compose.pruebas.yml exec -it app python -m app.create_admin`.
 - Nunca subir a Git `.env`, la carpeta `data/` ni copias `.db` de
   la base de datos.
 - Nunca enviar al chatbot cédulas, teléfonos, correos ni

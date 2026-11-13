@@ -1,13 +1,14 @@
 # Ticketera de soporte
 
-FastAPI + SQLAlchemy + SQLite. Página en HTML/CSS/JS vanilla dentro de static/. Corre con Docker Compose dentro de WSL. Rama de trabajo: v2.
+FastAPI + SQLAlchemy + SQLite. Página en HTML/CSS/JS vanilla dentro de static/. Corre con Docker Compose dentro de WSL.
 
 Roles: requester (solicitante), technician (técnico), coordinator (coordinador), admin (administrador) y agent (Agente virtual: usuario del sistema que no inicia sesión).
 
 ## Comandos
-- El código se copia dentro de la imagen: después de CUALQUIER cambio (también en tests/ o static/) ejecuta `docker compose up --build -d` y espera 5 segundos antes de probar.
-- Pruebas: `docker compose exec app pytest -q`
-- Si el contenedor no arranca: `docker compose logs --tail 30 app`
+- Nunca ejecutes docker compose sin -f docker-compose.pruebas.yml: sin -f se toca la instancia real.
+- El código se copia dentro de la imagen: después de CUALQUIER cambio (también en tests/ o static/) ejecuta `docker compose -f docker-compose.pruebas.yml up --build -d` y espera 5 segundos antes de probar.
+- Pruebas: `docker compose -f docker-compose.pruebas.yml exec app pytest -q`
+- Si el contenedor no arranca: `docker compose -f docker-compose.pruebas.yml logs --tail 30 app`
 - Revisar JavaScript: `docker run --rm -v "$PWD/static:/s" node:20-alpine node --check /s/app.js`
 - Antes de terminar una tarea: reconstruye, corre pytest (todo debe pasar) y, si tocaste static/, corre la revisión de JavaScript.
 
@@ -26,7 +27,7 @@ Roles: requester (solicitante), technician (técnico), coordinator (coordinador)
 - Teléfono y cédula son datos personales (Ley 8968): no van en logs y solo los ve quien tiene permiso.
 - Nunca se envían al chatbot cédulas, teléfonos, correos ni contraseñas.
 - mailer.send_email nunca lanza excepciones: si falla, lo registra y devuelve False.
-- El rol admin nunca se obtiene registrándose ni con un código de invitación: el primer administrador se crea con `docker compose exec -it app python -m app.create_admin`.
+- El rol admin nunca se obtiene registrándose ni con un código de invitación: el primer administrador se crea con `docker compose -f docker-compose.pruebas.yml exec -it app python -m app.create_admin`.
 
 ## Git
 - No hagas commit ni push salvo que te lo pida. Nunca push --force.
