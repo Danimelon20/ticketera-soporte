@@ -124,6 +124,11 @@ def placement_labels(db: Session) -> dict[int, str]:
     return {user_id: placement_text(by_id.get(dept_id), by_id) for user_id, dept_id in _placements(db).items()}
 
 
+def placements(db: Session) -> dict[int, int]:
+    """user_id → department_id de técnicos y coordinadores (filtro por departamento de Cuentas)."""
+    return _placements(db)
+
+
 def is_placed(db: Session, user: models.User, by_id: dict | None = None) -> bool:
     """Tiene un departamento activo que atiende tickets ("cerrado por defecto": si no, no recibe tickets)."""
     if user.role not in PLACED_ROLES:

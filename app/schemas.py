@@ -969,9 +969,16 @@ class AccountCounts(BaseModel):
     invitations: int = 0
 
 
+class AccountDepartmentOption(BaseModel):
+    id: int
+    path: str
+
+
 class AccountListPage(BaseModel):
     items: list[AccountListRow]
     counts: AccountCounts
+    # Opciones del filtro por departamento: los que atienden tickets y los que tienen personal en la lista
+    departments: list[AccountDepartmentOption] = []
 
 
 class AccountRecentTicket(BaseModel):

@@ -75,6 +75,8 @@
 
 .aa-schedule-toggle input { accent-color: var(--blue); width: 15px; height: 15px; margin: 0; }
 
+.aa-department { width: auto; max-width: 100%; min-width: 0; height: 34px; font-size: 12px; }
+
 .aa-schedule-fields {
   display: flex;
   flex-wrap: wrap;
@@ -269,6 +271,8 @@
     .aa-main { padding-top: 16px; }
 
     .aa-main > .aa-head, .aa-main > .aa-quick, .aa-main > .aa-filters, .aa-main > .aa-schedule-fields { padding: 0 16px; }
+
+    .aa-department { flex: 1 1 100%; width: 100%; }
 
     .aa-panel { display: none; padding: 16px; }
 

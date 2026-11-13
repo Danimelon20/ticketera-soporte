@@ -9599,6 +9599,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'resend-invitation': 'Reenviar invitación', 'cancel-invitation': 'Cancelar invitación'
     };
     const aaScheduleOn = document.getElementById('aaScheduleOn');
+    // Filtro por departamento: solo ese (sin subdepartamentos) o «Sin departamento»; lo resuelve el servidor
+    const aaDepartment = document.getElementById('aaDepartment');
     const aaScheduleFields = document.getElementById('aaScheduleFields');
     const aaDay = document.getElementById('aaDay');
     const aaStart = document.getElementById('aaStart');
@@ -9628,6 +9630,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('aaInvite').hidden = currentUser.role !== 'admin';
         aaFilter = filter;
         aaSearch.value = search;
+        aaDepartment.value = '';
         aaSelected = null;
         aaPlaceholder();
         adminAccountsView.classList.remove('show-detail');
@@ -9637,6 +9640,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadAdminAccounts() {
         const params = new URLSearchParams({ filter: aaFilter });
         if (aaSearch.value.trim()) params.set('q', aaSearch.value.trim());
+        if (aaDepartment.value) params.set('department', aaDepartment.value);
         // Filtro por horario: lo resuelve el servidor (solo técnicos y coordinadores con turno ese día)
         if (aaScheduleOn.checked) {
             if (!aaStart.value || !aaEnd.value) {
@@ -9668,7 +9672,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (seq !== aaSeq) return;
         aaRows = data.items;
         renderAccountFilters(data.counts);
+        renderAccountDepartments(data.departments || []);
         renderAdminAccounts();
+    }
+
+    // Opciones fijas (Todos, Sin departamento) y las que manda el servidor; se conserva la elegida
+    function renderAccountDepartments(options) {
+        const current = aaDepartment.value;
+        aaDepartment.replaceChildren(staffOption('', 'Todos los departamentos', current === ''),
+            staffOption('none', 'Sin departamento', current === 'none'));
+        options.forEach(o => aaDepartment.appendChild(staffOption(String(o.id), o.path, String(o.id) === current)));
+        aaDepartment.value = current;
     }
 
     function renderAccountFilters(counts) {
@@ -10111,6 +10125,7 @@ document.addEventListener('DOMContentLoaded', () => {
     [aaDay, aaStart, aaEnd, aaMatch].forEach(field => field.addEventListener('change', () => {
         if (aaScheduleOn.checked) loadAdminAccounts();
     }));
+    aaDepartment.addEventListener('change', loadAdminAccounts);
     aaSearch.addEventListener('input', () => {
         clearTimeout(aaSearchTimer);
         aaSearchTimer = setTimeout(loadAdminAccounts, 300);

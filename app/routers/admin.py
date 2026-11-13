@@ -18,7 +18,8 @@ from .. import (
     identity, models, people_activity, routing, schedules, throttle,
 )
 from ..schemas import (
-    AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
+    AccountChangePage, AccountChangeRead, AccountCounts, AccountDepartmentOption, AccountListPage, AccountListRow,
+    AccountRecentTicket,
     AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, PersonActivityPage,
     PersonHeader, PersonHit, TeamMember, ActivitySummary,
 )
@@ -556,18 +557,27 @@ def account_list(
     schedule_start: Optional[str] = Query(default=None, max_length=5),
     schedule_end: Optional[str] = Query(default=None, max_length=5),
     schedule_match: Literal[schedules.MATCH_MODES] = "covers",
+    # Filtro por departamento: el id (solo ese, sin subdepartamentos) o "none" (personal sin departamento)
+    department: Optional[str] = Query(default=None, max_length=12),
     db: Session = Depends(get_db),
     viewer: models.User = Depends(require_account_viewer),
 ):
-    """Lista y contadores de los filtros rápidos. Los contadores usan la búsqueda y el horario, no el filtro rápido."""
+    """Lista y contadores de los filtros rápidos. Los contadores usan la búsqueda, el horario y el departamento, no
+    el filtro rápido."""
     now = auto_assign._now()
     by_schedule = schedule_day is not None
     if by_schedule:
         if schedule_start is None or schedule_end is None:
             raise HTTPException(status_code=422, detail="Indique la hora de entrada y la de salida")
         schedules.check_range(schedule_start, schedule_end)
+    by_id = routing.departments_by_id(db)
+    department_id = _department_filter(department, by_id)
+    by_department = department is not None
     scope = ACCOUNT_SCOPE[viewer.role]
     roles = [r for r in scope if r in schedules.SCHEDULE_ROLES] if by_schedule else list(scope)
+    if by_department:
+        # Solo el personal que tiene departamento (técnicos y coordinadores)
+        roles = [r for r in roles if r in routing.PLACED_ROLES]
     term = f"%{q.strip().lower()}%" if q and q.strip() else None
 
     query = db.query(models.User).filter(models.User.role.in_(roles))
@@ -582,9 +592,12 @@ def account_list(
     open_counts = _open_tickets(db, users)
     shifts = schedules.for_users(db, ids) if by_schedule else {}
     departments_of = routing.placement_labels(db)
+    placed_in = routing.placements(db)
 
     rows = []
     for u in users:
+        if by_department and placed_in.get(u.id) != department_id:
+            continue
         shift = None
         if by_schedule:
             # Sin turno ese día no aparece; de vacaciones o ausente sí (con su estado visible)
@@ -611,6 +624,14 @@ def account_list(
             query = query.filter(
                 func.lower(models.StaffInvitation.name).like(term) | func.lower(models.StaffInvitation.email).like(term)
             )
+        if by_department:
+            # El departamento con el que se invitó (sin fila: sin departamento)
+            placed = db.query(models.StaffInvitationPlacement.invitation_id)
+            if department_id is None:
+                query = query.filter(models.StaffInvitation.id.notin_(placed))
+            else:
+                query = query.filter(models.StaffInvitation.id.in_(
+                    placed.filter(models.StaffInvitationPlacement.department_id == department_id)))
         invitations = [
             AccountListRow(
                 kind="invitation", id=inv.id, name=inv.name, email=mask_email(inv.email), role=inv.role,
@@ -628,9 +649,28 @@ def account_list(
         "invitations": invitations,
     }
     groups["all"] = rows + invitations
+    # Opciones: los departamentos que atienden tickets y cualquiera donde haya personal de su alcance
+    in_scope = {u.id for u in db.query(models.User.id).filter(models.User.role.in_(scope))}
+    option_ids = {d.id for d in by_id.values() if routing.serves_tickets(d, by_id)}
+    option_ids |= {dept for user_id, dept in placed_in.items() if user_id in in_scope and dept in by_id}
+    options = sorted((AccountDepartmentOption(id=i, path=routing.path_label(by_id[i], by_id)) for i in option_ids),
+                     key=lambda o: o.path.casefold())
     return AccountListPage(
         items=groups[filter_], counts=AccountCounts(**{key: len(value) for key, value in groups.items()}),
+        departments=options,
     )
+
+
+DEPARTMENT_FILTER_INVALID = "El departamento no existe"
+
+
+def _department_filter(value: str | None, by_id: dict) -> int | None:
+    """"none" o el id de un departamento existente. 422 si no."""
+    if value is None or value == "none":
+        return None
+    if not value.isdigit() or int(value) not in by_id:
+        raise HTTPException(status_code=422, detail=DEPARTMENT_FILTER_INVALID)
+    return int(value)
 
 
 @router.get("/accounts/{user_id}", response_model=AccountSummary)
