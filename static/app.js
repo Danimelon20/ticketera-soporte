@@ -11134,8 +11134,12 @@ document.addEventListener('DOMContentLoaded', () => {
               + `(${t.transfers} transferencia(s)). ${data.pending.arrived} fueron a «Por clasificar».`
             : `Del ${dayText(data.date_from)} al ${dayText(data.date_to)}: no llegaron correos clasificados.`;
         if (data.without_ai) {
-            document.getElementById('precisionSummary').textContent +=
-                ` No se cuentan ${data.without_ai} borrador(es) sin datos de la IA (por ejemplo, los DEMO, que se cargan ya clasificados).`;
+            // Cuáles: así no se confunden con los que sí cuentan
+            const ids = (data.without_ai_ids || []).map(id => `#${id}`);
+            const list = ids.length > 1 ? `${ids.slice(0, -1).join(', ')} y ${ids[ids.length - 1]}` : ids.join('');
+            document.getElementById('precisionSummary').textContent += ids.length === 1
+                ? ` No se cuenta el borrador ${list} (sin datos de la IA, como los DEMO, que se cargan ya clasificados).`
+                : ` No se cuentan los borradores ${list} (sin datos de la IA, como los DEMO, que se cargan ya clasificados).`;
         }
 
         // Pocos correos: los números son de referencia, no para ajustar

@@ -1347,6 +1347,7 @@ class PrecisionReport(BaseModel):
     received: int
     # «Directo» sin lo que eligió la IA (borradores DEMO cargados ya clasificados): no cuentan
     without_ai: int = 0
+    without_ai_ids: list[int] = []
     # Pocos correos: los números no alcanzan para ajustar el umbral, la similitud mínima o las fichas
     few_cases: bool = False
     min_cases: int = 20

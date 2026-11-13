@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from app import availability, classification_report, models
+from app import availability, classification_report, config, mailer, models
 from app.database import SessionLocal
 from org_helpers import team
 
@@ -26,9 +26,10 @@ def clean(client):
 
 @pytest.fixture
 def org(make_user):
-    soporte, soporte_coord, _ = team(make_user)
+    soporte, soporte_coord, soporte_tech = team(make_user)
     redes, redes_coord, _ = team(make_user)
-    return {"soporte": soporte, "redes": redes, "soporte_coord": soporte_coord, "redes_coord": redes_coord}
+    return {"soporte": soporte, "redes": redes, "soporte_coord": soporte_coord, "redes_coord": redes_coord,
+            "soporte_tech": soporte_tech}
 
 
 def _ticket(requester):
@@ -219,7 +220,7 @@ def test_direct_without_ai_data_is_not_counted(client, make_user, org, routing_o
     _transfer(demo, org["soporte_coord"], None, org["soporte"], org["redes"])
     _routed(requester, org["redes"])
     data = _report(client, admin)
-    assert data["received"] == 1 and data["without_ai"] == 1
+    assert data["received"] == 1 and data["without_ai"] == 1 and data["without_ai_ids"] == [demo]
     assert data["totals"]["direct"] == 1 and data["totals"]["transfers"] == 0
     assert data["corrections"] == []
 
@@ -236,3 +237,34 @@ def test_admin_decision_keeps_the_reason(client, make_user, org, routing_on):
         row = db.get(models.DraftClassification, draft_id)
         assert row.status == "classified" and row.pending_reason == "no_coordinator"
     assert {r["key"] for r in _report(client, admin)["reasons"]} == {"no_coordinator"}
+
+
+def test_confirmed_through_the_coordinator_counts_as_a_hit(client, make_user, org, routing_on, monkeypatch):
+    """De punta a punta, por las mismas rutas que la página: la IA lo manda a Soporte N1, la coordinadora lo
+    transfiere a Redes por error, Redes lo devuelve y la coordinadora lo confirma con un técnico de Soporte N1
+    (Fase 3). Es un acierto de la IA, con un rebote de dos transferencias."""
+    monkeypatch.setattr(config, "AUTO_ASSIGN_ENABLED", False)
+    monkeypatch.setattr(config, "GROUPING_ENABLED", False)
+    monkeypatch.setattr(mailer, "send_email", lambda *args, **kwargs: True)
+    admin, requester = make_user("admin"), make_user("requester")
+    draft_id = _routed(requester, org["soporte"])
+    transfers = ((org["soporte_coord"], org["redes"], "El teclado es inalámbrico y pierde la conexión"),
+                 (org["redes_coord"], org["soporte"], "Revisado: el teclado está dañado, no es de red"))
+    for user, target, reason in transfers:
+        response = client.post(f"/api/drafts/{draft_id}/transfer", headers=user["headers"],
+                               json={"department_id": target, "reason": reason})
+        assert response.status_code == 200, response.text
+    # Antes de confirmar: pendiente, fuera del %
+    before = {d["department_id"]: d for d in _report(client, admin)["departments"]}[org["soporte"]]
+    assert before["pending"] == 1 and before["confirmed"] == 0 and before["accuracy"] is None
+    response = client.post(f"/api/drafts/{draft_id}/confirm", headers=org["soporte_coord"]["headers"],
+                           json={"title": "Teclado", "description": "No responde.", "category_id": 1,
+                                 "priority_id": 1, "assigned_to": org["soporte_tech"]["id"]})
+    assert response.status_code == 200, response.text
+    data = _report(client, admin)
+    row = {d["department_id"]: d for d in data["departments"]}[org["soporte"]]
+    assert row == {**row, "direct": 1, "confirmed": 1, "hits": 1, "accuracy": 100.0, "pending": 0,
+                   "bounced": 1, "transfers": 2}
+    mine = [c for c in data["corrections"] if c["draft_id"] == draft_id]
+    assert len(mine) == 2 and {c["outcome"] for c in mine} == {"ai_right"}
+    assert all(c["ticket_id"] == response.json()["ticket_id"] for c in mine)

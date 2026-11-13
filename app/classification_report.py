@@ -65,7 +65,8 @@ def build(db: Session, start: datetime, end: datetime) -> dict:
         models.DraftClassification.created_at >= start, models.DraftClassification.created_at < end).all()
     # «Directo» sin lo que eligió la IA no es una decisión de la IA (los borradores DEMO llegan ya clasificados):
     # no cuentan, ni sus transferencias
-    rows = [r for r in found if not (r.status == "routed" and r.ai_department_id is None)]
+    without_ai = sorted(r.draft_id for r in found if r.status == "routed" and r.ai_department_id is None)
+    rows = [r for r in found if r.draft_id not in set(without_ai)]
     draft_ids = [r.draft_id for r in rows]
     transfers = (db.query(models.DraftTransfer).filter(models.DraftTransfer.draft_id.in_(draft_ids))
                  .order_by(models.DraftTransfer.transferred_at.desc(), models.DraftTransfer.id.desc()).all()
@@ -149,6 +150,7 @@ def build(db: Session, start: datetime, end: datetime) -> dict:
             "outcome": outcome(rows_by_draft[t.draft_id]),
             "current_department": label(rows_by_draft[t.draft_id].department_id),
         })
-    return {"routing_enforced": routing.enforced(db), "received": len(rows), "without_ai": len(found) - len(rows),
+    return {"routing_enforced": routing.enforced(db), "received": len(rows), "without_ai": len(without_ai),
+            "without_ai_ids": without_ai,
             "few_cases": len(rows) < MIN_CASES, "min_cases": MIN_CASES, "totals": totals,
             "departments": departments, "pending": pending, "reasons": reasons, "corrections": corrections}
