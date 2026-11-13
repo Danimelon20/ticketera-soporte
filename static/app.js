@@ -6856,8 +6856,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.addEventListener('popstate', applyRoute);
 
+    // Grupos del menú abiertos o cerrados por la persona; se recuerda en este navegador (por rol)
+    const NAV_OPEN_KEY = 'ticketera.navOpenModules';
+    let navOpenModules = null;
+
+    function loadNavOpenModules() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(`${NAV_OPEN_KEY}.${currentUser.role}`) || 'null');
+            navOpenModules = Array.isArray(saved) ? new Set(saved) : null;
+        } catch (err) {
+            navOpenModules = null;
+        }
+    }
+
+    function saveNavOpenModules() {
+        try {
+            localStorage.setItem(`${NAV_OPEN_KEY}.${currentUser.role}`, JSON.stringify([...navOpenModules]));
+        } catch (err) {
+            // Sin almacenamiento: queda así solo en esta visita
+        }
+    }
+
+    function applyNavOpenModules() {
+        sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
+            const sub = li.querySelector('.nav-sections');
+            if (!sub) return;
+            // Con un solo módulo (técnico) queda siempre abierto
+            const open = navModules.length === 1 || navOpenModules.has(li.dataset.module);
+            sub.hidden = !open;
+            li.querySelector('.nav-module').setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    }
+
     function renderSideNav() {
         navModules = navModulesFor(currentUser.role);
+        loadNavOpenModules();
         navItems = {};
         sideNavGroups.replaceChildren();
         const heading = makeEl('h2', 'nav-modules-title', 'Módulos');
@@ -6940,15 +6973,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const module = section ? moduleOf(section) : null;
         sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
-            // Con un solo módulo (técnico) queda siempre abierto
-            const open = navModules.length === 1 || Boolean(module && li.dataset.module === module.id);
             li.querySelector('.nav-module').classList.toggle('is-active', Boolean(module && li.dataset.module === module.id));
-            const sub = li.querySelector('.nav-sections');
-            if (sub) {
-                sub.hidden = !open;
-                li.querySelector('.nav-module').setAttribute('aria-expanded', open ? 'true' : 'false');
-            }
         });
+        // Sin preferencia guardada, solo el grupo de la página abierta; al llegar a una página, su grupo se abre
+        // (sin cerrar los demás) para que se vea dónde está
+        if (navOpenModules === null) navOpenModules = new Set();
+        if (module && !navOpenModules.has(module.id)) {
+            navOpenModules.add(module.id);
+            saveNavOpenModules();
+        }
+        applyNavOpenModules();
         if (section) pushRoute(section.route);
         renderPageHead();
         renderQueueViews();
@@ -6982,23 +7016,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!homeView.hidden) renderHome();
     }
 
-    // Abajo del menú: el turno de hoy (técnico y coordinador) o el estado del sistema (administrador)
+    // Abajo del menú: el turno de hoy (técnico y coordinador)
     let lastSystemStatus = null;
 
     function renderNavShift() {
         const box = document.getElementById('navShift');
         const text = document.getElementById('navShiftText');
         if (!currentUser) return;
+        // El administrador no ve el estado del sistema aquí: está en Administración › Estado del sistema
         if (currentUser.role === 'admin') {
-            if (!lastSystemStatus) {
-                box.hidden = true;
-                return;
-            }
-            const off = [['email', 'correo'], ['ai_analysis', 'IA'], ['auto_assign', 'asignación automática']]
-                .filter(([key]) => !lastSystemStatus[key]).map(([, label]) => label);
-            box.hidden = false;
-            box.className = `nav-shift ${off.length ? 'is-warn' : 'is-on'}`;
-            text.textContent = off.length ? `Sistema: ${off.join(', ')} apagado` : 'Sistema: todo funciona';
+            box.hidden = true;
             return;
         }
         const shift = navCounts.shift;
@@ -7332,9 +7359,19 @@ document.addEventListener('DOMContentLoaded', () => {
     sideNavGroups.addEventListener('click', (e) => {
         const button = e.target.closest('.nav-item, .nav-module');
         if (!button) return;
-        // Un módulo abre su primera sección; una sección, la suya
         const module = button.classList.contains('nav-module')
             ? navModules.find(m => m.id === button.dataset.moduleId) : null;
+        // Un grupo con varias páginas se abre o se cierra sin cambiar de página. Con el menú contraído a íconos
+        // (las páginas no se ven) lleva a su primera página, como antes
+        const iconsOnly = document.body.classList.contains('nav-collapsed') && window.matchMedia('(min-width: 768px)').matches;
+        if (module && module.sections.length > 1 && navModules.length > 1 && !iconsOnly) {
+            if (navOpenModules.has(module.id)) navOpenModules.delete(module.id);
+            else navOpenModules.add(module.id);
+            saveNavOpenModules();
+            applyNavOpenModules();
+            return;
+        }
+        // Un módulo de una sola página (o contraído) abre su primera sección; una sección, la suya
         const section = module ? module.sections[0] : navItems[button.dataset.navId];
         if (!section) return;
         goRoute(section.route);

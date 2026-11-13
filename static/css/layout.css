@@ -430,7 +430,9 @@ body.staff-shell .side-nav {
 }
 
 /* Del menú viejo: quedan en la página hasta la limpieza (N5), pero no se muestran */
-body.staff-shell .side-nav-groups { flex: 1 1 auto; min-height: 0; padding: 0; }
+/* No se encoge: con muchas opciones, «Mi cuenta», «Cerrar sesión» y «Contraer menú» quedan debajo de ellas (la
+   barra hace scroll) en vez de taparlas; con pocas, siguen al fondo (margin-top: auto en .nav-foot) */
+body.staff-shell .side-nav-groups { flex: 1 0 auto; padding: 0; }
 
 .nav-modules-title { margin: 0; padding: 0 10px 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--app-nav-muted); }
 
@@ -449,7 +451,10 @@ body.staff-shell .side-nav-groups { flex: 1 1 auto; min-height: 0; padding: 0; }
 
 .nav-module.is-active, .nav-module.active { background: #EEF3FF; color: var(--link); }
 
-.nav-module-caret { margin-left: auto; font-size: 11px; color: var(--app-nav-muted); }
+.nav-module-caret { margin-left: auto; font-size: 11px; color: var(--app-nav-muted); transition: transform 0.15s ease; }
+
+/* Grupo cerrado: la flecha apunta a la derecha */
+.nav-module[aria-expanded="false"] .nav-module-caret { transform: rotate(-90deg); }
 
 body.staff-shell .nav-item {
   width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: none; border-radius: 8px;
