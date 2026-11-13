@@ -1,12 +1,14 @@
 """scripts.demo_data: cargar y limpiar no dejan nada DEMO y no tocan los datos reales."""
 import os
+import re
+import unicodedata
 
 from sqlalchemy import func
 
-from app import routing, attachments, audit, config, graph, mailer, models
+from app import routing, attachments, audit, classifier, config, graph, mailer, models
 from app.alerts import due_state
 from app.database import SessionLocal, engine
-from scripts import demo_data
+from scripts import demo_data, eval_classifier
 
 DEMO = "%@demo.invalid"
 
@@ -304,7 +306,8 @@ def test_clean_removes_demo_department_profiles(client, sent):
     db = SessionLocal()
     try:
         dept_id = db.query(models.Department).filter(models.Department.name == "[DEMO] Redes").one().id
-        db.add(models.DepartmentProfile(department_id=dept_id, handles="Internet", examples="Sin internet"))
+        # Ya viene con la ficha DEMO: se cambia
+        db.merge(models.DepartmentProfile(department_id=dept_id, handles="Internet", examples="Sin internet"))
         db.add(models.DepartmentExampleEmbedding(department_id=dept_id, text_hash="x" * 64, vector="[1.0]"))
         db.commit()
     finally:
@@ -362,3 +365,46 @@ def test_load_creates_department_tickets(client, sent):
     finally:
         db.close()
     assert sent == []
+
+
+def test_load_creates_the_demo_profiles(client, sent):
+    """Redes y Soporte N1 cargan su ficha (qué atiende, ejemplos y qué no atiende): eval_classifier funciona
+    siempre después de cargar el demo."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        people = {p.path.rsplit("/", 1)[-1].strip(): p for p in classifier.participants(db)}
+        for name in ("Redes", "Soporte N1"):
+            person = people[f"{demo_data.DEMO_TAG} {name}"]
+            assert person.handles and person.not_handles and len(person.examples) >= 5
+    finally:
+        db.close()
+    # Volver a cargar no duplica ni pierde las fichas
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        demo_ids = [d.id for d in db.query(models.Department).filter(models.Department.name.like("[DEMO]%"))]
+        assert db.query(models.DepartmentProfile).filter(
+            models.DepartmentProfile.department_id.in_(demo_ids)).count() == 2
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+
+
+def _words(text):
+    text = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
+    return re.findall(r"[a-z0-9]+", text)
+
+
+def test_demo_examples_do_not_copy_the_eval_cases():
+    """Si un ejemplo de la ficha se pareciera a un correo de eval_classifier, la evaluación acertaría por copia:
+    pocas palabras de contenido en común y ninguna secuencia de tres palabras igual."""
+    for profile in demo_data.DEMO_PROFILES.values():
+        for example in classifier.split_examples(profile["examples"]):
+            mine = _words(example)
+            for name, subject, body, _expected in eval_classifier.CASES:
+                theirs = _words(f"{subject} {body}")
+                a, b = {w for w in mine if len(w) > 3}, {w for w in theirs if len(w) > 3}
+                assert len(a & b) / min(len(a), len(b)) < 0.4, (example, name)
+                trigrams = {tuple(theirs[i:i + 3]) for i in range(len(theirs) - 2)}
+                assert not {tuple(mine[i:i + 3]) for i in range(len(mine) - 2)} & trigrams, (example, name)

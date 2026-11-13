@@ -65,6 +65,35 @@ DEMO_DEPARTMENTS = (
     ("Gerencia General", "Redes", True),
     (None, "Recursos Humanos", False),
 )
+# Fichas de la clasificación de los dos departamentos que atienden tickets (sin datos personales). Los ejemplos
+# no repiten ni parafrasean los correos de scripts.eval_classifier: si se parecieran, la evaluación acertaría por
+# copia (tests/test_demo_data.py lo revisa)
+DEMO_PROFILES = {
+    "Redes": {
+        "handles": "Conectividad: internet, wifi, cableado y puntos de red, VPN y acceso remoto, telefonía IP.",
+        "examples": "\n".join((
+            "El puerto de red de mi escritorio no enciende la luz aunque cambié el cable",
+            "En la sala de reuniones la señal inalámbrica es muy débil y se corta",
+            "Necesitamos instalar un punto de red nuevo en la bodega",
+            "El teléfono IP de recepción no tiene tono",
+            "El escritorio remoto al servidor de archivos se desconecta cada pocos minutos",
+        )),
+        "not_handles": "Computadoras, impresoras, programas y cuentas de usuario: van a Soporte N1.",
+    },
+    "Soporte N1": {
+        "handles": "Equipos y periféricos (computadoras, monitores, teclados, impresoras, escáneres), programas de "
+                   "oficina y su instalación, cuentas de usuario y contraseñas.",
+        "examples": "\n".join((
+            "El monitor nuevo no muestra imagen cuando lo conecto",
+            "El mouse inalámbrico dejó de responder aunque le puse baterías nuevas",
+            "El escáner no envía los documentos escaneados a mi correo",
+            "Necesito que configuren el correo de la empresa en mi celular nuevo",
+            "Word no me deja guardar documentos en la carpeta compartida",
+            "La computadora tarda muchísimo en encender y hace un ruido extraño",
+        )),
+        "not_handles": "Internet, wifi, cableado, VPN o acceso remoto: van a Redes.",
+    },
+}
 ANA, BETO, CARLA, IMPOSTOR = "ana.cliente", "beto.cliente", "carla.cliente", "suplantador"
 MAIL_TARGET = "No puedo entrar al correo de la oficina"
 MAIL_SOURCE = "Outlook me pide la contraseña todo el tiempo"
@@ -366,6 +395,8 @@ def load(db) -> list[dict]:
         models.StaffPlacement(user_id=away.id, department_id=depts["Soporte N1"].id),
         # Escalamiento de ejemplo: lo que Soporte N1 no resuelve sube a Redes
         models.DepartmentEscalation(department_id=depts["Soporte N1"].id, next_department_id=depts["Redes"].id),
+        # Fichas de la clasificación: así scripts.eval_classifier funciona después de cargar el demo
+        *(models.DepartmentProfile(department_id=depts[name].id, **profile) for name, profile in DEMO_PROFILES.items()),
     ])
     db.flush()
 
