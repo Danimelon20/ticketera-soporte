@@ -510,15 +510,16 @@ def load(db) -> list[dict]:
 
     rows += [
         {"rol": "Técnico", "correo": morning.email,
-         "probar": "Soporte N1. Turno L-V 07-15. Tiene el ticket por vencer y el borrador "
-                   "\"El monitor parpadea\"."},
+         "probar": "Soporte N1. Turno L-V 07-15. Tiene el ticket por vencer. No ve borradores: los revisa la "
+                   "coordinadora de su departamento."},
         {"rol": "Técnico", "correo": evening.email,
          "probar": "Redes. Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
                    "separado de un incidente, sigue en Mis tickets." % finger_related.id},
         {"rol": "Técnico", "correo": away.email,
          "probar": "Soporte N1. De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
-         "probar": "Coordina Soporte N1. Agrupación (#%d en #%d), vencimientos, borrador \"Sin revisor\". "
+         "probar": "Coordina Soporte N1. Agrupación (#%d en #%d), vencimientos, los 2 borradores de Soporte N1 "
+                   "(al crear el ticket elige el técnico). "
                    "Escalar en el #%d: Redes ya elegido, motivo obligatorio." % (mail_2.id, mail_1.id, soon.id)},
         {"rol": "Coordinador", "correo": net_coordinator.email,
          "probar": "Coordina Redes. Con el interruptor encendido ve los tickets de red (#%d y sus ligados), el "
@@ -527,8 +528,10 @@ def load(db) -> list[dict]:
          "probar": "Sin departamento: con el interruptor encendido ve el aviso y no recibe tickets."},
         {"rol": "Cliente", "correo": ana.email,
          "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
-        {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y borrador sin revisor."},
-        {"rol": "Cliente", "correo": carla.email, "probar": "Ticket de red ligado y borrador con revisor."},
+        {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y el borrador \"El teclado no responde\" "
+                                                          "(Soporte N1)."},
+        {"rol": "Cliente", "correo": carla.email, "probar": "Ticket de red ligado y el borrador \"El monitor parpadea\" "
+                                                           "(Soporte N1)."},
         {"rol": "Cliente", "correo": impostor.email,
          "probar": "Intentó usar la cédula de Ana: el admin ve el reporte del Agente virtual."},
     ]
