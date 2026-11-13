@@ -179,13 +179,6 @@ def test_queue_response_has_no_personal_data(make_user, client):
         assert secret not in text
 
 
-def test_requester_cannot_use_queue_or_suggestion(make_user, client):
-    requester = make_user("requester")
-    ticket_id = _ticket(requester)
-    assert client.get("/api/queue", headers=requester["headers"]).status_code == 403
-    assert client.get(f"/api/tickets/{ticket_id}/suggestion", headers=requester["headers"]).status_code == 403
-
-
 def _always_on_shift(user_id):
     db = SessionLocal()
     try:

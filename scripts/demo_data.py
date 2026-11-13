@@ -702,7 +702,14 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
         return ok, ", ".join(f"#{t} → #{p}" if p else f"#{t} sin ligar" for p, t in found)
 
     add("Agrupación", "Coordinador Redes", ", ".join(f"#{t} → #{principal}" for t in related), linked)
-    add("Agrupación", "Cliente (Ana)", f"ve que #{source} se agregó a #{target}", lambda: merged_into(ANA))
+    def contact_cannot_login():
+        # Un contacto (quien reporta por correo o un cliente archivado) recibe el error de siempre
+        response = api.http.post("/api/auth/login", json={"email": _email(ANA), "password": PASSWORD})
+        ok = response.status_code == 401 and response.json().get("detail") == "Correo o contraseña incorrectos"
+        return ok, f"HTTP {response.status_code}"
+
+    add("Acceso", "Contacto (Ana)", "no inicia sesión: el mismo error que una contraseña incorrecta",
+        contact_cannot_login)
 
     def bell():
         response = api.get(MORNING, "/api/notifications/overdue")
@@ -929,7 +936,7 @@ def verify(db, http) -> int:
     without_due = _open_without_due(db, ids)
     api = DemoApi(http)
     try:
-        for local in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED, ANA):
+        for local in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED):
             api.login(local)
         checks = _checks(api, ids)
     finally:

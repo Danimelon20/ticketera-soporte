@@ -193,7 +193,7 @@ def test_only_the_coordinator_of_the_department_can_transfer(client, make_user, 
     draft_id = _draft(make_user("requester"), org["soporte"])
     # Otro coordinador, el técnico, el administrador y el solicitante
     assert _transfer(client, org["redes_coord"], draft_id, org["redes"]).status_code == 403
-    for role in ("technician", "admin", "requester"):
+    for role in ("technician", "admin"):
         assert _transfer(client, make_user(role), draft_id, org["redes"]).status_code == 403
     # «Por clasificar» lo decide el administrador
     waiting = _draft(make_user("requester"), None, status="pending")

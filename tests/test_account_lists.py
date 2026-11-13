@@ -22,9 +22,10 @@ ACCOUNT_LISTS = (
 
 
 @pytest.mark.parametrize("path", ACCOUNT_LISTS)
-def test_requester_gets_403_on_every_account_list(client, make_user, path):
+def test_contact_gets_401_on_every_account_list(client, make_user, path):
+    # Un contacto no tiene sesión
     response = client.get(path, headers=make_user("requester")["headers"])
-    assert response.status_code == 403
+    assert response.status_code == 401
     assert not EMAIL_RE.search(response.text)
 
 
@@ -78,7 +79,7 @@ def test_ticket_brings_names_without_emails(client, make_user, make_ticket):
     client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
     client.post(f"/api/tickets/{ticket['id']}/comments", json={"content": "Revisando"}, headers=technician["headers"])
 
-    for viewer in (requester, technician):
+    for viewer in (technician,):
         detail = client.get(f"/api/tickets/{ticket['id']}", headers=viewer["headers"]).json()
         people = {p["id"]: p for p in detail["people"]}
         assert people[technician["id"]] == {"id": technician["id"], "name": "Tomás Técnico", "role": "technician"}
@@ -88,7 +89,7 @@ def test_ticket_brings_names_without_emails(client, make_user, make_ticket):
         for user in (requester, coordinator, technician):
             assert user["email"] not in str(detail["people"])
 
-    listing = client.get("/api/tickets", headers=requester["headers"]).json()
+    listing = client.get("/api/tickets", headers=technician["headers"]).json()
     assert [t["assigned_name"] for t in listing if t["id"] == ticket["id"]] == ["Tomás Técnico"]
 
 

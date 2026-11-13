@@ -93,7 +93,7 @@ def test_confirm_creates_tree_and_merged_names_become_aliases(client, make_user)
 
 
 def test_import_is_admin_only(client, make_user):
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert _preview(client, user, _csv("X / Y")).status_code == 403
         assert client.post("/api/admin/departments/import/confirm", headers=user["headers"],

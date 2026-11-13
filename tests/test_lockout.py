@@ -60,19 +60,19 @@ def test_five_wrong_passwords_lock_for_15_minutes(client, make_user, sent):
 
 def test_failures_of_one_account_do_not_lock_another(client, make_user, sent):
     # Todas las solicitudes llegan desde la misma IP (el proxy): el límite es por correo
-    careless = make_user("requester")
-    other = make_user("requester")
-    responses = _fail(client, careless["email"], "requester", 5)
+    careless = make_user("technician")
+    other = make_user("technician")
+    responses = _fail(client, careless["email"], "staff", 5)
     assert responses[-1].status_code == 429
-    response = _login(client, other["email"], "requester")
+    response = _login(client, other["email"], "staff")
     assert response.status_code == 200, response.text
-    assert _fail(client, other["email"], "requester", 1)[0].status_code == 401
-    assert _login(client, careless["email"], "requester").status_code == 429
+    assert _fail(client, other["email"], "staff", 1)[0].status_code == 401
+    assert _login(client, careless["email"], "staff").status_code == 429
 
 
 def test_forwarded_for_header_does_not_bypass_the_lock(client, make_user, sent):
-    user = make_user("requester")
-    _fail(client, user["email"], "requester", 5)
+    user = make_user("technician")
+    _fail(client, user["email"], "staff", 5)
     response = client.post(
         "/api/auth/login", json={"email": user["email"], "password": PASSWORD, "portal": "requester"},
         headers={"X-Forwarded-For": "203.0.113.7"},
@@ -81,21 +81,21 @@ def test_forwarded_for_header_does_not_bypass_the_lock(client, make_user, sent):
 
 
 def test_lock_message_is_the_same_whether_account_exists_or_not(client, make_user):
-    user = make_user("requester")
+    user = make_user("technician")
     missing = f"nadie-{uuid.uuid4().hex}@test.com"
-    existing_responses = _fail(client, user["email"], "requester", 6)
-    missing_responses = _fail(client, missing, "requester", 6)
+    existing_responses = _fail(client, user["email"], "staff", 6)
+    missing_responses = _fail(client, missing, "staff", 6)
     for a, b in zip(existing_responses, missing_responses):
         assert a.status_code == b.status_code
         assert a.json() == b.json()
     assert existing_responses[-1].json() == {"detail": LOCKED}
-    assert _login(client, user["email"], "requester").json() == _login(client, missing, "requester").json()
+    assert _login(client, user["email"], "staff").json() == _login(client, missing, "staff").json()
 
 
 def test_old_tab_value_is_not_a_failure(client, make_user):
     """Un solo formulario: la pestaña que mande una página vieja se ignora y no suma fallos."""
     user = make_user("technician")
-    for portal in ("requester", "admin", "staff", "requester", "admin", "staff"):
+    for portal in ("requester", "admin", "staff", "staff", "admin", "staff"):
         assert _login(client, user["email"], portal).status_code == 200
 
 
@@ -124,8 +124,8 @@ def test_admin_code_failures_share_the_counter(client, make_user, sent):
 
 
 def test_email_change_code_failures_share_the_counter(client, make_user, sent):
-    user = make_user("requester")
-    assert all(r.status_code == 401 for r in _fail(client, user["email"], "requester", 3))
+    user = make_user("technician")
+    assert all(r.status_code == 401 for r in _fail(client, user["email"], "staff", 3))
     client.post(
         "/api/account/email", json={"current_password": PASSWORD, "new_email": f"n-{uuid.uuid4().hex}@example.com"},
         headers=user["headers"],
@@ -135,7 +135,7 @@ def test_email_change_code_failures_share_the_counter(client, make_user, sent):
     response = client.post("/api/account/email/verify", json={"code": wrong}, headers=user["headers"])
     assert response.status_code == 429
     assert response.json() == {"detail": LOCKED}
-    assert _login(client, user["email"], "requester").status_code == 429
+    assert _login(client, user["email"], "staff").status_code == 429
 
 
 def test_email_change_wrong_password_counts_toward_lock(client, make_user, sent):

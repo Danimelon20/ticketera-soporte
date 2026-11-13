@@ -86,7 +86,7 @@ def test_admin_classifies_unclassified_tickets(client, make_user, make_ticket):
 
 def test_classification_is_admin_only(client, make_user, make_ticket):
     ticket = make_ticket(make_user("requester"))
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert client.get("/api/admin/tickets/unclassified", headers=user["headers"]).status_code == 403
         assert client.put(f"/api/admin/tickets/{ticket['id']}/department", headers=user["headers"],
@@ -103,12 +103,3 @@ def test_unclassified_tickets_warn_but_do_not_block(client, make_user, make_tick
     others = [i["ok"] for i in switch["checklist"] if not i["warning"]]
     assert switch["ready"] == all(others)
 
-
-def test_requester_does_not_see_department_history(client, make_user, make_ticket):
-    admin = make_user("admin")
-    requester = make_user("requester")
-    ticket = make_ticket(requester)
-    client.put(f"/api/admin/tickets/{ticket['id']}/department", headers=admin["headers"],
-               json={"department_id": department()})
-    own = client.get(f"/api/tickets/{ticket['id']}", headers=requester["headers"]).json()
-    assert all(h["field"] != "department" for h in own["history"])

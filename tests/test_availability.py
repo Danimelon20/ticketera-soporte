@@ -85,7 +85,7 @@ def test_without_schedule_is_available(make_user):
 
 
 def test_other_roles_have_no_status(make_user, client):
-    for role in ("requester", "admin"):
+    for role in ("admin",):
         user = make_user(role)
         assert client.get("/api/auth/me", headers=user["headers"]).json()["availability"] is None
 
@@ -127,7 +127,7 @@ def test_own_period_is_logged(client, make_user, role):
     assert rows[0].new_value == "Vacaciones del 10/03/2031 al 12/03/2031"
 
 
-@pytest.mark.parametrize("role", ["requester", "admin"])
+@pytest.mark.parametrize("role", ["admin"])
 def test_only_staff_have_own_periods(client, make_user, role):
     assert _own(client, make_user(role), "vacation", TODAY, TODAY).status_code == 403
 
@@ -185,7 +185,7 @@ def test_managers_register_periods(client, make_user, actor_role, target_role):
 
 
 @pytest.mark.parametrize("actor_role,target_role", [
-    ("technician", "technician"), ("requester", "technician"), ("coordinator", "coordinator"),
+    ("technician", "technician"), ("coordinator", "coordinator"),
     ("admin", "requester"), ("admin", "admin"),
 ])
 def test_cannot_register_others_periods(client, make_user, actor_role, target_role):

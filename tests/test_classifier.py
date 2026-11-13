@@ -84,7 +84,7 @@ def _counts():
 
 # ----- Ficha -----
 
-@pytest.mark.parametrize("role", ["coordinator", "technician", "requester"])
+@pytest.mark.parametrize("role", ["coordinator", "technician"])
 def test_only_the_admin_edits_profiles_and_tests(client, make_user, ai, role):
     user = make_user(role)
     dept = department()

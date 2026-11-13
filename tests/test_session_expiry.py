@@ -88,8 +88,8 @@ def test_logout_invalidates_token_on_server(client, make_user):
 
 
 def test_token_is_stored_hashed(client, make_user):
-    user = make_user("requester")
-    token = _login(client, user, "requester")
+    user = make_user("technician")
+    token = _login(client, user)
     db = SessionLocal()
     try:
         tokens = [row.token for row in db.query(models.Session).all()]

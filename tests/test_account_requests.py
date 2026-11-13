@@ -75,14 +75,14 @@ def test_reason_is_required(client, make_user):
 def test_only_coordinator_creates_and_only_admin_resolves(client, make_user):
     coordinator = make_user("coordinator")
     technician = make_user("technician")
-    for role in ("admin", "technician", "requester"):
+    for role in ("admin", "technician"):
         assert _create(client, make_user(role), technician, "role", "requester").status_code == 403
     request_id = _create(client, coordinator, technician, "role", "requester").json()["id"]
-    for actor in (coordinator, make_user("coordinator"), make_user("technician"), make_user("requester")):
+    for actor in (coordinator, make_user("coordinator"), make_user("technician")):
         assert client.post(f"/api/account-requests/{request_id}/approve", headers=actor["headers"]).status_code == 403
         assert client.post(f"/api/account-requests/{request_id}/reject", json={"reason": "x"},
                            headers=actor["headers"]).status_code == 403
-    for role in ("technician", "requester"):
+    for role in ("technician",):
         assert client.get("/api/account-requests", headers=make_user(role)["headers"]).status_code == 403
 
 

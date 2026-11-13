@@ -58,9 +58,6 @@ def test_ai_off_web_ticket_gets_standard_due_and_history(client, make_user, make
     detail = client.get(f"/api/tickets/{ticket['id']}", headers=coordinator["headers"]).json()
     assert detail["ai_analysis"]["due_at"] is not None and detail["due_state"]
     assert any(h["field"] == "level_default" and "estándar" in h["new_value"] for h in detail["history"])
-    # El solicitante no ve esa línea interna
-    mine = client.get(f"/api/tickets/{ticket['id']}", headers=requester["headers"]).json()
-    assert all(h["field"] != "level_default" for h in mine["history"])
     # Una segunda vuelta no repite la línea
     main.fill_due_dates()
     assert _default_lines(ticket["id"]) == 1

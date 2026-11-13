@@ -196,7 +196,11 @@ def make_user(client):
 
 @pytest.fixture
 def make_ticket(client):
-    """Fábrica: crea un ticket a nombre del usuario indicado (headers)."""
+    """Fábrica: crea un ticket a nombre del usuario indicado.
+
+    Un contacto (rol requester) ya no inicia sesión: su ticket se crea con la misma función que usa el coordinador
+    «a nombre de» (create_for_owner) y después corren las tareas en segundo plano, como al responder la API. El
+    personal lo crea por la API con sus headers."""
     def _make(actor, title="Ticket de prueba", priority_id=1, category_id=1):
         payload = {
             "title": title,
@@ -205,10 +209,32 @@ def make_ticket(client):
             "priority_id": priority_id,
             "contact_phone": "8888-1234",
         }
+        if actor.get("role") == "requester":
+            return _owner_ticket(actor, payload)
         response = client.post("/api/tickets", json=payload, headers=actor["headers"])
         assert response.status_code == 200, response.text
         return response.json()
     return _make
+
+
+def _owner_ticket(actor, payload):
+    from fastapi import BackgroundTasks
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.tickets import create_for_owner
+    from app.schemas import TicketCreate, TicketRead
+
+    tasks = BackgroundTasks()
+    db = SessionLocal()
+    try:
+        owner = db.get(models.User, actor["id"])
+        ticket = create_for_owner(db, TicketCreate(**payload), owner, tasks)
+        data = TicketRead.model_validate(ticket).model_dump(mode="json")
+    finally:
+        db.close()
+    for task in tasks.tasks:
+        task.func(*task.args, **task.kwargs)
+    return data
 
 
 @pytest.fixture(autouse=True)

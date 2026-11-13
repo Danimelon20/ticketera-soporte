@@ -52,6 +52,11 @@ def _to(sent, user):
     return [call for call in sent if call[0] == user["email"]]
 
 
+def _contact_follows(ticket_id, user_id):
+    """El contacto sigue su ticket (como al llegar por correo: se agrega solo al crearlo)."""
+    _old_follower(ticket_id, user_id)
+
+
 def _old_follower(ticket_id, user_id):
     """Seguimiento del personal que quedó de antes del cambio (ya no se puede crear)."""
     db = SessionLocal()
@@ -60,19 +65,6 @@ def _old_follower(ticket_id, user_id):
         db.commit()
     finally:
         db.close()
-
-
-def test_requester_follows_and_unfollows_own_ticket(client, make_user, make_ticket, sent):
-    requester = make_user("requester")
-    ticket = make_ticket(requester)
-    assert _unfollow(client, ticket["id"], requester).status_code == 204
-    assert _following(client, ticket["id"], requester) is False
-    assert _follow(client, ticket["id"], requester).status_code == 204
-    assert _following(client, ticket["id"], requester) is True
-    assert _unfollow(client, ticket["id"], requester).status_code == 204
-    assert _following(client, ticket["id"], requester) is False
-    # Dejar de seguir sin seguir no falla
-    assert _unfollow(client, ticket["id"], requester).status_code == 204
 
 
 @pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
@@ -98,24 +90,6 @@ def test_staff_can_stop_old_follow(client, make_user, make_ticket, sent):
     assert _followers_count(ticket["id"], coordinator["id"]) == 0
 
 
-def test_follow_twice_keeps_one_record(client, make_user, make_ticket, sent):
-    requester = make_user("requester")
-    ticket = make_ticket(requester)
-    assert _follow(client, ticket["id"], requester).status_code == 204
-    assert _follow(client, ticket["id"], requester).status_code == 204
-    assert _followers_count(ticket["id"], requester["id"]) == 1
-
-
-def test_requester_cannot_follow_others_ticket(client, make_user, make_ticket, sent):
-    owner = make_user("requester")
-    other = make_user("requester")
-    ticket = make_ticket(owner)
-    response = _follow(client, ticket["id"], other)
-    assert response.status_code == 403
-    assert _followers_count(ticket["id"], other["id"]) == 0
-    assert _follow(client, 999999, owner).status_code == 404
-
-
 def test_status_change_notifies_requester_follower_only(client, make_user, make_ticket, sent):
     requester = make_user("requester", "Carla Solicitante")
     old_staff_follower = make_user("coordinator")
@@ -123,7 +97,7 @@ def test_status_change_notifies_requester_follower_only(client, make_user, make_
     technician = make_user("technician", "Tomás Técnico")
     ticket = make_ticket(requester)
 
-    _follow(client, ticket["id"], requester)
+    _contact_follows(ticket["id"], requester["id"])
     _old_follower(ticket["id"], old_staff_follower["id"])
     _patch(client, ticket["id"], coordinator, assigned_to=technician["id"])
     _old_follower(ticket["id"], technician["id"])
@@ -153,7 +127,7 @@ def test_comment_notifies_with_text(client, make_user, make_ticket, sent):
     requester = make_user("requester", "Rosa")
     coordinator = make_user("coordinator", "Cora")
     ticket = make_ticket(requester)
-    _follow(client, ticket["id"], requester)
+    _contact_follows(ticket["id"], requester["id"])
 
     response = client.post(
         f"/api/tickets/{ticket['id']}/comments",
@@ -175,7 +149,7 @@ def test_status_and_assignment_send_one_email(client, make_user, make_ticket, se
     coordinator = make_user("coordinator", "Cora")
     technician = make_user("technician", "Teo")
     ticket = make_ticket(requester)
-    _follow(client, ticket["id"], requester)
+    _contact_follows(ticket["id"], requester["id"])
 
     _patch(client, ticket["id"], coordinator, status="in_progress", assigned_to=technician["id"])
 
@@ -193,7 +167,7 @@ def test_assignment_only_subject(client, make_user, make_ticket, sent):
     coordinator = make_user("coordinator", "Cora")
     technician = make_user("technician", "Teo")
     ticket = make_ticket(requester)
-    _follow(client, ticket["id"], requester)
+    _contact_follows(ticket["id"], requester["id"])
 
     _patch(client, ticket["id"], coordinator, assigned_to=technician["id"])
 
@@ -207,7 +181,7 @@ def test_inactive_follower_is_skipped(client, make_user, make_ticket, sent):
     requester = make_user("requester")
     coordinator = make_user("coordinator")
     ticket = make_ticket(requester)
-    _follow(client, ticket["id"], requester)
+    _contact_follows(ticket["id"], requester["id"])
 
     db = SessionLocal()
     try:

@@ -29,7 +29,7 @@ def test_team_masks_email_and_hides_personal_data(make_user, client):
 
 
 def test_team_only_for_coordinator_and_admin(make_user, client):
-    for role in ("technician", "requester"):
+    for role in ("technician",):
         user = make_user(role)
         assert client.get("/api/team", headers=user["headers"]).status_code == 403
 

@@ -8,24 +8,25 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import accounts, audit, availability, config, entra_login, identity, mailer, models, routing, schedules, throttle
-from ..validators import INTERNAL_EMAIL, is_internal_email
 from ..schemas import (
-    RegisterRequest, LoginRequest, AuthResponse, MeRead, UserRead,
+    LoginRequest, AuthResponse, MeRead, UserRead,
     LoginChallengeResponse, VerifyCodeRequest, ResendCodeRequest,
     SignupStarted, EmailCodeRequest, EmailRequest, ActivationResult,
     PasswordResetRequest, PasswordResetConfirm,
 )
 from ..security import (
     hash_password, verify_password, new_token, get_current_user, hash_code, hash_token,
-    generate_login_code, generate_password, mask_email, password_min,
+    generate_login_code, generate_password, mask_email,
 )
 
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
 TWO_FACTOR_ROLES = ("admin",)
-# Un solo formulario de inicio: el rol sale de la cuenta (el Agente virtual no entra nunca)
-LOGIN_ROLES = ("admin", "coordinator", "technician", "requester")
+# Un solo formulario de inicio: el rol sale de la cuenta. El Agente virtual y los contactos (rol requester: quien
+# reporta por correo y las cuentas de cliente archivadas) no entran nunca; reciben el mismo error que una
+# contraseña incorrecta, así no se revela si la cuenta existe
+LOGIN_ROLES = ("admin", "coordinator", "technician")
 # Con MS_LOGIN_ENABLED, técnicos y coordinadores entran solo con Microsoft
 MICROSOFT_ONLY_ROLES = ("coordinator", "technician")
 LOGIN_ERROR = "Correo o contraseña incorrectos"
@@ -35,12 +36,11 @@ CODE_MINUTES = 10
 MAX_CODE_ATTEMPTS = 5
 RESEND_SECONDS = 60
 CODE_ERROR = "Error: Intente Nuevamente"
-# Registro de clientes e invitaciones del personal
+# Invitaciones del personal y restablecer la contraseña
 CONFIRM_MINUTES = 15
 INVITE_HOURS = 72
 # Mismo mensaje para código incorrecto, vencido, con demasiados intentos o correo desconocido
 CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
-CONFIRM_EMAIL = "Confirme su correo para iniciar sesión"
 ACTIVATE_PATH = "/#activar-cuenta"
 # Abre directo el paso de escribir el código (el correo va en el fragmento: no llega al servidor)
 RESET_PATH = "/#restablecer"
@@ -117,120 +117,6 @@ def start_challenge(db: Session, user: models.User) -> LoginChallengeResponse:
     db.commit()
     _send_code(user, code)
     return LoginChallengeResponse(challenge_id=challenge.id, email_hint=mask_email(user.email))
-
-
-def _send_signup_code(email: str, code: str) -> None:
-    send_code_email(
-        email,
-        "Confirme su cuenta de la Ticketera",
-        f"Su código para confirmar la cuenta es: {code}. Vence en {CONFIRM_MINUTES} minutos.\n\n"
-        "Si usted no creó una cuenta, ignore este correo.",
-        code,
-    )
-
-
-def _new_signup_code(pending: models.PendingSignup) -> str:
-    code = generate_login_code()
-    now = _now()
-    pending.code_hash = hash_code(code)
-    pending.expires_at = now + timedelta(minutes=CONFIRM_MINUTES)
-    pending.attempts = 0
-    pending.sent_at = now
-    return code
-
-
-@router.post("/auth/register", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
-def register(user_data: RegisterRequest, db: Session = Depends(get_db)):
-    # Misma respuesta exista o no el correo: no se revela quién tiene cuenta
-    email = normalize_email(user_data.email)
-    response = SignupStarted(email_hint=mask_email(email))
-    if "@" not in email:
-        raise HTTPException(status_code=422, detail="Escriba un correo válido")
-    if is_internal_email(email):
-        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
-
-    # Se calcula siempre: el tiempo de respuesta no delata si el correo ya tenía cuenta
-    password_hash = hash_password(user_data.password)
-    pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-    if _find_user(db, email) is not None:
-        # Aviso al dueño (como mucho uno por minuto); no se crea cuenta.
-        # La fila con hash "!" solo marca cuándo se avisó: nunca se puede confirmar.
-        if pending is None:
-            pending = models.PendingSignup(
-                email=email, password_hash="!", code_hash="!", expires_at=_now(), attempts=MAX_CODE_ATTEMPTS, sent_at=None,
-            )
-        if _can_resend(pending.sent_at):
-            pending.sent_at = _now()
-            db.add(pending)
-            db.commit()
-            mailer.send_email(
-                email,
-                "Intento de crear una cuenta con su correo",
-                "Alguien intentó crear una cuenta de cliente en la Ticketera con este correo, "
-                "pero ya tiene una cuenta. Si fue usted, inicie sesión con su contraseña. "
-                "Si no fue usted, puede ignorar este correo.",
-            )
-            # Solo sin correo real, para probar en desarrollo; el aviso no lleva códigos
-            if config.MAIL_TRANSPORT == "log":
-                logging.warning("[SOLO DESARROLLO] aviso de cuenta existente para %s", mask_email(email))
-        return response
-
-    if pending is None:
-        pending = models.PendingSignup(email=email, sent_at=None)
-        db.add(pending)
-    pending.password_hash = password_hash
-    if _can_resend(pending.sent_at):
-        code = _new_signup_code(pending)
-        db.commit()
-        _send_signup_code(email, code)
-    else:
-        db.commit()
-    return response
-
-
-@router.post("/auth/register/verify", response_model=AuthResponse)
-def verify_signup(data: EmailCodeRequest, db: Session = Depends(get_db)):
-    email = normalize_email(data.email)
-    # Registros que quedaron a medias antes de agregar el dominio a INTERNAL_DOMAINS
-    if is_internal_email(email):
-        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
-    pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-    if (
-        pending is None
-        or pending.password_hash == "!"
-        or pending.expires_at <= _now()
-        or pending.attempts >= MAX_CODE_ATTEMPTS
-    ):
-        raise HTTPException(status_code=400, detail=CODE_INVALID)
-    if not _code_matches(data.code, pending.code_hash):
-        pending.attempts += 1
-        db.commit()
-        raise HTTPException(status_code=400, detail=CODE_INVALID)
-    if _find_user(db, email) is not None:
-        db.delete(pending)
-        db.commit()
-        raise HTTPException(status_code=400, detail=CODE_INVALID)
-
-    # El nombre, la cédula y el teléfono se piden en "Complete su perfil"
-    user = models.User(name="", email=email, role="requester", password_hash=pending.password_hash)
-    db.add(user)
-    db.delete(pending)
-    db.commit()
-    db.refresh(user)
-    return _create_session(db, user)
-
-
-@router.post("/auth/register/resend", response_model=SignupStarted, status_code=status.HTTP_202_ACCEPTED)
-def resend_signup(data: EmailRequest, db: Session = Depends(get_db)):
-    email = normalize_email(data.email)
-    if is_internal_email(email):
-        raise HTTPException(status_code=400, detail=INTERNAL_EMAIL)
-    pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-    if pending is not None and pending.password_hash != "!" and _can_resend(pending.sent_at):
-        code = _new_signup_code(pending)
-        db.commit()
-        _send_signup_code(email, code)
-    return SignupStarted(email_hint=mask_email(email))
 
 
 def _active_invitation(db: Session, email: str) -> models.StaffInvitation | None:
@@ -353,7 +239,8 @@ def send_reset_code(db: Session, user: models.User, requested_by: models.User | 
     return send_code_email(user.email, "Restablecer el acceso a la Ticketera", body, code)
 
 
-RESET_ROLES = ("admin", "coordinator", "technician", "requester")
+# Los contactos no tienen contraseña: el mismo 202 sin enviar nada
+RESET_ROLES = ("admin", "coordinator", "technician")
 
 
 def _reset_user(db: Session, email: str) -> models.User | None:
@@ -424,23 +311,14 @@ def confirm_password_reset(data: PasswordResetConfirm, response: Response, db: S
             raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
         raise HTTPException(status_code=400, detail=CODE_INVALID)
 
-    generated = None
-    if user.role == "requester":
-        minimum = password_min(user.role)
-        if not data.new_password or len(data.new_password) < minimum:
-            # El código no se gasta: puede corregir la contraseña y enviarlo otra vez
-            raise HTTPException(status_code=422, detail=f"La contraseña debe tener al menos {minimum} caracteres")
-        user.password_hash = hash_password(data.new_password)
-    else:
-        generated = generate_password()
-        user.password_hash = hash_password(generated)
+    # El personal recibe una contraseña generada (se ve una sola vez)
+    generated = generate_password()
+    user.password_hash = hash_password(generated)
     db.delete(reset)
     throttle.reset(db, email)
     accounts.close_sessions(db, user.id)
     audit.record(db, user.id, "password_reset", target=user)
     db.commit()
-    if generated is None:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
     # Única respuesta con la contraseña: que el navegador no la guarde
     response.headers["Cache-Control"] = "no-store"
     return ActivationResult(email=user.email, password=generated)
@@ -454,11 +332,6 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     if throttle.is_locked(db, email):
         raise HTTPException(status_code=429, detail=throttle.LOCK_MESSAGE)
     user = db.query(models.User).filter(models.User.email == email).first()
-    if user is None:
-        pending = db.query(models.PendingSignup).filter(models.PendingSignup.email == email).first()
-        # Solo quien sabe la contraseña se entera de que falta confirmar
-        if pending is not None and verify_password(credentials.password, pending.password_hash):
-            raise HTTPException(status_code=403, detail=CONFIRM_EMAIL)
     password_ok = verify_password(credentials.password, user.password_hash if user else _DUMMY_HASH)
     if not user or not password_ok or not user.is_active or user.role not in LOGIN_ROLES:
         # Cualquier 401 cuenta como fallo: el bloqueo no revela si la contraseña era correcta

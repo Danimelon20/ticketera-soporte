@@ -216,11 +216,11 @@ def test_unknown_email_is_rejected_without_full_email(client, ms):
     assert change.target_label and "***" in change.target_label
 
 
-def test_requester_account_is_rejected(client, make_user, ms):
+def test_contact_account_is_rejected_like_an_unknown_email(client, make_user, ms):
+    """Un contacto recibe el mismo rechazo que un correo sin cuenta: no se revela que existe."""
     user = make_user("requester")
     ms.claims = _claims(user["email"])
-    change = _assert_rejected(_microsoft_login(client), "requester")
-    assert change.target_user_id == user["id"]
+    _assert_rejected(_microsoft_login(client), "not_staff", label_must_not_contain=user["email"])
     assert _link_for(user["id"]) is None
 
 
@@ -229,12 +229,6 @@ def test_deactivated_account_is_rejected(client, make_user, ms):
     _set_user(user["id"], is_active=False)
     ms.claims = _claims(user["email"])
     _assert_rejected(_microsoft_login(client), "inactive")
-
-
-def test_requester_cannot_enter_with_microsoft(client, make_user, ms):
-    user = make_user("requester")
-    ms.claims = _claims(user["email"])
-    _assert_rejected(_microsoft_login(client), "requester")
 
 
 def test_account_linked_to_another_oid_is_rejected(client, make_user, ms):
@@ -382,15 +376,6 @@ def test_staff_cannot_change_password(client, make_user, ms):
         headers=user["headers"],
     )
     assert response.status_code == 403
-
-
-def test_requester_login_unchanged(client, make_user, ms):
-    user = make_user("requester")
-    response = client.post(
-        "/api/auth/login", json={"email": user["email"], "password": PASSWORD, "portal": "requester"}
-    )
-    assert response.status_code == 200
-    assert "token" in response.json()
 
 
 def test_admin_emergency_access_is_recorded_and_notified(client, make_user, ms, sent):

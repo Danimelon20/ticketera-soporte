@@ -1,6 +1,8 @@
 """Al resolverse (interruptor encendido): no sale ningún correo y quien creó el ticket recibe un aviso en su
 campana con enlace a la solución, para avisarle a quien reportó. Apagado: los correos de siempre."""
 
+from app import models
+from app.database import SessionLocal
 from org_helpers import department, set_department, team, unique
 
 SOLUTION = "Se reemplazó el tóner y se imprimió una página de prueba."
@@ -55,7 +57,10 @@ def test_switch_off_keeps_the_resolution_emails(client, make_user, make_ticket, 
     requester = make_user("requester")
     ticket = make_ticket(requester)
     set_department(ticket["id"], dept)
-    client.post(f"/api/tickets/{ticket['id']}/follow", headers=requester["headers"])
+    # El contacto sigue su ticket (como al llegar por correo)
+    with SessionLocal() as db:
+        db.add(models.TicketFollower(ticket_id=ticket["id"], user_id=requester["id"]))
+        db.commit()
     _work(client, coordinator, technician, ticket["id"])
     sent.clear()
     client.patch(f"/api/tickets/{ticket['id']}", headers=technician["headers"], json={"status": "resolved"})

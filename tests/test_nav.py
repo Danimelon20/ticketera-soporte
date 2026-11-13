@@ -200,12 +200,6 @@ def test_technician_without_shift_today(make_user):
     assert shift == {"start": None, "end": None, "on_shift": False, "load": 0}
 
 
-def test_requester_cannot_read_counts_or_status(make_user, client):
-    requester = make_user("requester")
-    assert client.get("/api/nav/counts", headers=requester["headers"]).status_code == 403
-    assert client.get("/api/system/status", headers=requester["headers"]).status_code == 403
-
-
 def test_system_status_only_flags_and_counts(make_user, client, monkeypatch):
     monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     monkeypatch.setattr(config, "AUTO_ASSIGN_ENABLED", True)

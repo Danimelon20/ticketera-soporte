@@ -159,7 +159,7 @@ def test_checklist_blocks_turning_on_item_by_item(client, make_user, clean_org):
 
 
 def test_activation_is_admin_only(client, make_user):
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert client.get("/api/admin/activation", headers=user["headers"]).status_code == 403
         assert _set(client, user, False).status_code == 403

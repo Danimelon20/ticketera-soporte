@@ -47,7 +47,7 @@ def test_admin_cannot_open_ticket_without_reason(client, make_user, ticket):
     assert _view(client, admin, 999999).status_code == 404
 
 
-@pytest.mark.parametrize("role", ["technician", "coordinator", "requester"])
+@pytest.mark.parametrize("role", ["technician", "coordinator"])
 def test_only_admin_uses_view_conversation(client, make_user, ticket, role):
     assert _view(client, make_user(role), ticket["id"]).status_code == 403
     assert _views(ticket["id"]) == []

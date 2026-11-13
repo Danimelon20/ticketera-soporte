@@ -150,12 +150,6 @@ def test_counts_put_overdue_apart(people):
 
 # ----- Avisos de la campana -----
 
-def test_requester_cannot_see_notices(client, people):
-    requester = people["requester"]
-    assert client.get("/api/notifications/overdue", headers=requester["headers"]).status_code == 403
-    response = client.post("/api/notifications/overdue/read", json={"all": True}, headers=requester["headers"])
-    assert response.status_code == 403
-
 
 def test_notices_at_50_and_80_once(client, people, monkeypatch):
     technician, coordinator = people["technician"], people["coordinator"]
@@ -283,7 +277,6 @@ def test_report_permissions(client, people, monkeypatch):
     # El administrador no entra al flujo de tickets
     assert client.get(url, headers=people["admin"]["headers"]).status_code == 403
     assert client.get(url, headers=people["other_technician"]["headers"]).status_code == 403
-    assert client.get(url, headers=people["requester"]["headers"]).status_code == 403
     response = client.get(f"/api/tickets/{not_due}/overdue-report", headers=people["coordinator"]["headers"])
     assert response.status_code == 400
 
@@ -317,7 +310,6 @@ def test_report_pdf(client, people, monkeypatch):
     assert b"8888-1234" not in content
 
     assert client.get(url, headers=people["other_technician"]["headers"]).status_code == 403
-    assert client.get(url, headers=people["requester"]["headers"]).status_code == 403
     response = client.get(f"/api/tickets/{not_due}/overdue-report.pdf", headers=coordinator["headers"])
     assert response.status_code == 400
 
@@ -340,7 +332,7 @@ def test_cause_permissions_and_review(client, people, monkeypatch):
     url = f"/api/tickets/{ticket}/overdue-cause"
     payload = {"cause": "high_load"}
 
-    for role in ("technician", "requester", "admin"):
+    for role in ("technician", "admin"):
         assert client.post(url, json=payload, headers=people[role]["headers"]).status_code == 403, role
     other = client.post(url, json={"cause": "other"}, headers=people["coordinator"]["headers"])
     assert other.status_code == 422

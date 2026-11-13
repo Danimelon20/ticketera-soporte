@@ -63,25 +63,6 @@ def hacienda_match(monkeypatch):
 
 # ----- Cédula de otra cuenta -----
 
-def test_profile_with_foreign_id_is_logged_and_reported(client, make_user, hacienda_match):
-    owner = make_user("requester")
-    other = make_user("requester", profile=False)
-    response = client.put("/api/profile", json=_profile(owner["id_number"]), headers=other["headers"])
-    assert response.status_code == 400
-    # El cliente ve el mismo mensaje de siempre: nada de reportes ni de la otra cuenta
-    assert response.json()["detail"] == ID_IN_USE
-
-    change = _changes(other["id"], "id_number_conflict")[-1]
-    assert change.actor_id == other["id"]
-    assert owner["id_number"] not in change.new_value
-    assert change.new_value == f"****{owner['id_number'][-4:]} (perfil)"
-
-    reports = _auto_reports(other["id"])
-    assert len(reports) == 1
-    assert reports[0].reason == "foreign_id" and reports[0].status == "open"
-    assert f"cuenta #{owner['id']}" in reports[0].comment
-    assert owner["id_number"] not in reports[0].comment
-
 
 def _activity(report_id):
     db = SessionLocal()
@@ -96,57 +77,6 @@ def _activity(report_id):
 def _admin_view(client, admin, user_id):
     reports = client.get("/api/account-reports?status=open", headers=admin["headers"]).json()
     return next(r for r in reports if r["target_user_id"] == user_id and r["reporter_role"] == "agent")
-
-
-def test_repeated_attempts_add_to_the_open_report(client, make_user, hacienda_match):
-    owner = make_user("requester")
-    other = make_user("requester", profile=False)
-    admin = make_user("admin")
-    assert client.put("/api/profile", json=_profile(owner["id_number"]), headers=other["headers"]).status_code == 400
-    report = _auto_reports(other["id"])[0]
-    _attempts, first_at, _owners = _activity(report.id)
-    for _ in range(2):
-        assert client.put("/api/profile", json=_profile(owner["id_number"]), headers=other["headers"]).status_code == 400
-
-    # Cada intento queda en el registro, pero el administrador ve un solo reporte con el contador
-    assert len(_changes(other["id"], "id_number_conflict")) == 3
-    assert [r.id for r in _auto_reports(other["id"])] == [report.id]
-    attempts, last_at, owners = _activity(report.id)
-    assert attempts == 3 and last_at >= first_at
-    # La misma cédula tres veces es una sola cédula distinta: no es señal fuerte
-    assert owners == 1
-    view = _admin_view(client, admin, other["id"])
-    assert view["attempts"] == 3 and view["last_attempt_at"]
-    assert view["distinct_id_numbers"] == 1 and view["strong_signal"] is False
-
-
-def test_three_distinct_foreign_ids_is_a_strong_signal(client, make_user, hacienda_match):
-    owners = [make_user("requester") for _ in range(3)]
-    other = make_user("requester", profile=False)
-    admin = make_user("admin")
-    for index, owner in enumerate(owners, start=1):
-        response = client.put("/api/profile", json=_profile(owner["id_number"]), headers=other["headers"])
-        assert response.status_code == 400
-        view = _admin_view(client, admin, other["id"])
-        assert view["distinct_id_numbers"] == index
-        # Con dos todavía no; desde la tercera cédula distinta, sí
-        assert view["strong_signal"] is (index >= 3)
-    assert len(_auto_reports(other["id"])) == 1
-    assert view["attempts"] == 3
-
-
-def test_other_reason_goes_into_the_same_open_report(client, make_user, hacienda_match, monkeypatch):
-    owner = make_user("requester")
-    other = make_user("requester", profile=False)
-    assert client.put("/api/profile", json=_profile(owner["id_number"]), headers=other["headers"]).status_code == 400
-    # Ahora un perfil válido, pero con un nombre que Hacienda no reconoce
-    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "01", "name_tokens": frozenset()})
-    assert client.put("/api/profile", json=_profile("1-0987-0654"), headers=other["headers"]).status_code == 200
-    reports = _auto_reports(other["id"])
-    assert len(reports) == 1 and reports[0].reason == "foreign_id"
-    assert "También: El nombre no coincide." in reports[0].comment
-    # Otro motivo no suma intentos de cédula ajena
-    assert _activity(reports[0].id)[0] == 1
 
 
 def test_email_with_foreign_id_is_reported(client, make_user, sent, monkeypatch, hacienda_match):
@@ -266,21 +196,6 @@ def test_admin_applying_foreign_id_is_only_logged(client, make_user, make_ticket
 
 # ----- Nombre que no coincide con Hacienda -----
 
-def test_profile_name_mismatch_is_reported(client, make_user):
-    # El Hacienda simulado de conftest no trae nombre: el resultado es mismatch
-    user = make_user("requester", profile=False)
-    response = client.put("/api/profile", json=_profile("1-0234-0567"), headers=user["headers"])
-    assert response.status_code == 200, response.text
-    reports = _auto_reports(user["id"])
-    assert [r.reason for r in reports] == ["name_mismatch"]
-    assert "perfil" in reports[0].comment
-
-
-def test_profile_name_match_is_not_reported(client, make_user, hacienda_match):
-    user = make_user("requester", profile=False)
-    assert client.put("/api/profile", json=_profile("1-0234-0567"), headers=user["headers"]).status_code == 200
-    assert _auto_reports(user["id"]) == []
-
 
 def test_email_mismatch_reported_only_when_client_sends_it(make_user):
     from_email = make_user("requester", name="Ana Mora Vargas", profile=False)
@@ -300,33 +215,6 @@ def test_email_mismatch_reported_only_when_client_sends_it(make_user):
 
 
 # ----- Etiqueta "Reportada": solo después de que el administrador confirma -----
-
-def test_auto_report_flags_only_after_admin_confirms(client, make_user, make_ticket, hacienda_match):
-    owner = make_user("requester")
-    other = make_user("requester")
-    admin = make_user("admin")
-    coordinator = make_user("coordinator")
-    other_id_number = other["id_number"]
-    _set_id_number(other["id"], None)
-    assert client.put("/api/profile", json=_profile(owner["id_number"]), headers=other["headers"]).status_code == 400
-    _set_id_number(other["id"], other_id_number)
-    ticket = make_ticket(other)
-
-    assert _is_reported(other["id"]) is False
-    detail = client.get(f"/api/tickets/{ticket['id']}", headers=coordinator["headers"]).json()
-    assert detail["requester_flags"]["reported"] is False
-    # Pero el administrador lo ve en la cola de Reportes
-    open_reports = client.get("/api/account-reports?status=open", headers=admin["headers"]).json()
-    assert any(r["target_user_id"] == other["id"] and r["reporter_role"] == "agent" for r in open_reports)
-
-    report_id = _auto_reports(other["id"])[0].id
-    response = client.post(
-        f"/api/account-reports/{report_id}/confirm", json={"note": "Revisado"}, headers=admin["headers"]
-    )
-    assert response.status_code == 200, response.text
-    assert _is_reported(other["id"]) is True
-    detail = client.get(f"/api/tickets/{ticket['id']}", headers=coordinator["headers"]).json()
-    assert detail["requester_flags"]["reported"] is True
 
 
 def test_manual_open_report_still_flags_immediately(client, make_user, make_ticket):

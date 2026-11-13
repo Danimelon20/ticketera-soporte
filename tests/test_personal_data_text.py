@@ -16,12 +16,16 @@ def _ticket_with_personal_data(client, make_user):
         "contact_phone": "8888-1234",
         "contact_id_number": "1-0234-0567",
     }
-    response = client.post("/api/tickets", json=payload, headers=requester["headers"])
-    assert response.status_code == 200, response.text
-    ticket = response.json()
-    response = client.post(f"/api/tickets/{ticket['id']}/comments", json={"content": COMMENT},
-                           headers=requester["headers"])
-    assert response.status_code == 200, response.text
+    # El contacto no inicia sesión: el ticket sale del camino «a nombre de» y su comentario, como si respondiera
+    # por correo
+    from conftest import _owner_ticket
+    ticket = _owner_ticket(requester, payload)
+    db = SessionLocal()
+    try:
+        db.add(models.Comment(ticket_id=ticket["id"], user_id=requester["id"], content=COMMENT))
+        db.commit()
+    finally:
+        db.close()
     return requester, ticket
 
 
@@ -79,9 +83,9 @@ def test_assigned_technician_sees_original_text(client, make_user):
     assert _listed(client, ticket["id"], technician)["description"] == DESCRIPTION
 
 
-def test_coordinator_admin_and_owner_see_original_text(client, make_user):
-    requester, ticket = _ticket_with_personal_data(client, make_user)
-    for user in (make_user("coordinator"), requester):
+def test_coordinator_and_admin_see_original_text(client, make_user):
+    _requester, ticket = _ticket_with_personal_data(client, make_user)
+    for user in (make_user("coordinator"),):
         detail = _detail(client, ticket["id"], user)
         assert detail["description"] == DESCRIPTION
         assert detail["comments"][0]["content"] == COMMENT

@@ -212,4 +212,3 @@ def test_department_options_for_staff(client, make_user):
     due = {p["name"]: p["due_text"] for p in options["priorities"]}
     assert due["Alta"] == "16 horas hábiles" and due["Urgente"] == "4 horas hábiles"
     assert "Sin categoría" not in [c["name"] for c in options["categories"]]
-    assert client.get("/api/departments/options", headers=make_user("requester")["headers"]).status_code == 403

@@ -340,6 +340,13 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
         detail = identity.INCOMPLETE_OWN if owner.id == current_user.id else identity.INCOMPLETE_OTHER
         raise HTTPException(status_code=400, detail=detail)
 
+    return create_for_owner(db, ticket, owner, background_tasks)
+
+
+def create_for_owner(db: Session, ticket: TicketCreate, owner: models.User,
+                     background_tasks: BackgroundTasks) -> models.Ticket:
+    """Ticket a nombre de una persona (el coordinador «a nombre de» con el interruptor apagado; las pruebas lo usan
+    para los tickets de un contacto). Después de responder: agrupación, análisis y asignación."""
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")

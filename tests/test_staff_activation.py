@@ -147,7 +147,7 @@ def test_coordinator_cannot_invite(client, make_user, sent):
         assert response.json()["detail"] == "Solo el administrador puede invitar personal"
 
 
-@pytest.mark.parametrize("role", ["requester", "technician"])
+@pytest.mark.parametrize("role", ["technician"])
 def test_others_cannot_invite(client, make_user, sent, role):
     _email_x, response = _invite(client, make_user(role))
     assert response.status_code == 403
@@ -204,9 +204,7 @@ def test_resend_from_activation_page(client, make_user, sent):
 def test_nobody_gets_staff_role_without_invitation(client, sent):
     email = _email()
     assert _activate(client, email, "123456").status_code == 400
-    client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123", "role": "technician"})
-    data = client.post(
-        "/api/auth/register/verify", json={"email": email, "code": code_from(sent[-1][2])}
-    ).json()
-    assert data["user"]["role"] == "requester"
+    # Tampoco con el registro, que ya no existe
+    assert client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123",
+                                                  "role": "technician"}).status_code in (404, 405)
     assert client.post("/api/invites", json={"role": "technician"}).status_code in (404, 405)

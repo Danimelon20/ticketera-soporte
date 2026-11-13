@@ -228,9 +228,6 @@ def test_delete_requester_without_activity(client, make_user, sent):
     assert row["actor"] == "Servidor"
     assert email not in row["account"]
     assert any("Cliente Equivocado" in c["account"] for c in _changes(client, viewer, "login_failed"))
-    # El correo queda libre para registrarse de nuevo
-    response = client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123"})
-    assert response.status_code == 202
 
 
 # ----- Archivar un solicitante con actividad -----

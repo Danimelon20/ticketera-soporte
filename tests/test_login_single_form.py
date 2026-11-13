@@ -24,7 +24,7 @@ def _me(client, token):
     return response.json()
 
 
-@pytest.mark.parametrize("role", ["technician", "coordinator", "requester"])
+@pytest.mark.parametrize("role", ["technician", "coordinator"])
 def test_each_role_enters_by_the_same_form(client, make_user, sent, role):
     user = make_user(role)
     response = _login(client, user["email"])
@@ -53,7 +53,7 @@ def test_admin_enters_by_the_same_form_with_code(client, make_user, sent):
 @pytest.mark.parametrize("legacy_portal", ["admin", "staff", "requester", "", "cualquiera"])
 def test_old_page_sending_portal_is_ignored(client, make_user, sent, legacy_portal):
     """Compatibilidad: una página vieja en caché que todavía envía la pestaña entra igual."""
-    for role in ("technician", "coordinator", "requester"):
+    for role in ("technician", "coordinator"):
         user = make_user(role)
         response = _login(client, user["email"], portal=legacy_portal)
         assert response.status_code == 200, (role, response.text)
@@ -76,6 +76,9 @@ def test_errors_answer_the_same(client, make_user, sent):
         _login(client, f"nadie-{uuid.uuid4().hex}@test.com"),
         _login(client, inactive["email"]),
         _login(client, agent_email),
+        # Un contacto (quien reporta por correo o un cliente archivado), con su contraseña correcta
+        _login(client, make_user("requester")["email"]),
+        _login(client, make_user("requester")["email"], portal="requester"),
     ]
     assert {r.status_code for r in responses} == {401}
     assert all(r.json() == {"detail": GENERIC} for r in responses)
@@ -94,19 +97,6 @@ def test_five_failures_lock_for_fifteen_minutes(client, make_user, sent):
     assert throttle.LOCK_MINUTES == 15
 
 
-def test_unconfirmed_signup_hears_it_only_with_the_right_password(client, sent):
-    email = f"cliente-{uuid.uuid4().hex}@example.com"
-    client.post("/api/auth/register", json={"email": email, "password": PASSWORD})
-    assert code_from(sent[-1][2])
-    response = _login(client, email)
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Confirme su correo para iniciar sesión"
-    wrong = _login(client, email, "otra-clave-999")
-    assert wrong.status_code == 401 and wrong.json() == {"detail": GENERIC}
-
-
-# ----- Con MS_LOGIN_ENABLED: el personal entra solo con Microsoft -----
-
 @pytest.mark.parametrize("role", ["technician", "coordinator"])
 def test_staff_password_blocked_with_microsoft(client, make_user, sent, monkeypatch, role):
     monkeypatch.setattr(config, "MS_LOGIN_ENABLED", True)
@@ -120,10 +110,11 @@ def test_staff_password_blocked_with_microsoft(client, make_user, sent, monkeypa
     assert sent == []
 
 
-def test_requester_and_admin_still_use_password_with_microsoft(client, make_user, sent, monkeypatch):
+def test_admin_still_uses_password_with_microsoft(client, make_user, sent, monkeypatch):
     monkeypatch.setattr(config, "MS_LOGIN_ENABLED", True)
+    # Un contacto tampoco entra con Microsoft encendido
     requester = make_user("requester")
-    assert _login(client, requester["email"]).status_code == 200
+    assert _login(client, requester["email"]).json() == {"detail": GENERIC}
     # Acceso de emergencia del administrador: contraseña y código
     admin = make_user("admin")
     response = _login(client, admin["email"])

@@ -4,6 +4,8 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
+from conftest import _owner_ticket
+
 from app import auto_assign, chatbot, config, mailer, models
 from app.database import SessionLocal
 
@@ -436,11 +438,9 @@ def test_web_ticket_is_assigned_after_ai_analysis(client, make_user, monkeypatch
     # B ya tiene un nivel 3; A uno sin nivel (2): gana A
     _ticket(requester, level=3, assigned_to=b["id"])
     _ticket(requester, level=None, assigned_to=a["id"])
-    response = client.post("/api/tickets", json={
+    ticket = _owner_ticket(requester, {
         "title": "Servidor caído", "description": "No responde.", "category_id": 1, "priority_id": 1,
-    }, headers=requester["headers"])
-    assert response.status_code == 200
-    ticket = response.json()["id"]
+    })["id"]
     assert seen["assigned_during_analysis"] is False
     assert _assigned_to(ticket) == a["id"]
     # Con el nivel de la IA (4), la carga de A pasa a 6
@@ -458,9 +458,9 @@ def test_web_ticket_with_failed_analysis_counts_as_two(client, make_user, monkey
     monkeypatch.setattr(chatbot, "post_chat", _fail)
     technician = _tech(make_user)
     requester = make_user("requester")
-    ticket = client.post("/api/tickets", json={
+    ticket = _owner_ticket(requester, {
         "title": "No imprime", "description": "Nada.", "category_id": 1, "priority_id": 1,
-    }, headers=requester["headers"]).json()["id"]
+    })["id"]
     assert _assigned_to(ticket) == technician["id"]
     assert auto_assign.loads(SessionLocal(), [technician["id"]]) == {technician["id"]: 2}
 
@@ -469,9 +469,9 @@ def test_web_ticket_without_ai_is_assigned(client, make_user, monkeypatch):
     monkeypatch.setattr(auto_assign, "_now", lambda: MONDAY_10AM)
     technician = _tech(make_user)
     requester = make_user("requester")
-    ticket = client.post("/api/tickets", json={
+    ticket = _owner_ticket(requester, {
         "title": "Correo lento", "description": "Tarda.", "category_id": 1, "priority_id": 1,
-    }, headers=requester["headers"]).json()["id"]
+    })["id"]
     assert _assigned_to(ticket) == technician["id"]
 
 

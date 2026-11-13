@@ -68,7 +68,7 @@ def _record(actor_id, action, target_id=None, label=None, old=None, new=None, at
 
 
 # ----- Permisos -----
-@pytest.mark.parametrize("role", ["technician", "coordinator", "requester"])
+@pytest.mark.parametrize("role", ["technician", "coordinator"])
 def test_only_admin_can_use_people_routes(client, make_user, role):
     user = make_user(role)
     person = make_user("technician")
@@ -302,10 +302,10 @@ def test_staff_header(client, make_user):
 
 # ----- Ingresos e intentos fallidos (se registran desde este cambio) -----
 def test_login_and_failed_login_are_recorded(client, make_user):
-    requester = make_user("requester")
-    bad = client.post("/api/auth/login", json={"email": requester["email"], "password": "otra-clave-999", "portal": "requester"})
+    requester = make_user("technician")
+    bad = client.post("/api/auth/login", json={"email": requester["email"], "password": "otra-clave-999", "portal": "staff"})
     assert bad.status_code == 401
-    good = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
+    good = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "staff"})
     assert good.status_code == 200
     db = _db()
     try:

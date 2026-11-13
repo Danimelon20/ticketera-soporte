@@ -594,15 +594,6 @@ def test_discard(client, make_user, sent, llm):
     assert client.get("/api/drafts?status=discarded", headers=admin["headers"]).json()[0]["id"] == draft.id
 
 
-def test_requester_gets_403(client, make_user, sent, llm):
-    requester = make_user("requester", profile=False)
-    draft = _draft_from(requester, llm, _answer())
-    headers = requester["headers"]
-    assert client.get("/api/drafts", headers=headers).status_code == 403
-    assert client.post(f"/api/drafts/{draft.id}/confirm", json=_confirm_payload(), headers=headers).status_code == 403
-    assert client.post(f"/api/drafts/{draft.id}/discard", headers=headers).status_code == 403
-
-
 def test_health_counts_drafts(client, make_user, sent, llm):
     admin = make_user("admin")
     _draft_from(make_user("requester", profile=False), llm, _answer(kind="not_support"))
@@ -844,13 +835,6 @@ def test_request_details_send_failure_changes_nothing(client, make_user, sent, l
     assert _get(models.EmailDraft, draft.id).status == "pending_review"
     assert _processed_result(msg) == "draft_created"
     assert _notices(requester["id"]) == []
-
-
-def test_request_details_requester_gets_403(client, make_user, sent, llm):
-    requester, draft, _msg = _pending_with_message(make_user, llm)
-    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=requester["headers"])
-    assert response.status_code == 403
-    assert _get(models.EmailDraft, draft.id) is not None
 
 
 def test_request_details_missing_or_not_pending(client, make_user, sent, llm):

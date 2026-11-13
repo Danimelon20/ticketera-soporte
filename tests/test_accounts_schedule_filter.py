@@ -111,7 +111,7 @@ def test_invalid_range_is_422(make_user, client):
 
 
 def test_only_admin_can_filter(make_user, client):
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert _filter(client, user, "08:00", "12:00").status_code == 403
 

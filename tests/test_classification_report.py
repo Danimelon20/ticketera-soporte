@@ -197,7 +197,7 @@ def test_period_counts_by_arrival(client, make_user, org, routing_on):
 
 
 def test_only_the_admin(client, make_user, routing_on):
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         assert client.get(URL, headers=make_user(role)["headers"]).status_code == 403
 
 

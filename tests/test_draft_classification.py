@@ -221,7 +221,7 @@ def test_choose_validations_and_permissions(client, make_user, ai, org, routing_
     assert response.status_code == 409 and response.json()["detail"] == draft_classification.NO_COORDINATOR
     assert _choose(client, admin, draft_id, department(handles=False)).status_code == 422
     assert _choose(client, admin, 999999, org["redes"]).status_code == 404
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert _choose(client, user, draft_id, org["redes"]).status_code == 403
         assert client.get("/api/admin/drafts/pending-classification", headers=user["headers"]).status_code == 403

@@ -73,7 +73,7 @@ def test_changes_are_audited(client, make_user):
 def test_departments_are_admin_only(client, make_user):
     admin = make_user("admin")
     dept = _create(client, admin, unique("Privado")).json()
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert client.get("/api/admin/departments", headers=user["headers"]).status_code == 403
         assert _create(client, user, unique("X")).status_code == 403

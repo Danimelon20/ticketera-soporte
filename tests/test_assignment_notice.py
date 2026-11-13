@@ -81,7 +81,13 @@ def test_follower_technician_gets_one_email(client, make_user, make_ticket, sent
     technician = make_user("technician")
     other_follower = make_user("requester")
     ticket = make_ticket(other_follower)
-    assert client.post(f"/api/tickets/{ticket['id']}/follow", headers=other_follower["headers"]).status_code == 204
+    # El contacto sigue su ticket (se agrega solo, como al llegar por correo)
+    db = SessionLocal()
+    try:
+        db.add(models.TicketFollower(ticket_id=ticket["id"], user_id=other_follower["id"]))
+        db.commit()
+    finally:
+        db.close()
     # El técnico ya no puede seguir un ticket ajeno: el seguimiento viene de antes de este cambio
     db = SessionLocal()
     try:
@@ -118,12 +124,12 @@ def test_notice_has_no_protected_data(client, make_user, make_ticket, sent):
     coordinator = make_user("coordinator")
     technician = make_user("technician")
     requester = make_user("requester")
-    response = client.post("/api/tickets", json={
+    from conftest import _owner_ticket
+    ticket = _owner_ticket(requester, {
         "title": "Llamar al 8765-4321 por la cédula 1-0987-0654",
         "description": "Mi cédula es 109870654 y mi teléfono 8765-4321. Descripción privada.",
         "category_id": 1, "priority_id": 1, "contact_phone": "8765-4321",
-    }, headers=requester["headers"])
-    ticket = response.json()
+    })
     from app import comments
 
     db = SessionLocal()

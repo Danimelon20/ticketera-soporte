@@ -128,11 +128,16 @@ def get_current_session(
     return db_session
 
 
+# Roles que pueden tener sesión (el Agente virtual y los contactos, no)
+SESSION_ROLES = ("admin", "coordinator", "technician")
+
+
 def get_current_user(
     db_session: models.Session = Depends(get_current_session),
     db: DBSession = Depends(get_db)
 ) -> models.User:
     user = db.query(models.User).filter(models.User.id == db_session.user_id, models.User.is_active == True).first()
-    if not user:
+    # Los contactos (rol requester) ya no inician sesión: una sesión abierta de antes deja de servir
+    if not user or user.role not in SESSION_ROLES:
         raise HTTPException(status_code=401, detail=LOGIN_REQUIRED)
     return user

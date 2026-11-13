@@ -229,21 +229,6 @@ def test_analyze_pending_limit(make_user, llm):
     assert [_row(i).status for i in ids] == ["done", "done", "pending"]
 
 
-def test_requester_never_sees_analysis(client, make_user, llm):
-    requester = make_user("requester", profile=False)
-    ticket_id = _email_ticket(requester)
-    llm["replies"].append(_answer())
-    email_analysis.analyze_pending()
-
-    response = client.get(f"/api/tickets/{ticket_id}", headers=requester["headers"])
-    assert response.status_code == 200
-    assert "ai_analysis" not in response.json()
-    assert "contact_phone" in response.json()
-
-    response = client.patch(f"/api/tickets/{ticket_id}/ai-level", json={"level": 4}, headers=requester["headers"])
-    assert response.status_code == 403
-
-
 def test_overdue_level_is_corrected_by_coordinator_not_technician(client, make_user, llm):
     requester = make_user("requester", profile=False)
     coordinator = make_user("coordinator")

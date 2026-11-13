@@ -45,5 +45,5 @@ def test_overview_lists_unplaced_staff(client, make_user):
 
 
 def test_overview_is_admin_only(client, make_user):
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         assert _overview(client, make_user(role)).status_code == 403

@@ -163,10 +163,9 @@ def resolve_user(db: Session, identity: Identity) -> models.User:
     portal, email = identity.portal, identity.email
     link = db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.oid == identity.oid).first()
     user = db.get(models.User, link.user_id) if link is not None else _find_by_email(db, email)
-    if user is None or user.role == "agent":
+    # Un contacto (rol requester) recibe lo mismo que un correo sin cuenta: no se revela que existe
+    if user is None or user.role in ("agent", "requester"):
         raise LoginRejected("not_staff", portal=portal, email=email)
-    if user.role == "requester":
-        raise LoginRejected("requester", portal=portal, user=user)
     if not user.is_active:
         raise LoginRejected("inactive", portal=portal, user=user)
     # Un solo botón: técnicos, coordinadores y el administrador (solicitantes y el Agente ya se rechazaron)

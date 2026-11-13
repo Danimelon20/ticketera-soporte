@@ -94,13 +94,6 @@ def test_ticket_not_found(client, make_user):
 
 # ---------- Pruebas nuevas de roles ----------
 
-def test_requester_cannot_update(client, make_user, make_ticket):
-    # Reglas 13 y 20: el solicitante no cambia nada, ni en su propio ticket
-    solicitante = make_user("requester")
-    ticket = make_ticket(solicitante)
-    assert patch(client, ticket["id"], solicitante, status="in_progress").status_code == 403
-    assert patch(client, ticket["id"], solicitante, priority_id=4).status_code == 403
-
 
 def test_technician_can_change_status_and_priority(client, make_user, make_ticket):
     # Reglas 14 y 20

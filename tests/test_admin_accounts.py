@@ -21,7 +21,7 @@ def _by_id(rows, user_id, kind="user"):
 
 def test_only_admin_sees_accounts(make_user, client):
     target = make_user("technician")
-    for role in ("coordinator", "technician", "requester"):
+    for role in ("coordinator", "technician"):
         user = make_user(role)
         assert client.get("/api/admin/accounts", headers=user["headers"]).status_code == 403
         assert client.get(f"/api/admin/accounts/{target['id']}", headers=user["headers"]).status_code == 403
@@ -171,8 +171,6 @@ def test_close_sessions_respects_permissions(make_user, client):
     assert client.post(f"/api/accounts/{admin['id']}/close-sessions", headers=admin["headers"]).status_code == 403
     assert client.post(f"/api/accounts/{other_coordinator['id']}/close-sessions",
                        headers=coordinator["headers"]).status_code == 403
-    assert client.post(f"/api/accounts/{coordinator['id']}/close-sessions",
-                       headers=requester["headers"]).status_code == 403
     # Cerrar sesiones es del administrador: el coordinador ya no lo hace ni con clientes
     assert client.post(f"/api/accounts/{requester['id']}/close-sessions",
                        headers=coordinator["headers"]).status_code == 403

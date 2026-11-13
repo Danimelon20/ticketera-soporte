@@ -1,7 +1,8 @@
 """El comentario interno nunca le llega al solicitante, por ningún camino; el personal sí lo ve."""
 import pytest
 
-from app import accounts, chatbot, config
+from app import accounts, chatbot, config, models
+from app.database import SessionLocal
 from app.routers import chat as chat_router
 
 TEXT = accounts.RELEASED_COMMENT
@@ -29,7 +30,10 @@ def released(client, make_user, make_ticket, sent):
     requester = make_user("requester")
     leaving = make_user("technician")
     ticket = make_ticket(requester, title="Correo no sincroniza")
-    client.post(f"/api/tickets/{ticket['id']}/follow", headers=requester["headers"])
+    # El contacto sigue su ticket (como al llegar por correo)
+    with SessionLocal() as db:
+        db.add(models.TicketFollower(ticket_id=ticket["id"], user_id=requester["id"]))
+        db.commit()
     client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": leaving["id"]}, headers=coordinator["headers"])
     client.post(f"/api/tickets/{ticket['id']}/comments", json={"content": "Comentario público"},
                 headers=coordinator["headers"])
@@ -38,17 +42,6 @@ def released(client, make_user, make_ticket, sent):
     admin = make_user("admin")
     assert client.post(f"/api/accounts/{leaving['id']}/deactivate", headers=admin["headers"]).status_code == 204
     return {"ticket": ticket, "requester": requester, "coordinator": coordinator}
-
-
-def test_requester_does_not_get_it_in_ticket_detail_or_list(client, released):
-    requester, ticket = released["requester"], released["ticket"]
-    detail = client.get(f"/api/tickets/{ticket['id']}", headers=requester["headers"])
-    assert detail.status_code == 200
-    assert TEXT not in detail.text
-    assert [c["content"] for c in detail.json()["comments"]] == ["Comentario público"]
-    assert all(c.get("internal") in (None, False) for c in detail.json()["comments"])
-    listing = client.get("/api/tickets", headers=requester["headers"])
-    assert TEXT not in listing.text
 
 
 @pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
@@ -75,15 +68,6 @@ def test_not_sent_to_followers_or_requester_by_email(client, released, sent):
     # El único correo es el aviso al equipo, y no lo recibe ningún seguidor que no sea del equipo
     assert all("liberados" in subject for _, subject, _ in sent)
     assert all(TEXT not in body for _, _, body in sent)
-
-
-def test_not_in_requester_chat_context(client, released, prompts):
-    response = client.post("/api/chat", json={"message": "¿Cómo va mi ticket?"}, headers=released["requester"]["headers"])
-    assert response.status_code == 200
-    prompt = prompts[-1]
-    assert "Correo no sincroniza" in prompt
-    assert "Comentario público" in prompt
-    assert TEXT not in prompt
 
 
 def test_technician_chat_context_marks_it_internal(client, make_user, released, prompts):

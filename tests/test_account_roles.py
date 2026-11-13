@@ -46,7 +46,10 @@ def test_permission_matrix(client, make_user, sent, actor_role, target_role, act
     actor = make_user(actor_role)
     target = make_user(target_role)
     response = _post(client, actor, target["id"], action)
-    if (actor_role, target_role, action) in ALLOWED:
+    if actor_role == "requester":
+        # Un contacto no tiene sesión
+        assert response.status_code == 401, response.text
+    elif (actor_role, target_role, action) in ALLOWED:
         assert response.status_code in (202, 204), response.text
     else:
         assert response.status_code == 403, response.text
@@ -56,7 +59,7 @@ def test_permission_matrix(client, make_user, sent, actor_role, target_role, act
 @pytest.mark.parametrize("action", ACTIONS)
 def test_nobody_manages_own_account(client, make_user, sent, role, action):
     user = make_user(role)
-    assert _post(client, user, user["id"], action).status_code == 403
+    assert _post(client, user, user["id"], action).status_code == (401 if role == "requester" else 403)
     assert _db_user(user["id"]).is_active
 
 
@@ -72,7 +75,7 @@ def test_only_admin_changes_roles_directly(client, make_user, role):
     actor = make_user(role)
     target = make_user("requester")
     response = client.patch(f"/api/admin/users/{target['id']}", json={"role": "technician"}, headers=actor["headers"])
-    assert response.status_code == 403
+    assert response.status_code == (401 if role == "requester" else 403)
     assert _db_user(target["id"]).role == "requester"
 
 
@@ -176,8 +179,10 @@ def test_admin_deactivates_and_reactivates_requester(client, make_user):
     login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
     assert login.status_code == 401
     assert _post(client, coordinator, requester["id"], "reactivate").status_code == 204
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
-    assert login.status_code == 200
+    assert _db_user(requester["id"]).is_active
+    # Reactivado sigue sin poder entrar: los contactos nunca inician sesión
+    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
+    assert login.status_code == 401
 
 
 def _assign(client, coordinator, ticket, technician):
@@ -252,8 +257,9 @@ def test_unlock_clears_lockout(client, make_user):
     assert rows[0]["login_locked"] is True
 
     assert _post(client, coordinator, requester["id"], "unlock").status_code == 204
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
-    assert login.status_code == 200
+    # Desbloqueado, el mismo error de siempre: un contacto nunca inicia sesión
+    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
+    assert login.status_code == 401
 
 
 def test_directory_state_filter(client, make_user):

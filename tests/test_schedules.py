@@ -64,7 +64,7 @@ def test_coordinator_and_admin_set_schedule(client, make_user, role):
 
 
 @pytest.mark.parametrize("actor_role,target_role", [
-    ("technician", "technician"), ("requester", "technician"), ("coordinator", "coordinator"),
+    ("technician", "technician"), ("coordinator", "coordinator"),
     ("admin", "requester"),
 ])
 def test_others_cannot_set_schedule(client, make_user, actor_role, target_role):

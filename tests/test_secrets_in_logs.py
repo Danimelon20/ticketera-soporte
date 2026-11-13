@@ -12,12 +12,6 @@ def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplo
     caplog.set_level(logging.DEBUG)
     secrets = []
 
-    email = f"cliente-{uuid.uuid4().hex}@example.com"
-    client.post("/api/auth/register", json={"email": email, "password": "clave-cliente-123"})
-    code = code_from(sent[-1][2])
-    secrets += ["clave-cliente-123", code]
-    assert client.post("/api/auth/register/verify", json={"email": email, "code": code}).status_code == 200
-
     admin = make_user("admin")
     staff_email = f"personal-{uuid.uuid4().hex}@test.com"
     client.post(

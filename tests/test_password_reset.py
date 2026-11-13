@@ -61,7 +61,7 @@ def test_same_answer_whether_account_exists_or_not(client, make_user, sent):
         db.close()
 
     cases = [
-        (requester["email"], "requester"),                 # existe
+        (requester["email"], "requester"),                 # contacto: no tiene contraseña
         (f"nadie-{uuid.uuid4().hex}@test.com", "requester"),  # no existe
         (technician["email"], "requester"),                # otra pestaña: ya no importa
         (inactive["email"], "requester"),                  # desactivada
@@ -69,30 +69,8 @@ def test_same_answer_whether_account_exists_or_not(client, make_user, sent):
     responses = [_request(client, email, portal) for email, portal in cases]
     assert {r.status_code for r in responses} == {202}
     assert len({tuple(sorted(r.json().keys())) for r in responses}) == 1
-    # Toda cuenta activa recibe su código, sin importar la pestaña; la inexistente y la desactivada, nada
-    assert [to for to, _, _ in sent] == [requester["email"], technician["email"]]
-
-
-def test_requester_chooses_new_password_and_code_works_once(client, make_user, sent):
-    requester = make_user("requester")
-    _request(client, requester["email"], "requester")
-    code = _codes_to(sent, requester["email"])[-1]
-
-    too_short = _confirm(client, requester["email"], "requester", code, "corta")
-    assert too_short.status_code == 422
-    response = _confirm(client, requester["email"], "requester", code, "nueva-clave-segura")
-    assert response.status_code == 204
-    assert response.content == b""
-    # Sesiones cerradas y la contraseña nueva funciona
-    assert _sessions(requester["id"]) == 0
-    login = client.post("/api/auth/login", json={
-        "email": requester["email"], "password": "nueva-clave-segura", "portal": "requester",
-    })
-    assert login.status_code == 200
-    # El mismo código no sirve otra vez
-    again = _confirm(client, requester["email"], "requester", code, "otra-clave-segura")
-    assert again.status_code == 400
-    assert again.json()["detail"] == CODE_INVALID
+    # Solo el personal activo recibe su código; el contacto, la inexistente y la desactivada, nada
+    assert [to for to, _, _ in sent] == [technician["email"]]
 
 
 @pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
@@ -115,7 +93,7 @@ def test_staff_gets_generated_password(client, make_user, sent, role):
 
 
 def test_wrong_codes_count_toward_lockout(client, make_user, sent):
-    requester = make_user("requester")
+    requester = make_user("technician")
     _request(client, requester["email"], "requester")
     code = _codes_to(sent, requester["email"])[-1]
     wrong = "000000" if code != "000000" else "111111"
@@ -127,7 +105,7 @@ def test_wrong_codes_count_toward_lockout(client, make_user, sent):
 
 
 def test_expired_code_is_rejected(client, make_user, sent):
-    requester = make_user("requester")
+    requester = make_user("technician")
     _request(client, requester["email"], "requester")
     code = _codes_to(sent, requester["email"])[-1]
     _set_reset(requester["id"], expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1))
@@ -136,7 +114,7 @@ def test_expired_code_is_rejected(client, make_user, sent):
 
 
 def test_code_lasts_15_minutes_and_resend_waits_a_minute(client, make_user, sent):
-    requester = make_user("requester")
+    requester = make_user("technician")
     _request(client, requester["email"], "requester")
     db = SessionLocal()
     try:
@@ -151,7 +129,7 @@ def test_code_lasts_15_minutes_and_resend_waits_a_minute(client, make_user, sent
 
 
 def test_only_hash_is_stored(client, make_user, sent):
-    requester = make_user("requester")
+    requester = make_user("technician")
     _request(client, requester["email"], "requester")
     code = _codes_to(sent, requester["email"])[-1]
     db = SessionLocal()
@@ -208,7 +186,7 @@ def _reset_links(sent, email):
     return [m for to, _, body in sent if to == email for m in re.findall(r"\S+/#restablecer\?\S+", body)]
 
 
-@pytest.mark.parametrize("role,portal", [("requester", "requester"), ("technician", "staff"), ("admin", "admin")])
+@pytest.mark.parametrize("role,portal", [("technician", "staff"), ("admin", "admin")])
 def test_forgot_email_links_to_code_step(client, make_user, sent, role, portal):
     user = make_user(role)
     _request(client, user["email"], portal)
@@ -230,12 +208,12 @@ def test_forced_reset_email_links_to_code_step(client, make_user, sent):
 
 def test_having_a_code_sends_no_new_email(client, make_user, sent):
     # "Ya tengo un código" solo muestra el paso del código: confirmar no pide otro correo
-    requester = make_user("requester")
+    requester = make_user("technician")
     _request(client, requester["email"], "requester")
     code = _codes_to(sent, requester["email"])[-1]
     before = len(sent)
     response = _confirm(client, requester["email"], "requester", code, "nueva-clave-456")
-    assert response.status_code == 204
+    assert response.status_code == 200
     assert len(sent) == before
 
 

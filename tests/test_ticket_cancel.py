@@ -61,7 +61,7 @@ def test_staff_with_permission_cancels(client, make_user, make_ticket, requester
     assert "Lo resolvió solo" not in to_requester[0][2]
 
 
-@pytest.mark.parametrize("role", ["technician", "requester", "admin"])
+@pytest.mark.parametrize("role", ["technician", "admin"])
 def test_others_cannot_cancel_or_reopen(client, make_user, make_ticket, requester, role):
     actor = requester if role == "requester" else make_user(role)
     ticket = make_ticket(requester)
@@ -174,11 +174,3 @@ def test_admin_health_counts_cancelled_apart(client, make_user, make_ticket, req
     assert after["cancelled"] == before.get("cancelled", 0) + 1
     assert after.get("closed", 0) == before.get("closed", 0)
 
-
-def test_requester_does_not_see_cancellation_reason(client, make_user, make_ticket, requester):
-    coordinator = make_user("coordinator")
-    ticket = make_ticket(requester)
-    assert _cancel(client, coordinator, [ticket["id"]], note="Nota interna").status_code == 200
-    body = client.get(f"/api/tickets/{ticket['id']}", headers=requester["headers"]).json()
-    assert body["status"] == "closed"
-    assert body["cancellation"] is None

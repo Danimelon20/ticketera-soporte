@@ -89,7 +89,7 @@ def _ids(page, kind="user"):
     return {row["id"] for row in page["items"] if row["kind"] == kind}
 
 
-@pytest.mark.parametrize("role", ["technician", "requester"])
+@pytest.mark.parametrize("role", ["technician"])
 def test_technician_and_requester_get_403(client, make_user, role):
     viewer = make_user(role)
     target = make_user("requester")

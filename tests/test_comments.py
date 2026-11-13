@@ -91,20 +91,6 @@ def test_comment_ticket_not_found(client, make_user):
 
 # ---------- Pruebas nuevas de roles ----------
 
-def test_requester_comments_own_ticket(client, make_user, make_ticket):
-    # Regla 7: el solicitante sí comenta lo suyo
-    solicitante = make_user("requester")
-    ticket = make_ticket(solicitante)
-    assert comment(client, ticket["id"], solicitante, "Sigue sin imprimir").status_code == 200
-
-
-def test_requester_cannot_comment_others_ticket(client, make_user, make_ticket):
-    # Regla 7: el solicitante no comenta lo ajeno
-    ana = make_user("requester")
-    luis = make_user("requester")
-    ticket_de_luis = make_ticket(luis)
-    assert comment(client, ticket_de_luis["id"], ana, "Me meto").status_code == 403
-
 
 def _assign(client, coordinator, ticket_id, user):
     """Asigna el coordinador: el técnico ya no se asigna tickets."""
@@ -121,17 +107,6 @@ def test_technician_comments_only_assigned_ticket(client, make_user, make_ticket
     _assign(client, make_user("coordinator"), ticket["id"], tecnico)
     assert comment(client, ticket["id"], tecnico, "Lo reviso mañana").status_code == 200
 
-
-def test_requester_cannot_open_others_ticket(client, make_user, make_ticket):
-    # Decisión b: el solicitante no abre el detalle de un ticket ajeno
-    ana = make_user("requester")
-    luis = make_user("requester")
-    ticket_de_luis = make_ticket(luis)
-    assert detail(client, ticket_de_luis["id"], ana).status_code == 403
-    assert detail(client, ticket_de_luis["id"], luis).status_code == 200
-
-
-# ---------- Pruebas adicionales requeridas ----------
 
 def test_unassigned_technician_cannot_comment_ticket(client, make_user, make_ticket):
     # Ya no ve los tickets de los demás: ni los abre ni comenta
