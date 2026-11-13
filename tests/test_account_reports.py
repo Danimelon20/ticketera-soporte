@@ -197,15 +197,6 @@ def test_requester_never_sees_reports(client, make_user, make_ticket, sent):
     assert len(sent) == before
 
 
-    db = SessionLocal()
-    try:
-        context = chatbot.build_context(db, db.get(models.User, requester["id"]))
-    finally:
-        db.close()
-    assert "report" not in context.lower()
-    assert "Parece una cuenta falsa" not in context
-
-
 def test_technician_cannot_report_unknown_requester(client, make_user):
     # Sin tickets ni borradores el técnico no pudo haberla visto
     requester = make_user("requester")

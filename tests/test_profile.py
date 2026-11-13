@@ -33,6 +33,8 @@ def test_coordinator_cannot_create_ticket_for_incomplete_profile(client, make_us
     assert response.json()["detail"].startswith("El perfil del solicitante está incompleto")
 
 
-def test_staff_cannot_use_requester_profile(client, make_user):
+def test_profile_route_no_longer_exists(client, make_user):
+    """«Complete su perfil» era del cliente: la ruta ya no existe."""
     tech = make_user("technician")
-    assert client.put("/api/profile", json=_profile(), headers=tech["headers"]).status_code == 403
+    response = client.put("/api/profile", json=_profile(), headers=tech["headers"])
+    assert response.status_code in (404, 405)

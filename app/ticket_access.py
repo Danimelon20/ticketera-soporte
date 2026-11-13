@@ -54,8 +54,6 @@ def access(db: Session, user: models.User, ticket: models.Ticket) -> str | None:
         return FULL if dept_id is not None and ticket_dept == dept_id else None
     if user.role == "coordinator":
         return FULL
-    if user.role == "requester":
-        return FULL if ticket.created_by == user.id else None
     if user.role == "technician":
         if ticket.assigned_to == user.id:
             return FULL
@@ -77,8 +75,6 @@ def filter_visible(db: Session, user: models.User, query: Query) -> Query:
         ))
     if user.role == "coordinator":
         return query
-    if user.role == "requester":
-        return query.filter(models.Ticket.created_by == user.id)
     if user.role == "technician":
         return query.filter(
             (models.Ticket.assigned_to == user.id) | models.Ticket.id.in_(_past_assignments(db, user.id))
@@ -97,12 +93,6 @@ def check_assignee_filter(db: Session, user: models.User, assigned_to: int | Non
     target = db.get(models.User, assigned_to)
     if target is not None and target.role == "coordinator":
         raise HTTPException(status_code=403, detail=OTHER_COORDINATOR)
-
-
-def visible_user_ids(db: Session, ticket: models.Ticket, user_ids: list[int]) -> set[int]:
-    """De esas personas, las que pueden ver el ticket (para avisos a seguidores)."""
-    users = db.query(models.User).filter(models.User.id.in_(user_ids)).all() if user_ids else []
-    return {u.id for u in users if access(db, u, ticket) is not None}
 
 
 def conversation_label(ticket_id: int) -> str:

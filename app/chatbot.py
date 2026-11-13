@@ -11,14 +11,12 @@ from . import comments as internal_comments, config, models
 from .notifications import STATUS_LABELS
 
 ROLE_LABELS = {
-    "requester": "solicitante",
     "technician": "técnico",
     "coordinator": "coordinador",
     "admin": "administrador",
 }
 
 ROLE_GUIDANCE = {
-    "requester": "Ayuda al usuario a entender el estado de sus tickets y a describir bien su problema.",
     "technician": "Ayuda con resúmenes, prioridades y pasos de diagnóstico de soporte técnico.",
     "coordinator": "Ayuda con resúmenes del equipo, carga de trabajo y tickets atrasados.",
     "admin": "Ayuda con la administración del sistema: cuentas, invitaciones, permisos, correo e IA. No tienes datos de tickets.",
@@ -80,29 +78,6 @@ def _comment_line(comment: models.Comment, internal: bool = False) -> str:
     author = comment.user.name if comment.user else "Desconocido"
     mark = " (interno)" if internal else ""
     return f"    - {author}{mark}: {_redact(comment.content)[:COMMENT_CHARS]}"
-
-
-def _requester_context(db: Session, user: models.User) -> list[str]:
-    tickets = (
-        db.query(models.Ticket)
-        .filter(models.Ticket.created_by == user.id)
-        .order_by(models.Ticket.created_at.desc(), models.Ticket.id.desc())
-        .limit(10)
-        .all()
-    )
-    if not tickets:
-        return ["No tienes tickets."]
-    lines = ["Tus tickets más recientes:"]
-    for t in tickets:
-        lines.append(
-            f"- Ticket #{t.id}: {_redact(t.title)} | estado: {_status(t)} | prioridad: {t.priority.name} "
-            f"| categoría: {t.category.name} | asignado: {_assignee(t)}"
-        )
-        comments = _last_comments(db, t.id, 3, include_internal=False)
-        if comments:
-            lines.append("  Últimos comentarios:")
-            lines.extend(_comment_line(c) for c in comments)
-    return lines
 
 
 def _technician_context(db: Session, user: models.User) -> list[str]:
@@ -200,9 +175,7 @@ def _team_context(db: Session) -> list[str]:
 
 def build_context(db: Session, user: models.User) -> str:
     # Solo nombres de personas: nunca correos, teléfonos, cédulas, contraseñas ni códigos
-    if user.role == "requester":
-        lines = _requester_context(db, user)
-    elif user.role == "technician":
+    if user.role == "technician":
         lines = _technician_context(db, user)
     elif user.role == "coordinator":
         # El administrador no recibe datos de tickets

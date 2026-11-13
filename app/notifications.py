@@ -49,10 +49,9 @@ def notify_followers(
         )
         .all()
     )
-    # Solo quien puede ver el ticket: nunca el administrador ni un técnico al que ya no le corresponde
-    from . import ticket_access
-    visible = ticket_access.visible_user_ids(db, ticket, [u.id for u in followers])
-    followers = [u for u in followers if u.id in visible]
+    # Solo quien reportó el ticket: los contactos ya no inician sesión, así que «puede verlo» es «es suyo».
+    # Nunca el contacto de otro ticket (por ejemplo, de un incidente ligado)
+    followers = [u for u in followers if u.id == ticket.created_by]
     for user in followers:
         with_files = bool(files) and user.id == ticket.created_by
         # Más de 20 MB no sale por correo: va el enlace al ticket en el portal

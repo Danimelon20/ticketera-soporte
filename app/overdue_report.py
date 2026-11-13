@@ -12,7 +12,7 @@ from xml.sax.saxutils import escape
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from . import comments, models, nav, portal
+from . import comments, models, nav, ticket_activity
 from .chatbot import _redact
 from .daily_summary import _local
 from .notifications import STATUS_LABELS
@@ -157,7 +157,7 @@ def build(db: Session, ticket: models.Ticket, viewer: models.User, contact: tupl
         "overdue_seconds": max(0, int((now - due).total_seconds())),
         "first_response_at": first.created_at if first else None,
         "without_response_seconds": max(0, int(((first.created_at if first else now) - ticket.created_at).total_seconds())),
-        "last_activity_at": portal.last_activity(db, [ticket])[ticket.id],
+        "last_activity_at": ticket_activity.last_activity(db, [ticket])[ticket.id],
         "contact_phone": contact[0],
         "contact_id_number": contact[1],
         "timeline": _timeline(db, ticket, first, due),

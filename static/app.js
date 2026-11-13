@@ -18,13 +18,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const topbar = document.querySelector('.topbar');
     const mainContent = document.querySelector('main');
     const loginPanel = document.getElementById('loginPanel');
-    const signupPanel = document.getElementById('signupPanel');
     const activatePanel = document.getElementById('activatePanel');
     const forgotPanel = document.getElementById('forgotPanel');
     const loginForm = document.getElementById('loginForm');
-    const signupForm = document.getElementById('signupForm');
     const activateForm = document.getElementById('activateForm');
-    const confirmEmailNotice = document.getElementById('confirmEmailNotice');
     const sessionNotice = document.getElementById('sessionNotice');
     // Mismo texto que app/security.py: la sesión venció por inactividad o por tiempo total
     const SESSION_EXPIRED = 'Su sesión venció. Inicie sesión de nuevo.';
@@ -228,18 +225,13 @@ document.addEventListener('DOMContentLoaded', () => {
         renderInvitesSection();
         renderPlacementNotice();
         updateRoleTabs();
-        if (profileRequired()) {
-            showProfile();
-        } else {
-            showView('tickets');
-        }
+        showView('tickets');
         refreshDraftsBadge();
         refreshReportsBadge();
-        // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
+        // El personal ve los contadores en el menú lateral
         setupStaffShell();
         // El personal entra por la ruta del enlace (#/módulo/sección) o al inicio de su rol
-        if (isStaffShell() && !profileRequired()) startStaffRoute();
-        setupPortal();
+        if (isStaffShell()) startStaffRoute();
         setupChat();
     }
 
@@ -249,23 +241,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (ticketLink) linkedTicketId = Number(ticketLink[1]);
 
     function openLinkedTicket() {
-        if (!linkedTicketId || !currentUser || profileRequired()) return;
+        if (!linkedTicketId || !currentUser) return;
         const ticketId = linkedTicketId;
         linkedTicketId = null;
-        // El personal pasa a la ruta del ticket (#/módulo/sección/N); el portal queda sin ruta
-        if (!isStaffShell()) history.replaceState(null, '', window.location.pathname + window.location.search);
-        if (isRequesterPortal()) openPortalTicket(ticketId);
-        else if (isStaffShell()) openTicketById(ticketId);
+        // El personal pasa a la ruta del ticket (#/módulo/sección/N)
+        if (isStaffShell()) openTicketById(ticketId);
     }
 
     function showAuthScreen() {
-        document.body.classList.remove('profile-required');
         sessionNotice.hidden = true;
         resetEmailChange();
         forgotMode = false;
         stopDraftsPolling();
         teardownStaffShell();
-        teardownPortal();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
@@ -279,8 +267,8 @@ document.addEventListener('DOMContentLoaded', () => {
         showAuthPanel();
     }
 
-    // ===== Pantallas de inicio: iniciar sesión, crear cuenta de cliente, activar cuenta de personal =====
-    const AUTH_ROUTES = { '#crear-cuenta': 'signup', '#activar-cuenta': 'activate' };
+    // ===== Pantallas de inicio: iniciar sesión y activar cuenta de personal (no hay registro de clientes) =====
+    const AUTH_ROUTES = { '#activar-cuenta': 'activate' };
     // Enlace del correo de restablecimiento: #restablecer?correo=...
     const RESET_ROUTE = '#restablecer';
 
@@ -302,7 +290,6 @@ document.addEventListener('DOMContentLoaded', () => {
         unavailable: 'No se pudo conectar con Microsoft. Intente más tarde.',
         tenant: 'Esa cuenta Microsoft no pertenece a la organización.',
         not_staff: 'Esa cuenta Microsoft no corresponde a nadie del personal. Si es nuevo, active su invitación.',
-        requester: 'Esa es una cuenta de cliente: entre con su correo y contraseña.',
         inactive: 'Su cuenta está desactivada. Comuníquese con el administrador.',
         already_linked: 'Su cuenta ya está enlazada a otra cuenta Microsoft. Comuníquese con el administrador.',
         invitation: 'La invitación no es válida o venció. Pida una nueva al administrador.',
@@ -326,10 +313,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const route = AUTH_ROUTES[window.location.hash];
         const panel = route || (forgotMode ? 'forgot' : 'login');
         loginPanel.hidden = panel !== 'login';
-        signupPanel.hidden = panel !== 'signup';
         activatePanel.hidden = panel !== 'activate';
         forgotPanel.hidden = panel !== 'forgot';
-        confirmEmailNotice.hidden = true;
         if (panel !== 'activate') clearActivationResult();
         if (panel !== 'forgot') clearForgot();
         hideError();
@@ -418,56 +403,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 completeLogin(data);
             } catch (err) {
-                // apiFetch ya mostró el error; si falta confirmar el correo se ofrece el código
-                if (err.message === CONFIRM_EMAIL_MESSAGE) {
-                    pendingSignupEmail = email;
-                    confirmEmailNotice.hidden = false;
-                }
+                // apiFetch ya mostró el error
             }
         });
     }
-
-    const CONFIRM_EMAIL_MESSAGE = 'Confirme su correo para iniciar sesión';
-    let pendingSignupEmail = null;
-
-    document.getElementById('confirmEmailBtn').addEventListener('click', async () => {
-        if (!pendingSignupEmail) return;
-        let result;
-        try {
-            result = await postAuth('/auth/register/resend', { email: pendingSignupEmail });
-        } catch (err) {
-            showError('No se pudo conectar con el servidor');
-            return;
-        }
-        if (!result.ok) {
-            showError(getErrorMessage(result.data));
-            return;
-        }
-        loginForm.reset();
-        showSignupVerify(pendingSignupEmail, result.data.email_hint);
-    });
-
-    signupForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        hideError();
-        const email = document.getElementById('signupEmail').value.trim();
-        const password = document.getElementById('signupPassword').value;
-        let result;
-        try {
-            result = await postAuth('/auth/register', { email, password });
-        } catch (err) {
-            showError('No se pudo conectar con el servidor');
-            return;
-        }
-        if (!result.ok) {
-            showError(result.status === 422 && Array.isArray(result.data.detail)
-                ? 'La contraseña debe tener al menos 8 caracteres'
-                : getErrorMessage(result.data));
-            return;
-        }
-        signupForm.reset();
-        showSignupVerify(email, result.data.email_hint);
-    });
 
     // ----- Activar cuenta de personal -----
     const activateResult = document.getElementById('activateResult');
@@ -589,9 +528,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const forgotCodeInput = document.getElementById('forgotCode');
     const forgotCodeEmail = document.getElementById('forgotCodeEmail');
     const forgotNotice = document.getElementById('forgotNotice');
-    const forgotPasswordFields = document.getElementById('forgotPasswordFields');
-    const forgotNewPassword = document.getElementById('forgotNewPassword');
-    const forgotConfirmPassword = document.getElementById('forgotConfirmPassword');
     const forgotResendBtn = document.getElementById('forgotResend');
     const forgotResult = document.getElementById('forgotResult');
     const forgotPasswordValue = document.getElementById('forgotPassword');
@@ -623,10 +559,6 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotMode = true;
         clearForgot();
         forgotTitle.textContent = 'Olvidé mi contraseña';
-        // El cliente elige su contraseña; al personal se le genera una (los campos son opcionales)
-        forgotPasswordFields.hidden = false;
-        forgotNewPassword.required = false;
-        forgotConfirmPassword.required = false;
         clearHash();
         showAuthPanel();
         forgotEmailInput.focus();
@@ -717,18 +649,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const body = { email: forgotEmail, code };
-        // Solo si escribió una contraseña nueva (cuentas de cliente); el servidor la exige al cliente
-        if (forgotNewPassword.value || forgotConfirmPassword.value) {
-            if (forgotNewPassword.value.length < 8) {
-                showError('La contraseña debe tener al menos 8 caracteres');
-                return;
-            }
-            if (forgotNewPassword.value !== forgotConfirmPassword.value) {
-                showError('Las contraseñas no coinciden');
-                return;
-            }
-            body.new_password = forgotNewPassword.value;
-        }
         let result;
         try {
             result = await postAuth('/auth/password-reset/confirm', body);
@@ -740,12 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(getErrorMessage(result.data));
             return;
         }
-        // Cliente: eligió la suya. Personal: el servidor genera una y la muestra una sola vez
-        if (!result.data.password) {
-            backFromForgot();
-            showSuccess('Contraseña restablecida. Inicie sesión con la nueva.');
-            return;
-        }
+        // El servidor genera la contraseña y la muestra una sola vez
         forgotGenerated = result.data.password;
         forgotPasswordValue.textContent = forgotGenerated;
         forgotCodeForm.hidden = true;
@@ -816,11 +731,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const resendCodeBtn = document.getElementById('resendCode');
     const resendNotice = document.getElementById('resendNotice');
     const backToLoginBtn = document.getElementById('backToLogin');
-    const signupHaveAccountBtn = document.getElementById('signupHaveAccount');
 
     const verifyTitle = document.getElementById('verifyTitle');
-    // Inicio de sesión del administrador: 10 minutos. Confirmar una cuenta nueva: 15 minutos.
-    const CODE_SECONDS = { login: 10 * 60, signup: 15 * 60 };
+    // Código del administrador al iniciar sesión: 10 minutos
+    const CODE_SECONDS = { login: 10 * 60 };
     const RESEND_WAIT_SECONDS = 60;
 
     let challengeId = null;
@@ -844,9 +758,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
             if (left === 0) {
                 clearInterval(expiryTimer);
-                verifyTimer.textContent = verifyMode === 'signup'
-                    ? 'El código venció. Pida uno nuevo.'
-                    : 'El código venció. Inicie sesión de nuevo.';
+                verifyTimer.textContent = 'El código venció. Inicie sesión de nuevo.';
                 verifySubmit.disabled = true;
                 return;
             }
@@ -895,24 +807,10 @@ document.addEventListener('DOMContentLoaded', () => {
         openVerifyScreen(data.challenge_id, data.email_hint);
     }
 
-    // Confirmar el correo de una cuenta de cliente nueva
-    function showSignupVerify(email, emailHint) {
-        verifyMode = 'signup';
-        verifyEmail = email;
-        verifyTitle.textContent = 'Confirme su correo';
-        openVerifyScreen(null, emailHint);
-    }
-
     function openVerifyScreen(newChallengeId, emailHint) {
         resetChat();
         challengeId = newChallengeId;
-        // Registro: no se sabe si el correo ya tenía cuenta (la API responde igual)
-        verifyHint.textContent = verifyMode === 'signup'
-            ? 'Si ese correo está disponible, le enviamos un código de confirmación. '
-                + 'Si ya tiene una cuenta con ese correo, le enviamos un aviso para que inicie sesión. '
-                + 'Revise también la carpeta de spam.'
-            : 'Enviamos un código de 6 dígitos a ' + emailHint;
-        signupHaveAccountBtn.hidden = verifyMode !== 'signup';
+        verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + emailHint;
         clearTimeout(verifyRedirectTimer);
         verifyBusy = false;
         clearDigits();
@@ -972,9 +870,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let result;
         try {
-            result = verifyMode === 'signup'
-                ? await postAuth('/auth/register/verify', { email: verifyEmail, code })
-                : await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
+            result = await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
         } catch (err) {
             verifyBusy = false;
             verifySubmit.disabled = false;
@@ -1073,9 +969,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let result;
         try {
-            result = verifyMode === 'signup'
-                ? await postAuth('/auth/register/resend', { email: verifyEmail })
-                : await postAuth('/auth/resend-code', { challenge_id: challengeId });
+            result = await postAuth('/auth/resend-code', { challenge_id: challengeId });
         } catch (err) {
             resendCodeBtn.disabled = false;
             showVerifyError('No se pudo conectar con el servidor');
@@ -1089,9 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
             clearDigits();
             startExpiryCountdown();
             startResendCountdown();
-            resendNotice.textContent = verifyMode === 'signup'
-                ? 'Si ese correo está disponible, le enviamos un código nuevo. Revise también la carpeta de spam.'
-                : 'Le enviamos un código nuevo';
+            resendNotice.textContent = 'Le enviamos un código nuevo';
             digitInputs[0].focus();
             return;
         }
@@ -1107,11 +999,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     backToLoginBtn.addEventListener('click', backToLogin);
-
-    signupHaveAccountBtn.addEventListener('click', () => {
-        backToLogin();
-        openLogin();
-    });
 
     // ===== Asistente =====
     const chatToggle = document.getElementById('chatToggle');
@@ -1140,10 +1027,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.innerWidth >= 768 && !nav.hidden && nav.getClientRects().length) left = nav.getBoundingClientRect().right;
         const bar = document.querySelector('.topbar');
         if (bar && bar.getClientRects().length) top = Math.max(0, bar.getBoundingClientRect().bottom);
-        ['portalFooter'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el && !el.hidden && el.getClientRects().length) bottom = Math.min(bottom, el.getBoundingClientRect().top);
-        });
         const size = chatToggle.offsetHeight || 56;
         return {
             top, bottom, left, size,
@@ -1526,11 +1409,6 @@ document.addEventListener('DOMContentLoaded', () => {
             pollNavCounts(false);
             return;
         }
-        if (isRequesterPortal()) {
-            await loadPortalList();
-            return;
-        }
-        
         const params = new URLSearchParams();
         if (filters.status) params.append('status', filters.status);
         if (filters.category_id) params.append('category_id', filters.category_id);
@@ -1695,16 +1573,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderFollowButton(btn, hint, following) {
-        btn.textContent = following ? 'Siguiendo' : 'Dar seguimiento';
-        btn.setAttribute('aria-pressed', following ? 'true' : 'false');
-        btn.classList.toggle('following', following);
-        hint.textContent = following
-            ? 'Te avisaremos por correo de cambios de estado, asignación y comentarios nuevos.'
-            : '';
-        hint.hidden = !following;
-    }
-
     function showTicketDetail(ticket) {
         currentTicket = ticket;
         // Nombres de quienes aparecen en el ticket (el solicitante no recibe la lista de cuentas)
@@ -1714,10 +1582,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (isStaffShell()) {
             renderStaffDetail(ticket);
-            return;
-        }
-        if (isRequesterPortal()) {
-            renderPortalDetail(ticket);
             return;
         }
         detailContent.replaceChildren();
@@ -1763,18 +1627,6 @@ document.addEventListener('DOMContentLoaded', () => {
         titleRow.className = 'detail-title-row';
         titleRow.appendChild(h1);
 
-        const followBox = document.createElement('div');
-        followBox.className = 'follow-box';
-        const followBtn = document.createElement('button');
-        followBtn.type = 'button';
-        followBtn.className = 'follow-btn';
-        const followHint = document.createElement('p');
-        followHint.className = 'follow-hint';
-        followBox.appendChild(followBtn);
-        followBox.appendChild(followHint);
-        // "Dar seguimiento" por correo: solo el solicitante (el personal recibe 403 en el servidor)
-        if (currentUser && currentUser.role === 'requester') titleRow.appendChild(followBox);
-        renderFollowButton(followBtn, followHint, Boolean(ticket.following));
         detailContent.appendChild(titleRow);
 
         const descP = document.createElement('p');
@@ -1839,7 +1691,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         detailContent.appendChild(dl);
 
-        if (currentUser.role !== 'requester' && ticket.ai_analysis) {
+        if (ticket.ai_analysis) {
             detailContent.appendChild(renderAiCard(ticket));
         }
 
@@ -1852,20 +1704,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const state = ticket.status;
         const isClosed = state === 'closed';
 
-        if (currentUser.role === 'requester') {
-            if (!isClosed) {
-                const msg = document.createElement('p');
-                msg.textContent = 'Solo el equipo de soporte puede cambiar el estado o la asignación';
-                msg.className = 'requester-msg';
-                msg.style.color = 'var(--muted)';
-                actionsSection.appendChild(msg);
-            } else {
-                const closedMsg = document.createElement('p');
-                closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
-                closedMsg.className = 'closed-msg';
-                actionsSection.appendChild(closedMsg);
-            }
-        } else if (currentUser.role === 'technician') {
+        if (currentUser.role === 'technician') {
             const actionDiv = document.createElement('div');
             actionDiv.style.display = 'flex';
             actionDiv.style.gap = '10px';
@@ -2717,8 +2556,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showSuccess(`Ticket #${created.id} creado`);
             } else {
                 showView('tickets');
-                if (isRequesterPortal()) loadPortalList();
-                showSuccess('Solicitud enviada');
+                showSuccess(`Ticket #${created.id} creado`);
             }
         });
     }
@@ -2832,8 +2670,6 @@ document.addEventListener('DOMContentLoaded', () => {
         navDrafts.hidden = !canSeeDrafts();
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
-        // Portal del solicitante: el asistente también como pestaña
-        document.getElementById('navAssistant').hidden = role !== 'requester';
     }
 
     function showView(name) {
@@ -2865,7 +2701,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         setActiveTab(tabs[name]);
         if (name === 'tickets') {
-            setDocumentTitle(currentUser && currentUser.role === 'requester' ? 'Mis solicitudes' : 'Tickets');
+            setDocumentTitle('Tickets');
         } else {
             setDocumentTitle(SCREEN_TITLES[name]);
         }
@@ -2898,64 +2734,34 @@ document.addEventListener('DOMContentLoaded', () => {
         showView('reports');
     });
 
-    // ----- Perfil del solicitante -----
-    const profileForm = document.getElementById('profileForm');
-    const profileName = document.getElementById('profileName');
-    const profileIdNumber = document.getElementById('profileIdNumber');
-    const profilePhone = document.getElementById('profilePhone');
-    const profileCancel = document.getElementById('profileCancel');
-
-    function profileRequired() {
-        return Boolean(currentUser && currentUser.role === 'requester' && !currentUser.profile_complete);
-    }
-
+    // ----- Mi cuenta (solo el personal: los contactos no inician sesión) -----
     function showProfile() {
-        const required = profileRequired();
-        const isRequester = currentUser.role === 'requester';
-        // Mientras falte el perfil no se puede usar el resto de la página
-        document.body.classList.toggle('profile-required', required);
-        document.getElementById('profileTitle').textContent = required ? 'Complete su perfil' : 'Mi cuenta';
-        document.getElementById('profileIntro').hidden = !required;
-        // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario.
-        // Qué secciones existen para este rol; applyProfileTab muestra solo las de la pestaña elegida.
+        // Qué secciones existen para este rol; applyProfileTab muestra solo las de la pestaña elegida
         const technician = hasAvailability(currentUser);
         const allowed = {
-            accountPersonal: isRequester,
-            accountStaffProfile: !isRequester,
-            accountPhone: !isRequester && !required,
+            accountStaffProfile: true,
+            accountPhone: true,
             accountAvailability: technician,
             accountSchedule: technician,
-            accountEmail: !required,
+            accountEmail: true,
             // Con Microsoft, técnicos y coordinadores no tienen contraseña (el servidor responde 403)
-            accountPassword: !required && !staffUsesMicrosoft(currentUser),
+            accountPassword: !staffUsesMicrosoft(currentUser),
         };
         Object.entries(allowed).forEach(([id, ok]) => { document.getElementById(id).dataset.allowed = ok ? '1' : ''; });
         // Disponibilidad y horario propios: técnicos y coordinadores (el servidor no los da a otros roles)
         document.getElementById('accountTabTurno').hidden = !technician;
         document.getElementById('accountTabSeguridad').hidden = staffUsesMicrosoft(currentUser);
-        document.getElementById('accountTabs').hidden = required;
-        document.getElementById('accountHome').hidden = required;
         document.getElementById('accountAvatar').textContent = getInitials(currentUser.name);
         document.getElementById('accountWhoName').textContent = currentUser.name || currentUser.email;
         document.getElementById('accountWhoRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
         document.getElementById('accountStaffName').textContent = currentUser.name || '—';
         document.getElementById('accountStaffRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
-        if (required || (profileTab === 'turno' && !technician)
+        if ((profileTab === 'turno' && !technician)
             || (profileTab === 'seguridad' && staffUsesMicrosoft(currentUser))) profileTab = 'perfil';
         applyProfileTab();
         fillAccountSections();
-        profileCancel.hidden = required;
-        profileName.value = currentUser.name || '';
-        profileIdNumber.value = currentUser.id_number || '';
-        profilePhone.value = currentUser.phone || '';
-        const locked = Boolean(currentUser.identity_locked);
-        profileName.readOnly = locked;
-        profileIdNumber.readOnly = locked;
-        document.getElementById('profileLockedNote').hidden = !locked;
         showView('profile');
-        if (required) setDocumentTitle('Complete su perfil');
-        else setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
-        if (isRequester) (locked ? profilePhone : profileName).focus();
+        setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
     }
 
     // ----- Pestañas de Mi cuenta: Perfil, Correo, Seguridad y (técnico) Disponibilidad y horario -----
@@ -2970,7 +2776,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tab.dataset.accountTab === profileTab) tab.setAttribute('aria-current', 'page');
             else tab.removeAttribute('aria-current');
         });
-        if (!profileRequired()) setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
+        setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
     }
 
     document.getElementById('accountTabs').addEventListener('click', (e) => {
@@ -2989,40 +2795,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('accountLogout').addEventListener('click', () => switchAccountBtn.click());
-
-    profileForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        hideError();
-        const name = profileName.value.trim();
-        const idNumber = profileIdNumber.value.trim();
-        const phone = profilePhone.value.trim();
-        if (name.split(/\s+/).length < 2 && !currentUser.identity_locked) {
-            showError('Escriba su nombre completo (nombre y apellidos)');
-            return;
-        }
-        const contactError = validatePhone(phone) || validateIdNumber(idNumber);
-        if (contactError) {
-            showError(contactError);
-            return;
-        }
-        try {
-            currentUser = await apiFetch('/profile', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, id_number: idNumber, phone })
-            });
-        } catch (err) {
-            return; // apiFetch ya mostró el error
-        }
-        document.body.classList.remove('profile-required');
-        // Nombre e iniciales en la barra
-        document.querySelector('.topbar-user-name').textContent = currentUser.name;
-        document.querySelector('.topbar-avatar').textContent = getInitials(currentUser.name);
-        showView('tickets');
-        showSuccess('Perfil guardado');
-    });
-
-    profileCancel.addEventListener('click', () => showView('tickets'));
 
     // ----- Mi cuenta: teléfono (personal), correo y contraseña (todos) -----
     const accountPhoneSection = document.getElementById('accountPhone');
@@ -3051,7 +2823,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mismo mínimo que app/security.py
     function passwordMinimum() {
-        return currentUser && currentUser.role === 'requester' ? 8 : 12;
+        return 12;
     }
 
     function fillAccountSections() {
@@ -6065,16 +5837,13 @@ document.addEventListener('DOMContentLoaded', () => {
             resetRequesterField();
             const canChooseRequester = currentUser && OPERATION_ROLES.includes(currentUser.role);
             requesterGroup.hidden = !canChooseRequester;
-            const portal = isRequesterPortal();
-            document.getElementById('newTicketTitle').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
-            document.getElementById('newTicketCrumb').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
-            document.getElementById('newTicketCrumbBase').textContent = portal ? 'Mis solicitudes' : 'Tickets';
-            document.getElementById('newTicketBack').textContent = portal ? '← Volver a mis solicitudes' : '← Volver a Tickets';
-            document.getElementById('newTicketSubmit').textContent = portal ? 'Enviar solicitud' : 'Crear ticket';
-            document.getElementById('newTicketIntro').textContent = portal
-                ? 'Cuéntenos qué pasa. Le avisaremos por correo cada vez que haya novedades.'
-                : 'Para registrar un caso que llegó por teléfono o en persona.';
-            setDocumentTitle(portal ? 'Nueva solicitud' : 'Nuevo ticket');
+            document.getElementById('newTicketTitle').textContent = 'Nuevo ticket';
+            document.getElementById('newTicketCrumb').textContent = 'Nuevo ticket';
+            document.getElementById('newTicketCrumbBase').textContent = 'Tickets';
+            document.getElementById('newTicketBack').textContent = '← Volver a Tickets';
+            document.getElementById('newTicketSubmit').textContent = 'Crear ticket';
+            document.getElementById('newTicketIntro').textContent = 'Para registrar un caso que llegó por teléfono o en persona.';
+            setDocumentTitle('Nuevo ticket');
             if (currentUser) {
                 document.getElementById('contactName').value = currentUser.name;
                 document.getElementById('contactEmail').value = currentUser.email;
@@ -6196,28 +5965,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (evContainer) {
                     renderEventsList(currentTicket, evContainer);
                 }
-            }
-            return;
-        }
-
-        const followBtn = e.target.closest('.follow-btn');
-        if (followBtn) {
-            const ticketId = selectedTicketId;
-            const following = followBtn.getAttribute('aria-pressed') === 'true';
-            followBtn.disabled = true;
-            try {
-                await apiFetch(`/tickets/${ticketId}/follow`, { method: following ? 'DELETE' : 'POST' });
-                // Si mientras tanto se abrió otro ticket, no tocar su botón
-                if (ticketId === selectedTicketId) {
-                    const hint = followBtn.parentElement.querySelector('.follow-hint');
-                    renderFollowButton(followBtn, hint, !following);
-                    if (currentTicket) currentTicket.following = !following;
-                }
-                showSuccess(following ? 'Ya no das seguimiento a este ticket' : 'Ahora das seguimiento a este ticket');
-            } catch (err) {
-                showError(err.message || 'No se pudo actualizar el seguimiento');
-            } finally {
-                followBtn.disabled = false;
             }
             return;
         }
@@ -6812,7 +6559,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function applyRoute() {
-        if (!currentUser || !isStaffShell() || profileRequired()) return;
+        if (!currentUser || !isStaffShell()) return;
         // Enlace de un correo (#ticket/N) con la sesión abierta: pasa a la ruta del ticket
         const linked = window.location.hash.match(/^#ticket\/(\d+)$/);
         if (linked) history.replaceState(null, '', `#/${ticketRoute(Number(linked[1]))}`);
@@ -10306,215 +10053,6 @@ document.addEventListener('DOMContentLoaded', () => {
             await refreshSelectedAccount();
         }
     });
-
-    // ===== Portal del solicitante: Centro de Soporte =====
-    const portalList = document.getElementById('portalList');
-    const portalEmpty = document.getElementById('portalEmpty');
-    const portalTotal = document.getElementById('portalTotal');
-    const portalFooter = document.getElementById('portalFooter');
-    const portalLogo = document.getElementById('portalLogo');
-    const navAssistant = document.getElementById('navAssistant');
-    const brandName = document.getElementById('brandName');
-    // Pasos derivados de los estados reales (app/portal.py)
-    const PORTAL_STEPS = ['Recibida', 'Asignada', 'En atención', 'Resuelta'];
-
-    function isRequesterPortal() {
-        return Boolean(currentUser && currentUser.role === 'requester');
-    }
-
-    async function loadPortalList() {
-        let tickets;
-        if (!portalList.children.length) showSkeleton(portalList, { rows: 3 });
-        try {
-            tickets = await apiFetch('/tickets', { silent: true });
-        } catch (err) {
-            portalList.removeAttribute('aria-busy');
-            portalList.replaceChildren(errorState(err, loadPortalList));
-            return;
-        }
-        portalList.removeAttribute('aria-busy');
-        tickets.sort((a, b) => parseServerDate(b.last_activity_at) - parseServerDate(a.last_activity_at));
-        portalList.replaceChildren();
-        portalEmpty.hidden = tickets.length > 0;
-        portalEmpty.replaceChildren(emptyState({
-            title: 'Todavía no tiene solicitudes',
-            text: 'Cuéntenos qué pasa y el equipo de soporte le responderá por correo.',
-            action: 'Nueva solicitud',
-            onAction: () => openNewTicket.click(),
-        }));
-        portalTotal.textContent = `${tickets.length} ${tickets.length === 1 ? 'solicitud' : 'solicitudes'}`;
-        tickets.forEach(ticket => {
-            const li = makeEl('li');
-            const button = makeEl('button', 'portal-item');
-            button.type = 'button';
-            button.dataset.id = String(ticket.id);
-            if (ticket.id === selectedTicketId) button.classList.add('selected');
-            button.appendChild(makeEl('span', 'portal-item-title', ticket.title));
-            const meta = makeEl('span', 'portal-item-meta');
-            meta.appendChild(makeEl('span', 'ui-num', `#${ticket.id}`));
-            meta.appendChild(makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
-            const updated = makeEl('span', '', 'Actualizada ');
-            updated.appendChild(timeTag(ticket.last_activity_at));
-            meta.appendChild(updated);
-            button.appendChild(meta);
-            // Avance en una línea: "Paso 2 de 4 · Asignada"
-            const step = ticket.progress_step || 1;
-            const progress = makeEl('span', 'portal-item-progress');
-            const bar = makeEl('span', 'ui-bar');
-            bar.setAttribute('aria-hidden', 'true');
-            const fill = makeEl('span');
-            fill.style.width = `${(step / PORTAL_STEPS.length) * 100}%`;
-            bar.appendChild(fill);
-            progress.append(bar, makeEl('span', 'portal-item-step', `Paso ${step} de ${PORTAL_STEPS.length} · ${PORTAL_STEPS[step - 1]}`));
-            button.appendChild(progress);
-            li.appendChild(button);
-            portalList.appendChild(li);
-        });
-    }
-
-    async function openPortalTicket(ticketId) {
-        portalList.querySelectorAll('.portal-item').forEach(b => b.classList.toggle('selected', Number(b.dataset.id) === ticketId));
-        selectedTicketId = ticketId;
-        document.querySelector('.split').classList.add('show-detail');
-        try {
-            const ticket = await apiFetch(`/tickets/${ticketId}`);
-            showTicketDetail(ticket);
-        } catch (err) {
-            selectedTicketId = null;
-            document.querySelector('.split').classList.remove('show-detail');
-            renderDetailPlaceholder();
-        }
-    }
-
-    portalList.addEventListener('click', (e) => {
-        const item = e.target.closest('.portal-item');
-        if (item) openPortalTicket(Number(item.dataset.id));
-    });
-
-    function renderPortalSteps(step) {
-        const list = makeEl('ol', 'portal-steps');
-        list.setAttribute('aria-label', 'Avance de la solicitud');
-        PORTAL_STEPS.forEach((label, index) => {
-            const number = index + 1;
-            const state = number < step ? 'done' : number === step ? 'current' : 'todo';
-            const li = makeEl('li', `portal-step is-${state}`);
-            if (state === 'current') li.setAttribute('aria-current', 'step');
-            li.appendChild(makeEl('span', 'portal-step-dot', String(number)));
-            li.appendChild(makeEl('span', 'portal-step-label', label));
-            list.appendChild(li);
-        });
-        return list;
-    }
-
-    function renderPortalDetail(ticket) {
-        detailContent.replaceChildren();
-        detailPanel.scrollTop = 0;
-        const created = makeEl('p', 'sd-meta portal-detail-meta', `SOLICITUD #${ticket.id} · creada `);
-        created.appendChild(timeTag(ticket.created_at));
-        detailContent.appendChild(created);
-        detailContent.appendChild(makeEl('h1', 'portal-detail-title', ticket.title));
-        if (ticket.merged_into) {
-            const notice = makeEl('div', 'ui-notice is-ok portal-merged');
-            notice.appendChild(makeEl('span', '', `Su mensaje se agregó a su solicitud #${ticket.merged_into}, que ya estamos atendiendo.`));
-            const open = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm portal-merged-open', `Ver #${ticket.merged_into}`);
-            open.type = 'button';
-            open.dataset.ticketId = String(ticket.merged_into);
-            notice.appendChild(open);
-            detailContent.appendChild(notice);
-        }
-        detailContent.appendChild(renderPortalSteps(ticket.progress_step || 1));
-        if (ticket.assigned_name) {
-            detailContent.appendChild(makeEl('p', 'sd-muted portal-owner', `Le atiende: ${ticket.assigned_name}`));
-        }
-        const original = makeEl('div', 'portal-original');
-        original.appendChild(makeEl('p', 'portal-message-meta', 'Su solicitud'));
-        original.appendChild(makeEl('p', 'portal-message-text', ticket.description));
-        detailContent.appendChild(original);
-
-        detailContent.appendChild(makeEl('h2', 'portal-subtitle', 'Conversación'));
-        // El servidor nunca envía notas internas al solicitante; el filtro es solo por si acaso
-        const messages = (ticket.comments || []).filter(c => !c.internal);
-        if (messages.length === 0) {
-            detailContent.appendChild(emptyState({ title: 'Todavía no hay mensajes', text: 'Cuando el equipo le responda, lo verá aquí y le llegará un correo.' }));
-        } else {
-            const list = makeEl('ol', 'portal-messages');
-            messages.forEach(comment => {
-                const own = comment.user_id === currentUser.id;
-                const li = makeEl('li', `portal-message${own ? ' is-own' : ''}`);
-                const author = own ? 'Usted' : (userMap[comment.user_id] || 'Equipo de soporte');
-                const meta = makeEl('p', 'portal-message-meta', `${author} · `);
-                meta.appendChild(timeTag(comment.created_at));
-                li.appendChild(meta);
-                if (comment.content) li.appendChild(makeEl('p', 'portal-message-text', comment.content));
-                const files = attachmentList(comment.attachments);
-                if (files) li.appendChild(files);
-                list.appendChild(li);
-            });
-            detailContent.appendChild(list);
-        }
-
-        if (ticket.status === 'closed') {
-            detailContent.appendChild(makeEl('p', 'sd-muted', 'Esta solicitud está cerrada y ya no admite respuestas.'));
-            return;
-        }
-        const composer = makeEl('div', 'ui-card sd-composer portal-composer');
-        const label = makeEl('label', 'sr-only', 'Su respuesta');
-        label.htmlFor = 'portalReply';
-        const textarea = makeEl('textarea', 'sd-reply');
-        textarea.id = 'portalReply';
-        textarea.rows = 3;
-        textarea.maxLength = 5000;
-        textarea.placeholder = 'Escriba su respuesta';
-        const actions = makeEl('div', 'sd-composer-actions');
-        const send = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm portal-send', 'Enviar respuesta');
-        send.type = 'button';
-        actions.appendChild(send);
-        composer.append(label, textarea, attachmentPicker(), actions);
-        detailContent.appendChild(composer);
-    }
-
-    detailPanel.addEventListener('click', async (e) => {
-        const merged = e.target.closest('.portal-merged-open');
-        if (merged && isRequesterPortal()) {
-            openPortalTicket(Number(merged.dataset.ticketId));
-            return;
-        }
-        const send = e.target.closest('.portal-send');
-        if (!send || !selectedTicketId || !isRequesterPortal()) return;
-        const textarea = document.getElementById('portalReply');
-        const content = textarea.value.trim();
-        if (!content && !pendingFiles.length) {
-            showError('Escriba su respuesta antes de enviarla');
-            return;
-        }
-        send.disabled = true;
-        if (!(await sendComment(content, false))) {
-            send.disabled = false;
-            return;
-        }
-        await reloadSelectedTicketAndList();
-        showSuccess('Respuesta enviada');
-    });
-
-    navAssistant.addEventListener('click', () => {
-        if (chatPanel.hidden) openChat();
-    });
-    portalLogo.addEventListener('error', () => { portalLogo.hidden = true; });
-
-    function setupPortal() {
-        const portal = isRequesterPortal();
-        document.body.classList.toggle('requester-portal', portal);
-        portalFooter.hidden = !portal;
-        brandName.textContent = portal ? 'Centro de Soporte' : 'Mesa de Servicio';
-        navTickets.textContent = portal ? 'Mis solicitudes' : 'Tickets';
-        openNewTicket.textContent = portal ? '+ Nueva solicitud' : '+ Nuevo ticket';
-    }
-
-    function teardownPortal() {
-        document.body.classList.remove('requester-portal');
-        portalFooter.hidden = true;
-        brandName.textContent = 'Mesa de Servicio';
-    }
 
     // ===== Una sola sección por opción del menú =====
     const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };

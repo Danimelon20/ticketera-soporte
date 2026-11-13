@@ -586,44 +586,6 @@ body.staff-shell.ticket-open .queue-aside { display: none; }
 
 .detail-title-row h1 { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
 
-.follow-box { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 240px; }
-
-.follow-btn {
-  min-height: 44px;
-  padding: 6px 16px;
-  border: 1px solid var(--field-line);
-  border-radius: 8px;
-  background: #FFFFFF;
-  color: var(--ink);
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.follow-btn:hover { background: var(--bg); }
-
-.follow-btn.following {
-  background: #EEF2FC;
-  border-color: #2E55C9;
-  color: #1F3F99;
-  font-weight: 600;
-}
-
-.follow-btn:disabled { opacity: 0.6; cursor: default; }
-
-.follow-btn:focus-visible { outline: 2px solid #2E55C9; outline-offset: 2px; }
-
-.follow-hint { margin: 0; font-size: 12px; color: var(--muted); text-align: right; }
-
-.follow-hint[hidden] { display: none; }
-
-@media (max-width: 860px) {
-    .follow-box { align-items: flex-start; max-width: none; }
-
-    .follow-hint { text-align: left; }
-}
-
 /* Análisis de la IA en el detalle del ticket */
 .ai-card { background: var(--card-bg); border: var(--card-border-w) solid var(--card-line); box-shadow: var(--card-shadow); border-radius: 10px; padding: 16px; margin: 0 0 28px 0; display: grid; gap: 10px; }
 
@@ -788,10 +750,6 @@ body.staff-shell.ticket-open #detailContent {
 .td-title-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .td-title { flex: 1 1 320px; min-width: 0; margin: 0; font-size: 21px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
-
-.td-head .follow-box { flex-direction: row; align-items: center; max-width: none; }
-
-.td-head .follow-btn { min-height: 34px; font-size: var(--fs-sm); border-radius: var(--r-md); }
 
 .td-status-label { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
 

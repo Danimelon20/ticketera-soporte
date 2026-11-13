@@ -89,7 +89,6 @@ MATRIX = [
      _codes(403, 403, 200, 403, 401)),
     ("sugerencia", "get", lambda w: f"/api/tickets/{w['ticket_id']}/suggestion", None, _codes(403, 403, 200, 403, 401)),
     # "Dar seguimiento" por correo: solo el solicitante
-    ("seguir", "post", lambda w: f"/api/tickets/{w['ticket_id']}/follow", None, _codes(403, 403, 403, 403, 401)),
     ("cancelar", "post", lambda w: "/api/tickets/cancel",
      lambda w: {"ticket_ids": [w["ticket_id"]], "reason": "duplicate", "notify_requester": False},
      _codes(403, 403, 200, 403, 401)),

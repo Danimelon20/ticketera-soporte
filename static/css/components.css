@@ -370,11 +370,11 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 :where(body.staff-shell) input[type="checkbox"]:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Botones secundarios: mismo borde que los campos */
-:where(body.staff-shell) :is(.ui-btn, .btn-submit, .btn-primary, .btn-action, .btn-assign, .btn-secondary, .aa-quick-btn, .follow-btn) { border-width: var(--control-border-w); }
+:where(body.staff-shell) :is(.ui-btn, .btn-submit, .btn-primary, .btn-action, .btn-assign, .btn-secondary, .aa-quick-btn) { border-width: var(--control-border-w); }
 
-:where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn, .follow-btn):hover:not(:disabled) { border-color: var(--app-control-line-hover); }
+:where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn):hover:not(:disabled) { border-color: var(--app-control-line-hover); }
 
-:where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn, .follow-btn):focus-visible { border-color: var(--app-control-focus); box-shadow: var(--app-control-ring); outline: none; }
+:where(body.staff-shell) :is(.ui-btn-secondary, .btn-secondary, .aa-quick-btn):focus-visible { border-color: var(--app-control-focus); box-shadow: var(--app-control-ring); outline: none; }
 
 /* ----- Pestañas ----- */
 

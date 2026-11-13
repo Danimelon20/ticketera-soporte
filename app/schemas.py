@@ -47,11 +47,6 @@ class UserCreate(BaseModel):
     role: Literal["requester", "technician", "coordinator"]
 
 
-class RegisterRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=150)
-    password: str = Field(min_length=8)
-
-
 class SignupStarted(BaseModel):
     email_hint: str
 
@@ -185,30 +180,6 @@ class MeRead(BaseModel):
     routing_enforced: bool = False
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class ProfileUpdate(BaseModel):
-    name: str = Field(max_length=100)
-    phone: str
-    id_number: str
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v):
-        v = " ".join(v.split())
-        if not v:
-            raise ValueError("Escriba su nombre completo")
-        return v
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v):
-        return normalize_phone(v)
-
-    @field_validator("id_number")
-    @classmethod
-    def validate_id_number(cls, v):
-        return normalize_id_number(v)
 
 
 class PasswordChange(BaseModel):
@@ -374,8 +345,6 @@ class TicketRead(BaseModel):
     # Nombre de quien lo atiende: el solicitante no tiene acceso a la lista de cuentas
     assigned_name: Optional[str] = None
     source: str = "web"
-    # Avance para el portal: 1 Recibida, 2 Asignada, 3 En atención, 4 Resuelta
-    progress_step: int = 1
     # Último cambio o comentario público
     last_activity_at: Optional[datetime] = None
     # Solo para el personal y si está cancelado
@@ -489,7 +458,6 @@ class TicketDetail(TicketRead):
     comments: list[CommentRead] = []
     contact_phone: Optional[str] = None
     contact_id_number: Optional[str] = None
-    following: bool = False
     ai_analysis: Optional[AIAnalysisRead] = None
     people: list[PersonRead] = []
     requester_flags: Optional[RequesterFlags] = None

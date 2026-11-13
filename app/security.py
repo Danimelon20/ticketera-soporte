@@ -45,7 +45,7 @@ def hash_token(token: str) -> str:
 
 
 def password_min(role: str) -> int:
-    return 8 if role == "requester" else 12
+    return 12
 
 
 def generate_invite_code(role: str) -> str:

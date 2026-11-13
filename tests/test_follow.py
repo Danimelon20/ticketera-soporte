@@ -16,20 +16,6 @@ def sent(monkeypatch):
     return calls
 
 
-def _follow(client, ticket_id, user):
-    return client.post(f"/api/tickets/{ticket_id}/follow", headers=user["headers"])
-
-
-def _unfollow(client, ticket_id, user):
-    return client.delete(f"/api/tickets/{ticket_id}/follow", headers=user["headers"])
-
-
-def _following(client, ticket_id, user):
-    response = client.get(f"/api/tickets/{ticket_id}", headers=user["headers"])
-    assert response.status_code == 200
-    return response.json()["following"]
-
-
 def _patch(client, ticket_id, user, **data):
     response = client.patch(f"/api/tickets/{ticket_id}", json=data, headers=user["headers"])
     assert response.status_code == 200, response.text
@@ -65,29 +51,6 @@ def _old_follower(ticket_id, user_id):
         db.commit()
     finally:
         db.close()
-
-
-@pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
-def test_staff_cannot_follow(client, make_user, make_ticket, sent, role):
-    requester = make_user("requester")
-    coordinator = make_user("coordinator")
-    staff = make_user(role)
-    ticket = make_ticket(requester)
-    if role == "technician":
-        _patch(client, ticket["id"], coordinator, assigned_to=staff["id"])
-    response = _follow(client, ticket["id"], staff)
-    assert response.status_code == 403
-    assert "solicitante" in response.json()["detail"]
-    assert _followers_count(ticket["id"], staff["id"]) == 0
-
-
-def test_staff_can_stop_old_follow(client, make_user, make_ticket, sent):
-    requester = make_user("requester")
-    coordinator = make_user("coordinator")
-    ticket = make_ticket(requester)
-    _old_follower(ticket["id"], coordinator["id"])
-    assert _unfollow(client, ticket["id"], coordinator).status_code == 204
-    assert _followers_count(ticket["id"], coordinator["id"]) == 0
 
 
 def test_status_change_notifies_requester_follower_only(client, make_user, make_ticket, sent):
@@ -198,3 +161,12 @@ def test_following_view_no_longer_exists(client, make_user):
     technician = make_user("technician")
     response = client.get("/api/queue", params={"view": "following"}, headers=technician["headers"])
     assert response.status_code == 422
+
+
+def test_follow_routes_no_longer_exist(client, make_user, make_ticket):
+    """«Dar seguimiento» era del cliente con sesión: quien reporta por correo lo sigue desde que se crea el ticket."""
+    coordinator = make_user("coordinator")
+    ticket = make_ticket(make_user("requester"))
+    for method in ("post", "delete"):
+        response = getattr(client, method)(f"/api/tickets/{ticket['id']}/follow", headers=coordinator["headers"])
+        assert response.status_code in (404, 405)

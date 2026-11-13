@@ -85,7 +85,6 @@ def test_admin_cannot_act_on_the_ticket(client, make_user, ticket):
     tid = ticket["id"]
     assert client.post(f"/api/tickets/{tid}/comments", json={"content": "Hola"}, headers=admin["headers"]).status_code == 403
     assert client.patch(f"/api/tickets/{tid}", json={"priority_id": 2}, headers=admin["headers"]).status_code == 403
-    assert client.post(f"/api/tickets/{tid}/follow", headers=admin["headers"]).status_code == 403
 
 
 def test_admin_attachments_only_one_hour_after_view(client, make_user, make_ticket, ticket):

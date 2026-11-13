@@ -14,7 +14,6 @@
     <link rel="stylesheet" href="css/layout.css">
     <link rel="stylesheet" href="css/components.css">
     <link rel="stylesheet" href="css/pages-auth.css">
-    <link rel="stylesheet" href="css/pages-portal.css">
     <link rel="stylesheet" href="css/pages-tickets.css">
     <link rel="stylesheet" href="css/pages-admin.css">
     <link rel="stylesheet" href="css/utilities.css">
@@ -53,7 +52,6 @@
             <button type="button" id="resendCode" class="verify-link" disabled>Reenviar código en 60 s</button>
             <p id="resendNotice" class="verify-notice" aria-live="polite"></p>
             <button type="button" id="backToLogin" class="verify-link">Volver al inicio de sesión</button>
-            <button type="button" id="signupHaveAccount" class="verify-link" hidden>Ya tengo cuenta: iniciar sesión</button>
         </div>
     </section>
     <section id="authScreen" class="auth-screen">
@@ -108,37 +106,10 @@
                         </div>
                         <button type="submit" class="btn-submit">Entrar</button>
                     </form>
-                    <div id="confirmEmailNotice" class="auth-notice" hidden>
-                        <p>Su cuenta todavía no está confirmada.</p>
-                        <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
-                    </div>
                     <p class="login-extra">
                         <span>¿Recibió una invitación?</span>
                         <a href="#activar-cuenta" class="auth-link auth-link-inline">Activar mi cuenta</a>
                     </p>
-                    <p class="login-extra">
-                        <span>¿Es cliente y no tiene cuenta?</span>
-                        <a href="#crear-cuenta" class="auth-link auth-link-inline">Crear una cuenta</a>
-                    </p>
-                </div>
-                <div id="signupPanel" class="auth-form-panel" hidden>
-                    <h1 class="auth-title">Crear cuenta de cliente</h1>
-                    <p class="help-text">Le enviaremos un código de 6 dígitos para confirmar su correo.</p>
-                    <form id="signupForm">
-                        <div class="form-group" style="margin-bottom: 16px;">
-                            <label for="signupEmail">Correo</label>
-                            <input type="email" id="signupEmail" name="email" autocomplete="email" required>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 24px;">
-                            <label for="signupPassword">Contraseña</label>
-                            <input type="password" id="signupPassword" name="password" minlength="8" autocomplete="new-password" required>
-                            <small class="help-text">Mínimo 8 caracteres</small>
-                        </div>
-                        <button type="submit" class="btn-submit">Crear cuenta</button>
-                    </form>
-                    <nav class="auth-links">
-                        <a href="#" class="auth-link">Volver al inicio de sesión</a>
-                    </nav>
                 </div>
                 <div id="forgotPanel" class="auth-form-panel" hidden>
                     <h1 id="forgotTitle" class="auth-title">Olvidé mi contraseña</h1>
@@ -160,17 +131,6 @@
                         <div class="form-group" style="margin-bottom: 16px;">
                             <label for="forgotCode">Código</label>
                             <input type="text" id="forgotCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
-                        </div>
-                        <div id="forgotPasswordFields">
-                            <div class="form-group" style="margin-bottom: 16px;">
-                                <label for="forgotNewPassword">Contraseña nueva (cuentas de cliente)</label>
-                                <input type="password" id="forgotNewPassword" minlength="8" autocomplete="new-password">
-                                <small class="help-text">Mínimo 8 caracteres. Si es del personal, déjela en blanco: se le genera una.</small>
-                            </div>
-                            <div class="form-group" style="margin-bottom: 24px;">
-                                <label for="forgotConfirmPassword">Confirmar contraseña nueva</label>
-                                <input type="password" id="forgotConfirmPassword" minlength="8" autocomplete="new-password">
-                            </div>
                         </div>
                         <button type="submit" class="btn-submit">Restablecer contraseña</button>
                         <button type="button" id="forgotResend" class="btn-secondary auth-secondary">Reenviar código</button>
@@ -236,7 +196,6 @@
   </button>
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
-    <button type="button" id="navAssistant" class="topbar-tab" hidden>Asistente</button>
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
@@ -428,14 +387,6 @@
                         </span>
                     </div>
                 </section>
-            </section>
-            <section id="portalPanel" class="portal-panel" aria-labelledby="portalTitle">
-                <header class="portal-head">
-                    <h1 id="portalTitle" class="portal-title">Mis solicitudes</h1>
-                    <span id="portalTotal" class="portal-total"></span>
-                </header>
-                <ul id="portalList" class="portal-list"></ul>
-                <div id="portalEmpty" class="portal-empty" hidden></div>
             </section>
             <section id="listPanel" aria-label="Lista de tickets">
                 <div class="list-filters">
@@ -637,8 +588,7 @@
                 <button type="button" id="accountLogout" class="ui-btn ui-btn-secondary account-logout">Cerrar sesión</button>
             </aside>
             <div class="account-main">
-            <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
-            <p id="profileIntro" class="view-note">Antes de crear tickets necesitamos su nombre completo, cédula y teléfono.</p>
+            <h1 id="profileTitle" class="view-title">Mi cuenta</h1>
             <section id="accountStaffProfile" class="account-section" data-account-tab="perfil" aria-labelledby="accountStaffProfileTitle" hidden>
                 <h2 id="accountStaffProfileTitle" class="account-title">Perfil</h2>
                 <p class="account-current">Así lo ve el resto del equipo.</p>
@@ -647,30 +597,6 @@
                     <dt>Rol</dt><dd id="accountStaffRole"></dd>
                 </dl>
             </section>
-            <section id="accountPersonal" class="account-section" data-account-tab="perfil" aria-labelledby="accountPersonalTitle">
-            <h2 id="accountPersonalTitle" class="account-title">Datos personales</h2>
-            <form id="profileForm" class="profile-form">
-                <div class="form-group">
-                    <label for="profileName">Nombre completo</label>
-                    <input type="text" id="profileName" maxlength="100" autocomplete="name" required>
-                </div>
-                <div class="form-group">
-                    <label for="profileIdNumber">Cédula</label>
-                    <input type="text" id="profileIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
-                    <small class="help-text">9 dígitos, o 11 o 12 si es DIMEX</small>
-                </div>
-                <div class="form-group">
-                    <label for="profilePhone">Teléfono</label>
-                    <input type="tel" id="profilePhone" placeholder="8888-1234" maxlength="16" inputmode="numeric" autocomplete="tel" required>
-                </div>
-                <p id="profileLockedNote" class="help-text" hidden>El nombre y la cédula quedaron fijos al crear su primer ticket. Si hay un error, contacte a soporte.</p>
-                <div class="profile-actions">
-                    <button type="submit" class="btn-submit">Guardar</button>
-                    <button type="button" id="profileCancel" class="btn-secondary" hidden>Cancelar</button>
-                </div>
-            </form>
-            </section>
-
             <section id="accountPhone" class="account-section" data-account-tab="perfil" aria-labelledby="accountPhoneTitle" hidden>
                 <h2 id="accountPhoneTitle" class="account-title">Teléfono</h2>
                 <form id="accountPhoneForm" class="profile-form">
@@ -1217,7 +1143,7 @@
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="unclassified">
                     <div class="admin-card-head"><h2>Tickets sin departamento</h2></div>
-                    <p class="admin-text">Tickets abiertos de antes de los departamentos y los que llegan del portal. Elija el departamento que los atiende; si no tienen responsable, entran a la asignación automática de ese departamento.</p>
+                    <p class="admin-text">Tickets abiertos de antes de los departamentos y los creados sin departamento. Elija el departamento que los atiende; si no tienen responsable, entran a la asignación automática de ese departamento.</p>
                     <ul id="unclassifiedList" class="org-list"></ul>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="departments">
@@ -1354,13 +1280,6 @@
             <img id="statusLogo" class="staff-logo" src="img/american-data.svg" alt="American Data Networks" height="26">
         </footer>
     </main>
-
-    <footer id="portalFooter" class="portal-footer" hidden>
-        <span>Centro de Soporte</span>
-        <img id="portalLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
-    </footer>
-
-
     <div id="errorMessage" class="error" role="alert"></div>
     <div id="successMessage" class="success"></div>
     <!-- Avisos breves abajo (toast); cada aviso puede llevar un botón, por ejemplo "Deshacer" -->
