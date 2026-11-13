@@ -75,6 +75,9 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     for ticket in tickets:
         level = email_analysis.effective_level(ticket.ai_analysis) if ticket.ai_analysis else None
         result[ticket.assigned_to] += (level if level is not None else NO_LEVEL) if by_levels else 1
+    # Con tickets por departamento los técnicos ya no revisan borradores: no cuentan
+    if routing.enforced(db):
+        return result
     drafts = (
         db.query(models.DraftAssignment.user_id, models.EmailDraft.ai_level)
         .join(models.EmailDraft, models.EmailDraft.id == models.DraftAssignment.draft_id)

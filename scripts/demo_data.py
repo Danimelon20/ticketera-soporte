@@ -429,8 +429,12 @@ def load(db) -> list[dict]:
                                recorded_by=coordinator.id, recorded_at=now))
 
     # Borradores del correo: uno con revisor y uno "Sin revisor"
-    b.draft(carla, DRAFT_ASSIGNED, "Buenas, el monitor parpadea cada rato y se apaga.", assigned_to=morning)
-    b.draft(beto, DRAFT_UNASSIGNED, "Algunas teclas no escriben desde ayer.")
+    demo_drafts = [b.draft(carla, DRAFT_ASSIGNED, "Buenas, el monitor parpadea cada rato y se apaga.", assigned_to=morning),
+                   b.draft(beto, DRAFT_UNASSIGNED, "Algunas teclas no escriben desde ayer.")]
+    # Tickets por departamento: los dos son de Soporte N1 (los revisa la coordinadora; apagado no se usa)
+    for demo_draft in demo_drafts:
+        db.add(models.DraftClassification(draft_id=demo_draft.id, status="routed", department_id=depts["Soporte N1"].id,
+                                          created_at=now))
 
     # Suplantación: intenta usar la cédula de Ana (queda el reporte automático del Agente virtual)
     suspicion.id_number_conflict(db, impostor, ana.id_number, "profile", actor_id=impostor.id)
@@ -715,15 +719,32 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
             return False, "no lo ve"
         return bool(draft.get("can_review")), "lo ve, " + ("confirmable" if draft.get("can_review") else "no confirmable")
 
-    add("Borradores", "Técnico (mañana)", f"borrador #{assigned} visible y confirmable", reviewer_sees)
-
-    def other_cannot_confirm():
+    def other_cannot_confirm(local=EVENING):
         body = {"title": "Verificación", "description": "Verificación", "category_id": MISSING_CATEGORY_ID,
                 "priority_id": MISSING_CATEGORY_ID}
-        response = api.post(EVENING, f"/api/drafts/{assigned}/confirm", body)
+        response = api.post(local, f"/api/drafts/{assigned}/confirm", body)
         return response.status_code == 403, f"HTTP {response.status_code}"
 
-    add("Borradores", "Técnico (tarde)", f"confirmar #{assigned}: HTTP 403", other_cannot_confirm)
+    def technician_without_drafts():
+        code = api.get(MORNING, "/api/drafts").status_code
+        return code == 403, f"HTTP {code}"
+
+    def coordinator_reviews_department():
+        draft, error = drafts(COORDINATOR, assigned)
+        if error:
+            return False, error
+        if draft is None:
+            return False, "no lo ve"
+        ok = draft.get("can_review") and draft.get("assigned_to") is None and not draft.get("can_reassign")
+        return bool(ok), "lo ve, sin revisor y confirmable" if ok else "lo ve, con revisor o no confirmable"
+
+    if ids["enforced"]:
+        # Tickets por departamento: los técnicos ya no ven borradores; los revisa el coordinador del departamento
+        add("Borradores", "Técnico (mañana)", "sin borradores: HTTP 403", technician_without_drafts)
+        add("Borradores", "Coordinador Redes", f"confirmar #{assigned} (de Soporte N1): HTTP 403",
+            lambda: other_cannot_confirm(NET_COORDINATOR))
+        add("Borradores", "Coordinador", f"borrador #{assigned} de Soporte N1 visible, sin revisor",
+            coordinator_reviews_department)
 
     def coordinator_sees_unassigned():
         draft, error = drafts(COORDINATOR, unassigned)
@@ -734,7 +755,10 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
         return draft.get("assigned_to") is None, "lo ve, " + (
             "Sin revisor" if draft.get("assigned_to") is None else "con revisor")
 
-    add("Borradores", "Coordinador", f"borrador #{unassigned} visible, Sin revisor", coordinator_sees_unassigned)
+    if not ids["enforced"]:
+        add("Borradores", "Técnico (mañana)", f"borrador #{assigned} visible y confirmable", reviewer_sees)
+        add("Borradores", "Técnico (tarde)", f"confirmar #{assigned}: HTTP 403", other_cannot_confirm)
+        add("Borradores", "Coordinador", f"borrador #{unassigned} visible, Sin revisor", coordinator_sees_unassigned)
 
     separated = ids["separated"]
 

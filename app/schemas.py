@@ -715,6 +715,15 @@ class DraftAssign(BaseModel):
     confirm_unavailable: bool = False
 
 
+class DraftTechnician(BaseModel):
+    """Técnico del departamento para confirmar un borrador: carga de la asignación automática y disponibilidad."""
+    id: int
+    name: str
+    load: int
+    availability: str
+    availability_text: str
+
+
 class DraftConfirm(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1)
@@ -723,6 +732,9 @@ class DraftConfirm(BaseModel):
     # Vacíos o enmascarados (con *): se usan los guardados. Se validan en la ruta.
     contact_phone: Optional[str] = None
     contact_id_number: Optional[str] = None
+    # Tickets por departamento: técnico activo del departamento del borrador (obligatorio; se valida en la ruta)
+    assigned_to: Optional[int] = None
+    confirm_unavailable: bool = False
 
     @field_validator("title", "description")
     @classmethod

@@ -293,6 +293,8 @@ def test_verify_checks_the_unplaced_notice_with_the_switch_on(client, sent, caps
     assert "ve el aviso" in out
     # Tickets de red en Redes y Escalar en Soporte N1 con Redes ya elegido
     assert "(de red, en Redes): HTTP 403" in out and "Escalar con [DEMO] Redes ya elegido" in out
+    # Fase 3: los borradores son de la coordinadora de Soporte N1; los técnicos ya no los ven
+    assert "sin borradores: HTTP 403" in out and "visible, sin revisor" in out
 
 
 
@@ -325,8 +327,9 @@ def test_clean_removes_draft_classifications_of_demo(client, sent):
         dept_id = db.query(models.Department).filter(models.Department.name == "[DEMO] Redes").one().id
         draft = db.query(models.EmailDraft).filter(models.EmailDraft.title.like("[DEMO]%")).first()
         draft_id = draft.id
-        db.add(models.DraftClassification(draft_id=draft_id, status="routed", department_id=dept_id,
-                                          ai_department_id=dept_id, option1_id=dept_id))
+        # Ya viene clasificado (Soporte N1): se cambia a Redes
+        db.merge(models.DraftClassification(draft_id=draft_id, status="routed", department_id=dept_id,
+                                            ai_department_id=dept_id, option1_id=dept_id))
         db.commit()
     finally:
         db.close()

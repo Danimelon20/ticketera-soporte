@@ -91,9 +91,19 @@ def _unassigned(db: Session, now: datetime, viewer: models.User | None = None) -
     return sum(1 for t in _not_overdue(_open_tickets(db, viewer=viewer), now) if t.assigned_to is None)
 
 
-def _drafts_pending(db: Session, reviewer_id: int | None = None) -> int:
-    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor."""
+def _drafts_pending(db: Session, reviewer_id: int | None = None, viewer: models.User | None = None) -> int:
+    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor.
+    Con tickets por departamento: solo los del departamento del coordinador (el técnico no tiene borradores)."""
     query = db.query(models.EmailDraft).filter(models.EmailDraft.status.in_(auto_assign.DRAFT_PENDING_STATUSES))
+    if routing.enforced(db):
+        row = routing.coordinator_row(db, viewer.id) if viewer is not None and viewer.role == "coordinator" else None
+        if row is None:
+            return 0
+        return query.join(models.DraftClassification,
+                          models.DraftClassification.draft_id == models.EmailDraft.id).filter(
+            models.DraftClassification.status.in_(("routed", "classified")),
+            models.DraftClassification.department_id == row.department_id,
+        ).count()
     if reviewer_id is not None:
         query = query.join(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id).filter(
             models.DraftAssignment.user_id == reviewer_id
@@ -147,13 +157,13 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
             "overdue": mine_overdue,
             "mine_resolved_today": _resolved_today(db, now, assigned_to=user.id),
             # Solo los borradores que le asignaron
-            "drafts_pending": _drafts_pending(db, reviewer_id=user.id),
+            "drafts_pending": _drafts_pending(db, reviewer_id=user.id, viewer=user),
             "shift": _shift(db, user, now),
         }
 
     result = {
         **_ticket_counts(db, user, now),
-        "drafts_pending": _drafts_pending(db),
+        "drafts_pending": _drafts_pending(db, viewer=user),
         # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
         "cancelled": cancellations.count(db),
     }

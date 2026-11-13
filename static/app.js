@@ -2829,7 +2829,7 @@ document.addEventListener('DOMContentLoaded', () => {
         navReports.hidden = !REPORT_REVIEW_ROLES.includes(role);
         // Invitaciones: solo el administrador (cuida las cuentas)
         navUsers.hidden = role !== 'admin';
-        navDrafts.hidden = !DRAFT_ROLES.includes(role);
+        navDrafts.hidden = !canSeeDrafts();
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
         // Portal del solicitante: el asistente también como pestaña
@@ -3265,6 +3265,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Borradores de correos -----
     // El administrador no entra a los borradores (no confirma ni descarta)
     const DRAFT_ROLES = ['technician', 'coordinator'];
+
+    // Con tickets por departamento los técnicos ya no ven borradores: los revisa el coordinador del departamento
+    function canSeeDrafts() {
+        return Boolean(currentUser) && DRAFT_ROLES.includes(currentUser.role)
+            && !(currentUser.role === 'technician' && currentUser.routing_enforced);
+    }
     const DRAFT_STATUS_LABELS = {
         analyzing: 'Analizando',
         pending_review: 'Por revisar',
@@ -3317,7 +3323,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function refreshDraftsBadge() {
-        if (!currentUser || !DRAFT_ROLES.includes(currentUser.role)) return;
+        if (!canSeeDrafts()) return;
         try {
             const list = await apiFetch('/drafts');
             updateDraftsBadge(list.length);
@@ -3356,20 +3362,54 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function startDraftsPolling() {
         stopDraftsPolling();
-        if (!currentUser || !DRAFT_ROLES.includes(currentUser.role)) return;
+        if (!canSeeDrafts()) return;
         draftsPollTimer = setInterval(pollDraftsBadge, 60000);
     }
 
     // El coordinador ve todos y filtra; el técnico, solo los que le asignaron
     const draftsFilter = document.getElementById('draftsFilter');
     const draftReassign = document.getElementById('draftReassign');
+    const draftTechnicianField = document.getElementById('draftTechnicianField');
+    const draftTechnicianSelect = document.getElementById('draftTechnician');
+    // Tickets por departamento: técnicos activos del departamento del coordinador, con carga y disponibilidad
+    let draftTechnicians = [];
+
+    function draftsByDepartment() {
+        return Boolean(currentUser && currentUser.routing_enforced);
+    }
 
     function setupDraftsFilter() {
         const manager = OPERATION_ROLES.includes(currentUser.role);
-        document.getElementById('draftsFilterField').hidden = !manager;
-        document.getElementById('draftsIntro').textContent = manager
-            ? 'La IA leyó estos correos. Cada uno tiene un técnico que lo revisa; usted puede reasignarlo.'
-            : 'Mis borradores: los correos que le asignaron. Usted decide si se vuelven ticket.';
+        // Con tickets por departamento: una sola lista, la de su departamento
+        document.getElementById('draftsFilterField').hidden = !manager || draftsByDepartment();
+        document.getElementById('draftsIntro').textContent = draftsByDepartment()
+            ? 'Correos de su departamento que leyó la IA. Al crear el ticket, usted elige el técnico que lo atenderá.'
+            : manager
+                ? 'La IA leyó estos correos. Cada uno tiene un técnico que lo revisa; usted puede reasignarlo.'
+                : 'Mis borradores: los correos que le asignaron. Usted decide si se vuelven ticket.';
+    }
+
+    async function loadDraftTechnicians() {
+        draftTechnicians = [];
+        if (!draftsByDepartment() || currentUser.role !== 'coordinator') return;
+        try {
+            draftTechnicians = await apiFetch('/drafts/technicians', { silent: true });
+        } catch (err) {
+            showError(err.message || 'No se pudo cargar la lista de técnicos');
+        }
+    }
+
+    function fillDraftTechnicians() {
+        draftTechnicianSelect.replaceChildren();
+        const empty = staffOption('', draftTechnicians.length ? 'Seleccionar…' : 'Sin técnicos activos en su departamento', true);
+        empty.disabled = true;
+        draftTechnicianSelect.appendChild(empty);
+        // La misma carga que usa la asignación automática
+        const byLevels = lastSystemStatus && lastSystemStatus.auto_assign_mode === 'levels';
+        draftTechnicians.forEach(tech => {
+            const load = `carga ${tech.load}${byLevels ? ' (suma de niveles)' : ''}`;
+            draftTechnicianSelect.appendChild(staffOption(String(tech.id), `${tech.name} — ${load} · ${tech.availability_text}`, false));
+        });
     }
 
     // Secciones de Borradores: el filtro del coordinador (el técnico ve siempre los suyos)
@@ -3401,10 +3441,11 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadDrafts() {
         if (!drafts.length) showSkeleton(draftsList, { rows: 4 });
         setupDraftsFilter();
-        const query = OPERATION_ROLES.includes(currentUser.role) && draftsFilter.value !== 'all'
+        const query = OPERATION_ROLES.includes(currentUser.role) && !draftsByDepartment() && draftsFilter.value !== 'all'
             ? `?assigned=${draftsFilter.value}` : '';
         try {
             drafts = await apiFetch(`/drafts${query}`, { silent: true });
+            await loadDraftTechnicians();
         } catch (err) {
             draftsList.removeAttribute('aria-busy');
             draftsList.replaceChildren();
@@ -3483,7 +3524,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const [tag, tone] = draftTag(draft);
             const tags = makeEl('span', 'draft-item-tags');
             tags.appendChild(makeEl('span', `ui-tag ${tone}`, tag));
-            tags.appendChild(makeEl('span', draft.assigned_name ? 'ui-tag' : 'ui-tag is-warn', draftOwnerText(draft)));
+            // Con tickets por departamento no hay revisor: el técnico se elige al crear el ticket
+            if (!draftsByDepartment()) tags.appendChild(makeEl('span', draft.assigned_name ? 'ui-tag' : 'ui-tag is-warn', draftOwnerText(draft)));
             if (draft.classification) tags.appendChild(makeEl('span', draft.department_name ? 'ui-tag is-info' : 'ui-tag is-warn', draftDepartmentText(draft)));
             btn.appendChild(tags);
             li.appendChild(btn);
@@ -3526,7 +3568,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftTagEl = document.getElementById('draftTag');
         draftTagEl.textContent = tag;
         draftTagEl.className = `ui-tag ${tone}`;
-        document.getElementById('draftAssignee').textContent = draftOwnerText(draft);
+        const draftAssignee = document.getElementById('draftAssignee');
+        draftAssignee.textContent = draftOwnerText(draft);
+        draftAssignee.hidden = draftsByDepartment();
+        const pickTechnician = draftsByDepartment() && draft.can_review;
+        draftTechnicianField.hidden = !pickTechnician;
+        draftTechnicianSelect.required = pickTechnician;
+        if (pickTechnician) fillDraftTechnicians();
         // Reasignar: solo el coordinador. Confirmar o descartar: el revisor o un coordinador
         document.getElementById('draftReassignField').hidden = !draft.can_reassign;
         if (draft.can_reassign) fillDraftReassign(draft);
@@ -3638,6 +3686,16 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(phoneError || idError);
             return;
         }
+        // Tickets por departamento: el técnico que lo atenderá (el servidor valida que sea de su departamento)
+        const technician = draftsByDepartment()
+            ? draftTechnicians.find(tech => String(tech.id) === draftTechnicianSelect.value) : null;
+        if (draftsByDepartment() && !technician) {
+            showError('Elija el técnico de su departamento que atenderá el ticket');
+            return;
+        }
+        // Igual que al reasignar: a alguien no disponible, solo confirmando
+        const confirmUnavailable = Boolean(technician) && technician.availability !== 'available';
+        if (confirmUnavailable && !window.confirm(`${technician.name}: ${technician.availability_text}. ¿Asignarle el ticket de todas formas?`)) return;
         setDraftBusy(true);
         try {
             const result = await apiFetch(`/drafts/${selectedDraftId}/confirm`, {
@@ -3649,10 +3707,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     priority_id: parseInt(draftPrioritySelect.value, 10),
                     description: draftDescriptionInput.value.trim(),
                     contact_phone: draftPhoneInput.value,
-                    contact_id_number: draftIdNumberInput.value
+                    contact_id_number: draftIdNumberInput.value,
+                    ...(technician ? { assigned_to: technician.id, confirm_unavailable: confirmUnavailable } : {})
                 })
             });
-            showSuccess(`Ticket #${result.ticket_id} creado`);
+            showSuccess(technician ? `Ticket #${result.ticket_id} creado y asignado a ${technician.name}` : `Ticket #${result.ticket_id} creado`);
             selectedDraftId = null;
             await loadDrafts();
             loadTickets(getFilters());
@@ -6459,9 +6518,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             return `${head} · ordenados por vencimiento`;
                         },
                     }),
-                    draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
+                    // Con tickets por departamento los borradores los revisa el coordinador
+                    ...(currentUser.routing_enforced ? [] : [draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
                         count: 'drafts_pending', context: 'Correos que le asignaron. Al confirmar uno, el ticket queda a su cargo.',
-                    }),
+                    })]),
                     queueSection('overdue', 'Vencidos', 'mi-trabajo/vencidos', {
                         count: 'overdue', tone: 'alert', context: 'Sus tickets que pasaron el tiempo de respuesta',
                     }),
@@ -6571,7 +6631,9 @@ document.addEventListener('DOMContentLoaded', () => {
             { id: 'drafts', label: 'Borradores', icon: 'mail', sections: [
                 draftsSection('drafts', 'Todos', 'borradores/todos', 'all', {
                     title: 'Borradores de correo', count: 'drafts_pending',
-                    context: 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
+                    context: currentUser.routing_enforced
+                        ? 'Correos de su departamento: al crear el ticket, usted elige el técnico'
+                        : 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
                 }),
             ] },
             { id: 'team', label: 'Equipo', icon: 'team', sections: [
@@ -7138,7 +7200,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const byLevels = lastSystemStatus && lastSystemStatus.auto_assign_mode === 'levels';
         document.getElementById('asideShiftLoad').textContent = shift
             ? `Carga actual: ${shift.load}${byLevels ? ' (suma de niveles)' : ''}` : '';
-        loadAsideDrafts();
+        // Con tickets por departamento el técnico ya no tiene borradores
+        document.getElementById('asideDraftsCard').hidden = !canSeeDrafts();
+        if (canSeeDrafts()) loadAsideDrafts();
     }
 
     async function loadAsideDrafts() {

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import alerts, auto_assign, availability, models, nav
+from . import alerts, auto_assign, availability, models, nav, routing
 from .chatbot import _redact
 
 ALERT_KINDS = ("due_50", "due_80", "overdue")  # De menos a más avanzado
@@ -131,6 +131,9 @@ def items_for(db: Session, user: models.User, now: datetime | None = None) -> li
 
 
 def _draft_rows(db: Session, user: models.User) -> list[models.DraftAssignment]:
+    # Con tickets por departamento los borradores no se asignan a técnicos: sin avisos
+    if routing.enforced(db):
+        return []
     return (
         db.query(models.DraftAssignment)
         .options(joinedload(models.DraftAssignment.draft))

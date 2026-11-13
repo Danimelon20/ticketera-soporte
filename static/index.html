@@ -490,7 +490,7 @@
                     <p id="asideShiftTime" class="queue-aside-big"></p>
                     <p id="asideShiftLoad" class="queue-aside-text"></p>
                 </section>
-                <section class="ui-card queue-aside-card" aria-labelledby="asideDraftsTitle">
+                <section id="asideDraftsCard" class="ui-card queue-aside-card" aria-labelledby="asideDraftsTitle">
                     <h2 id="asideDraftsTitle" class="ui-kicker">Mis borradores</h2>
                     <ul id="asideDrafts" class="queue-aside-list"></ul>
                     <p class="queue-aside-note">Al confirmar un borrador, el ticket queda a su cargo.</p>
@@ -996,6 +996,11 @@
                                     <label for="draftIdNumber">Cédula</label>
                                     <input type="text" id="draftIdNumber" class="ui-input" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
                                 </div>
+                            </div>
+                            <div id="draftTechnicianField" class="ui-field" hidden>
+                                <label for="draftTechnician">Técnico que lo atenderá</label>
+                                <select id="draftTechnician" class="ui-input" autocomplete="off"></select>
+                                <p class="help-text">Técnicos activos de su departamento, con su carga actual y su disponibilidad.</p>
                             </div>
                             <p id="draftNotYours" class="ui-notice draft-not-yours" hidden>Solo su revisor o un coordinador puede crear el ticket o descartar este borrador.</p>
                             <div id="draftActions" class="draft-actions">
