@@ -320,6 +320,9 @@ def routing_checklist(db: Session) -> list[dict]:
         return f"{len(names)}: {shown}" + (" y otros" if len(names) > 3 else "")
 
     unclassified = unclassified_open_tickets(db).count()
+    # Importación local: classifier importa este módulo
+    from . import classifier
+    without_profile = classifier.missing_profiles(db)
     return [
         {"key": "serving_departments", "label": "Hay al menos un departamento que atiende tickets",
          "ok": bool(serving), "detail": None if serving else "ninguno marcado", "link": "admin/departamentos"},
@@ -338,6 +341,11 @@ def routing_checklist(db: Session) -> list[dict]:
         {"key": "unclassified_tickets", "label": "Tickets abiertos sin departamento", "warning": True,
          "ok": unclassified == 0, "detail": f"{unclassified} por clasificar" if unclassified else None,
          "link": "admin/sin-departamento"},
+        # Advertencia, no bloquea: sin «Qué atiende» no participa en la clasificación (sus correos quedan en
+        # «Por clasificar» y el administrador los elige a mano)
+        {"key": "departments_without_profile", "label": "Cada departamento que atiende tickets tiene ficha",
+         "warning": True, "ok": not without_profile, "detail": detail(without_profile),
+         "link": "admin/departamentos"},
     ]
 
 

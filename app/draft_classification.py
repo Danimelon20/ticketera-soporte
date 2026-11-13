@@ -73,6 +73,8 @@ def classify_draft(db: Session, draft: models.EmailDraft, lock: bool = True) -> 
         row.status, row.department_id = "pending", None
         if result.passes:
             row.pending_reason = "no_coordinator"
+        elif classifier.NO_PROFILES in result.notes:
+            row.pending_reason = "no_profiles"
         elif result.llm_department_id is None and not result.similarities:
             row.pending_reason = "ai_error"
         else:

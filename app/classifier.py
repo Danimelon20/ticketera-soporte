@@ -40,6 +40,9 @@ EMBED_TIMEOUT_SECONDS = 30
 CLASSIFY_NUM_CTX = 8192
 
 NO_DEPARTMENTS = "No hay departamentos que atiendan tickets"
+# Sin «Qué atiende» un departamento no participa: la IA lo elegiría solo por su nombre
+NO_PROFILES = "Ningún departamento que atiende tickets tiene «Qué atiende» en su ficha"
+WITHOUT_PROFILE = "No participan (sin «Qué atiende»): {paths}"
 NO_EMBEDDINGS = ("Sin similitud: el modelo de embeddings {model} no está disponible o no respondió. "
                  "El correo iría a «Por clasificar»")
 NO_LLM = "La IA no respondió: el correo iría a «Por clasificar»"
@@ -85,22 +88,33 @@ def split_examples(text: str | None) -> list[str]:
     return [e for e in examples if e]
 
 
+def has_handles(profile: models.DepartmentProfile | None) -> bool:
+    return profile is not None and bool((profile.handles or "").strip())
+
+
 def participants(db: Session) -> list[Participant]:
-    """Departamentos activos que atienden tickets, con su ficha (vacía si no tiene). Ordenados por ruta."""
+    """Departamentos activos que atienden tickets y tienen «Qué atiende» en su ficha. Ordenados por ruta.
+    Sin «Qué atiende» no participan (la IA los elegiría por el nombre): los ve missing_profiles."""
     by_id = routing.departments_by_id(db)
     profiles = {p.department_id: p for p in db.query(models.DepartmentProfile)}
     result = []
     for dept in by_id.values():
-        if not routing.serves_tickets(dept, by_id):
-            continue
         profile = profiles.get(dept.id)
+        if not routing.serves_tickets(dept, by_id) or not has_handles(profile):
+            continue
         result.append(Participant(
-            id=dept.id, path=routing.path_label(dept, by_id),
-            handles=profile.handles if profile else "",
-            examples=split_examples(profile.examples) if profile else [],
-            not_handles=profile.not_handles if profile else "",
+            id=dept.id, path=routing.path_label(dept, by_id), handles=profile.handles,
+            examples=split_examples(profile.examples), not_handles=profile.not_handles or "",
         ))
     return sorted(result, key=lambda p: p.path.casefold())
+
+
+def missing_profiles(db: Session) -> list[str]:
+    """Rutas de los departamentos activos que atienden tickets sin «Qué atiende» (no participan)."""
+    by_id = routing.departments_by_id(db)
+    profiles = {p.department_id: p for p in db.query(models.DepartmentProfile)}
+    return sorted((routing.path_label(d, by_id) for d in by_id.values()
+                   if routing.serves_tickets(d, by_id) and not has_handles(profiles.get(d.id))), key=str.casefold)
 
 
 def threshold(db: Session) -> float:
@@ -287,8 +301,11 @@ def classify(db: Session, subject: str, body: str, cache: bool = True, lock: boo
     lock=False: quien llama ya tiene el turno del modelo (el análisis de los borradores)."""
     result = Classification(threshold=threshold(db))
     people = participants(db)
+    missing = missing_profiles(db)
     if not people:
-        result.notes.append(NO_DEPARTMENTS)
+        result.notes.append(NO_PROFILES if missing else NO_DEPARTMENTS)
+        if missing:
+            result.notes.append(WITHOUT_PROFILE.format(paths="; ".join(missing)))
         return result
     # Un solo uso del modelo a la vez (el mismo turno que los análisis)
     with email_analysis.ANALYSIS_LOCK if lock else nullcontext():
@@ -318,6 +335,8 @@ def classify(db: Session, subject: str, body: str, cache: bool = True, lock: boo
         result.notes.append(LOW_MARGIN.format(margin=result.margin, threshold=result.threshold))
     # Siempre, por cada departamento sin ejemplos (elija lo que elija la IA): hay que completar su ficha
     result.notes += [NO_EXAMPLES.format(path=p.path) for p in people if not p.examples]
+    if missing:
+        result.notes.append(WITHOUT_PROFILE.format(paths="; ".join(missing)))
 
     # Opciones: la de la IA (o la más parecida) y la siguiente más parecida
     first = result.llm_department_id if result.llm_department_id is not None else (sims[0][0] if sims else None)

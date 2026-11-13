@@ -973,6 +973,7 @@ DRAFT_PENDING_REASONS = {
     "no_coordinator": "El departamento elegido no tiene coordinador activo",
     "ai_error": "La IA no pudo analizar el correo",
     "installed": "Llegó antes de la clasificación por departamento",
+    "no_profiles": "Ningún departamento tiene ficha («Qué atiende»)",
 }
 
 

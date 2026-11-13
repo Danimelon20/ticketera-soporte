@@ -1108,6 +1108,8 @@ class DepartmentRead(BaseModel):
     # Siguiente nivel (Escalar transfiere a ese departamento)
     next_department_id: Optional[int] = None
     next_department_path: Optional[str] = None
+    # Ficha con «Qué atiende»: sin ella no participa en la clasificación de correos
+    has_profile: bool = False
 
 
 class DepartmentCreate(BaseModel):

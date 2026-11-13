@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app import chatbot, classifier, models, routing, similarity
+from app import chatbot, classifier, draft_classification, models, routing, similarity
 from app.database import SessionLocal
 from app.routers import org
 from org_helpers import changes, department, unique
@@ -204,6 +204,8 @@ def test_department_without_examples_never_goes_direct(client, make_user, ai):
     admin = make_user("admin")
     _two_departments(client, admin)
     bare = department(unique("Ingeniería N3"))
+    # Con «Qué atiende» pero sin ejemplos: participa, pero nunca va directo
+    assert _put(client, admin, bare, handles="Servidores y bases de datos").status_code == 200
     ai["choice"] = _path(bare)
     data = _test(client, admin, "El servidor de base de datos está lento").json()
     assert data["llm_department_id"] == bare and data["passes"] is False
@@ -375,3 +377,62 @@ def test_handles_change_recomputes_its_vector(client, make_user, ai):
     with SessionLocal() as db:
         assert db.query(models.DepartmentExampleEmbedding).filter_by(department_id=n2).count() == 1
 
+
+
+# ----- Sin «Qué atiende» no participa -----
+
+def test_department_without_handles_does_not_participate(client, make_user, ai):
+    """Un departamento que atiende tickets con la ficha vacía atraía correos por su nombre: ya no participa,
+    ni en la lista de la IA ni en la similitud, y Probar clasificación lo nombra en una nota."""
+    admin = make_user("admin")
+    redes, _ = _two_departments(client, admin)
+    empty = department(unique("Averías"))
+    blank = department(unique("Gerencia de Tecnologías"))
+    assert _put(client, admin, blank, handles="   ", examples="Algo falla").status_code == 200
+    ai["choice"] = _path(empty)
+    data = _test(client, admin, "Les comparto el menú del almuerzo del viernes").json()
+    enum = ai["payloads"][-1]["format"]["properties"]["department"]["enum"]
+    assert _path(empty) not in enum and _path(blank) not in enum and _path(redes) in enum
+    assert data["llm_department_id"] is None
+    offered = [o["department_id"] for o in data["options"]]
+    assert empty not in offered and blank not in offered
+    note = next(n for n in data["notes"] if n.startswith("No participan"))
+    assert _path(empty) in note and _path(blank) in note
+    with SessionLocal() as db:
+        ids = {p.id for p in classifier.participants(db)}
+        assert empty not in ids and blank not in ids and redes in ids
+        assert _path(empty) in classifier.missing_profiles(db)
+    # Con «Qué atiende» vuelve a participar
+    assert _put(client, admin, empty, handles="Averías eléctricas del edificio").status_code == 200
+    with SessionLocal() as db:
+        assert empty in {p.id for p in classifier.participants(db)}
+
+
+def test_departments_list_and_checklist_warn_about_missing_profiles(client, make_user, ai):
+    admin = make_user("admin")
+    redes, _ = _two_departments(client, admin)
+    empty = department(unique("Sin ficha"))
+    rows = {d["id"]: d for d in client.get("/api/admin/departments", headers=admin["headers"]).json()}
+    assert rows[redes]["has_profile"] is True and rows[empty]["has_profile"] is False
+    [switch] = client.get("/api/admin/activation", headers=admin["headers"]).json()
+    item = next(i for i in switch["checklist"] if i["key"] == "departments_without_profile")
+    # Advertencia: no bloquea el encendido
+    assert item["warning"] is True and item["ok"] is False and item["link"] == "admin/departamentos"
+
+
+def test_no_department_with_handles_waits_with_its_own_reason(client, make_user, ai, monkeypatch):
+    """Sin ningún departamento con ficha, el correo queda en «Por clasificar» con su motivo (no «la IA falló»)."""
+    monkeypatch.setattr(classifier, "participants", lambda db: [])
+    monkeypatch.setattr(classifier, "missing_profiles", lambda db: ["Averías"])
+    with SessionLocal() as db:
+        result = classifier.classify(db, "Ayuda", "No tengo internet")
+        assert classifier.NO_PROFILES in result.notes and not result.options
+        requester = make_user("requester")
+        draft = models.EmailDraft(message_id=f"<{unique('sin-ficha')}@test>", requester_id=requester["id"],
+                                  status="pending_review", subject="Ayuda", body="No tengo internet")
+        db.add(draft)
+        db.flush()
+        row = draft_classification.classify_draft(db, draft)
+        assert row.status == "pending" and row.pending_reason == "no_profiles"
+        assert models.DRAFT_PENDING_REASONS["no_profiles"]
+        db.rollback()

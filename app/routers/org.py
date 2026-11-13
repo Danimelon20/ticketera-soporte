@@ -60,6 +60,7 @@ def _department_reads(db: Session) -> list[DepartmentRead]:
         .filter(models.User.is_active.is_(True))
     }
     next_ids = routing.escalations(db)
+    with_handles = {p.department_id for p in db.query(models.DepartmentProfile) if classifier.has_handles(p)}
     rows = [
         DepartmentRead(
             id=dept.id, name=dept.name, parent_id=dept.parent_id, path=routing.path_label(dept, by_id),
@@ -70,6 +71,7 @@ def _department_reads(db: Session) -> list[DepartmentRead]:
             coordinator_name=(coordinators[dept.id][1] or "Sin nombre") if dept.id in coordinators else None,
             next_department_id=next_ids.get(dept.id),
             next_department_path=routing.path_label(by_id.get(next_ids.get(dept.id)), by_id),
+            has_profile=dept.id in with_handles,
         )
         for dept in by_id.values()
     ]

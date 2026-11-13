@@ -10444,6 +10444,13 @@ document.addEventListener('DOMContentLoaded', () => {
         departmentOptions(document.getElementById('deptCreateParent'), { empty: '(Raíz)' });
         const list = document.getElementById('deptList');
         list.replaceChildren();
+        // Sin «Qué atiende» no participa en la clasificación de correos (sus correos quedan en «Por clasificar»)
+        const withoutProfile = orgDepartments.filter(d => d.handles_tickets && d.active_path && !d.has_profile);
+        const profileNotice = document.getElementById('deptProfileNotice');
+        profileNotice.hidden = !withoutProfile.length;
+        profileNotice.textContent = withoutProfile.length === 1
+            ? '1 departamento que atiende tickets no tiene ficha («Qué atiende»): no participa en la clasificación de correos. Complétela con «Ficha».'
+            : `${withoutProfile.length} departamentos que atienden tickets no tienen ficha («Qué atiende»): no participan en la clasificación de correos. Complételas con «Ficha».`;
         if (!orgDepartments.length) {
             list.appendChild(emptyState({ title: 'Todavía no hay departamentos', text: 'Agréguelos uno por uno o importe el organigrama.' }));
             return;
@@ -10453,6 +10460,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const text = makeEl('div', 'org-row-text');
             const title = makeEl('span', 'org-row-title', d.path);
             if (d.handles_tickets) title.appendChild(makeEl('span', 'ui-tag is-info org-serving', 'Atiende tickets'));
+            if (d.handles_tickets && d.active_path && !d.has_profile) {
+                title.appendChild(makeEl('span', 'ui-tag is-warn org-serving', 'Sin ficha · no participa en la clasificación'));
+            }
             text.appendChild(title);
             const sub = [];
             if (d.handles_tickets) {
@@ -10576,6 +10586,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         deptProfileDialog.close();
         showSuccess('Ficha guardada: aplica desde el siguiente correo');
+        // La etiqueta «Sin ficha» y el aviso cambian con «Qué atiende»
+        showDepartments();
     });
 
     // Probar clasificación: no crea borradores ni tickets
