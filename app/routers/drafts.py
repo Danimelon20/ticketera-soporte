@@ -10,7 +10,10 @@ from ..database import get_db
 from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, draft_classification, email_analysis, email_attachments, grouping, identity, models, routing, suspicion
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
-from ..schemas import AttachmentRead, DraftAssign, DraftConfirm, DraftRead, DraftTechnician
+from ..schemas import (
+    AttachmentRead, DraftAssign, DraftConfirm, DraftRead, DraftTechnician, DraftTransferOption, DraftTransferRequest,
+    DraftTransferResult,
+)
 from ..security import get_current_user, mask_email
 from ..validators import mask_id_number, normalize_id_number, normalize_phone
 from .tickets import person_name, unavailable_message, verify_id_number
@@ -28,6 +31,10 @@ NO_DRAFT_ASSIGNMENT = "Con tickets por departamento, los borradores no se asigna
 TECHNICIAN_REQUIRED = "Elija el técnico de su departamento que atenderá el ticket"
 TECHNICIAN_NOT_IN_DEPARTMENT = "Solo puede elegir un técnico activo de su departamento"
 CLASSIFIED = ("routed", "classified")
+TRANSFER_OFF = "Encienda tickets por departamento para transferir borradores (Administración › Activación)"
+TRANSFER_SAME = "El borrador ya es de ese departamento"
+TRANSFER_NO_COORDINATOR = "Ese departamento no tiene coordinador activo"
+TRANSFER_NOT_PENDING = "Este borrador ya no está pendiente"
 # Los poco claros y los que no son soporte no se revisan: no se listan ni se cuentan
 DEFAULT_STATUSES = auto_assign.DRAFT_PENDING_STATUSES
 DraftStatus = Literal[
@@ -146,6 +153,13 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
     pending = draft.status in DEFAULT_STATUSES
     data.can_review = pending and can_review(db, draft, viewer)
     data.can_reassign = pending and viewer.role in MANAGER_ROLES and not enforced
+    data.can_transfer = enforced and data.can_review
+    last = _last_transfer(db, draft.id) if enforced else None
+    if last is not None:
+        by_id = routing.departments_by_id(db)
+        actor = db.get(models.User, last.transferred_by)
+        data.transfer_note = (f"Transferido desde {routing.path_label(by_id.get(last.from_department_id), by_id)} "
+                              f"por {person_name(actor) if actor else 'Sin nombre'}: {last.reason}")
     if viewer.role == "technician":
         # El técnico no ve datos personales completos (como en el detalle del ticket)
         data.body = _redact(data.body)
@@ -219,6 +233,33 @@ def list_drafts(
         query = query.filter(models.DraftAssignment.user_id.is_(None))
     drafts = query.order_by(models.EmailDraft.created_at.asc(), models.EmailDraft.id.asc()).all()
     return [_draft_read(db, d, reviewer) for d in drafts]
+
+
+def _last_transfer(db: Session, draft_id: int) -> models.DraftTransfer | None:
+    return (db.query(models.DraftTransfer).filter(models.DraftTransfer.draft_id == draft_id)
+            .order_by(models.DraftTransfer.id.desc()).first())
+
+
+@router.get("/drafts/transfer-options", response_model=list[DraftTransferOption])
+def draft_transfer_options(db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
+    """Destinos para transferir un borrador: los departamentos activos que atienden tickets. Su departamento y los
+    que no tienen coordinador activo salen deshabilitados, con el motivo."""
+    if not routing.enforced(db):
+        raise HTTPException(status_code=409, detail=TRANSFER_OFF)
+    own = coordinator_department_id(db, reviewer)
+    by_id = routing.departments_by_id(db)
+    options = []
+    for dept in by_id.values():
+        if not routing.serves_tickets(dept, by_id):
+            continue
+        reason = None
+        if dept.id == own:
+            reason = "Es su departamento"
+        elif not draft_classification.has_coordinator(db, dept.id):
+            reason = "Sin coordinador activo"
+        options.append(DraftTransferOption(id=dept.id, path=routing.path_label(dept, by_id), enabled=reason is None,
+                                           disabled_reason=reason))
+    return sorted(options, key=lambda o: o.path.casefold())
 
 
 @router.get("/drafts/technicians", response_model=list[DraftTechnician])
@@ -370,6 +411,52 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     if owner is None:
         background_tasks.add_task(auto_assign.assign_new, ticket.id)
     return _draft_read(db, draft, reviewer)
+
+
+@router.get("/drafts/{draft_id}", response_model=DraftRead)
+def get_draft(draft_id: int, db: Session = Depends(get_db), reviewer=Depends(require_reviewer)):
+    """Un borrador. Con tickets por departamento, solo el coordinador de su departamento (403 a los demás, también
+    al que lo transfirió)."""
+    draft = db.get(models.EmailDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="El borrador no existe")
+    _check_can_review(db, draft, reviewer)
+    return _draft_read(db, draft, reviewer)
+
+
+@router.post("/drafts/{draft_id}/transfer", response_model=DraftTransferResult)
+def transfer_draft(draft_id: int, data: DraftTransferRequest, db: Session = Depends(get_db),
+                   reviewer=Depends(require_reviewer)):
+    """El coordinador transfiere un borrador de su departamento a otro que atiende tickets y tiene coordinador
+    activo. El borrador llega completo; el coordinador del destino recibe el aviso en la campana y el anterior
+    deja de verlo. Queda como corrección de la IA (draft_transfers)."""
+    if not routing.enforced(db):
+        raise HTTPException(status_code=409, detail=TRANSFER_OFF)
+    draft = _open_draft(db, draft_id)
+    _check_can_review(db, draft, reviewer)
+    if draft.status not in DEFAULT_STATUSES:
+        raise HTTPException(status_code=409, detail=TRANSFER_NOT_PENDING)
+    row = draft_classification.row_of(db, draft.id)
+    source_id = row.department_id
+    target = routing.serving_department(db, data.department_id)
+    if target.id == source_id:
+        raise HTTPException(status_code=400, detail=TRANSFER_SAME)
+    coordinator = routing.coordinator_of(db, target.id)
+    if not draft_classification.has_coordinator(db, target.id):
+        raise HTTPException(status_code=409, detail=TRANSFER_NO_COORDINATOR)
+    origin = "transfer" if _last_transfer(db, draft.id) is not None else ("ai" if row.status == "routed" else "admin")
+    db.add(models.DraftTransfer(
+        draft_id=draft.id, ai_department_id=row.ai_department_id, origin=origin, from_department_id=source_id,
+        to_department_id=target.id, reason=data.reason, transferred_by=reviewer.id,
+        transferred_at=_now().replace(tzinfo=None), notify_user_id=coordinator.user_id,
+    ))
+    row.department_id = target.id
+    db.commit()
+    # Sin el texto del correo ni el motivo en el log
+    logging.info("Borrador %s transferido del departamento %s al %s por el usuario %s",
+                 draft.id, source_id, target.id, reviewer.id)
+    by_id = routing.departments_by_id(db)
+    return DraftTransferResult(draft_id=draft.id, department_name=routing.path_label(target, by_id))
 
 
 @router.post("/drafts/{draft_id}/request-details")

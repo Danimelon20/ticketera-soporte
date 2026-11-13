@@ -1121,6 +1121,31 @@ class DepartmentTransfer(Base):
     transferred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+# Origen del departamento de un borrador antes de transferirlo: la IA, el administrador o otra transferencia
+DRAFT_TRANSFER_ORIGINS = {"ai": "La IA", "admin": "El administrador", "transfer": "Otra transferencia"}
+
+
+class DraftTransfer(Base):
+    """Un coordinador transfirió un borrador de su departamento a otro, con motivo. Es una corrección de la IA
+    (para el reporte de precisión): qué eligió la IA, de dónde salió el departamento, a dónde fue, quién y cuándo.
+    También es el aviso en la campana del coordinador del destino (notify_user_id, seen_at). Tabla nueva."""
+    __tablename__ = "draft_transfers"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), index=True, nullable=False)
+    # Lo que eligió la IA al llegar el correo (nulo si no eligió ninguno)
+    ai_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    # ai, admin o transfer (validado en Python)
+    origin = Column(String(20), nullable=False)
+    from_department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    to_department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=False)
+    reason = Column(String(300), nullable=False)
+    transferred_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    transferred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    notify_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    seen_at = Column(DateTime, nullable=True)
+
+
 INBOX_KINDS = ("ticket_transferred", "ticket_resolved")
 
 

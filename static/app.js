@@ -3594,6 +3594,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftReason = document.getElementById('draftReason');
         draftReason.textContent = draft.pending_reason ? `Pendiente: ${draft.pending_reason}` : '';
         draftReason.hidden = !draft.pending_reason;
+        const draftTransferNote = document.getElementById('draftTransferNote');
+        draftTransferNote.textContent = draft.transfer_note || '';
+        draftTransferNote.hidden = !draft.transfer_note;
+        document.getElementById('draftTransferBtn').hidden = !draft.can_transfer;
         const draftDepartment = document.getElementById('draftDepartment');
         draftDepartment.textContent = draft.classification ? `Departamento: ${draftDepartmentText(draft)}` : '';
         draftDepartment.hidden = !draft.classification;
@@ -3645,7 +3649,73 @@ document.addEventListener('DOMContentLoaded', () => {
         draftConfirmBtn.disabled = busy;
         draftDiscardBtn.disabled = busy;
         draftDetailsBtn.disabled = busy;
+        document.getElementById('draftTransferBtn').disabled = busy;
     }
+
+    // ----- Transferir un borrador a otro departamento -----
+    const draftTransferDialog = document.getElementById('draftTransferDialog');
+    const draftTransferError = document.getElementById('draftTransferError');
+    const draftTransferTarget = document.getElementById('draftTransferTarget');
+    const draftTransferReason = document.getElementById('draftTransferReason');
+
+    document.getElementById('draftTransferBtn').addEventListener('click', async () => {
+        if (!shownDraft) return;
+        const draft = shownDraft;
+        let options;
+        try {
+            options = await apiFetch('/drafts/transfer-options', { silent: true });
+        } catch (err) {
+            showError(err.message || 'No se pudieron cargar los departamentos');
+            return;
+        }
+        draftTransferTarget.replaceChildren(staffOption('', 'Seleccionar…', true));
+        draftTransferTarget.firstChild.disabled = true;
+        options.forEach(o => {
+            // Los que no se pueden elegir salen deshabilitados con el motivo
+            const option = staffOption(String(o.id), o.enabled ? o.path : `${o.path} — ${o.disabled_reason}`, false);
+            option.disabled = !o.enabled;
+            draftTransferTarget.appendChild(option);
+        });
+        draftTransferTarget.value = '';
+        draftTransferReason.value = '';
+        document.getElementById('draftTransferDraft').textContent = `Borrador #${draft.id} · ${draft.subject || '(Sin asunto)'}`;
+        draftTransferError.hidden = true;
+        draftTransferDialog.dataset.draftId = String(draft.id);
+        draftTransferDialog.showModal();
+        draftTransferTarget.focus();
+    });
+
+    document.getElementById('draftTransferCancel').addEventListener('click', () => draftTransferDialog.close());
+    document.getElementById('draftTransferForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const reason = draftTransferReason.value.trim();
+        if (!draftTransferTarget.value) {
+            draftTransferError.textContent = 'Elija el departamento destino';
+            draftTransferError.hidden = false;
+            return;
+        }
+        if (reason.length < 15) {
+            draftTransferError.textContent = 'El motivo debe tener al menos 15 caracteres';
+            draftTransferError.hidden = false;
+            return;
+        }
+        let result;
+        try {
+            result = await apiFetch(`/drafts/${draftTransferDialog.dataset.draftId}/transfer`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ department_id: Number(draftTransferTarget.value), reason }),
+            });
+        } catch (err) {
+            draftTransferError.textContent = err.message || 'No se pudo transferir el borrador';
+            draftTransferError.hidden = false;
+            return;
+        }
+        draftTransferDialog.close();
+        showSuccess(`Borrador #${result.draft_id} transferido a ${result.department_name}`);
+        // Ya no es de su departamento: sale de la lista
+        selectedDraftId = null;
+        await loadDrafts();
+    });
 
     draftReassign.addEventListener('change', async () => {
         if (selectedDraftId === null || !draftReassign.value) return;
@@ -12181,7 +12251,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let bellLoaded = false;
 
     // Los de borradores no tienen ticket: se identifican por el borrador
-    const noticeKey = (item) => (item.kind === 'draft_assigned' ? `draft:${item.draft_id}` : `${item.ticket_id}:${item.kind}`);
+    // Asignado (sin interruptor) o transferido a su departamento (con interruptor)
+    const isDraftNotice = (item) => item.kind === 'draft_assigned' || item.kind === 'draft_transferred';
+    const noticeKey = (item) => (isDraftNotice(item) ? `${item.kind}:${item.draft_id}` : `${item.ticket_id}:${item.kind}`);
 
     // "2 h 05 min", "45 min", "3 d 4 h"
     function durationText(seconds) {
@@ -12236,7 +12308,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bellLoaded) {
             data.items.filter(item => !item.read && !bellKnown.has(noticeKey(item))).forEach(item => {
                 toast(noticeToastText(item), {
-                    action: item.kind === 'draft_assigned' ? 'Ver borrador'
+                    action: isDraftNotice(item) ? 'Ver borrador'
                         : (item.kind === 'report' || item.kind === 'overdue' ? 'Ver reporte' : 'Ver ticket'),
                     duration: 8000,
                     onClose: (reason) => { if (reason === 'action') openNotice(item); },
@@ -12257,7 +12329,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         bellItems.forEach(item => {
-            const calm = item.kind === 'due_50' || item.kind === 'draft_assigned';
+            const calm = item.kind === 'due_50' || isDraftNotice(item);
             const li = makeEl('li', `bell-item${item.read ? '' : ' is-unread'}${calm ? '' : ' is-urgent'}`);
             const open = makeEl('button', 'bell-open');
             open.type = 'button';
@@ -12306,10 +12378,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Vencido o reporte: al Reporte de vencimiento; 50 % y 80 %: al ticket
     function openNotice(item) {
-        markNoticesRead(item.kind === 'draft_assigned' ? { draft_id: item.draft_id } : { ticket_id: item.ticket_id });
+        markNoticesRead(isDraftNotice(item) ? { draft_id: item.draft_id } : { ticket_id: item.ticket_id });
         closeBellPanel();
         closeSideNav();
-        if (item.kind === 'draft_assigned') openDraftById(item.draft_id);
+        if (isDraftNotice(item)) openDraftById(item.draft_id);
         else if (item.kind === 'overdue' || item.kind === 'report') openOverdueReport(item.ticket_id);
         else if (item.kind === 'ticket_resolved') {
             // Enlace a la documentación de la solución

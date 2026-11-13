@@ -956,6 +956,7 @@
                         </div>
                         <p id="draftReason" class="ui-notice is-warn draft-reason" hidden></p>
                         <p id="draftDepartment" class="help-text draft-department" hidden></p>
+                        <p id="draftTransferNote" class="ui-notice draft-transfer-note" hidden></p>
                         <div id="draftReassignField" class="ui-field draft-reassign" hidden>
                             <label for="draftReassign">Reasignar a</label>
                             <select id="draftReassign" class="ui-input"></select>
@@ -1006,6 +1007,7 @@
                             <div id="draftActions" class="draft-actions">
                                 <button type="button" id="draftDiscardBtn" class="ui-btn ui-btn-quiet-danger">Descartar</button>
                                 <button type="button" id="draftDetailsBtn" class="ui-btn ui-btn-secondary">Pedir más detalles</button>
+                                <button type="button" id="draftTransferBtn" class="ui-btn ui-btn-secondary" hidden>Transferir</button>
                                 <button type="submit" id="draftConfirmBtn" class="ui-btn ui-btn-primary">Crear ticket</button>
                                 <span id="draftDetailsHint" class="draft-actions-hint">"Pedir más detalles" le escribe al remitente y elimina este borrador; si responde, llega como un correo nuevo.</span>
                             </div>
@@ -1452,6 +1454,28 @@
             <p id="transferError" class="dialog-error" role="alert" hidden></p>
             <div class="dialog-actions">
                 <button type="button" id="transferCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Transferir</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Transferir un borrador a otro departamento (coordinador, con tickets por departamento) -->
+    <dialog id="draftTransferDialog" class="app-dialog" aria-labelledby="draftTransferTitle">
+        <form id="draftTransferForm" class="profile-form">
+            <h2 id="draftTransferTitle" class="modal-title">Transferir el borrador a otro departamento</h2>
+            <p id="draftTransferDraft" class="help-text"></p>
+            <div class="form-group">
+                <label for="draftTransferTarget">Departamento destino</label>
+                <select id="draftTransferTarget" autocomplete="off" required></select>
+            </div>
+            <div class="form-group">
+                <label for="draftTransferReason">Motivo (mínimo 15 caracteres)</label>
+                <textarea id="draftTransferReason" rows="3" minlength="15" maxlength="300" required></textarea>
+                <small class="help-text">El borrador llega completo al coordinador del destino, con un aviso en su campana. Usted deja de verlo. Queda registrado como corrección de la IA.</small>
+            </div>
+            <p id="draftTransferError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="draftTransferCancel" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-submit">Transferir</button>
             </div>
         </form>

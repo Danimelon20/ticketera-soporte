@@ -6,6 +6,8 @@
 - Al vencer, el reporte de vencimiento: a coordinadores, pendiente de revisar
   hasta que se registre la causa.
 - "Nuevo borrador asignado": al revisor del borrador, mientras siga pendiente (draft_assignments).
+- Borrador transferido a su departamento: al coordinador del destino, mientras siga pendiente y en su
+  departamento (draft_transfers).
 Cada aviso se genera una sola vez por ticket (ticket_due_notices). La primera revisión después de
 instalar esto solo registra lo que ya correspondía (baseline) y no lo muestra.
 Privacidad: solo número, título enmascarado y nombres; nunca descripción, teléfono ni cédula.
@@ -125,6 +127,7 @@ def items_for(db: Session, user: models.User, now: datetime | None = None) -> li
             "suggestion": suggestion,
         })
     items += _draft_items(db, user)
+    items += _transfer_items(db, user)
     items += _inbox_items(db, user)
     items.sort(key=lambda i: (i["created_at"], i["ticket_id"] or 0, i.get("draft_id") or 0), reverse=True)
     return items
@@ -164,6 +167,57 @@ def _draft_items(db: Session, user: models.User) -> list[dict]:
         }
         for row in _draft_rows(db, user)
     ]
+
+
+def _transfer_rows(db: Session, user: models.User) -> list[models.DraftTransfer]:
+    """Borradores transferidos a su departamento que siguen pendientes y siguen ahí (si se volvió a transferir,
+    el aviso ya no es suyo)."""
+    if not routing.enforced(db):
+        return []
+    return (
+        db.query(models.DraftTransfer)
+        .join(models.EmailDraft, models.EmailDraft.id == models.DraftTransfer.draft_id)
+        .join(models.DraftClassification, models.DraftClassification.draft_id == models.DraftTransfer.draft_id)
+        .filter(
+            models.DraftTransfer.notify_user_id == user.id,
+            models.EmailDraft.status.in_(auto_assign.DRAFT_PENDING_STATUSES),
+            models.DraftClassification.department_id == models.DraftTransfer.to_department_id,
+        )
+        .order_by(models.DraftTransfer.id.desc())
+        .all()
+    )
+
+
+def _transfer_items(db: Session, user: models.User) -> list[dict]:
+    """Borrador transferido a su departamento: asunto enmascarado y la frase con el origen y el motivo."""
+    rows = _transfer_rows(db, user)
+    if not rows:
+        return []
+    by_id = routing.departments_by_id(db)
+    items, seen = [], set()
+    for row in rows:
+        # Uno por borrador: la transferencia más reciente
+        if row.draft_id in seen:
+            continue
+        seen.add(row.draft_id)
+        draft = db.get(models.EmailDraft, row.draft_id)
+        actor = db.get(models.User, row.transferred_by)
+        title = _redact(draft.title or draft.subject or "Borrador")
+        source = routing.path_label(by_id.get(row.from_department_id), by_id)
+        items.append({
+            "ticket_id": None,
+            "draft_id": row.draft_id,
+            "title": title,
+            "kind": "draft_transferred",
+            "created_at": row.transferred_at,
+            "due_at": None,
+            "read": row.seen_at is not None,
+            "needs_review": False,
+            "suggestion": None,
+            "text": _redact(f"Borrador #{row.draft_id} transferido desde {source} por "
+                            f"{(actor.name if actor else None) or 'Sin nombre'}: {row.reason}"),
+        })
+    return items
 
 
 def _inbox_items(db: Session, user: models.User) -> list[dict]:
@@ -211,8 +265,12 @@ def mark_read(db: Session, user: models.User, ticket_id: int | None = None, now:
         if row.seen_at is None and (every or row.draft_id == draft_id):
             row.seen_at = now
             count += 1
+    for row in _transfer_rows(db, user):
+        if row.seen_at is None and (every or row.draft_id == draft_id):
+            row.seen_at = now
+            count += 1
     for item in items_for(db, user, now):
-        if item["kind"] in ("draft_assigned",) + models.INBOX_KINDS:
+        if item["kind"] in ("draft_assigned", "draft_transferred") + models.INBOX_KINDS:
             continue
         if item["read"] or (not every and item["ticket_id"] != ticket_id):
             continue

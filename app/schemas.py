@@ -707,12 +707,39 @@ class DraftRead(BaseModel):
     # Tickets por departamento: departamento elegido por la IA o el administrador; «Por clasificar» si todavía no
     department_name: Optional[str] = None
     classification: Optional[Literal["routed", "pending", "classified"]] = None
+    # Transferir a otro departamento (el coordinador del departamento) y la última transferencia que lo trajo
+    can_transfer: bool = False
+    transfer_note: Optional[str] = None
 
 
 class DraftAssign(BaseModel):
     """El coordinador elige otro técnico para revisar el borrador."""
     user_id: int
     confirm_unavailable: bool = False
+
+
+class DraftTransferOption(BaseModel):
+    """Destino para transferir un borrador: los que no se pueden elegir traen el motivo."""
+    id: int
+    path: str
+    enabled: bool
+    disabled_reason: Optional[str] = None
+
+
+class DraftTransferRequest(BaseModel):
+    department_id: int
+    # Motivo obligatorio: al menos 15 caracteres (igual que transferir tickets)
+    reason: str = Field(min_length=15, max_length=300)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value):
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+
+class DraftTransferResult(BaseModel):
+    draft_id: int
+    department_name: str
 
 
 class DraftTechnician(BaseModel):
@@ -1017,8 +1044,8 @@ class OverdueNotice(BaseModel):
     ticket_id: Optional[int] = None
     draft_id: Optional[int] = None
     title: str
-    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned", "ticket_transferred",
-                  "ticket_resolved"]
+    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned", "draft_transferred",
+                  "ticket_transferred", "ticket_resolved"]
     created_at: datetime
     due_at: Optional[datetime] = None
     read: bool
