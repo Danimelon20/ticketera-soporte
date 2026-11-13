@@ -531,9 +531,10 @@ def test_deadline_passed_leaves_ticket_normal(make_user, make_ticket, grouping_o
     make_ticket(requester, title=f"Outlook no envía {tag}")
     second = make_ticket(requester, title=f"Outlook no envía nada {tag}")
     monkeypatch.setattr(config, "GROUPING_ENABLED", True)
-    # El reloj ya pasó el plazo cuando toca preguntarle a la IA (grouping y similarity usan el mismo time)
-    ticks = [1000.0]
-    monkeypatch.setattr(grouping.time, "monotonic", lambda: ticks.pop(0) if ticks else 2000.0)
+    # Plazo de 0 s: vence en el mismo instante en que empieza la revisión. La similitud está simulada, así que el
+    # plazo se revisa al preguntarle a la IA; time.monotonic nunca retrocede, así que similarity.remaining siempre
+    # lo ve vencido. Sin reemplazar el reloj del proceso (otros hilos lo usan)
+    monkeypatch.setattr(config, "GROUPING_TIMEOUT_SECONDS", 0)
     assert grouping.after_ticket_created(second["id"]) is None
     assert get(models.Ticket, second["id"]).status == "new"
     assert grouping_on["chat_calls"] == []
