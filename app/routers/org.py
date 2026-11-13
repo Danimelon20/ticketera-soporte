@@ -272,6 +272,18 @@ def test_classification(data: ClassificationTestRequest, db: Session = Depends(g
 # ----- Por clasificar: borradores que la IA no envió a un coordinador -----
 
 EXCERPT_CHARS = 300
+DISAGREEMENT = "La IA y la similitud no coinciden"
+
+
+def _option_roles(row: models.DraftClassification) -> list[str]:
+    """Por qué está cada opción: la 1.ª es la de la IA (si eligió) y la 2.ª la más parecida por similitud que no
+    es la 1.ª. Si la IA no eligió, las dos salen de la similitud."""
+    ai_chose = row.ai_department_id is not None and row.ai_department_id == row.option1_id
+    if not ai_chose:
+        return ["similarity", "second"]
+    if row.ai_agrees:
+        return ["both", "second"]
+    return ["ai", "similarity"]
 
 
 @router.get("/drafts/pending-classification", response_model=PendingDrafts)
@@ -282,12 +294,16 @@ def pending_classification(db: Session = Depends(get_db), admin=Depends(require_
     items = []
     for draft, row in draft_classification.pending_query(db).all():
         options = []
-        for dept_id, sim in ((row.option1_id, row.option1_similarity), (row.option2_id, row.option2_similarity)):
+        roles = _option_roles(row)
+        pairs = ((row.option1_id, row.option1_similarity), (row.option2_id, row.option2_similarity))
+        for (dept_id, sim), role in zip(pairs, roles):
             dept = by_id.get(dept_id)
             if dept is not None and routing.serves_tickets(dept, by_id):
                 options.append(PendingDraftOption(
-                    department_id=dept.id, path=routing.path_label(dept, by_id), similarity=sim,
+                    department_id=dept.id, path=routing.path_label(dept, by_id), similarity=sim, role=role,
                     has_coordinator=draft_classification.has_coordinator(db, dept.id)))
+        disagreement = DISAGREEMENT if any(o.role == "ai" for o in options) and any(
+            o.role == "similarity" for o in options) else None
         items.append(PendingDraft(
             draft_id=draft.id, created_at=draft.created_at,
             requester_name=(draft.requester.name if draft.requester else None) or "Sin nombre",
@@ -296,7 +312,7 @@ def pending_classification(db: Session = Depends(get_db), admin=Depends(require_
             summary=draft.summary,
             pending_reason=models.DRAFT_PENDING_REASONS.get(row.pending_reason),
             ai_department_path=routing.path_label(by_id.get(row.ai_department_id), by_id),
-            ai_reason=row.ai_reason, ai_margin=row.ai_margin, options=options,
+            ai_reason=row.ai_reason, ai_margin=row.ai_margin, options=options, disagreement=disagreement,
         ))
     return PendingDrafts(threshold=classifier.threshold(db), routing_enforced=routing.enforced(db), items=items)
 

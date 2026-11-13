@@ -1428,3 +1428,6 @@ body.staff-shell :is(.panel-table-wrap, .invites-table-wrap, #directoryView .tab
 #draftsUnclassifiedList .org-row-actions .ui-btn { white-space: normal; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
 
 #draftsUnclassifiedList .drafts-unclassified-dept { flex: 1 1 180px; min-width: 0; }
+
+#draftsUnclassifiedList .drafts-disagreement { align-self: flex-start; margin-top: 4px; }
+

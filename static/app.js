@@ -10794,6 +10794,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftsUnclassifiedList = document.getElementById('draftsUnclassifiedList');
     const thresholdInput = document.getElementById('thresholdInput');
 
+    // De dónde sale cada opción de «Por clasificar»
+    const OPTION_ROLES = {
+        both: 'IA y similitud', ai: 'Elegido por la IA', similarity: 'Más parecido (similitud)', second: '2.º más parecido',
+    };
+
     function similarityLabel(value) {
         return value === null || value === undefined ? 'sin similitud' : `similitud ${value.toFixed(3)}`;
     }
@@ -10827,12 +10832,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const margin = item.ai_margin === null || item.ai_margin === undefined ? '' : ` · margen ${item.ai_margin.toFixed(3)}`;
                 text.appendChild(makeEl('span', 'org-row-sub', `IA: ${item.ai_department_path || 'Ninguno'}${margin} — ${item.ai_reason}`));
             }
+            if (item.disagreement) text.appendChild(makeEl('span', 'ui-tag is-warn drafts-disagreement', item.disagreement));
             const actions = makeEl('div', 'org-row-actions');
-            // Un clic: las dos opciones más probables
-            item.options.forEach((option, index) => {
-                const label = `${index === 0 ? '1.ª' : '2.ª'}: ${option.path} (${option.has_coordinator
+            // Un clic: las dos opciones más probables, cada una con de dónde sale. Si la IA y la similitud no
+            // coinciden, ninguna se destaca
+            item.options.forEach(option => {
+                const label = `${OPTION_ROLES[option.role] || 'Opción'}: ${option.path} (${option.has_coordinator
                     ? similarityLabel(option.similarity) : 'sin coordinador activo'})`;
-                const button = makeEl('button', `ui-btn ui-btn-sm ${index === 0 ? 'ui-btn-primary' : 'ui-btn-secondary'}`, label);
+                const primary = option.role === 'both' || (option.role === 'ai' && !item.disagreement);
+                const button = makeEl('button', `ui-btn ui-btn-sm ${primary ? 'ui-btn-primary' : 'ui-btn-secondary'}`, label);
                 button.type = 'button';
                 button.dataset.chooseDraft = String(item.draft_id);
                 button.dataset.chooseDept = String(option.department_id);
@@ -10842,12 +10850,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 actions.appendChild(button);
             });
-            // Otro departamento (o sin sugerencia de la IA)
+            // Otro departamento (o, sin sugerencia de la IA, el único camino). Siempre empieza vacío: sin
+            // autocomplete el navegador no restaura la selección de otra fila al recargar
             const select = makeEl('select', 'ui-input drafts-unclassified-dept');
-            select.setAttribute('aria-label', `Otro departamento para el borrador #${item.draft_id}`);
-            departmentOptions(select, { servingOnly: true, empty: 'Otro departamento' });
+            select.setAttribute('autocomplete', 'off');
+            select.setAttribute('aria-label', `${item.options.length ? 'Otro departamento' : 'Departamento'} para el borrador #${item.draft_id}`);
+            departmentOptions(select, { servingOnly: true, empty: item.options.length ? 'Otro departamento…' : 'Seleccionar…' });
+            select.value = '';
             const other = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Enviar');
             other.type = 'button';
+            other.disabled = true;
             other.dataset.chooseDraft = String(item.draft_id);
             other.dataset.chooseOther = 'true';
             actions.append(select, other);
@@ -10856,6 +10868,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     ADMIN_SECTION_LOADERS['drafts-unclassified'] = showDraftsUnclassified;
+
+    // «Enviar» solo con un departamento elegido (un solo listener para todas las filas)
+    draftsUnclassifiedList.addEventListener('change', (e) => {
+        const select = e.target.closest('.drafts-unclassified-dept');
+        if (!select) return;
+        const send = select.closest('li').querySelector('button[data-choose-other]');
+        if (send) send.disabled = !select.value;
+    });
 
     draftsUnclassifiedList.addEventListener('click', async (e) => {
         const button = e.target.closest('button[data-choose-draft]');

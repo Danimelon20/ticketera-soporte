@@ -139,6 +139,9 @@ def test_ambiguous_email_waits_with_two_masked_options(client, make_user, ai, or
     [item] = [i for i in _pending(client, admin)["items"] if i["draft_id"] == draft_id]
     assert [o["department_id"] for o in item["options"]] == [org["soporte"], org["redes"]]
     assert all(o["has_coordinator"] for o in item["options"])
+    # Queda claro de dónde sale cada opción y que no coinciden
+    assert [o["role"] for o in item["options"]] == ["ai", "similarity"]
+    assert item["disagreement"] == "La IA y la similitud no coinciden"
     assert item["pending_reason"] == models.DRAFT_PENDING_REASONS["below_threshold"]
     # Teléfono enmascarado en el asunto y el fragmento
     assert "8888-1234" not in item["subject"] and "8888-1234" not in item["excerpt"]
@@ -316,3 +319,33 @@ def test_simulate_email_creates_analyzes_and_classifies(client, make_user, ai, o
         draft = db.query(models.EmailDraft).filter(models.EmailDraft.requester_id == requester["id"]).one()
         assert draft.status == "pending_review"
         assert draft_classification.row_of(db, draft.id).department_id == org["redes"]
+
+
+# ----- Corrección de la Fase 2: de dónde sale cada opción -----
+
+def test_options_say_where_they_come_from(client, make_user, ai, org, routing_on):
+    admin = make_user("admin")
+    requester = make_user("requester")
+    # La IA no eligió: las dos salen de la similitud
+    ai["choice"] = None
+    no_ai = _arrive(requester, NETWORK)
+    # La IA y la similitud coinciden, pero el umbral no se alcanza
+    with SessionLocal() as db:
+        routing.set_setting(db, classifier.THRESHOLD_KEY, "1.0")
+        db.commit()
+    try:
+        ai["choice"] = _label(org["redes"])
+        agree = _arrive(requester, NETWORK)
+    finally:
+        with SessionLocal() as db:
+            routing.set_setting(db, classifier.THRESHOLD_KEY, None)
+            db.commit()
+    items = {i["draft_id"]: i for i in _pending(client, admin)["items"]}
+    assert [o["role"] for o in items[no_ai]["options"]] == ["similarity", "second"]
+    assert items[no_ai]["options"][0]["department_id"] == org["redes"] and items[no_ai]["disagreement"] is None
+    assert [o["role"] for o in items[agree]["options"]] == ["both", "second"]
+    assert items[agree]["disagreement"] is None
+    # La 1.ª por similitud nunca tiene menos similitud que la 2.ª cuando las dos salen de la similitud
+    first, second = items[agree]["options"]
+    assert first["similarity"] >= second["similarity"]
+

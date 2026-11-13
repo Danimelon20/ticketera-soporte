@@ -1196,6 +1196,9 @@ class PendingDraftOption(BaseModel):
     similarity: Optional[float] = None
     # Sin coordinador activo no se puede elegir (el servidor responde 409)
     has_coordinator: bool = True
+    # Por qué está aquí: ai (lo eligió la IA), similarity (el más parecido a los ejemplos), both (las dos
+    # coinciden) o second (el 2.º más parecido)
+    role: Literal["ai", "similarity", "both", "second"] = "second"
 
 
 class PendingDraft(BaseModel):
@@ -1211,6 +1214,8 @@ class PendingDraft(BaseModel):
     ai_reason: Optional[str] = None
     ai_margin: Optional[float] = None
     options: list[PendingDraftOption] = []
+    # La IA y la similitud eligieron departamentos distintos (texto para el administrador)
+    disagreement: Optional[str] = None
 
 
 class PendingDrafts(BaseModel):
