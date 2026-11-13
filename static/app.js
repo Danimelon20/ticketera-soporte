@@ -10884,6 +10884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Administración › Por clasificar: correos que la IA no envió directo a un coordinador -----
     const draftsUnclassifiedList = document.getElementById('draftsUnclassifiedList');
     const thresholdInput = document.getElementById('thresholdInput');
+    const minSimilarityInput = document.getElementById('minSimilarityInput');
 
     // De dónde sale cada opción de «Por clasificar»
     const OPTION_ROLES = {
@@ -10906,6 +10907,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         document.getElementById('draftsUnclassifiedOff').hidden = data.routing_enforced;
         if (document.activeElement !== thresholdInput) thresholdInput.value = data.threshold.toFixed(3);
+        if (document.activeElement !== minSimilarityInput) minSimilarityInput.value = data.min_similarity.toFixed(3);
         draftsUnclassifiedList.replaceChildren();
         if (!data.items.length) {
             draftsUnclassifiedList.appendChild(emptyState({ title: 'No hay correos por clasificar', text: 'La IA envió todos los correos a un coordinador.' }));
@@ -11005,6 +11007,20 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             thresholdInput.value = data.threshold.toFixed(3);
             showSuccess('Umbral guardado: aplica desde el siguiente correo');
+        } catch (err) {
+            showError(err.message);
+        }
+    });
+
+    document.getElementById('minSimilarityForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const data = await apiFetch('/admin/classification/min-similarity', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ min_similarity: Number(minSimilarityInput.value) }),
+            });
+            minSimilarityInput.value = data.min_similarity.toFixed(3);
+            showSuccess('Similitud mínima guardada: aplica desde el siguiente correo');
         } catch (err) {
             showError(err.message);
         }

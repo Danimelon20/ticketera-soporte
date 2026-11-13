@@ -25,6 +25,10 @@ from . import chatbot, config, email_analysis, models, routing, similarity
 
 THRESHOLD_KEY = "classification_threshold"
 DEFAULT_THRESHOLD = 0.05
+# Similitud mínima del 1.º lugar para ir directo: un correo que no se parece a ninguna ficha no va directo aunque el
+# margen sea grande. 0.40 sale de scripts.eval_classifier con las fichas DEMO (soporte ≥ 0.437, almuerzo ≤ 0.354)
+MIN_SIMILARITY_KEY = "classification_min_similarity"
+DEFAULT_MIN_SIMILARITY = 0.40
 NONE_CHOICE = "Ninguno"
 FIELD_CHARS = 1000
 EXAMPLE_CHARS = 300
@@ -51,6 +55,7 @@ NO_EXAMPLES = ("Sin ejemplos en la ficha: {path} participa solo con «Qué atien
                "(siempre pasan por «Por clasificar»)")
 DISAGREE = "La IA y la similitud eligen departamentos distintos"
 LOW_MARGIN = "El margen ({margin:.3f}) no alcanza el umbral ({threshold:.3f})"
+LOW_SIMILARITY = "La similitud del 1.º ({similarity:.3f}) no alcanza el mínimo ({minimum:.3f})"
 
 
 @dataclass
@@ -65,11 +70,15 @@ class Participant:
 @dataclass
 class Classification:
     threshold: float
+    min_similarity: float = DEFAULT_MIN_SIMILARITY
     llm_department_id: int | None = None
     reason: str | None = None
     # (department_id, similitud) de mayor a menor; vacío sin embeddings
     similarities: list[tuple[int, float]] = field(default_factory=list)
     margin: float | None = None
+    # Similitud del 1.º lugar; low_similarity: no alcanzó el mínimo (por eso no va directo)
+    top_similarity: float | None = None
+    low_similarity: bool = False
     agrees: bool = False
     passes: bool = False
     # Las dos opciones más probables (para «Por clasificar»)
@@ -123,6 +132,14 @@ def threshold(db: Session) -> float:
         return float(value) if value is not None else DEFAULT_THRESHOLD
     except ValueError:
         return DEFAULT_THRESHOLD
+
+
+def min_similarity(db: Session) -> float:
+    value = routing.get_setting(db, MIN_SIMILARITY_KEY)
+    try:
+        return float(value) if value is not None else DEFAULT_MIN_SIMILARITY
+    except ValueError:
+        return DEFAULT_MIN_SIMILARITY
 
 
 # ----- 1. Elección de la IA -----
@@ -299,7 +316,7 @@ def classify(db: Session, subject: str, body: str, cache: bool = True, lock: boo
     """Clasifica un correo. No crea borradores ni tickets. Nunca lanza excepciones por la IA o los embeddings.
     cache=False: no guarda los vectores de los ejemplos (solo lectura, para scripts.eval_classifier).
     lock=False: quien llama ya tiene el turno del modelo (el análisis de los borradores)."""
-    result = Classification(threshold=threshold(db))
+    result = Classification(threshold=threshold(db), min_similarity=min_similarity(db))
     people = participants(db)
     missing = missing_profiles(db)
     if not people:
@@ -324,15 +341,20 @@ def classify(db: Session, subject: str, body: str, cache: bool = True, lock: boo
     sims = result.similarities
     if sims:
         result.margin = sims[0][1] - sims[1][1] if len(sims) > 1 else sims[0][1]
+        result.top_similarity = sims[0][1]
         result.agrees = result.llm_department_id is not None and sims[0][0] == result.llm_department_id
         if result.llm_department_id is not None and not result.agrees:
             result.notes.append(DISAGREE)
     chosen = next((p for p in people if p.id == result.llm_department_id), None)
     margin_ok = result.margin is not None and result.margin >= result.threshold
     # Sin ejemplos nunca va directo: «Qué atiende» es más general y daría falsos «directo»
-    result.passes = result.agrees and margin_ok and chosen is not None and bool(chosen.examples)
+    similar_ok = result.top_similarity is not None and result.top_similarity >= result.min_similarity
+    result.passes = result.agrees and margin_ok and similar_ok and chosen is not None and bool(chosen.examples)
     if result.agrees and not margin_ok:
         result.notes.append(LOW_MARGIN.format(margin=result.margin, threshold=result.threshold))
+    if result.top_similarity is not None and not similar_ok:
+        result.low_similarity = True
+        result.notes.append(LOW_SIMILARITY.format(similarity=result.top_similarity, minimum=result.min_similarity))
     # Siempre, por cada departamento sin ejemplos (elija lo que elija la IA): hay que completar su ficha
     result.notes += [NO_EXAMPLES.format(path=p.path) for p in people if not p.examples]
     if missing:

@@ -1206,6 +1206,8 @@ class ClassificationTestResult(BaseModel):
     options: list[ClassificationOption] = []
     margin: Optional[float] = None
     threshold: float
+    top_similarity: Optional[float] = None
+    min_similarity: float = 0.4
     agrees: bool
     passes: bool
     notes: list[str] = []
@@ -1241,6 +1243,7 @@ class PendingDraft(BaseModel):
 
 class PendingDrafts(BaseModel):
     threshold: float
+    min_similarity: float = 0.4
     routing_enforced: bool
     items: list[PendingDraft] = []
 
@@ -1261,6 +1264,14 @@ class ThresholdUpdate(BaseModel):
 
 class ThresholdRead(BaseModel):
     threshold: float
+
+
+class MinSimilarityUpdate(BaseModel):
+    min_similarity: float = Field(ge=0, le=1)
+
+
+class MinSimilarityRead(BaseModel):
+    min_similarity: float
 
 
 class PlacementUpdate(BaseModel):

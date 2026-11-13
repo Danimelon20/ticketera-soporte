@@ -15,7 +15,7 @@ from ..business_hours import day_hours
 from ..schemas import (
     AdminOverview, CategoryOption, ClassificationOption, ClassificationTestRequest, ClassificationTestResult,
     DepartmentProfileRead, DepartmentProfileUpdate, DraftDepartmentChoice, DraftDepartmentChosen, PendingDraft,
-    PendingDraftOption, PendingDrafts, ThresholdRead, ThresholdUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    PendingDraftOption, PendingDrafts, ThresholdRead, ThresholdUpdate, MinSimilarityRead, MinSimilarityUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
     TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
@@ -265,6 +265,7 @@ def test_classification(data: ClassificationTestRequest, db: Session = Depends(g
     return ClassificationTestResult(
         llm_department_id=result.llm_department_id, llm_department_path=label(result.llm_department_id),
         reason=result.reason, margin=result.margin, threshold=result.threshold,
+        top_similarity=result.top_similarity, min_similarity=result.min_similarity,
         agrees=result.agrees, passes=result.passes, notes=result.notes,
         options=[ClassificationOption(department_id=d, path=label(d), similarity=sims.get(d))
                  for d in result.options],
@@ -316,7 +317,8 @@ def pending_classification(db: Session = Depends(get_db), admin=Depends(require_
             ai_department_path=routing.path_label(by_id.get(row.ai_department_id), by_id),
             ai_reason=row.ai_reason, ai_margin=row.ai_margin, options=options, disagreement=disagreement,
         ))
-    return PendingDrafts(threshold=classifier.threshold(db), routing_enforced=routing.enforced(db), items=items)
+    return PendingDrafts(threshold=classifier.threshold(db), min_similarity=classifier.min_similarity(db),
+                         routing_enforced=routing.enforced(db), items=items)
 
 
 @router.post("/drafts/{draft_id}/department", response_model=DraftDepartmentChosen)
@@ -336,6 +338,15 @@ def update_threshold(data: ThresholdUpdate, db: Session = Depends(get_db), admin
     draft_classification.set_threshold(db, admin, data.threshold)
     db.commit()
     return ThresholdRead(threshold=classifier.threshold(db))
+
+
+@router.put("/classification/min-similarity", response_model=MinSimilarityRead)
+def update_min_similarity(data: MinSimilarityUpdate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    """Similitud mínima del 1.º lugar para enviar un borrador directo al coordinador. Aplica desde el siguiente
+    correo."""
+    draft_classification.set_min_similarity(db, admin, data.min_similarity)
+    db.commit()
+    return MinSimilarityRead(min_similarity=classifier.min_similarity(db))
 
 
 # ----- Importación del organigrama (el archivo solo se lee en memoria: nunca se guarda) -----

@@ -974,6 +974,7 @@ DRAFT_PENDING_REASONS = {
     "ai_error": "La IA no pudo analizar el correo",
     "installed": "Llegó antes de la clasificación por departamento",
     "no_profiles": "Ningún departamento tiene ficha («Qué atiende»)",
+    "low_similarity": "El correo no se parece a ninguna ficha",
 }
 
 

@@ -18,6 +18,7 @@ NO_COORDINATOR = "Ese departamento no tiene coordinador activo: asígnele uno pr
 ALREADY_CLASSIFIED = "Este borrador ya tiene departamento"
 NOT_FOUND = "El borrador no existe o ya no espera revisión"
 THRESHOLD_LABEL = "Umbral de clasificación de correos"
+MIN_SIMILARITY_LABEL = "Similitud mínima de clasificación"
 
 
 def _now() -> datetime:
@@ -75,6 +76,8 @@ def classify_draft(db: Session, draft: models.EmailDraft, lock: bool = True) -> 
             row.pending_reason = "no_coordinator"
         elif classifier.NO_PROFILES in result.notes:
             row.pending_reason = "no_profiles"
+        elif result.low_similarity:
+            row.pending_reason = "low_similarity"
         elif result.llm_department_id is None and not result.similarities:
             row.pending_reason = "ai_error"
         else:
@@ -138,6 +141,16 @@ def choose(db: Session, admin: models.User, draft_id: int, department_id: int) -
     # Para calibrar el umbral: ¿la IA tenía razón con su 1.ª opción? (sin sugerencia: no cuenta)
     row.matched_first = (dept.id == row.option1_id) if row.option1_id is not None else None
     return row
+
+
+def set_min_similarity(db: Session, admin: models.User, value: float) -> None:
+    """Similitud mínima del 1.º lugar, editable por el administrador; el cambio queda en el Registro de cambios.
+    No hace commit."""
+    old = classifier.min_similarity(db)
+    routing.set_setting(db, classifier.MIN_SIMILARITY_KEY, f"{value:.3f}", actor=admin)
+    if round(old, 3) != round(value, 3):
+        audit.record(db, admin.id, "setting_changed", target_label=MIN_SIMILARITY_LABEL,
+                     old=f"{old:.3f}", new=f"{value:.3f}")
 
 
 def set_threshold(db: Session, admin: models.User, value: float) -> None:

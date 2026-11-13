@@ -252,6 +252,77 @@ def test_threshold_is_editable_audited_and_applies_to_the_next_email(client, mak
             db.commit()
 
 
+# ----- Similitud mínima del 1.º lugar -----
+
+@pytest.fixture
+def faint(monkeypatch):
+    """Embeddings con una dimensión propia del correo («computadora», que no está en las fichas): la 1.ª opción
+    sigue siendo Redes, con margen grande, pero con una similitud baja."""
+    def _embed(texts, deadline):
+        return [_vector(t) + [3.0 * t.lower().count("computadora")] for t in texts]
+
+    monkeypatch.setattr(similarity, "embed", _embed)
+
+
+def _set_min_similarity(value):
+    with SessionLocal() as db:
+        routing.set_setting(db, classifier.MIN_SIMILARITY_KEY, value)
+        db.commit()
+
+
+def test_min_similarity_is_editable_and_audited(client, make_user, routing_on):
+    admin = make_user("admin")
+    url = "/api/admin/classification/min-similarity"
+    try:
+        assert _pending(client, admin)["min_similarity"] == classifier.DEFAULT_MIN_SIMILARITY == 0.40
+        assert client.put(url, headers=admin["headers"], json={"min_similarity": 1.5}).status_code == 422
+        assert client.put(url, headers=admin["headers"], json={"min_similarity": -0.1}).status_code == 422
+        for role in ("coordinator", "technician"):
+            assert client.put(url, headers=make_user(role)["headers"], json={"min_similarity": 0.3}).status_code == 403
+        response = client.put(url, headers=admin["headers"], json={"min_similarity": 0.55})
+        assert response.status_code == 200 and response.json()["min_similarity"] == 0.55
+        assert _pending(client, admin)["min_similarity"] == 0.55
+        rows = changes("setting_changed", draft_classification.MIN_SIMILARITY_LABEL)
+        assert rows and rows[-1].old_value == "0.400" and rows[-1].new_value == "0.550"
+        assert rows[-1].actor_id == admin["id"]
+    finally:
+        _set_min_similarity(None)
+
+
+def test_email_that_resembles_no_profile_waits_even_with_a_big_margin(client, make_user, ai, org, routing_on,
+                                                                      faint):
+    """La IA y la similitud coinciden y el margen alcanza el umbral, pero la 1.ª opción se parece poco a su ficha:
+    va a «Por clasificar» con su motivo."""
+    admin = make_user("admin")
+    ai["choice"] = _label(org["redes"])
+    try:
+        _set_min_similarity("0.9")
+        draft_id = _arrive(make_user("requester"), NETWORK)
+        row = _row(draft_id)
+        assert row.status == "pending" and row.pending_reason == "low_similarity" and row.ai_agrees is True
+        item = next(i for i in _pending(client, admin)["items"] if i["draft_id"] == draft_id)
+        assert item["pending_reason"] == models.DRAFT_PENDING_REASONS["low_similarity"]
+        # Con el mínimo en 0 vuelve a ir directo
+        _set_min_similarity("0")
+        assert _row(_arrive(make_user("requester"), NETWORK)).status == "routed"
+    finally:
+        _set_min_similarity(None)
+
+
+def test_classification_test_shows_the_top_similarity_and_the_note(client, make_user, ai, org, faint):
+    admin = make_user("admin")
+    ai["choice"] = _label(org["redes"])
+    try:
+        _set_min_similarity("0.9")
+        data = client.post("/api/admin/classification/test", headers=admin["headers"],
+                           json={"subject": "", "body": NETWORK}).json()
+        assert data["passes"] is False and data["min_similarity"] == 0.9 and 0 < data["top_similarity"] < 0.9
+        assert data["agrees"] is True and data["margin"] >= data["threshold"]
+        assert any(n.startswith("La similitud del 1.º") for n in data["notes"])
+    finally:
+        _set_min_similarity(None)
+
+
 # ----- Pendientes al encender -----
 
 def test_pending_drafts_move_to_por_clasificar_when_switched_on(client, make_user, ai, org, routing_switch):
