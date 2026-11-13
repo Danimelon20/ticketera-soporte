@@ -7,6 +7,8 @@ Uso (entorno de pruebas encendido):
 Solo lee: no crea borradores, tickets ni historial y no guarda los vectores de los ejemplos. Solo corre con
 APP_ENV=pruebas. El departamento esperado se busca por su nombre corto (sin etiquetas como «[DEMO]»), por ejemplo
 «Redes», «Soporte N1» y «Soporte N2»; si no existe, el caso se omite. Los correos no traen datos personales.
+Un caso «Ninguno» es FALLA si la IA elige un departamento o si el correo iría directo a un coordinador. La columna
+«Similitud 1.º» sirve para ajustar la similitud mínima (soporte arriba, lo que no es soporte abajo).
 """
 import sys
 import time
@@ -23,6 +25,8 @@ CASES = (
     ("VPN", "VPN", "Desde la casa no puedo entrar a la VPN, me dice tiempo de espera agotado", "Redes"),
     ("Cuenta bloqueada", "Cuenta", "Me bloquearon la cuenta por intentar la clave varias veces", "Soporte N1"),
     ("Menú del almuerzo", "Saludos", "Les comparto el menú del almuerzo del viernes", NONE),
+    # Pregunta que no se parece a ninguna ficha: la IA llegó a elegir Soporte N1 («como el almuerzo»)
+    ("Menú (pregunta)", "", "¿Cuál es el menú del almuerzo del viernes?", NONE),
     ("Facturación", "", "El sistema de facturación no deja generar facturas desde esta mañana, sale un error de "
                         "base de datos.", "Soporte N2"),
     ("Facturas urgente", "Urgente facturas", "No puedo generar facturas, el sistema da error de base de datos "
@@ -53,25 +57,28 @@ def run() -> int:
         names = dict(zip((p.id for p in people), classifier.labels(people)))
         rows, details, correct, evaluated = [], [], 0, 0
         current_threshold = classifier.threshold(db)
+        current_minimum = classifier.min_similarity(db)
         for name, subject, body, expected in CASES:
             if expected != NONE and expected not in names.values():
-                rows.append((name, expected, "—", "—", "—", "—", "omitido"))
+                rows.append((name, expected, "—", "—", "—", "—", "—", "omitido"))
                 continue
             evaluated += 1
             start = time.monotonic()
             result = classifier.classify(db, subject, body, cache=False)
             seconds = time.monotonic() - start
             chosen = names.get(result.llm_department_id, NONE)
-            ok = chosen == expected
+            # Un correo que no es de soporte nunca puede llegar solo a un coordinador: si iría directo, es FALLA
+            ok = chosen == expected and not (expected == NONE and result.passes)
             correct += ok
             margin = "—" if result.margin is None else f"{result.margin:.3f}"
+            top = "—" if result.top_similarity is None else f"{result.top_similarity:.3f}"
             route = "directo" if result.passes else "Por clasificar"
-            rows.append((name, expected, chosen, margin, route, f"{seconds:.1f} s", "OK" if ok else "FALLA"))
+            rows.append((name, expected, chosen, top, margin, route, f"{seconds:.1f} s", "OK" if ok else "FALLA"))
             details.append((name, result.reason, result.notes))
         db.rollback()
     finally:
         db.close()
-    _table(("Correo", "Esperado", "Elección de la IA", "Margen", "Iría", "Tiempo", "OK/FALLA"), rows)
+    _table(("Correo", "Esperado", "Elección de la IA", "Similitud 1.º", "Margen", "Iría", "Tiempo", "OK/FALLA"), rows)
     skipped = len(CASES) - evaluated
     if skipped:
         print(f"\n{skipped} omitido(s): no hay un departamento que atienda tickets con ese nombre "
@@ -82,7 +89,8 @@ def run() -> int:
         for note in notes:
             print(f"    nota: {note}")
     print()
-    print(f"{correct}/{evaluated} aciertos de {evaluated} evaluados (umbral actual {current_threshold})")
+    print(f"{correct}/{evaluated} aciertos de {evaluated} evaluados (umbral actual {current_threshold}, "
+          f"similitud mínima {current_minimum})")
     return 0 if evaluated and correct == evaluated else 1
 
 
