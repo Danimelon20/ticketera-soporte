@@ -6637,6 +6637,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     navSection('drafts-unclassified', 'Por clasificar', 'admin/por-clasificar', () => showAdminSection('drafts-unclassified'), {
                         count: 'drafts_unclassified', tone: 'warn', context: 'Correos que la IA no envió directo a un coordinador',
                     }),
+                    navSection('precision', 'Precisión de la IA', 'admin/precision-ia', () => showAdminSection('precision'), {
+                        context: 'Correos directo y corregidos por departamento, y por qué fueron a «Por clasificar»',
+                    }),
                     navSection('unclassified', 'Sin departamento', 'admin/sin-departamento', () => showAdminSection('unclassified'), {
                         count: 'unclassified', tone: 'warn', context: 'Tickets abiertos que todavía no tienen departamento',
                     }),
@@ -10483,6 +10486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         departments: 'Departamentos', activation: 'Activación', panel: 'Panel',
         unclassified: 'Tickets sin departamento',
         'drafts-unclassified': 'Correos por clasificar',
+        precision: 'Precisión de la IA',
     };
     // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
     const ADMIN_SECTION_LOADERS = {};
@@ -11040,6 +11044,164 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     ADMIN_SECTION_LOADERS['drafts-unclassified'] = showDraftsUnclassified;
+
+    // ----- Administración › Precisión de la IA -----
+    const precisionRange = document.getElementById('precisionRange');
+    const precisionDates = document.getElementById('precisionDates');
+    const precisionFrom = document.getElementById('precisionFrom');
+    const precisionTo = document.getElementById('precisionTo');
+    let precisionSeq = 0;
+
+    // "2026-11-13" → "13/11/2026" (sin pasar por la zona horaria: es un día de la oficina)
+    function dayText(value) {
+        const [year, month, day] = String(value).split('-');
+        return `${day}/${month}/${year}`;
+    }
+
+    function pctText(value) {
+        return typeof value === 'number' ? `${value.toLocaleString('es-CR')} %` : '—';
+    }
+
+    async function showPrecision() {
+        const params = new URLSearchParams();
+        if (precisionRange.value === 'custom') {
+            if (!precisionFrom.value || !precisionTo.value) return;
+            params.set('from', precisionFrom.value);
+            params.set('to', precisionTo.value);
+        } else {
+            const from = new Date();
+            from.setDate(from.getDate() - Number(precisionRange.value));
+            params.set('from', localDateString(from));
+            params.set('to', localDateString(new Date()));
+        }
+        const seq = ++precisionSeq;
+        let data;
+        try {
+            data = await apiFetch(`/admin/classification/precision?${params}`, { silent: true });
+        } catch (err) {
+            if (seq === precisionSeq) showError(err.message || 'No se pudo cargar el reporte');
+            return;
+        }
+        if (seq !== precisionSeq) return;
+        renderPrecision(data);
+    }
+    ADMIN_SECTION_LOADERS.precision = showPrecision;
+
+    function renderPrecision(data) {
+        document.getElementById('precisionOff').hidden = data.routing_enforced;
+        const t = data.totals;
+        document.getElementById('precisionSummary').textContent = data.received
+            ? `Del ${dayText(data.date_from)} al ${dayText(data.date_to)}: ${data.received} correo(s) clasificados. `
+              + `${t.direct} fueron directo: ${t.hits} de ${t.confirmed} confirmados en el departamento de la IA `
+              + `(${pctText(t.accuracy)} de acierto), ${t.pending} pendiente(s) y ${t.bounced} con rebotes `
+              + `(${t.transfers} transferencia(s)). ${data.pending.arrived} fueron a «Por clasificar».`
+            : `Del ${dayText(data.date_from)} al ${dayText(data.date_to)}: no llegaron correos clasificados.`;
+        if (data.without_ai) {
+            document.getElementById('precisionSummary').textContent +=
+                ` No se cuentan ${data.without_ai} borrador(es) sin datos de la IA (por ejemplo, los DEMO, que se cargan ya clasificados).`;
+        }
+
+        // Pocos correos: los números son de referencia, no para ajustar
+        const few = document.getElementById('precisionFew');
+        few.hidden = !data.few_cases;
+        few.textContent = data.few_cases
+            ? `Con ${data.received} correo(s) en el periodo, los números todavía no alcanzan para ajustar el umbral, `
+              + `la similitud mínima o las fichas (hacen falta al menos ${data.min_cases}). Úselos solo como referencia.`
+            : '';
+
+        const body = document.getElementById('precisionBody');
+        body.replaceChildren();
+        if (!data.departments.length) {
+            const row = document.createElement('tr');
+            const cell = makeEl('td', '', 'Ningún correo fue directo a un coordinador en este periodo.');
+            cell.colSpan = 7;
+            row.appendChild(cell);
+            body.appendChild(row);
+        }
+        data.departments.forEach(d => {
+            const row = document.createElement('tr');
+            row.append(makeEl('td', '', d.path), makeEl('td', '', String(d.direct)),
+                makeEl('td', '', String(d.confirmed)), makeEl('td', '', String(d.hits)),
+                makeEl('td', '', pctText(d.accuracy)), makeEl('td', '', String(d.pending)),
+                makeEl('td', '', d.bounced ? `${d.bounced} (${d.transfers} transferencia(s))` : '0'));
+            body.appendChild(row);
+        });
+        labelTableCells(document.getElementById('precisionTable'));
+
+        const p = data.pending;
+        document.getElementById('precisionPending').textContent = p.arrived
+            ? `Llegaron ${p.arrived}: ${p.decided} los decidió el administrador y ${p.still_waiting} siguen esperando. `
+              + (p.with_suggestion
+                  ? `La elección coincidió con la 1.ª opción de la IA en ${p.matched} de ${p.with_suggestion} (${pctText(p.matched_pct)}).`
+                  : 'Ninguno decidido tenía sugerencia de la IA.')
+            : 'Ningún correo fue a «Por clasificar» en este periodo.';
+        const reasons = document.getElementById('precisionReasons');
+        reasons.replaceChildren();
+        data.reasons.forEach(r => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `${r.label}: ${r.count} (${pctText(r.pct)})`));
+            // Con pocos correos no se recomienda ajustar nada (lo dice el aviso de arriba)
+            if (!data.few_cases) text.appendChild(makeEl('span', 'org-row-sub', `Qué ajustar: ${r.adjust}`));
+            li.appendChild(text);
+            reasons.appendChild(li);
+        });
+
+        const corrections = document.getElementById('precisionCorrectionsBody');
+        corrections.replaceChildren();
+        if (!data.corrections.length) {
+            const row = document.createElement('tr');
+            const cell = makeEl('td', '', 'Ningún borrador fue corregido en este periodo.');
+            cell.colSpan = 8;
+            row.appendChild(cell);
+            corrections.appendChild(row);
+        }
+        data.corrections.forEach(c => {
+            const row = document.createElement('tr');
+            const first = makeEl('td', 'precision-draft');
+            first.appendChild(makeEl('span', '', `Borrador #${c.draft_id} · ${c.subject}`));
+            if (c.ticket_id) {
+                // Confirmado: enlace al ticket que salió del borrador
+                const link = makeEl('button', 'ticket-bar-link precision-ticket', `Ticket #${c.ticket_id}`);
+                link.type = 'button';
+                link.dataset.ticketId = String(c.ticket_id);
+                first.appendChild(link);
+            } else {
+                first.appendChild(makeEl('span', 'org-row-sub', DRAFT_STATUS_LABELS[c.draft_status] || 'Pendiente'));
+            }
+            row.append(first, makeEl('td', '', c.ai_department || 'Ninguno'), makeEl('td', '', c.origin_label),
+                makeEl('td', '', c.from_department || '—'), makeEl('td', '', c.to_department || '—'),
+                makeEl('td', '', c.reason), makeEl('td', '', `${c.by_name} · ${formatDateTime(c.at)}`),
+                precisionOutcome(c));
+            corrections.appendChild(row);
+        });
+        labelTableCells(document.getElementById('precisionCorrections'));
+    }
+
+    // ¿Terminó donde dijo la IA?
+    function precisionOutcome(c) {
+        const cell = makeEl('td');
+        if (c.outcome === 'ai_right') cell.appendChild(makeEl('span', 'ui-tag is-ok', 'La IA tenía razón'));
+        else if (c.outcome === 'ai_wrong') cell.appendChild(makeEl('span', 'ui-tag is-warn', 'La IA se equivocó'));
+        else cell.appendChild(makeEl('span', 'ui-tag', c.current_department ? `Pendiente · hoy en ${c.current_department}` : 'Pendiente'));
+        return cell;
+    }
+
+    precisionRange.addEventListener('change', () => {
+        precisionDates.hidden = precisionRange.value !== 'custom';
+        if (precisionRange.value !== 'custom') showPrecision();
+    });
+    [precisionFrom, precisionTo].forEach(input => input.addEventListener('change', () => {
+        if (precisionFrom.value && precisionTo.value && precisionFrom.value > precisionTo.value) {
+            showError('La fecha "Desde" no puede ser posterior a "Hasta".');
+            return;
+        }
+        showPrecision();
+    }));
+    document.getElementById('precisionCorrectionsBody').addEventListener('click', (e) => {
+        const link = e.target.closest('.precision-ticket');
+        if (link) openTicketById(Number(link.dataset.ticketId));
+    });
 
     // «Enviar» solo con un departamento elegido (un solo listener para todas las filas)
     draftsUnclassifiedList.addEventListener('change', (e) => {

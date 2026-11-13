@@ -1435,3 +1435,19 @@ body.staff-shell :is(.panel-table-wrap, .invites-table-wrap, #directoryView .tab
 
 #draftsUnclassifiedList .drafts-disagreement { align-self: flex-start; margin-top: 4px; }
 
+
+/* Administración › Precisión de la IA */
+.precision-filters { margin: var(--sp-3) 0; }
+
+.precision-summary { font-weight: 500; }
+
+.precision-reasons { margin-bottom: var(--sp-4); }
+
+.precision-draft { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+
+.precision-ticket { align-self: flex-start; }
+
+@media (max-width: 767px) {
+    /* En tarjeta, la primera celda (borrador y enlace) sigue en columna */
+    body.staff-shell .panel-table td.precision-draft { flex-direction: column; align-items: flex-start; text-align: left; }
+}

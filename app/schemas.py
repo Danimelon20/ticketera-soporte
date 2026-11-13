@@ -1285,6 +1285,78 @@ class DraftDepartmentChosen(BaseModel):
     matched_first: Optional[bool] = None
 
 
+class PrecisionTotals(BaseModel):
+    """Directo al coordinador: confirmados y aciertos (confirmado en el departamento que eligió la IA), % de acierto
+    (aciertos / confirmados), pendientes (sin confirmar o descartados, fuera del %) y rebotes (borradores con
+    transferencias y total de transferencias)."""
+    direct: int
+    confirmed: int
+    hits: int
+    pending: int
+    bounced: int
+    transfers: int
+    accuracy: Optional[float] = None
+
+
+class PrecisionDepartment(PrecisionTotals):
+    """Lo mismo, por el departamento que eligió la IA."""
+    department_id: Optional[int] = None
+    path: str
+
+
+class PrecisionPending(BaseModel):
+    """«Por clasificar»: cuántos llegaron y cuántas veces el administrador eligió la 1.ª opción de la IA."""
+    arrived: int
+    decided: int
+    still_waiting: int
+    with_suggestion: int
+    matched: int
+    matched_pct: Optional[float] = None
+
+
+class PrecisionReason(BaseModel):
+    key: str
+    label: str
+    adjust: str
+    count: int
+    pct: Optional[float] = None
+
+
+class PrecisionCorrection(BaseModel):
+    draft_id: int
+    ticket_id: Optional[int] = None
+    draft_status: Optional[str] = None
+    subject: str
+    ai_department: Optional[str] = None
+    origin: str
+    origin_label: str
+    from_department: Optional[str] = None
+    to_department: Optional[str] = None
+    reason: str
+    by_name: str
+    at: datetime
+    # ai_right: se confirmó donde dijo la IA; ai_wrong: en otro; pending: todavía no se confirmó
+    outcome: Literal["ai_right", "ai_wrong", "pending"]
+    current_department: Optional[str] = None
+
+
+class PrecisionReport(BaseModel):
+    date_from: date
+    date_to: date
+    routing_enforced: bool
+    received: int
+    # «Directo» sin lo que eligió la IA (borradores DEMO cargados ya clasificados): no cuentan
+    without_ai: int = 0
+    # Pocos correos: los números no alcanzan para ajustar el umbral, la similitud mínima o las fichas
+    few_cases: bool = False
+    min_cases: int = 20
+    totals: PrecisionTotals
+    departments: list[PrecisionDepartment] = []
+    pending: PrecisionPending
+    reasons: list[PrecisionReason] = []
+    corrections: list[PrecisionCorrection] = []
+
+
 class ThresholdUpdate(BaseModel):
     threshold: float = Field(ge=0, le=1)
 

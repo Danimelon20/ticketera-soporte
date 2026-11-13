@@ -1161,6 +1161,60 @@
                     <p id="minSimilarityHint" class="admin-text">Además del margen, la 1.ª opción tiene que parecerse lo suficiente a su ficha: un correo que no se parece a ninguna (por ejemplo, el menú del almuerzo) pasa por aquí aunque el margen sea grande. Mídalo con scripts.eval_classifier (columna «Similitud 1.º»). El cambio queda en el Registro de cambios y aplica desde el siguiente correo.</p>
                     <ul id="draftsUnclassifiedList" class="org-list"></ul>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="precision">
+                    <div class="admin-card-head"><h2>Precisión de la IA</h2></div>
+                    <p class="admin-text">Qué tan bien elige la IA el departamento de los correos de soporte. Se cuentan los correos que llegaron en el periodo. Sirve para saber qué ajustar: el umbral, la similitud mínima o las fichas.</p>
+                    <p id="precisionOff" class="ui-notice is-warn" hidden>Tickets por departamento está apagado: los correos nuevos no se clasifican (Administración › Activación).</p>
+                    <div class="person-filter-row precision-filters">
+                        <div class="ui-field">
+                            <label for="precisionRange">Periodo</label>
+                            <select id="precisionRange" class="ui-input" autocomplete="off">
+                                <option value="7">Últimos 7 días</option>
+                                <option value="30" selected>Últimos 30 días</option>
+                                <option value="90">Últimos 90 días</option>
+                                <option value="custom">Entre fechas</option>
+                            </select>
+                        </div>
+                        <div id="precisionDates" class="person-dates" hidden>
+                            <div class="ui-field">
+                                <label for="precisionFrom">Desde</label>
+                                <input type="date" id="precisionFrom" class="ui-input">
+                            </div>
+                            <div class="ui-field">
+                                <label for="precisionTo">Hasta</label>
+                                <input type="date" id="precisionTo" class="ui-input">
+                            </div>
+                        </div>
+                    </div>
+                    <p id="precisionSummary" class="admin-text precision-summary" aria-live="polite"></p>
+                    <p id="precisionFew" class="ui-notice is-warn" hidden></p>
+
+                    <h3 class="org-subtitle">Directo al coordinador, por departamento que eligió la IA</h3>
+                    <div class="panel-table-wrap">
+                        <table id="precisionTable" class="ui-table panel-table">
+                            <thead>
+                                <tr><th>Departamento</th><th>Recibidos directo</th><th>Confirmados</th><th>Aciertos</th><th>% de acierto</th><th>Pendientes</th><th>Rebotes</th></tr>
+                            </thead>
+                            <tbody id="precisionBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="help-text">Acierto: el borrador se confirmó como ticket en el departamento que eligió la IA (% sobre los confirmados). Pendientes: todavía sin confirmar o descartados; no entran en el %. Rebotes: borradores que se transfirieron y el total de transferencias; una transferencia por error de una persona no cuenta contra la IA.</p>
+
+                    <h3 class="org-subtitle">Por clasificar</h3>
+                    <p id="precisionPending" class="admin-text"></p>
+                    <ul id="precisionReasons" class="org-list precision-reasons"></ul>
+
+                    <h3 class="org-subtitle">Borradores corregidos</h3>
+                    <p class="help-text">Para mejorar las fichas: qué eligió la IA, a dónde fue, por qué y dónde terminó.</p>
+                    <div class="panel-table-wrap">
+                        <table id="precisionCorrections" class="ui-table panel-table">
+                            <thead>
+                                <tr><th>Borrador</th><th>Eligió la IA</th><th>Origen</th><th>De</th><th>A</th><th>Motivo</th><th>Quién y cuándo</th><th>Resultado</th></tr>
+                            </thead>
+                            <tbody id="precisionCorrectionsBody"></tbody>
+                        </table>
+                    </div>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="unclassified">
                     <div class="admin-card-head"><h2>Tickets sin departamento</h2></div>
                     <p class="admin-text">Tickets abiertos de antes de los departamentos y los que llegan del portal. Elija el departamento que los atiende; si no tienen responsable, entran a la asignación automática de ese departamento.</p>

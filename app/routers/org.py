@@ -3,19 +3,22 @@
 Adaptado de la rama areas-y-clientes sin áreas de atención: el administrador crea, renombra, mueve y
 desactiva departamentos y marca los que atienden tickets.
 """
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from datetime import date, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import (
-    accounts, audit, auto_assign, classifier, config, departments, draft_classification, email_analysis, models, nav,
-    routing,
+    accounts, audit, auto_assign, availability, classification_report, classifier, config, departments,
+    draft_classification, email_analysis, models, nav, people_activity, routing,
 )
 from ..business_hours import day_hours
 from ..schemas import (
     AdminOverview, CategoryOption, ClassificationOption, ClassificationTestRequest, ClassificationTestResult,
     DepartmentProfileRead, DepartmentProfileUpdate, DraftDepartmentChoice, DraftDepartmentChosen, PendingDraft,
-    PendingDraftOption, PendingDrafts, ThresholdRead, ThresholdUpdate, MinSimilarityRead, MinSimilarityUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
+    PendingDraftOption, PendingDrafts, PrecisionReport, ThresholdRead, ThresholdUpdate, MinSimilarityRead, MinSimilarityUpdate, DepartmentCreate, DepartmentOption, DepartmentOptions, PriorityOption, DepartmentImportConfirm, DepartmentImportPreview, DepartmentImportResult, DepartmentRead,
     DepartmentUpdate, OverviewDepartment, PlacementRead, PlacementUpdate, StaffAlerts, SwitchRead, SwitchUpdate,
     TicketDepartmentUpdate, UnclassifiedTicket, UnplacedPerson,
 )
@@ -330,6 +333,26 @@ def choose_draft_department(draft_id: int, data: DraftDepartmentChoice, db: Sess
     by_id = routing.departments_by_id(db)
     return DraftDepartmentChosen(draft_id=draft_id, department_name=routing.path_label(by_id[row.department_id], by_id),
                                  matched_first=row.matched_first)
+
+
+PRECISION_DAYS = 30
+
+
+@router.get("/classification/precision", response_model=PrecisionReport)
+def classification_precision(
+    from_: Optional[date] = Query(default=None, alias="from"),
+    to: Optional[date] = None,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """Precisión de la IA en el periodo (por la llegada del correo; sin fechas, los últimos 30 días)."""
+    today = availability.office_today()
+    date_to = to or today
+    date_from = from_ or (date_to - timedelta(days=PRECISION_DAYS))
+    if date_from > date_to:
+        raise HTTPException(status_code=400, detail="La fecha inicial no puede ser posterior a la final")
+    start, end = people_activity.date_range(date_from, date_to)
+    return PrecisionReport(date_from=date_from, date_to=date_to, **classification_report.build(db, start, end))
 
 
 @router.put("/classification/threshold", response_model=ThresholdRead)

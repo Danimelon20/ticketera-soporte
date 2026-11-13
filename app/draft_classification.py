@@ -135,7 +135,7 @@ def choose(db: Session, admin: models.User, draft_id: int, department_id: int) -
         raise HTTPException(status_code=409, detail=NO_COORDINATOR)
     row.status = "classified"
     row.department_id = dept.id
-    row.pending_reason = None
+    # El motivo de «Por clasificar» se conserva: el reporte «Precisión de la IA» lo desglosa
     row.decided_by = admin.id
     row.decided_at = _now()
     # Para calibrar el umbral: ¿la IA tenía razón con su 1.ª opción? (sin sugerencia: no cuenta)
