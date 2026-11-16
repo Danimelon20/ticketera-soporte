@@ -34,9 +34,10 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
   todos los routers.
 - Las rutas de la API no llevan barra final (/api/tickets, no
   /api/tickets/).
-- Roles: requester, technician, coordinator, admin y agent (Agente
-  virtual, no inicia sesión). Las reglas de permisos se validan en
-  el backend y responden 403.
+- Roles: requester (contacto: quien reporta por correo y las cuentas
+  de cliente archivadas; no inicia sesión), technician, coordinator,
+  admin y agent (Agente virtual, no inicia sesión). Las reglas de
+  permisos se validan en el backend y responden 403.
 - El rol admin nunca se obtiene registrándose ni con un código de
   invitación: el primer administrador se crea con
   `docker compose -f docker-compose.pruebas.yml exec -it app python -m app.create_admin`.

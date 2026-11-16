@@ -218,6 +218,10 @@ def clean(db) -> dict[str, int]:
     if not any(ids.values()):
         return {}
     files = _stored_names(db, ids)
+    # Cuenta de cliente archivada (sin columna id): la de los usuarios DEMO
+    demo_users = ids.get("users", set())
+    if demo_users:
+        db.execute(delete(models.ArchivedAccount).where(models.ArchivedAccount.user_id.in_(demo_users)))
     # Siguiente nivel (sin columna id): las filas que salen de un departamento DEMO o llegan a uno
     demo_departments = ids.get("departments", set())
     if demo_departments:
@@ -400,12 +404,14 @@ def load(db) -> list[dict]:
     ])
     db.flush()
 
-    # Clientes con perfil completo y uno sin cédula que intenta usar la de otro
+    # Contactos: empleados que reportan por correo (no inician sesión). El «suplantador» es una cuenta de cliente
+    # de antes de quitar el portal, archivada, que intentó usar la cédula de Ana (el reporte se conserva)
     ids = _free_id_numbers(db, 3)
     ana = _user(db, ANA, "Ana Cliente Uno", "requester", "80000001", ids[0])
     beto = _user(db, BETO, "Beto Cliente Dos", "requester", "80000002", ids[1])
     carla = _user(db, CARLA, "Carla Cliente Tres", "requester", "80000003", ids[2])
     impostor = _user(db, IMPOSTOR, "Cliente Suplantador", "requester", "80000004")
+    db.add(models.ArchivedAccount(user_id=impostor.id))
 
     # Agrupación A: el mismo cliente con el mismo problema en otras palabras (se fusiona)
     mail_1 = b.ticket(ana, MAIL_TARGET,
@@ -526,14 +532,16 @@ def load(db) -> list[dict]:
                    "transferido #%d (aviso en la campana) y no ve los de Soporte N1." % (net[0].id, moved.id)},
         {"rol": "Técnico", "correo": unplaced.email,
          "probar": "Sin departamento: con el interruptor encendido ve el aviso y no recibe tickets."},
-        {"rol": "Cliente", "correo": ana.email,
-         "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
-        {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y el borrador \"El teclado no responde\" "
-                                                          "(Soporte N1)."},
-        {"rol": "Cliente", "correo": carla.email, "probar": "Ticket de red ligado y el borrador \"El monitor parpadea\" "
-                                                           "(Soporte N1)."},
-        {"rol": "Cliente", "correo": impostor.email,
-         "probar": "Intentó usar la cédula de Ana: el admin ve el reporte del Agente virtual."},
+        {"rol": "Contacto", "correo": ana.email,
+         "probar": "No inicia sesión (reporta por correo). Su ticket #%d tiene otro fusionado; es la dueña de la "
+                   "cédula que intentó usar el suplantador." % mail_1.id},
+        {"rol": "Contacto", "correo": beto.email,
+         "probar": "No inicia sesión. Ticket de red principal y el borrador \"El teclado no responde\" (Soporte N1)."},
+        {"rol": "Contacto", "correo": carla.email,
+         "probar": "No inicia sesión. Ticket de red ligado y el borrador \"El monitor parpadea\" (Soporte N1)."},
+        {"rol": "Cliente archivado", "correo": impostor.email,
+         "probar": "Cuenta de antes del cambio, archivada: Cuentas › Archivados. Intentó usar la cédula de Ana "
+                   "(el admin ve el reporte del Agente virtual)."},
     ]
     for row in rows:
         row["clave"] = PASSWORD

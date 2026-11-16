@@ -408,3 +408,20 @@ def test_demo_examples_do_not_copy_the_eval_cases():
                 assert len(a & b) / min(len(a), len(b)) < 0.4, (example, name)
                 trigrams = {tuple(theirs[i:i + 3]) for i in range(len(theirs) - 2)}
                 assert not {tuple(mine[i:i + 3]) for i in range(len(mine) - 2)} & trigrams, (example, name)
+
+
+def test_demo_has_an_archived_client_and_cleans_it(client, sent):
+    """Sin portal: los clientes DEMO son contactos y el suplantador es una cuenta de cliente archivada."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        impostor = db.query(models.User).filter(models.User.email == f"{demo_data.IMPOSTOR}@demo.invalid").one()
+        assert db.get(models.ArchivedAccount, impostor.id) is not None
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        assert db.get(models.ArchivedAccount, impostor.id) is None
+    finally:
+        db.close()

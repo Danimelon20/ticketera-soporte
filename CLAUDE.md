@@ -2,7 +2,7 @@
 
 FastAPI + SQLAlchemy + SQLite. Página en HTML/CSS/JS vanilla dentro de static/. Corre con Docker Compose dentro de WSL.
 
-Roles: requester (solicitante), technician (técnico), coordinator (coordinador), admin (administrador) y agent (Agente virtual: usuario del sistema que no inicia sesión).
+Roles: requester (contacto: quien reporta un problema por correo y las cuentas de cliente archivadas; nunca inicia sesión), technician (técnico), coordinator (coordinador), admin (administrador) y agent (Agente virtual: usuario del sistema que no inicia sesión).
 
 ## Comandos
 - Nunca ejecutes docker compose sin -f docker-compose.pruebas.yml: sin -f se toca la instancia real.
