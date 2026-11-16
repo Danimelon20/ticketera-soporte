@@ -22,14 +22,16 @@ STAFF_ROLE_CHOICES = ("technician", "coordinator")
 # administrador (el primero y los siguientes se crean con app.create_admin)
 PERMISSIONS = {
     "admin": {
+        # Un contacto (quien reporta por correo o un cliente archivado) no inicia sesión: desbloquear o cerrar
+        # sus sesiones no aplica. Desactivarlo sí (deja de poder reportar por correo)
         "active": ("coordinator", "technician", "requester"),
         "reset": ("coordinator", "technician"),
-        "unlock": ("coordinator", "technician", "requester"),
+        "unlock": ("coordinator", "technician"),
         # Vacaciones e incapacidades (la disponibilidad en sí es automática)
         "availability": ("technician", "coordinator"),
         # Horario del coordinador: informativo (la asignación automática solo usa técnicos)
         "schedule": ("technician", "coordinator"),
-        "sessions": ("coordinator", "technician", "requester"),
+        "sessions": ("coordinator", "technician"),
         # Cambio directo de rol: técnico ↔ coordinador (nunca a administrador)
         "role": STAFF_ROLE_CHOICES,
         # Departamento del técnico o coordinador
@@ -45,6 +47,14 @@ PERMISSIONS = {
         "role": ("technician",),
     },
 }
+
+
+def archived_ids(db: Session, user_ids: list[int]) -> set[int]:
+    """De esas cuentas, las de cliente archivadas al quitar el portal."""
+    if not user_ids:
+        return set()
+    return {uid for (uid,) in db.query(models.ArchivedAccount.user_id).filter(
+        models.ArchivedAccount.user_id.in_(user_ids))}
 
 
 def check_can_manage(actor: models.User, target: models.User, action: str, new_role: str | None = None) -> None:

@@ -1,6 +1,7 @@
 """Autenticidad del remitente (app/email_auth.py): el «De:» se puede falsificar; las marcas de Exchange Online no.
 Interno (X-MS-Exchange-Organization-AuthAs: Internal) o la primera Authentication-Results con dmarc/compauth en
 pass para el dominio del «De:». Sin eso, el correo no se procesa ni se responde. simulate_email no pasa por aquí."""
+import uuid
 from email.message import EmailMessage
 from email.utils import make_msgid
 
@@ -11,7 +12,7 @@ from app.database import SessionLocal
 from app.email_processing import process_message
 
 MAILBOX = "soporte@ejemplo.com"
-SENDER = "ana.mora@data.cr"
+SENDER = f"ana-{uuid.uuid4().hex[:8]}@data.cr"
 
 
 @pytest.fixture(autouse=True)

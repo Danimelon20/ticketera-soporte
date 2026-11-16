@@ -37,4 +37,6 @@ def staff_flags(db: Session, user: models.User | None) -> dict | None:
     """Etiquetas para el personal sobre un solicitante: identidad de Hacienda y si está reportado."""
     if user is None or user.role != "requester":
         return None
-    return {"identity": identity.hacienda_label_code(db, user), "reported": bool(reported_ids(db, [user.id]))}
+    from . import accounts
+    return {"identity": identity.hacienda_label_code(db, user), "reported": bool(reported_ids(db, [user.id])),
+            "archived": bool(accounts.archived_ids(db, [user.id]))}

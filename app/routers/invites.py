@@ -28,7 +28,8 @@ def _record_sent(db: Session, actor: models.User, invitation: models.StaffInvita
 def _registered_message(user: models.User, invited_role: str) -> str:
     """El correo ya tiene cuenta: dice con qué rol, sin revelar más."""
     if user.role == "requester":
-        return "Ese correo es de una cuenta de cliente: no se puede invitar como personal."
+        # Contacto (quien reporta por correo o un cliente archivado). Pendiente de decidir si se podrá convertir
+        return "Ese correo es de un contacto (quien reporta por correo o un cliente archivado): no se puede invitar como personal."
     current = audit.role_name(user.role)
     if user.role == invited_role:
         return f"Esa persona ya está registrada como {current}."

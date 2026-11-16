@@ -251,7 +251,7 @@ def test_draft_shows_identity_and_reported(client, make_user):
     _report(client, technician, requester["id"])
     drafts = client.get("/api/drafts", headers=make_user("coordinator")["headers"]).json()
     item = next(d for d in drafts if d["id"] == draft_id)
-    assert item["requester_flags"] == {"identity": "not_found", "reported": True}
+    assert item["requester_flags"] == {"identity": "not_found", "reported": True, "archived": False}
 
 
 def test_requester_never_sees_identity_label_or_hacienda_name(client, make_user, make_ticket, monkeypatch):

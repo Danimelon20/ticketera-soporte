@@ -473,6 +473,9 @@ textarea.ui-input { min-height: 84px; padding: 10px var(--sp-3); line-height: 1.
 
 .tag-reported { background: #FDE8E8; color: #9B1C1C; }
 
+/* Contacto: cuenta de cliente archivada al quitar el portal */
+.tag-archived { background: #EEF0F4; color: #4A5068; }
+
 .tag-identity-match { background: #E6F4EA; color: #1E6B34; }
 
 .tag-identity-mismatch { background: #FDE8E8; color: #9B1C1C; }

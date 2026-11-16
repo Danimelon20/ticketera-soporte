@@ -113,7 +113,7 @@ def test_admin_quick_filters_and_counts(client, accounts_set):
     assert _ids(pages["invitations"]) == set()
     assert _ids(pages["all"]) == staff | clients and len(pages["all"]["items"]) == 9
 
-    expected = {"all": 9, "staff": 4, "clients": 3, "locked": 1, "reported": 1, "unverified": 1, "invitations": 2}
+    expected = {"all": 9, "staff": 4, "clients": 3, "archived": 0, "locked": 1, "reported": 1, "unverified": 1, "invitations": 2}
     for f in FILTERS:
         # Los contadores no dependen del filtro rápido elegido
         assert pages[f]["counts"] == expected
@@ -124,7 +124,7 @@ def test_search_narrows_counts(client, accounts_set):
     s = accounts_set
     page = _list(client, s["admin"], q=f"Reportada {s['tag']}")
     assert page["counts"] == {
-        "all": 1, "staff": 0, "clients": 1, "locked": 0, "reported": 1, "unverified": 0, "invitations": 0,
+        "all": 1, "staff": 0, "clients": 1, "archived": 0, "locked": 0, "reported": 1, "unverified": 0, "invitations": 0,
     }
 
 

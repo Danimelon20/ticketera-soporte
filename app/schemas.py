@@ -401,9 +401,12 @@ class AILevelUpdate(BaseModel):
 
 
 class RequesterFlags(BaseModel):
-    """Solo para el personal: resultado de Hacienda (sin el nombre) y si la cuenta está reportada."""
-    identity: str
+    """Solo para el personal: resultado de Hacienda (sin el nombre; None sin cédula, como quien reporta por correo)
+    y si la cuenta está reportada."""
+    identity: Optional[str] = None
     reported: bool = False
+    # Cuenta de cliente archivada al quitar el portal
+    archived: bool = False
 
 
 class GroupItem(BaseModel):
@@ -952,12 +955,16 @@ class AccountListRow(BaseModel):
     schedule_day: Optional[str] = None
     # Personal: "Ruta · N2"; None sin departamento
     department_name: Optional[str] = None
+    # Contacto: cuenta de cliente archivada al quitar el portal (scripts.admin_tools archive-clients)
+    archived: bool = False
 
 
 class AccountCounts(BaseModel):
     all: int = 0
     staff: int = 0
+    # Contactos: quien reporta por correo y los clientes archivados (rol requester)
     clients: int = 0
+    archived: int = 0
     locked: int = 0
     reported: int = 0
     unverified: int = 0
@@ -992,6 +999,8 @@ class AccountSummary(BaseModel):
     is_active: bool
     identity: Optional[str] = None
     reported: bool = False
+    # Contacto: cuenta de cliente archivada al quitar el portal
+    archived: bool = False
     availability: Optional[str] = None
     return_date: Optional[date] = None
     schedule: Optional[list[ScheduleDay]] = None

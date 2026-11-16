@@ -126,7 +126,10 @@ MATRIX = [
      _codes(403, 403, 403, 204, 401)),
     ("restablecer acceso", "post", lambda w: f"/api/accounts/{w['users']['target_technician']['id']}/reset-access",
      None, _codes(403, 403, 403, 202, 401)),
-    ("desbloquear", "post", lambda w: f"/api/accounts/{w['users']['requester']['id']}/unlock", None,
+    # Un contacto no inicia sesión: desbloquearlo no aplica (también para el administrador)
+    ("desbloquear contacto", "post", lambda w: f"/api/accounts/{w['users']['requester']['id']}/unlock", None,
+     _codes(403, 403, 403, 403, 401)),
+    ("desbloquear", "post", lambda w: f"/api/accounts/{w['users']['target_technician']['id']}/unlock", None,
      _codes(403, 403, 403, 204, 401)),
     ("cerrar sesiones", "post", lambda w: f"/api/accounts/{w['users']['target_technician']['id']}/close-sessions",
      None, _codes(403, 403, 403, 204, 401)),

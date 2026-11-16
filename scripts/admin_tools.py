@@ -25,6 +25,17 @@ tickets, comentarios, borradores ni otra actividad; pide escribir el correo y qu
 archive-requester es para el solicitante que sí tiene actividad: desactiva la cuenta, cierra sus sesiones y
 cambia su correo por archivado-<id>@archivo.invalid para liberar el original. Conserva tickets, comentarios
 y reportes; pide escribir el correo y el registro de cambios guarda el correo original.
+
+Archivar las cuentas de cliente al quitar el portal (todas las de solicitante que no son de INTERNAL_DOMAINS):
+    docker compose -f docker-compose.pruebas.yml exec app python -m scripts.admin_tools archive-clients
+    docker compose -f docker-compose.pruebas.yml exec app python -m scripts.admin_tools archive-clients --apply
+  En la instancia real, el mismo comando con el compose de la real (sin -f).
+
+  POR DEFECTO SOLO MUESTRA qué cambiaría (cuántas cuentas, correos enmascarados, tickets abiertos y sesiones
+  abiertas) y no cambia nada. SOLO --apply CAMBIA: marca esas cuentas como archivadas y lo deja en el registro
+  de cambios como hecho por "Servidor". No borra nada: ni cuentas, ni tickets, ni sesiones; no cambia el correo
+  ni desactiva la cuenta (sigue recibiendo los correos de su ticket abierto hasta que se cierre). El acceso ya
+  está cerrado por el rol: un contacto nunca inicia sesión. Volver a correrlo no repite las ya archivadas.
 """
 import argparse
 import sys
@@ -57,10 +68,13 @@ ARCHIVE_DOMAIN = "archivo.invalid"
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m scripts.admin_tools", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=ADMIN_COMMANDS + ("list-admins", "internal-requesters", "delete-requester", "archive-requester"))
+    parser.add_argument("command", choices=ADMIN_COMMANDS + ("list-admins", "internal-requesters", "delete-requester",
+                                                             "archive-requester", "archive-clients"))
     parser.add_argument("--email", help="Correo de la cuenta (todos los comandos menos list-admins e internal-requesters)")
     parser.add_argument("--to", choices=DEMOTE_ROLES, default="coordinator",
                         help="Solo con demote: rol nuevo (por defecto, coordinator)")
+    parser.add_argument("--apply", action="store_true",
+                        help="Solo con archive-clients: SIN --apply solo muestra; CON --apply archiva")
     return parser
 
 
@@ -267,9 +281,56 @@ def archive_requester(email: str, confirm=input) -> int:
         db.close()
 
 
+def _clients_to_archive(db) -> list[models.User]:
+    """Cuentas de cliente (solicitante de otro dominio que INTERNAL_DOMAINS) que todavía no están archivadas."""
+    archived = db.query(models.ArchivedAccount.user_id)
+    users = (db.query(models.User).filter(models.User.role == "requester", models.User.id.notin_(archived))
+             .order_by(models.User.id).all())
+    return [u for u in users if not is_internal_email(u.email)]
+
+
+def archive_clients(apply: bool = False) -> int:
+    """Sin apply solo muestra; con apply las archiva. Devuelve 0 (también si no hay nada que archivar)."""
+    db = SessionLocal()
+    try:
+        users = _clients_to_archive(db)
+        if not users:
+            print("No hay cuentas de cliente por archivar.")
+            return 0
+        ids = [u.id for u in users]
+        open_tickets = dict(db.query(models.Ticket.created_by, func.count(models.Ticket.id)).filter(
+            models.Ticket.created_by.in_(ids), models.Ticket.status.in_(accounts.OPEN_STATUSES))
+            .group_by(models.Ticket.created_by).all())
+        sessions = dict(db.query(models.Session.user_id, func.count(models.Session.id)).filter(
+            models.Session.user_id.in_(ids)).group_by(models.Session.user_id).all())
+        print(("Se archivan" if apply else "MODO DE PRUEBA (no cambia nada). Se archivarían")
+              + f" {len(users)} cuenta(s) de cliente:")
+        for u in users:
+            print(f"  #{u.id} {mask_email(u.email)} · {open_tickets.get(u.id, 0)} ticket(s) abierto(s) · "
+                  f"{sessions.get(u.id, 0)} sesión(es) abierta(s){'' if u.is_active else ' · desactivada'}")
+        total_open = sum(open_tickets.values())
+        if total_open:
+            print(f"Sus {total_open} ticket(s) abierto(s) siguen abiertos y los atiende el personal; si alguno ya no "
+                  "aplica, el coordinador lo cancela con «Ya no aplica».")
+        if not apply:
+            print("No se cambió nada. Para archivarlas, vuelva a correrlo con --apply.")
+            return 0
+        for u in users:
+            db.add(models.ArchivedAccount(user_id=u.id))
+            audit.record(db, None, "server_account_archived", target=u, new="Cliente archivado al quitar el portal")
+        db.commit()
+        print(f"Listo: {len(users)} cuenta(s) archivada(s). No se borró nada.")
+        return 0
+    finally:
+        db.close()
+
+
 def main(argv: list[str] | None = None, confirm=input) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "archive-clients":
+        init_db()
+        return archive_clients(apply=args.apply)
     if args.command not in ("internal-requesters", "list-admins") and not args.email:
         parser.error(f"{args.command} necesita --email")
     init_db()

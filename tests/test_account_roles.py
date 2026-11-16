@@ -33,7 +33,10 @@ def _sessions(user_id):
 ALLOWED = {
     ("admin", target, action)
     for target in ("coordinator", "technician", "requester")
-    for action in ("deactivate", "reactivate", "unlock")
+    for action in ("deactivate", "reactivate")
+} | {
+    # Desbloquear: solo el personal (un contacto no inicia sesión)
+    ("admin", "coordinator", "unlock"), ("admin", "technician", "unlock"),
 } | {
     ("admin", "coordinator", "reset-access"), ("admin", "technician", "reset-access"),
 }
@@ -256,10 +259,10 @@ def test_unlock_clears_lockout(client, make_user):
                       headers=coordinator["headers"]).json()
     assert rows[0]["login_locked"] is True
 
-    assert _post(client, coordinator, requester["id"], "unlock").status_code == 204
-    # Desbloqueado, el mismo error de siempre: un contacto nunca inicia sesión
+    # Un contacto no inicia sesión: desbloquearlo no aplica y sigue recibiendo el mismo error
+    assert _post(client, coordinator, requester["id"], "unlock").status_code == 403
     login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
-    assert login.status_code == 401
+    assert login.status_code in (401, 429)
 
 
 def test_directory_state_filter(client, make_user):

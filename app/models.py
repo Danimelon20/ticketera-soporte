@@ -1121,6 +1121,16 @@ class DepartmentTransfer(Base):
     transferred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class ArchivedAccount(Base):
+    """Cuenta de cliente archivada al quitar el portal (scripts.admin_tools archive-clients --apply). Solo marca:
+    la cuenta, sus tickets, comentarios, historial y reportes se conservan y el personal los sigue viendo. El
+    acceso ya está cerrado por el rol (un contacto nunca inicia sesión). Tabla nueva."""
+    __tablename__ = "archived_accounts"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    archived_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 # Origen del departamento de un borrador antes de transferirlo: la IA, el administrador o otra transferencia
 DRAFT_TRANSFER_ORIGINS = {"ai": "La IA", "admin": "El administrador", "transfer": "Otra transferencia"}
 

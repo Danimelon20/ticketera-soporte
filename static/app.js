@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const ROLE_MAP = {
-        requester: 'Solicitante',
+        requester: 'Contacto',
         technician: 'Técnico',
         coordinator: 'Coordinador',
         agent: 'Agente virtual',
@@ -3783,12 +3783,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mismas reglas que app/accounts.py (solo comodidad: el servidor también las revisa)
     const MANAGE_RULES = {
         admin: {
+            // Como app/accounts.py: un contacto no inicia sesión (sin desbloquear ni cerrar sesiones)
             active: ['coordinator', 'technician', 'requester'],
             reset: ['coordinator', 'technician'],
-            unlock: ['coordinator', 'technician', 'requester'],
+            unlock: ['coordinator', 'technician'],
             availability: ['technician', 'coordinator'],
             schedule: ['technician', 'coordinator'],
-            sessions: ['coordinator', 'technician', 'requester'],
+            sessions: ['coordinator', 'technician'],
             // Técnico ↔ coordinador; nunca a administrador
             role: ['coordinator', 'technician']
         },
@@ -4008,9 +4009,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return tag;
     }
 
+    // Contacto: identidad de Hacienda solo si tiene cédula (cliente archivado); archivado y reportado
     function requesterTags(flags) {
-        const identity = flags.identity || 'unverified';
-        const tags = [makeTag(IDENTITY_LABELS[identity] || IDENTITY_LABELS.unverified, `tag-identity-${identity}`)];
+        const tags = [];
+        if (flags.identity) {
+            tags.push(makeTag(IDENTITY_LABELS[flags.identity] || IDENTITY_LABELS.unverified, `tag-identity-${flags.identity}`));
+        }
+        if (flags.archived) tags.push(makeTag('Cliente archivado', 'tag-archived'));
         if (flags.reported) tags.push(makeTag('Reportada', 'tag-reported'));
         return tags;
     }
@@ -6448,8 +6453,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla: se atienden desde el ticket principal',
                 }),
                 // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
-                navSection('clients', 'Clientes', 'tickets/clientes', () => openAccounts('clients'), {
-                    aliases: ['accounts'], context: 'Fichas de los clientes, en solo lectura',
+                navSection('clients', 'Contactos', 'tickets/clientes', () => openAccounts('clients'), {
+                    aliases: ['accounts'], context: 'Quien reporta por correo y los clientes archivados, en solo lectura',
                 }),
             ] },
             { id: 'drafts', label: 'Borradores', icon: 'mail', sections: [
@@ -6915,7 +6920,7 @@ document.addEventListener('DOMContentLoaded', () => {
             button.dataset.ticketId = String(item.principal_id);
             button.appendChild(makeEl('span', 'ui-tag is-danger', 'Incidente'));
             const text = makeEl('span', 'list-row-text');
-            text.appendChild(makeEl('span', 'list-row-title', `${item.clients} clientes reportan «${item.title}»`));
+            text.appendChild(makeEl('span', 'list-row-title', `${item.clients} personas reportan «${item.title}»`));
             text.appendChild(makeEl('span', 'list-row-sub', `Principal #${item.principal_id}`));
             button.appendChild(text);
             button.appendChild(makeEl('span', 'list-row-go', 'Ver ›'));
@@ -8103,7 +8108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         homeIncidents.hidden = !items.length;
         items.forEach(item => {
             const row = makeEl('div', 'ui-notice is-danger home-incident');
-            row.appendChild(makeEl('span', '', `Posible incidente: ${item.clients} clientes reportan «${item.title}»`));
+            row.appendChild(makeEl('span', '', `Posible incidente: ${item.clients} personas reportan «${item.title}»`));
             const open = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm home-incident-open', 'Ver');
             open.type = 'button';
             open.dataset.ticketId = String(item.principal_id);
@@ -9439,7 +9444,7 @@ document.addEventListener('DOMContentLoaded', () => {
         vacation: 'Vacaciones', incapacity: 'Ausencia', away: 'Ausente', invited: 'Invitación pendiente'
     };
     const ACCOUNT_TYPE_LABELS = {
-        requester: 'Cliente', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
+        requester: 'Contacto', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
     };
     // Grupos del menú "Acciones ▾", en este orden; la zona delicada va separada y en rojo
     const ACCOUNT_MENU_GROUPS = [
@@ -9567,6 +9572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (row.reported) return ['Reportada', 'is-danger'];
         if (row.state === 'locked') return ['Bloqueada', 'is-danger'];
         if (row.state === 'inactive') return ['Desactivada', ''];
+        if (row.archived) return ['Cliente archivado', ''];
         if (row.state === 'vacation' || row.state === 'away') return [ACCOUNT_STATE_LABELS[row.state], 'is-warn'];
         if (row.kind === 'invitation') return [`Invitación · ${row.invitation_hours_left} h`, 'is-info'];
         return null;
@@ -9682,7 +9688,7 @@ document.addEventListener('DOMContentLoaded', () => {
         aaDetail.replaceChildren();
         const box = makeEl('div', 'aa-account');
         const { head, tags } = accountPanelHead(d, accountMenuActions(d));
-        if (d.role === 'requester') requesterTags({ identity: d.identity, reported: d.reported }).forEach(t => tags.appendChild(t));
+        if (d.role === 'requester') requesterTags({ identity: d.identity, reported: d.reported, archived: d.archived }).forEach(t => tags.appendChild(t));
         box.appendChild(head);
 
         const alerts = makeEl('ul', 'aa-alerts');
@@ -11497,7 +11503,7 @@ document.addEventListener('DOMContentLoaded', () => {
             roleSelect.replaceChildren();
             // El coordinador no solicita ascensos a coordinador (el servidor lo rechaza)
             const options = isCoordinator
-                ? [['requester', 'Solicitante']]
+                ? [['requester', 'Contacto']]
                 // Administrador: solo el otro rol del personal, sin motivo
                 : ROLE_OPTIONS.filter(([value]) => value !== user.role);
             options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, value === preselected)));

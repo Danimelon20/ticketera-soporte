@@ -467,7 +467,7 @@ def admin_account_detail(user_id: int, db: Session = Depends(get_db), admin=Depe
 
 
 # ----- Cuentas: una sola lista con filtros rápidos (administrador y coordinador) -----
-ACCOUNT_FILTERS = ("all", "staff", "clients", "locked", "reported", "unverified", "invitations")
+ACCOUNT_FILTERS = ("all", "staff", "clients", "archived", "locked", "reported", "unverified", "invitations")
 STAFF_ACCOUNT_ROLES = ("technician", "coordinator", "admin")
 RECENT_ITEMS = 5
 # Cuentas que ve cada rol: el coordinador, solo técnicos y clientes
@@ -593,6 +593,7 @@ def account_list(
     shifts = schedules.for_users(db, ids) if by_schedule else {}
     departments_of = routing.placement_labels(db)
     placed_in = routing.placements(db)
+    archived = accounts.archived_ids(db, requester_ids)
 
     rows = []
     for u in users:
@@ -608,7 +609,7 @@ def account_list(
             kind="user", id=u.id, name=u.name or "Sin nombre", email=mask_email(u.email), role=u.role,
             state=_account_state(db, u, statuses), identity=identities.get(u.id), reported=u.id in reported,
             open_tickets=open_counts.get(u.id, 0), schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
-            department_name=departments_of.get(u.id),
+            department_name=departments_of.get(u.id), archived=u.id in archived,
         ))
 
     # Invitaciones pendientes: todavía no son cuentas (ni tienen horario). El coordinador solo ve las suyas
@@ -643,6 +644,7 @@ def account_list(
     groups = {
         "staff": [r for r in rows if r.role in STAFF_ACCOUNT_ROLES],
         "clients": [r for r in rows if r.role == "requester"],
+        "archived": [r for r in rows if r.archived],
         "locked": [r for r in rows if r.state == "locked"],
         "reported": [r for r in rows if r.role == "requester" and r.reported],
         "unverified": [r for r in rows if r.role == "requester" and r.identity == "unverified"],
@@ -733,6 +735,7 @@ def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.
         is_active=user.is_active,
         identity=identity.hacienda_label_code(db, user) if user.role == "requester" else None,
         reported=bool(account_reports.reported_ids(db, [user.id])) if user.role == "requester" else False,
+        archived=bool(accounts.archived_ids(db, [user.id])),
         availability=status[0] if status else None,
         return_date=status[1] if status else None,
         schedule=schedules.as_dicts(schedule_rows) if schedule_rows is not None else None,
