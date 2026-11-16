@@ -430,7 +430,8 @@ ACCOUNT_CHANGE_ACTIONS = (
     "conversation_viewed",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
     "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
-    # Solicitante archivado (old_value: el correo original en claro; new_value: archivado-<id>@archivo.invalid)
+    # Cliente archivado con admin_tools archive-clients. Las filas del comando archive-requester (ya quitado)
+    # guardan old_value: el correo original en claro; new_value: archivado-<id>@archivo.invalid
     "server_account_archived",
     # Administrador creado con app.create_admin y contraseña restablecida con admin_tools reset-password
     "server_admin_created", "server_password_reset",
