@@ -1260,6 +1260,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 addChatMessage(getErrorMessage(data), 'notice');
                 return;
             }
+            // Pregunta de datos: el servidor ya eligió la consulta; la respuesta llega completa (5 a 15 s)
+            if (response.headers.get('X-Chat-Kind') === 'data') {
+                pending.textContent = 'Consultando datos…';
+            }
             // El texto aparece mientras el modelo lo escribe
             const reader = response.body.getReader();
             const decoder = new TextDecoder();

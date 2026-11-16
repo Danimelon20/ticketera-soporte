@@ -1,26 +1,10 @@
 """El comentario interno nunca le llega al solicitante, por ningún camino; el personal sí lo ve."""
 import pytest
 
-from app import accounts, chatbot, config, models
+from app import accounts, models
 from app.database import SessionLocal
-from app.routers import chat as chat_router
 
 TEXT = accounts.RELEASED_COMMENT
-
-
-@pytest.fixture
-def prompts(monkeypatch):
-    calls = []
-
-    def _fake_llm(system_prompt, history, message):
-        calls.append(system_prompt)
-        return "Respuesta de prueba"
-
-    monkeypatch.setattr(config, "CHATBOT_ENABLED", True)
-    monkeypatch.setattr(chatbot, "call_llm", _fake_llm)
-    chat_router.reset_rate_limit()
-    yield calls
-    chat_router.reset_rate_limit()
 
 
 @pytest.fixture
@@ -68,13 +52,3 @@ def test_not_sent_to_followers_or_requester_by_email(client, released, sent):
     # El único correo es el aviso al equipo, y no lo recibe ningún seguidor que no sea del equipo
     assert all("liberados" in subject for _, subject, _ in sent)
     assert all(TEXT not in body for _, _, body in sent)
-
-
-def test_technician_chat_context_marks_it_internal(client, make_user, released, prompts):
-    technician = make_user("technician")
-    ticket = released["ticket"]
-    response = client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]},
-                            headers=released["coordinator"]["headers"])
-    assert response.status_code == 200
-    assert client.post("/api/chat", json={"message": "Resumen"}, headers=technician["headers"]).status_code == 200
-    assert f"(interno): {TEXT}" in prompts[-1]

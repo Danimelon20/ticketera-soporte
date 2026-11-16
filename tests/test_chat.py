@@ -20,6 +20,8 @@ def prompts(monkeypatch):
 
     monkeypatch.setattr(config, "CHATBOT_ENABLED", True)
     monkeypatch.setattr(chatbot, "call_llm", _fake_llm)
+    # Pregunta de ayuda general (sin datos); las consultas del catálogo: tests/test_assistant_queries.py
+    monkeypatch.setattr(chatbot, "select_query", lambda message, options, periods=(): (chatbot.HELP, None))
     chat_router.reset_rate_limit()
     yield calls
     chat_router.reset_rate_limit()
@@ -29,61 +31,19 @@ def _chat(client, user, message="¿Cómo va mi ticket?", **extra):
     return client.post("/api/chat", json={"message": message, **extra}, headers=user["headers"])
 
 
-def _assert_no_personal_data(prompt):
-    assert not EMAIL_RE.search(prompt), "El contexto no debe tener correos"
-    assert "88881234" not in prompt
-    assert "102340567" not in prompt
-    assert "8888-1234" not in prompt
-
-
-def test_no_personal_data_in_any_prompt(client, make_user, make_ticket, prompts):
-    requester = make_user("requester")
-    coordinator = make_user("coordinator")
-    technician = make_user("technician")
-    # make_ticket guarda teléfono 8888-1234 y cédula 1-0234-0567
-    ticket = make_ticket(requester, title="Sin red en la oficina")
-    client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
-    client.post(
-        f"/api/tickets/{ticket['id']}/comments",
-        json={"content": "Su teléfono es 8888-1234 y su correo ana@ejemplo.com"},
-        headers=coordinator["headers"],
-    )
-
-    # Los contactos no usan el asistente: solo el personal
-    for user in (technician, coordinator):
-        assert _chat(client, user).status_code == 200
-    assert len(prompts) == 2
-    for prompt in prompts:
-        _assert_no_personal_data(prompt)
-    assert "[dato oculto]" in prompts[0]
-
-
-def test_technician_sees_assigned_ticket(client, make_user, make_ticket, prompts):
+def test_help_prompt_has_no_ticket_data(client, make_user, make_ticket, prompts):
+    """La ayuda general ya no lleva datos de tickets: los números salen solo del catálogo."""
     requester = make_user("requester")
     coordinator = make_user("coordinator")
     technician = make_user("technician")
     ticket = make_ticket(requester, title="Servidor de archivos lento")
     client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
-
-    assert _chat(client, technician).status_code == 200
-    prompt = prompts[-1]
-    assert f"Ticket #{ticket['id']}: Servidor de archivos lento" in prompt
-    assert "Tickets nuevos sin asignar:" in prompt
-    assert "rol técnico" in prompt
-
-
-def test_coordinator_sees_team_summary(client, make_user, make_ticket, prompts):
-    requester = make_user("requester")
-    coordinator = make_user("coordinator")
-    make_ticket(requester, title="Correo no sincroniza")
-
-    assert _chat(client, coordinator).status_code == 200
-    prompt = prompts[-1]
-    assert "sin asignar" in prompt
-    assert re.search(r"Tickets abiertos sin asignar: [1-9]\d*", prompt)
-    assert re.search(r"- Nuevo: [1-9]\d*", prompt)
-    assert "Tickets abiertos por técnico:" in prompt
-    assert "días abierto:" in prompt
+    for user in (technician, coordinator, make_user("admin")):
+        assert _chat(client, user).status_code == 200
+    for prompt in prompts:
+        assert "Servidor de archivos lento" not in prompt and f"#{ticket['id']}" not in prompt
+        assert not EMAIL_RE.search(prompt)
+        assert chatbot.HELP_NOTE in prompt
 
 
 def test_disabled_returns_503(client, make_user, prompts, monkeypatch):

@@ -4,11 +4,9 @@ import re
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import comments as internal_comments, config, models
-from .notifications import STATUS_LABELS
+from . import config, models
 
 ROLE_LABELS = {
     "technician": "técnico",
@@ -19,16 +17,15 @@ ROLE_LABELS = {
 ROLE_GUIDANCE = {
     "technician": "Ayuda con resúmenes, prioridades y pasos de diagnóstico de soporte técnico.",
     "coordinator": "Ayuda con resúmenes del equipo, carga de trabajo y tickets atrasados.",
-    "admin": "Ayuda con la administración del sistema: cuentas, invitaciones, permisos, correo e IA. No tienes datos de tickets.",
+    "admin": "Ayuda con la administración del sistema: cuentas, invitaciones, permisos, correo e IA.",
 }
 
-OPEN_STATUSES = ("new", "in_progress", "resolved")
 TIMEOUT_SECONDS = 120
 # El modelo queda cargado entre peticiones (la carga en frío tarda ~9 s en CPU)
 KEEP_ALIVE = "24h"
 # Tope de tokens de la respuesta por tarea (en CPU se generan ~20 tokens/s)
 NUM_PREDICT = {"chat": 400, "ticket_analysis": 300, "draft_analysis": 300, "group_check": 80,
-               "department_classification": 300}
+               "department_classification": 300, "query_select": 40, "answer": 200}
 WARM_UP_TIMEOUT_SECONDS = 180
 COMMENT_CHARS = 300
 
@@ -38,6 +35,9 @@ _LONG_NUMBER_RE = re.compile(r"\d(?:[\s-]?\d){7,}")
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 # Nunca registrar en logs el mensaje, el contexto ni la respuesta.
+
+HELP_NOTE = ("En esta conversación no tienes datos de tickets ni cifras. Si te piden números o listas, "
+             "di que no los tienes aquí y sugiere preguntar, por ejemplo: «¿Cuántos tickets hay abiertos?».")
 
 
 class ChatbotUnavailable(Exception):
@@ -53,143 +53,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _status(ticket: models.Ticket) -> str:
-    return STATUS_LABELS.get(ticket.status, ticket.status)
-
-
-def _assignee(ticket: models.Ticket) -> str:
-    return ticket.assigned_user.name if ticket.assigned_user else "sin asignar"
-
-
-def _naive(value: datetime) -> datetime:
-    return value.replace(tzinfo=None) if value.tzinfo else value
-
-
-def _last_comments(db: Session, ticket_id: int, limit: int, include_internal: bool) -> list[models.Comment]:
-    # El solicitante nunca recibe comentarios internos, tampoco a través del asistente
-    query = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id)
-    if not include_internal:
-        query = internal_comments.not_internal(query)
-    comments = query.order_by(models.Comment.id.desc()).limit(limit).all()
-    return list(reversed(comments))
-
-
-def _comment_line(comment: models.Comment, internal: bool = False) -> str:
-    author = comment.user.name if comment.user else "Desconocido"
-    mark = " (interno)" if internal else ""
-    return f"    - {author}{mark}: {_redact(comment.content)[:COMMENT_CHARS]}"
-
-
-def _technician_context(db: Session, user: models.User) -> list[str]:
-    assigned = (
-        db.query(models.Ticket)
-        .filter(models.Ticket.assigned_to == user.id, models.Ticket.status != "closed")
-        .order_by(models.Ticket.created_at.asc())
-        .limit(15)
-        .all()
-    )
-    lines = ["Tus tickets asignados sin cerrar:"]
-    if not assigned:
-        lines.append("- Ninguno.")
-    for t in assigned:
-        lines.append(
-            f"- Ticket #{t.id}: {_redact(t.title)} | estado: {_status(t)} | prioridad: {t.priority.name} "
-            f"| creado: {_naive(t.created_at):%Y-%m-%d}"
-        )
-        last = _last_comments(db, t.id, 1, include_internal=True)
-        if last:
-            lines.append("  Último comentario:")
-            internal = bool(internal_comments.internal_ids(db, [last[0].id]))
-            lines.append(_comment_line(last[0], internal))
-
-    unassigned_query = db.query(models.Ticket).filter(
-        models.Ticket.status == "new", models.Ticket.assigned_to.is_(None)
-    )
-    lines.append(f"Tickets nuevos sin asignar: {unassigned_query.count()}")
-    for t in unassigned_query.order_by(models.Ticket.created_at.asc()).limit(10).all():
-        lines.append(
-            f"- Ticket #{t.id}: {_redact(t.title)} | prioridad: {t.priority.name} | categoría: {t.category.name}"
-        )
-    return lines
-
-
-def _team_context(db: Session) -> list[str]:
-    lines = ["Tickets por estado:"]
-    by_status = dict(
-        db.query(models.Ticket.status, func.count(models.Ticket.id)).group_by(models.Ticket.status).all()
-    )
-    for status, label in STATUS_LABELS.items():
-        lines.append(f"- {label}: {by_status.get(status, 0)}")
-
-    open_filter = models.Ticket.status.in_(OPEN_STATUSES)
-    lines.append("Tickets abiertos por prioridad:")
-    by_priority = (
-        db.query(models.Priority.name, func.count(models.Ticket.id))
-        .join(models.Ticket, models.Ticket.priority_id == models.Priority.id)
-        .filter(open_filter)
-        .group_by(models.Priority.id)
-        .order_by(models.Priority.level.desc())
-        .all()
-    )
-    if by_priority:
-        lines.extend(f"- {name}: {count}" for name, count in by_priority)
-    else:
-        lines.append("- Ninguno.")
-
-    unassigned = db.query(models.Ticket).filter(open_filter, models.Ticket.assigned_to.is_(None)).count()
-    lines.append(f"Tickets abiertos sin asignar: {unassigned}")
-
-    lines.append("Tickets abiertos por técnico:")
-    by_person = (
-        db.query(models.User.name, func.count(models.Ticket.id))
-        .join(models.Ticket, models.Ticket.assigned_to == models.User.id)
-        .filter(open_filter)
-        .group_by(models.User.id)
-        .order_by(func.count(models.Ticket.id).desc(), models.User.name)
-        .all()
-    )
-    if by_person:
-        lines.extend(f"- {name}: {count}" for name, count in by_person)
-    else:
-        lines.append("- Ninguno.")
-
-    oldest = (
-        db.query(models.Ticket)
-        .filter(open_filter)
-        .order_by(models.Ticket.created_at.asc(), models.Ticket.id.asc())
-        .limit(10)
-        .all()
-    )
-    lines.append("Los 10 tickets abiertos más antiguos:")
-    if not oldest:
-        lines.append("- Ninguno.")
-    now = _now()
-    for t in oldest:
-        days = (now - _naive(t.created_at)).days
-        lines.append(
-            f"- Ticket #{t.id}: {_redact(t.title)} | estado: {_status(t)} | asignado: {_assignee(t)} "
-            f"| días abierto: {days}"
-        )
-    return lines
-
-
 def build_context(db: Session, user: models.User) -> str:
-    # Solo nombres de personas: nunca correos, teléfonos, cédulas, contraseñas ni códigos
-    if user.role == "technician":
-        lines = _technician_context(db, user)
-    elif user.role == "coordinator":
-        # El administrador no recibe datos de tickets
-        lines = _team_context(db)
-    else:
-        lines = []
-    return "\n".join(lines)
+    """Prompt de ayuda general: sin datos de tickets. Los números llegan solo por las consultas del catálogo
+    (app/assistant_queries.py), calculadas en el servidor."""
+    return HELP_NOTE
 
 
 # Siempre idénticas y al principio: Ollama reutiliza lo ya leído de un prompt que empieza igual
 ASSISTANT_RULES = (
     "Eres el Asistente de la Ticketera de Soporte de American Data Networks. "
     "Responde en español, breve y claro. Usa solo la sección DATOS; si algo no está ahí, di que no lo sabes. "
-    "No inventes números de ticket ni estados. "
+    "No inventes números de ticket, estados ni cifras. "
     "No puedes cambiar tickets: si te lo piden, explica en qué parte de la página se hace. "
     "Nunca compartas datos personales (cédulas, teléfonos, correos, contraseñas): "
     "si te los piden, responde que no puedes compartir datos personales. "
@@ -394,3 +268,64 @@ def stream_llm(system_prompt: str, history: list, message: str):
     if not started:
         logging.error("Ollama devolvió una respuesta vacía")
         raise ChatbotUnavailable()
+
+
+# ---------- Consultas del catálogo: la IA elige y redacta; el servidor calcula ----------
+
+HELP = "ayuda"
+NO_MATCH = "ninguna"
+SELECT_RULES = (
+    "Clasifica la pregunta de un usuario de la Ticketera de Soporte. Elige UNA opción por su id. "
+    "Las opciones de datos son SOLO para preguntas que piden cifras o listas de tickets de la ticketera. "
+    "Si pregunta cómo hacer algo, qué significa algo o cómo resolver un problema técnico, elige ayuda. "
+    "Si pide cifras de otra cosa, o no tiene que ver con soporte, elige ninguna."
+)
+HELP_OPTION = (f"- {HELP}: cómo usar la ticketera, qué significa algo o pasos de soporte técnico (sin cifras). "
+               "Ejemplos: «¿Cómo invito a un técnico?»; «¿Cómo cambio mi contraseña?»; «¿Qué significa En proceso?»; "
+               "«Pasos para diagnosticar una red lenta»; «La impresora no imprime, ¿qué reviso?»")
+NO_MATCH_OPTION = (f"- {NO_MATCH}: cualquier otra cosa, o cifras que no son de tickets. Ejemplos: «Cuéntame un chiste»; "
+                   "«¿Cuál es la capital de Francia?»; «¿Cuántas personas trabajan en la empresa?»; "
+                   "«¿Cuánto cuesta una licencia?»")
+
+
+def select_query(message: str, options: list[dict], periods: tuple[str, ...] = ()) -> tuple[str, str | None]:
+    """(id elegido, periodo). options: [{"id", "description", "examples"}] solo de las consultas que el rol puede
+    usar. La salida está restringida a esos ids (enum): la IA nunca escribe una consulta. Lanza ChatbotUnavailable."""
+    # ayuda y ninguna primero: el modelo pequeño tiende a quedarse con la primera opción de datos
+    ids = [HELP, NO_MATCH] + [o["id"] for o in options]
+    lines = [SELECT_RULES, "", "Opciones:", HELP_OPTION, NO_MATCH_OPTION]
+    for option in options:
+        examples = "; ".join(f"«{e}»" for e in option["examples"])
+        lines.append(f"- {option['id']}: {option['description']} Ejemplos: {examples}")
+    schema = {"type": "object", "properties": {"query": {"type": "string", "enum": ids}}, "required": ["query"]}
+    if periods:
+        lines.append("Si la pregunta habla de un periodo, elige también period.")
+        schema["properties"]["period"] = {"type": "string", "enum": list(periods)}
+    messages = [{"role": "system", "content": "\n".join(lines)}, {"role": "user", "content": message}]
+    payload = ollama_payload("query_select", messages, temperature=0.0, format=schema, num_ctx=2048)
+    content = _THINK_RE.sub("", post_chat(payload, task="query_select")).strip()
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return NO_MATCH, None
+    query = data.get("query") if isinstance(data, dict) else None
+    period = data.get("period") if isinstance(data, dict) else None
+    return (query if query in ids else NO_MATCH), (period if period in periods else None)
+
+
+ANSWER_RULES = (
+    "Eres el Asistente de la Ticketera de Soporte. Responde en español, en 1 a 3 oraciones, a la pregunta usando "
+    "solo los DATOS. Escribe los números con cifras, tal como aparecen en DATOS. No agregues números, fechas, "
+    "porcentajes ni números de ticket que no estén en DATOS y no hagas cálculos. No hagas listas."
+)
+
+
+def write_answer(facts: list[str], message: str) -> str:
+    """Redacción de la respuesta con los números que calculó el servidor. Lanza ChatbotUnavailable."""
+    system = "\n".join([ANSWER_RULES, "", "DATOS:", *facts])
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
+    payload = ollama_payload("answer", messages, temperature=0.1, num_ctx=2048)
+    reply = _THINK_RE.sub("", post_chat(payload, task="answer")).strip()
+    if not reply:
+        raise ChatbotUnavailable()
+    return reply

@@ -115,6 +115,7 @@ def test_stream_only_think_is_unavailable(ollama_stream):
 
 
 def test_stream_endpoint(client, make_user, ollama_stream, monkeypatch):
+    monkeypatch.setattr(chatbot, "select_query", lambda message, options, periods=(): (chatbot.HELP, None))
     monkeypatch.setattr(config, "CHATBOT_ENABLED", True)
     chat_router.reset_rate_limit()
     user = make_user("technician")
@@ -123,9 +124,11 @@ def test_stream_endpoint(client, make_user, ollama_stream, monkeypatch):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     assert response.text == "Su ticket está en proceso."
+    assert response.headers["x-chat-kind"] == "help"
 
 
 def test_stream_endpoint_unavailable(client, make_user, ollama_stream, monkeypatch):
+    monkeypatch.setattr(chatbot, "select_query", lambda message, options, periods=(): (chatbot.HELP, None))
     monkeypatch.setattr(config, "CHATBOT_ENABLED", True)
     chat_router.reset_rate_limit()
     ollama_stream["status"] = 404
