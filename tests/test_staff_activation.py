@@ -154,8 +154,9 @@ def test_others_cannot_invite(client, make_user, sent, role):
 
 
 def test_existing_account_cannot_be_invited(client, make_user, sent):
-    requester = make_user("requester")
-    _email_x, response = _invite(client, make_user("admin"), email=requester["email"])
+    # Un contacto sí se puede invitar (tests/test_invite_contact.py); una cuenta del personal no
+    technician = make_user("technician")
+    _email_x, response = _invite(client, make_user("admin"), email=technician["email"])
     assert response.status_code == 409
 
 

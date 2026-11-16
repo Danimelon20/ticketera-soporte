@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, models, routing
+from .. import accounts, audit, models, routing
 from ..schemas import StaffInvitationCreate, StaffInvitationRead
 from ..security import get_current_user, mask_email
 from .auth import _can_resend, _find_user, _now, normalize_email, send_invitation
@@ -25,11 +25,11 @@ def _record_sent(db: Session, actor: models.User, invitation: models.StaffInvita
     )
 
 
-def _registered_message(user: models.User, invited_role: str) -> str:
-    """El correo ya tiene cuenta: dice con qué rol, sin revelar más."""
+def _registered_message(db: Session, user: models.User, invited_role: str) -> str:
+    """El correo ya tiene cuenta que no se puede invitar: dice con qué rol, sin revelar más."""
     if user.role == "requester":
-        # Contacto (quien reporta por correo o un cliente archivado). Pendiente de decidir si se podrá convertir
-        return "Ese correo es de un contacto (quien reporta por correo o un cliente archivado): no se puede invitar como personal."
+        # Un contacto sí se invita (is_invitable_contact); aquí solo llegan el archivado y el desactivado
+        return accounts.contact_invite_block(db, user) or accounts.ARCHIVED_NOT_INVITABLE
     current = audit.role_name(user.role)
     if user.role == invited_role:
         return f"Esa persona ya está registrada como {current}."
@@ -80,8 +80,9 @@ def create_invitation(
     if "@" not in email:
         raise HTTPException(status_code=422, detail="Escriba un correo válido")
     existing = _find_user(db, email)
-    if existing is not None:
-        raise HTTPException(status_code=409, detail=_registered_message(existing, data.role))
+    # Un contacto (quien reportó por correo) sí se invita: al activarla se convierte, con su historial
+    if existing is not None and not accounts.is_invitable_contact(db, existing):
+        raise HTTPException(status_code=409, detail=_registered_message(db, existing, data.role))
     # Departamento obligatorio (que atienda tickets); un coordinador por departamento
     department_id = routing.validate_invitation_placement(db, data.role, data.department_id, email)
 
@@ -108,8 +109,10 @@ def list_invitations(current_user: models.User = Depends(get_current_user), db: 
     query = db.query(models.StaffInvitation)
     invitations = query.order_by(models.StaffInvitation.created_at.desc(), models.StaffInvitation.id.desc()).all()
     emails = {i.email for i in invitations if i.used_by is None}
+    # Un contacto invitable no cuenta como registrado: la invitación lo convierte
     registered = {
-        email for (email,) in db.query(func.lower(models.User.email)).filter(func.lower(models.User.email).in_(emails))
+        user.email.lower() for user in db.query(models.User).filter(func.lower(models.User.email).in_(emails))
+        if not accounts.is_invitable_contact(db, user)
     } if emails else set()
     by_id = routing.departments_by_id(db)
     return [_invitation_read(i, registered=i.email.lower() in registered, placement=_placement_of(db, i, by_id))
@@ -136,8 +139,8 @@ def resend_invitation(
     invitation = _own_invitation(db, current_user, invitation_id)
     # La cuenta ya existe (se activó por otra vía o cambió de rol): nada que activar
     existing = _find_user(db, normalize_email(invitation.email))
-    if existing is not None:
-        raise HTTPException(status_code=409, detail=_registered_message(existing, invitation.role))
+    if existing is not None and not accounts.is_invitable_contact(db, existing):
+        raise HTTPException(status_code=409, detail=_registered_message(db, existing, invitation.role))
     if not _can_resend(invitation.sent_at):
         raise HTTPException(status_code=429, detail="Espera un minuto antes de reenviarla.")
     sent = send_invitation(invitation)

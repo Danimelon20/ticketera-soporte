@@ -94,7 +94,9 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
    La documentación interactiva de la API está en http://localhost:8000/docs.
 
 7. Desde **Administración › Invitaciones**, invite al personal (técnicos y coordinadores). Nadie más inicia
-   sesión: quien reporta un problema por correo queda como **contacto** (sin contraseña ni acceso).
+   sesión: quien reporta un problema por correo queda como **contacto** (sin contraseña ni acceso). Un contacto
+   se puede invitar con su mismo correo: al activar la invitación pasa a ser personal y conserva sus tickets
+   (un cliente archivado no se puede invitar).
 8. Si la base viene de antes de quitar el portal, archive las cuentas de cliente. Primero en modo de prueba
    (**solo muestra** qué cambiaría) y después con `--apply` (el que cambia; no borra nada):
 

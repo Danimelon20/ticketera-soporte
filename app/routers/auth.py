@@ -162,7 +162,9 @@ def valid_invitation(db: Session, email: str, code: str) -> models.StaffInvitati
         invitation.attempts += 1
         db.commit()
         raise HTTPException(status_code=400, detail=CODE_INVALID)
-    if _find_user(db, email) is not None:
+    # Un contacto se convierte al activar; otra cuenta con ese correo (o un cliente archivado) no
+    existing = _find_user(db, email)
+    if existing is not None and not accounts.is_invitable_contact(db, existing):
         raise HTTPException(status_code=400, detail=CODE_INVALID)
     return invitation
 
@@ -176,14 +178,8 @@ def activate_staff(data: EmailCodeRequest, response: Response, db: Session = Dep
     invitation = valid_invitation(db, email, data.code)
 
     password = generate_password()
-    user = models.User(name=invitation.name, email=email, role=invitation.role, password_hash=hash_password(password))
-    db.add(user)
-    db.flush()
-    invitation.used_by = user.id
-    invitation.used_at = _now()
-    audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
-    # Departamento elegido al invitar
-    routing.apply_invitation_placement(db, invitation, user)
+    # Sin cuenta: se crea. Un contacto: se convierte y conserva sus tickets
+    accounts.staff_from_invitation(db, invitation, _find_user(db, email), hash_password(password))
     db.commit()
     # Única respuesta con la contraseña: que el navegador no la guarde
     response.headers["Cache-Control"] = "no-store"

@@ -46,7 +46,6 @@ def _ago(**kwargs):
     ("technician", "coordinator", "registrada con el rol Técnico. Cambie su rol desde Acciones"),
     ("coordinator", "technician", "registrada con el rol Coordinador"),
     ("admin", "technician", "registrada con el rol Administrador"),
-    ("requester", "technician", "es de un contacto"),
 ])
 def test_invite_recognizes_registered_people(client, make_user, sent, existing_role, invited_role, expected):
     admin = make_user("admin")

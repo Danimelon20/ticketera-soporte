@@ -118,6 +118,11 @@ servidor con `scripts.admin_tools` (ver el README).
    encendido).
 3. En **Equipo y turnos** se carga su horario para que reciba asignaciones.
 
+**Caso típico: un contacto pasa a ser personal**
+Se invita con su mismo correo, como a cualquiera. Mientras no active la invitación sigue siendo contacto; al
+activarla se convierte en técnico o coordinador en la misma cuenta, y los tickets que reportó siguen siendo
+suyos. Un cliente archivado o un contacto desactivado no se puede invitar.
+
 ---
 
 ## Quien reporta por correo (contacto)

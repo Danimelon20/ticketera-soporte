@@ -1,5 +1,6 @@
 """Gestión de cuentas por rol: quién puede desactivar, restablecer o desbloquear a quién."""
 import logging
+from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
@@ -55,6 +56,49 @@ def archived_ids(db: Session, user_ids: list[int]) -> set[int]:
         return set()
     return {uid for (uid,) in db.query(models.ArchivedAccount.user_id).filter(
         models.ArchivedAccount.user_id.in_(user_ids))}
+
+
+ARCHIVED_NOT_INVITABLE = "Esa cuenta es de un cliente archivado: no se puede invitar como personal."
+INACTIVE_CONTACT = "Ese contacto está desactivado: no se puede invitar como personal."
+
+
+def contact_invite_block(db: Session, user: models.User) -> str | None:
+    """Un contacto (rol requester) se puede invitar como personal, salvo si es un cliente archivado o está
+    desactivado: devuelve el motivo, o None si se puede."""
+    if db.get(models.ArchivedAccount, user.id) is not None:
+        return ARCHIVED_NOT_INVITABLE
+    if not user.is_active:
+        return INACTIVE_CONTACT
+    return None
+
+
+def is_invitable_contact(db: Session, user: models.User | None) -> bool:
+    return user is not None and user.role == "requester" and contact_invite_block(db, user) is None
+
+
+def staff_from_invitation(db: Session, invitation: models.StaffInvitation, user: models.User | None,
+                          password_hash: str) -> models.User:
+    """Activa la invitación. Sin cuenta: crea la del personal. Con un contacto que se puede invitar: lo convierte
+    en el rol invitado y conserva su historial (los tickets que reportó siguen siendo suyos). Quien llama ya
+    revisó que user sea None o un contacto invitable. No hace commit."""
+    if user is None:
+        user = models.User(name=invitation.name, email=invitation.email, role=invitation.role,
+                           password_hash=password_hash)
+        db.add(user)
+        db.flush()
+        old_role = None
+    else:
+        old_role = user.role
+        user.name = invitation.name
+        user.role = invitation.role
+        user.password_hash = password_hash
+    invitation.used_by = user.id
+    invitation.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    audit.record(db, user.id, "invitation_used", target=user, old=audit.role_name(old_role),
+                 new=audit.role_name(user.role))
+    # Departamento elegido al invitar
+    routing.apply_invitation_placement(db, invitation, user)
+    return user
 
 
 def check_can_manage(actor: models.User, target: models.User, action: str, new_role: str | None = None) -> None:
