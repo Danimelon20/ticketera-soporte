@@ -6,7 +6,8 @@ Uso (entorno de pruebas encendido):
     docker compose -f docker-compose.pruebas.yml exec app python -m scripts.simulate_email --file /ruta/correo.eml
 
 Arma el mismo mensaje que llegaría del buzón y lo procesa con process_message (el mismo camino que la lectura
-del buzón): crea el borrador, lo analiza con la IA y, con «Tickets por departamento» encendido, lo clasifica.
+del buzón, salvo la revisión de autenticidad del remitente, que necesita las cabeceras de Exchange): crea el
+borrador, lo analiza con la IA y, con «Tickets por departamento» encendido, lo clasifica.
 Las respuestas automáticas («Recibimos su correo») salen a Mailpit.
 
 Nunca toca Microsoft Graph: solo corre con APP_ENV=pruebas, MAILBOX_POLL_ENABLED=false y MAIL_TRANSPORT distinto
@@ -78,7 +79,8 @@ def _report(db, draft_id: int) -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Simula un correo entrante (solo en el entorno de pruebas)")
-    parser.add_argument("--from", dest="sender", help="Correo de un solicitante registrado y activo")
+    parser.add_argument("--from", dest="sender",
+                        help="Remitente: alguien de INTERNAL_DOMAINS (la primera vez se crea su contacto)")
     parser.add_argument("--subject", default="", help="Asunto")
     parser.add_argument("--body", help="Texto del correo")
     parser.add_argument("--file", help="Archivo .eml en lugar de --from/--subject/--body")
@@ -100,7 +102,8 @@ def main(argv=None) -> int:
 
     db = SessionLocal()
     try:
-        result = process_message(db, msg)
+        # No pasa por Exchange: no trae las marcas de autenticidad del remitente (app/email_auth.py)
+        result = process_message(db, msg, verify_sender=False)
         print(f"Resultado: {result}")
         draft = db.query(models.EmailDraft).filter(models.EmailDraft.message_id == _message_id(msg)).first() \
             if result == "draft_created" else None

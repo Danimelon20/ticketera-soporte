@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, draft_classification, email_analysis, email_attachments, grouping, identity, models, routing, suspicion
+from .. import account_reports, assignment_notice, attachments, audit, auto_assign, availability, config, draft_classification, email_analysis, email_attachments, grouping, identity, models, routing
 from ..chatbot import _redact
 from ..email_processing import send_ticket_created
 from ..schemas import (
@@ -15,8 +15,8 @@ from ..schemas import (
     DraftTransferResult,
 )
 from ..security import get_current_user, mask_email
-from ..validators import mask_id_number, normalize_id_number, normalize_phone
-from .tickets import person_name, unavailable_message, verify_id_number
+from ..validators import mask_id_number, normalize_phone
+from .tickets import person_name, unavailable_message
 
 router = APIRouter(prefix="/api", tags=["drafts"])
 
@@ -173,15 +173,13 @@ def _draft_read(db: Session, draft: models.EmailDraft, viewer: models.User) -> D
     return data
 
 
-def _final_contact(value: str | None, stored: str | None, normalize, missing: str) -> str:
-    """Lo que escribió quien confirma; vacío o enmascarado: el dato guardado."""
+def _final_phone(value: str | None, stored: str | None) -> str | None:
+    """Lo que escribió quien confirma; vacío o enmascarado: el guardado (puede no haber: es opcional)."""
     value = (value or "").strip()
     if not value or "*" in value:
-        if not stored:
-            raise HTTPException(status_code=422, detail=missing)
         return stored
     try:
-        return normalize(value)
+        return normalize_phone(value)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -307,23 +305,11 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     priority = db.get(models.Priority, data.priority_id)
     if not priority:
         raise HTTPException(status_code=400, detail="La prioridad no existe")
+    # Teléfono opcional; la cédula ya no se pide (queda la que tenía una cuenta archivada, si tenía)
     stored_phone, stored_id = _stored_contact(draft)
-    contact_phone = _final_contact(data.contact_phone, stored_phone, normalize_phone, "Falta el teléfono")
-    contact_id_number = _final_contact(data.contact_id_number, stored_id, normalize_id_number, "Falta la cédula")
+    contact_phone = _final_phone(data.contact_phone, stored_phone)
+    contact_id_number = stored_id
     requester = draft.requester
-    # Hacienda solo para una cédula nueva escrita por quien confirma
-    if contact_id_number != stored_id:
-        if identity.id_number_taken(db, contact_id_number, requester.id):
-            # La escribió quien confirma: solo queda en el registro
-            suspicion.id_number_conflict(db, requester, contact_id_number, "staff", actor_id=reviewer.id, report=False)
-            db.commit()
-            raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
-        verify_id_number(contact_id_number)
-    elif contact_id_number != requester.id_number and identity.id_number_taken(db, contact_id_number, requester.id):
-        # El intento del cliente ya se contó cuando llegó su correo: aquí solo queda en el registro
-        suspicion.id_number_conflict(db, requester, contact_id_number, "draft", actor_id=reviewer.id, report=False)
-        db.commit()
-        raise HTTPException(status_code=400, detail=identity.ID_IN_USE)
 
     # Responsable: el técnico que confirma; si confirma un coordinador, el revisor del borrador.
     # Sin ninguno de los dos, lo decide la asignación automática como siempre
@@ -381,10 +367,9 @@ def confirm_draft(draft_id: int, data: DraftConfirm, background_tasks: Backgroun
     db.add(analysis)
     # Sin nivel del borrador (o "No es soporte"): vence como Estándar
     email_analysis.apply_default_level(db, ticket, analysis)
-    # Al perfil con las mismas reglas que "Complete su perfil"; desde aquí queda fijo
-    identity.apply_contact_from_email(
-        db, requester, requester.phone or contact_phone, contact_id_number, actor_id=reviewer.id
-    )
+    # El teléfono queda en su ficha si no tenía
+    if contact_phone and not requester.phone:
+        requester.phone = contact_phone
     identity.lock(db, requester)
 
     draft.status = "confirmed"

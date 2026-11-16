@@ -472,7 +472,7 @@ def status_reply_body(db: Session, user: models.User, text: str) -> str:
                 f"- Ticket #{t.id}: {t.title} | Estado: {STATUS_LABELS.get(t.status, t.status)} "
                 f"| Técnico asignado: {assignee}"
             )
-    lines += ["", f"Puede ver el detalle en {config.APP_URL}"]
+    lines += ["", "Puede responder el correo de cada ticket para agregar información."]
     return "\n".join(lines)
 
 
@@ -541,22 +541,12 @@ def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User, fo
     return "unclear"
 
 
-def _received_body(user: models.User, missing_contact: bool) -> str:
-    lines = [
+def _received_body(user: models.User) -> str:
+    return "\n".join([
         f"Buen día, {display_name(user)}.",
         "",
         "Recibimos su correo. Un técnico está revisando su solicitud y recibirá el número de ticket cuando se confirme.",
-    ]
-    if missing_contact:
-        lines += [
-            "",
-            "Para poder registrar su solicitud necesitamos sus datos de contacto. "
-            "Por favor responda este mismo correo con estas dos líneas:",
-            "",
-            "Teléfono: ...",
-            "Cédula: ...",
-        ]
-    return "\n".join(lines)
+    ])
 
 
 def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
@@ -620,14 +610,8 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         draft.description = result["description"] or (draft.body or "").strip()[:DRAFT_DESCRIPTION_CHARS] or None
         draft.category_id = result["category_id"]
         draft.priority_id = priority.id if priority else None
-        missing_contact = not draft.contact_phone or not draft.contact_id_number
-        # Con un motivo anotado (por ejemplo, cédula de otra cuenta) lo decide una persona
-        has_reason = (
-            db.query(models.DraftPendingReason).filter(models.DraftPendingReason.draft_id == draft.id).first()
-            is not None
-        )
-        missing_contact = missing_contact and not has_reason
-        draft.status = "waiting_contact" if missing_contact else "pending_review"
+        # Teléfono y cédula ya no se piden: pasa directo a revisión
+        draft.status = "pending_review"
         db.commit()
         if routing.enforced(db):
             # Tickets por departamento: la IA elige el departamento con las fichas (al coordinador o a
@@ -639,7 +623,7 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
             # Ya espera a una persona: se le busca revisor (import local: auto_assign importa este módulo)
             from . import auto_assign
             auto_assign.assign_draft(draft.id)
-        mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user, missing_contact))
+        mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user))
 
     logging.info("Borrador %s analizado por la IA: %s", draft.id, draft.status)
     return draft.status

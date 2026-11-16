@@ -42,6 +42,9 @@ MS_LOGIN_REDIRECT_URI = os.getenv("MS_LOGIN_REDIRECT_URI", "http://localhost:800
 
 # Dominios de la empresa (separados por coma): sus correos no pueden ser cuentas de solicitante. Vacío: no bloquea
 INTERNAL_DOMAINS = [d.strip().lower().lstrip("@") for d in os.getenv("INTERNAL_DOMAINS", "").split(",") if d.strip()]
+# Remitente de los correos entrantes: "auth" (por defecto) exige las marcas de autenticidad de Exchange Online
+# (interno, o DMARC/compauth en pass); "domain" solo mira el dominio del «De:» (que se puede falsificar)
+EMAIL_SENDER_CHECK = "domain" if os.getenv("EMAIL_SENDER_CHECK", "auth").strip().lower() == "domain" else "auth"
 
 # Asistente de la página (modelo local servido por Ollama)
 CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "false").lower() == "true"

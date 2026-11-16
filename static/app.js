@@ -3064,7 +3064,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftPrioritySelect = document.getElementById('draftPriority');
     const draftDescriptionInput = document.getElementById('draftDescription');
     const draftPhoneInput = document.getElementById('draftPhone');
-    const draftIdNumberInput = document.getElementById('draftIdNumber');
     const draftConfirmBtn = document.getElementById('draftConfirmBtn');
     const draftDiscardBtn = document.getElementById('draftDiscardBtn');
     const draftDetailsBtn = document.getElementById('draftDetailsBtn');
@@ -3399,17 +3398,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (draft.status === 'waiting_contact') {
             const waiting = document.createElement('p');
             waiting.className = 'ai-muted';
-            waiting.textContent = 'Se pidió al cliente su teléfono y su cédula. Si los consiguió por otro medio, escríbalos abajo.';
+            // Borradores de antes: ya no hace falta esperar esos datos para crear el ticket
+            waiting.textContent = 'Este correo llegó cuando todavía se pedían teléfono y cédula. Ya no hacen falta: puede crear el ticket.';
             ai.appendChild(waiting);
         }
 
         draftTitleInput.value = draft.title || '';
         draftDescriptionInput.value = draft.description || '';
+        // Teléfono opcional; vacío o enmascarado se usa el guardado. La cédula ya no se pide
         draftPhoneInput.value = draft.contact_phone || '';
-        draftIdNumberInput.value = draft.contact_id_number || '';
-        // Si el borrador ya los tiene, vacíos o enmascarados se usan los guardados
-        draftPhoneInput.required = !draft.contact_phone;
-        draftIdNumberInput.required = !draft.contact_id_number;
         fillDraftSelect(draftCategorySelect, categoryMap, draft.category_id);
         fillDraftSelect(draftPrioritySelect, priorityMap, draft.priority_id);
         draftConfirmBtn.disabled = false;
@@ -3532,9 +3529,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Solo se valida lo que se escribió nuevo (sin asteriscos)
         const isNew = value => value.trim() !== '' && !value.includes('*');
         const phoneError = isNew(draftPhoneInput.value) ? validatePhone(draftPhoneInput.value) : null;
-        const idError = isNew(draftIdNumberInput.value) ? validateIdNumber(draftIdNumberInput.value) : null;
-        if (phoneError || idError) {
-            showError(phoneError || idError);
+        if (phoneError) {
+            showError(phoneError);
             return;
         }
         // Tickets por departamento: el técnico que lo atenderá (el servidor valida que sea de su departamento)
@@ -3558,7 +3554,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     priority_id: parseInt(draftPrioritySelect.value, 10),
                     description: draftDescriptionInput.value.trim(),
                     contact_phone: draftPhoneInput.value,
-                    contact_id_number: draftIdNumberInput.value,
                     ...(technician ? { assigned_to: technician.id, confirm_unavailable: confirmUnavailable } : {})
                 })
             });

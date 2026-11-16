@@ -287,8 +287,7 @@ def send_merge_notice(requester: models.User, target_id: int) -> None:
             f"Buen día, {display_name(requester)}.",
             "",
             f"Su mensaje se agregó a su solicitud #{target_id}, que ya estamos atendiendo.",
-            "",
-            f"Puede verla en {config.APP_URL}/#ticket/{target_id}",
+            "Le avisaremos por este medio cuando haya cambios.",
         ]),
     )
 
@@ -466,8 +465,6 @@ def resolve_related(db: Session, principal: models.Ticket, actor: models.User) -
                 "",
                 "Respuesta del equipo de soporte:",
                 text,
-                "",
-                f"Puede verlo en {config.APP_URL}/#ticket/{related.id}",
             ])))
     return mails
 

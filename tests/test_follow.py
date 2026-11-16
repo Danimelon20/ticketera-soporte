@@ -75,7 +75,7 @@ def test_status_change_notifies_requester_follower_only(client, make_user, make_
     assert "Hola Carla Solicitante." in body
     assert "Tomás Técnico cambió el estado de Nuevo a En proceso." in body
     assert f"Título: {ticket['title']}" in body
-    assert "Recibes este correo porque das seguimiento a este ticket." in body
+    assert "Recibe este correo porque reportó este problema." in body
     # Nunca datos personales del contacto
     assert "8888" not in body
     assert "0234" not in body

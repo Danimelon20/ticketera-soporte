@@ -3,7 +3,7 @@ import re
 import unicodedata
 from email.utils import parseaddr
 
-from .validators import normalize_id_number, normalize_phone
+from .validators import normalize_phone
 
 DEFAULT_TITLE = "Ticket recibido por correo"
 DEFAULT_PRIORITY = "Media"
@@ -97,7 +97,8 @@ def parse_ticket_email(subject, body, category_names, priority_names) -> dict:
             description_lines.append(line)
             continue
         key = normalize(line)
-        for name in ("categoria", "prioridad", "telefono", "cedula", "descripcion"):
+        # La cédula ya no se pide (el personal se identifica por su correo); una línea «Cédula:» se ignora
+        for name in ("categoria", "prioridad", "telefono", "descripcion"):
             if key.startswith(name + ":"):
                 value = line.split(":", 1)[1].strip()
                 if name == "descripcion":
@@ -120,19 +121,13 @@ def parse_ticket_email(subject, body, category_names, priority_names) -> dict:
     if priority is None:
         priority = DEFAULT_PRIORITY
 
+    # Teléfono opcional: si viene mal escrito se ignora (no detiene el ticket)
     phone = None
     if "telefono" in fields:
         try:
             phone = normalize_phone(fields["telefono"])
-        except ValueError as exc:
-            errors.append(str(exc))
-
-    id_number = None
-    if "cedula" in fields:
-        try:
-            id_number = normalize_id_number(fields["cedula"])
-        except ValueError as exc:
-            errors.append(str(exc))
+        except ValueError:
+            phone = None
 
     description = None
     if description_lines is None:
@@ -147,7 +142,7 @@ def parse_ticket_email(subject, body, category_names, priority_names) -> dict:
         "category": category,
         "priority": priority,
         "phone": phone,
-        "id_number": id_number,
+        "id_number": None,
         "description": description,
         "errors": errors,
     }

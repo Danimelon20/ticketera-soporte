@@ -238,6 +238,17 @@ def _owner_ticket(actor, payload):
 
 
 @pytest.fixture(autouse=True)
+def email_senders(monkeypatch):
+    """Los correos de prueba no pasan por Exchange (no traen sus marcas de autenticidad) y las cuentas de prueba
+    son @test.com: por defecto solo se mira el dominio y test.com es de la empresa. Las pruebas de app/email_auth.py
+    y de remitentes de afuera lo cambian."""
+    from app import config
+
+    monkeypatch.setattr(config, "EMAIL_SENDER_CHECK", "domain")
+    monkeypatch.setattr(config, "INTERNAL_DOMAINS", ["test.com"])
+
+
+@pytest.fixture(autouse=True)
 def no_real_network():
     """Falla la prueba que intente salir a la red. El correo solo se enciende con monkeypatch en la prueba."""
     from app import config

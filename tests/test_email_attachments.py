@@ -339,14 +339,15 @@ def test_reply_with_files_goes_to_requester(client, followed_ticket, requester, 
         db.close()
 
 
-def test_more_than_20_mb_sends_portal_link(client, followed_ticket, requester, sent):
+def test_more_than_20_mb_asks_to_reply_for_them(client, followed_ticket, requester, sent):
     ticket, coordinator, _ = followed_ticket
     big = [(f"grande{i}.png", png(attachments.MAX_BYTES)) for i in range(3)]
     assert reply(client, ticket["id"], coordinator, big).status_code == 200
     [(mail, files)] = sent_to(sent, requester["email"])
     assert files is None
-    assert "Los archivos adjuntos están disponibles en el portal de soporte." in mail[2]
-    assert f"http://soporte.test/#ticket/{ticket['id']}" in mail[2]
+    # Ya no hay portal donde verlos: se le pide que los solicite respondiendo
+    assert "responda este correo para pedirlos" in mail[2]
+    assert "#ticket/" not in mail[2]
 
 
 def test_internal_note_with_files_sends_nothing(client, followed_ticket, sent):

@@ -1,12 +1,16 @@
 import hashlib
 import re
+import logging
 from email.header import decode_header, make_header
+from email.utils import parseaddr
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import config, email_attachments, hacienda, identity, mailer, models, suspicion
+from . import config, email_attachments, email_auth, identity, mailer, models
 from .email_parser import extract_sender, get_plain_body, parse_ticket_email, strip_quoted
+from .security import mask_email
+from .validators import is_internal_email
 from .notifications import display_name, notify_followers
 
 IGNORED_PRECEDENCE = ("bulk", "junk", "auto_reply")
@@ -15,6 +19,14 @@ TICKET_REF_RE = re.compile(r"\[Ticket\s*#(\d+)\]", re.IGNORECASE)
 BODY_MAX_LENGTH = 5000
 # Errores que indican un correo escrito sin la plantilla
 FREE_TEXT_ERRORS = ("Falta la línea Categoría", "La categoría", "Falta la línea Descripción", "La descripción")
+# Sin portal: solo el personal de la empresa reporta por correo (INTERNAL_DOMAINS)
+NOT_INTERNAL_SUBJECT = "No pudimos crear su ticket"
+NOT_INTERNAL_BODY = ("Buen día. Recibimos su correo, pero este buzón es solo para el personal de la empresa. "
+                     "Si necesita ayuda, comuníquese con su contacto habitual.")
+STAFF_SENDER_BODY = ("Buen día. Recibimos su correo, pero esta dirección es de una cuenta del personal de la "
+                     "Ticketera. Para reportar un problema, cree el ticket desde la Ticketera (Nuevo ticket).")
+# Contraseña inutilizable: un contacto nunca inicia sesión (verify_password siempre da False)
+NO_PASSWORD = "!"
 
 
 class _RunNow:
@@ -53,8 +65,7 @@ def _template(category_names: list[str], priority_names: list[str]) -> str:
         'Asunto: [Soporte] <título corto del problema>',
         f"Categoría: <una de: {', '.join(category_names)}>",
         f"Prioridad: <una de: {', '.join(priority_names)}; si no la pone queda Media>",
-        "Teléfono: <8 dígitos>",
-        "Cédula: <9 dígitos, o 11 o 12 si es DIMEX>",
+        "Teléfono: <8 dígitos; opcional>",
         "Descripción: <qué pasa, desde cuándo y qué intentaste>",
     ])
 
@@ -74,8 +85,7 @@ def send_ticket_created(ticket: models.Ticket, user: models.User, category: mode
         f"Prioridad: {priority.name}",
         "Estado: Nuevo",
         "",
-        "Le avisaremos por este medio cuando haya cambios.",
-        f"Puede ver el ticket en {config.APP_URL}",
+        "Le avisaremos por este medio cuando haya cambios. Puede responder este correo para agregar información.",
     ])
     mailer.send_email(user.email, f"[Ticket #{ticket.id}] Recibimos su solicitud: {ticket.title}", body)
 
@@ -151,74 +161,19 @@ def mark_pending(db: Session, draft: models.EmailDraft, reason: str) -> None:
         row.reason = reason
 
 
-def _update_waiting_contact(db: Session, msg, message_id: str, user: models.User, subject: str,
-                            category_names: list[str], priority_names: list[str]) -> str | None:
-    """Completa el teléfono o la cédula de un borrador que los espera. None: seguir el flujo normal."""
-    draft = (
-        db.query(models.EmailDraft)
-        .filter(models.EmailDraft.requester_id == user.id, models.EmailDraft.status == "waiting_contact")
-        .order_by(models.EmailDraft.id.desc())
-        .first()
-    )
-    if draft is None:
-        return None
-    parsed = parse_ticket_email(subject, strip_quoted(get_plain_body(msg)), category_names, priority_names)
-    phone = parsed["phone"]
-    id_number = parsed["id_number"]
-    if id_number and hacienda.check_id_number(id_number):
-        id_number = None
-    if not phone and not id_number:
-        return None
-
-    # Al perfil con las mismas reglas que "Complete su perfil"
-    reason = identity.apply_contact_from_email(db, user, phone, id_number)
-    if phone:
-        draft.contact_phone = phone
-    if id_number and reason is None:
-        draft.contact_id_number = id_number
-    missing = [name for name, value in (("Teléfono", draft.contact_phone), ("Cédula", draft.contact_id_number)) if not value]
-    if reason is not None:
-        # La cédula es de otra cuenta: no se guarda y lo revisa una persona
-        mark_pending(db, draft, reason)
-        missing = []
-    if not missing:
-        draft.status = "pending_review"
-    stored = email_attachments.save_to_draft(db, draft, email_attachments.extract(msg))
-    _save_result(db, message_id, "contact_updated")
-    email_attachments.commit_or_cleanup(db, stored)
-    if draft.status == "pending_review":
-        # Normalmente ya tiene revisor (desde "Esperando datos"); si no, se le busca
-        from . import auto_assign
-        auto_assign.assign_draft(draft.id)
-
-    if missing:
-        mailer.send_email(
-            user.email,
-            "[Soporte] Falta un dato de contacto",
-            "\n".join([
-                f"Buen día, {display_name(user)}.",
-                "",
-                "Gracias, recibimos parte de sus datos de contacto.",
-                f"Todavía falta: {missing[0]}. Por favor responda este correo con la línea:",
-                "",
-                f"{missing[0]}: ...",
-            ]),
-        )
-    else:
-        mailer.send_email(
-            user.email,
-            "[Soporte] Gracias, recibimos sus datos de contacto",
-            "\n".join([
-                f"Buen día, {display_name(user)}.",
-                "",
-                "Gracias, recibimos sus datos de contacto.",
-                "Un técnico está revisando su solicitud y recibirá el número de ticket cuando se confirme.",
-            ]),
-        )
-    return "contact_updated"
+def _new_contact(db: Session, msg, sender: str) -> models.User:
+    """Primera vez que escribe alguien de la empresa: su ficha de contacto, sin contraseña ni acceso. No hace
+    commit."""
+    name = " ".join(parseaddr(str(msg.get("From") or ""))[0].split())[:100]
+    user = models.User(name=name, email=sender, role="requester", password_hash=NO_PASSWORD)
+    db.add(user)
+    db.flush()
+    logging.info("Contacto nuevo %s creado desde un correo", user.id)
+    return user
 
 
-def process_message(db: Session, msg) -> str:
+def process_message(db: Session, msg, verify_sender: bool = True) -> str:
+    """verify_sender=False solo para scripts.simulate_email (no pasa por Exchange: no trae sus marcas)."""
     # a. Duplicados
     message_id = _message_id(msg)
     if db.query(models.ProcessedEmail).filter(models.ProcessedEmail.message_id == message_id).first():
@@ -231,28 +186,34 @@ def process_message(db: Session, msg) -> str:
         db.commit()
         return "ignored"
 
+    # El «De:» se puede falsificar: sin las marcas de autenticidad de Exchange no se usa ni se responde
+    if verify_sender and not email_auth.sender_verified(msg, sender):
+        _save_result(db, message_id, "unverified_sender")
+        db.commit()
+        logging.warning("Correo de %s sin marcas de autenticidad: no se procesó", mask_email(sender))
+        return "unverified_sender"
+
     # Respuesta a un ticket existente (funciona aunque la IA esté apagada)
     subject = _decode_subject(msg)
     reply_result = _handle_ticket_reply(db, msg, message_id, sender, subject)
     if reply_result is not None:
         return reply_result
 
-    # c. Solo solicitantes registrados y activos
-    user = (
-        db.query(models.User)
-        .filter(func.lower(models.User.email) == sender, models.User.is_active.is_(True))
-        .first()
-    )
-    if user is None or user.role != "requester":
+    # c. Solo el personal de la empresa (INTERNAL_DOMAINS): la primera vez se crea su contacto
+    user = db.query(models.User).filter(func.lower(models.User.email) == sender).first()
+    if user is not None and user.is_active and user.role in ("technician", "coordinator", "admin"):
+        _save_result(db, message_id, "staff_sender")
+        db.commit()
+        mailer.send_email(sender, NOT_INTERNAL_SUBJECT, STAFF_SENDER_BODY)
+        return "staff_sender"
+    if user is None and is_internal_email(sender):
+        user = _new_contact(db, msg, sender)
+    # Un cliente archivado (otro dominio) ya no abre temas nuevos; sus respuestas a un ticket sí entran (arriba)
+    if user is None or not user.is_active or user.role != "requester" or not is_internal_email(user.email):
+        db.rollback()
         _save_result(db, message_id, "unregistered")
         db.commit()
-        mailer.send_email(
-            sender,
-            "No pudimos crear su ticket",
-            "Buen día. Recibimos su correo, pero esta dirección no está registrada como cliente "
-            f"en la Ticketera de Soporte. Regístrese primero en {config.APP_URL} con este mismo "
-            "correo y vuelva a enviar su solicitud.",
-        )
+        mailer.send_email(sender, NOT_INTERNAL_SUBJECT, NOT_INTERNAL_BODY)
         return "unregistered"
 
     # d. Leer el correo
@@ -265,32 +226,9 @@ def process_message(db: Session, msg) -> str:
     errors = list(parsed["errors"])
     free_text = any(e.startswith(FREE_TEXT_ERRORS) for e in errors)
 
-    # Un correo sin plantilla puede traer los datos que esperaba un borrador
-    if free_text:
-        contact_result = _update_waiting_contact(db, msg, message_id, user, subject, category_names, priority_names)
-        if contact_result is not None:
-            return contact_result
-
-    # e. Teléfono y cédula: del correo o del perfil
+    # e. Teléfono opcional (del correo o el que ya tenía); la cédula ya no se pide al personal
     phone = parsed["phone"] or user.phone
-    id_number = parsed["id_number"] or user.id_number
-    if not phone and not any(e.startswith("El teléfono") for e in errors):
-        errors.append("Falta la línea Teléfono")
-    if not id_number and not any(e.startswith("La cédula") for e in errors):
-        errors.append("Falta la línea Cédula")
-    hacienda_error = None
-    id_taken = False
-    if parsed["id_number"] and parsed["id_number"] != user.id_number:
-        # Cédula de otra cuenta: no se usa (se queda la del perfil, si tiene)
-        id_taken = identity.id_number_taken(db, parsed["id_number"], user.id)
-        if id_taken:
-            suspicion.id_number_conflict(db, user, parsed["id_number"], "email")
-            id_number = user.id_number
-            errors.append(identity.ID_IN_USE)
-    if parsed["id_number"] and not id_taken:
-        hacienda_error = hacienda.check_id_number(parsed["id_number"])
-        if hacienda_error:
-            errors.append(hacienda_error)
+    id_number = user.id_number
 
     # Sin plantilla y con la IA encendida: borrador que confirma una persona (todavía no se responde)
     if errors and free_text and config.AI_ANALYSIS_ENABLED:
@@ -302,11 +240,9 @@ def process_message(db: Session, msg) -> str:
             body=strip_quoted(body_text)[:BODY_MAX_LENGTH],
             status="analyzing",
             contact_phone=phone,
-            contact_id_number=user.id_number if hacienda_error else id_number,
+            contact_id_number=id_number,
         )
         db.add(draft)
-        if id_taken:
-            mark_pending(db, draft, identity.ID_IN_USE_REASON)
         stored = email_attachments.save_to_draft(db, draft, email_attachments.extract(msg))
         _save_result(db, message_id, "draft_created")
         email_attachments.commit_or_cleanup(db, stored)
@@ -349,9 +285,9 @@ def process_message(db: Session, msg) -> str:
         contact_id_number=id_number,
         source="email",
     )
-    # Al perfil con las mismas reglas que "Complete su perfil"; si ya estaba fija, vale la del perfil
-    identity.apply_contact_from_email(db, user, phone, id_number)
-    ticket.contact_id_number = user.id_number or id_number
+    # El teléfono que trajo queda en su ficha si no tenía
+    if phone and not user.phone:
+        user.phone = phone
     db.add(ticket)
     db.flush()
     identity.lock(db, user)

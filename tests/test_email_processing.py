@@ -82,7 +82,8 @@ def test_complete_email_creates_ticket(db, sent, make_user):
     assert ticket.source == "email"
     assert ticket.created_by == requester["id"]
     assert ticket.contact_phone == "88881234"
-    assert ticket.contact_id_number == "102340567"
+    # La cédula ya no se pide ni se lee del correo
+    assert ticket.contact_id_number is None
 
     followers = db.query(models.TicketFollower).filter(models.TicketFollower.ticket_id == ticket.id).all()
     assert [f.user_id for f in followers] == [requester["id"]]
@@ -118,15 +119,16 @@ def test_missing_category_is_incomplete(db, sent, make_user):
 
 
 def test_unregistered_sender(db, sent):
-    sender = f"nadie-{uuid.uuid4().hex}@test.com"
+    # De afuera de la empresa (INTERNAL_DOMAINS): el aviso, sin crear nada
+    sender = f"nadie-{uuid.uuid4().hex}@afuera.com"
     assert process_message(db, _email(sender)) == "unregistered"
     assert sent[0][0] == sender
     assert sent[0][1] == "No pudimos crear su ticket"
 
 
-def test_technician_is_unregistered(db, sent, make_user):
+def test_technician_is_sent_to_the_page(db, sent, make_user):
     technician = make_user("technician")
-    assert process_message(db, _email(technician["email"])) == "unregistered"
+    assert process_message(db, _email(technician["email"])) == "staff_sender"
     assert _tickets_of(db, technician["id"]) == []
 
 
@@ -152,7 +154,8 @@ def test_auto_replied_is_ignored(db, sent, make_user):
     assert _tickets_of(db, requester["id"]) == []
 
 
-def test_sender_email_is_case_insensitive(db, sent, make_user):
+def test_sender_email_is_case_insensitive(db, sent, make_user, monkeypatch):
+    monkeypatch.setattr(config, "INTERNAL_DOMAINS", ["data.cr"])
     requester = make_user("requester", profile=False)
     email = f"daniel-{uuid.uuid4().hex}@data.cr"
     _set_user(requester["id"], email=email)
@@ -160,10 +163,3 @@ def test_sender_email_is_case_insensitive(db, sent, make_user):
     assert process_message(db, _email(sender)) == "created"
     assert len(_tickets_of(db, requester["id"])) == 1
 
-
-def test_id_number_rejected_by_hacienda_is_incomplete(db, sent, make_user, monkeypatch):
-    monkeypatch.setattr(hacienda, "lookup_id", lambda id_number: {"tipo": "02"})
-    requester = make_user("requester", profile=False)
-    assert process_message(db, _email(requester["email"])) == "incomplete"
-    assert _tickets_of(db, requester["id"]) == []
-    assert "La cédula no corresponde a una persona física o DIMEX" in sent[0][2]

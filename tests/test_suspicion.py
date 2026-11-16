@@ -79,36 +79,6 @@ def _admin_view(client, admin, user_id):
     return next(r for r in reports if r["target_user_id"] == user_id and r["reporter_role"] == "agent")
 
 
-def test_email_with_foreign_id_is_reported(client, make_user, sent, monkeypatch, hacienda_match):
-    monkeypatch.setattr(config, "SUPPORT_MAILBOX", MAILBOX)
-    owner = make_user("requester")
-    other = make_user("requester", profile=False)
-    msg = EmailMessage()
-    msg["From"] = other["email"]
-    msg["To"] = MAILBOX
-    msg["Subject"] = "[Soporte] Planillas"
-    msg["Message-ID"] = make_msgid()
-    msg.set_content(
-        "Categoría: Software\nPrioridad: Alta\nTeléfono: 8888-1234\n"
-        f"Cédula: {owner['id_number']}\nDescripción: No abre el sistema de planillas."
-    )
-    db = SessionLocal()
-    try:
-        assert process_message(db, msg) == "incomplete"
-    finally:
-        db.close()
-
-    # Un correo es un evento: un registro, un reporte y un intento
-    changes = _changes(other["id"], "id_number_conflict")
-    assert len(changes) == 1 and changes[0].new_value.endswith("(correo)")
-    reports = _auto_reports(other["id"])
-    assert len(reports) == 1 and reports[0].reason == "foreign_id"
-    assert changes[0].actor_id == reports[0].reporter_id  # el Agente virtual
-    assert _activity(reports[0].id)[0] == 1
-    # La respuesta al cliente no menciona la otra cuenta
-    assert owner["email"] not in sent[-1][2]
-
-
 def test_email_contact_with_foreign_id_is_reported(make_user, hacienda_match):
     owner = make_user("requester")
     other = make_user("requester", profile=False)
@@ -145,37 +115,6 @@ def _confirm(client, draft_id, actor, contact_id_number):
         "contact_phone": "8888-1234", "contact_id_number": contact_id_number,
     }
     return client.post(f"/api/drafts/{draft_id}/confirm", json=payload, headers=actor["headers"])
-
-
-def test_confirming_draft_does_not_count_the_email_attempt_twice(client, make_user, hacienda_match):
-    owner = make_user("requester")
-    other = make_user("requester", profile=False)
-    coordinator = make_user("coordinator")
-    # El intento del correo ya se contó al llegar
-    db = SessionLocal()
-    try:
-        identity.apply_contact_from_email(db, db.get(models.User, other["id"]), None, owner["id_number"])
-        db.commit()
-    finally:
-        db.close()
-    draft_id = _draft(other["id"], owner["id_number"])
-    response = _confirm(client, draft_id, coordinator, owner["id_number"])
-    assert response.status_code == 400
-    change = _changes(other["id"], "id_number_conflict")[-1]
-    assert change.actor_id == coordinator["id"] and change.new_value.endswith("(borrador del correo)")
-    reports = _auto_reports(other["id"])
-    assert len(reports) == 1 and _activity(reports[0].id)[0] == 1
-
-
-def test_draft_with_staff_typed_foreign_id_is_only_logged(client, make_user, hacienda_match):
-    owner = make_user("requester")
-    other = make_user("requester", profile=False)
-    coordinator = make_user("coordinator")
-    draft_id = _draft(other["id"], None)
-    response = _confirm(client, draft_id, coordinator, owner["id_number"])
-    assert response.status_code == 400
-    assert _changes(other["id"], "id_number_conflict")[-1].new_value.endswith("(cambio del personal)")
-    assert _auto_reports(other["id"]) == []
 
 
 def test_admin_applying_foreign_id_is_only_logged(client, make_user, make_ticket, hacienda_match):

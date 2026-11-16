@@ -67,6 +67,21 @@ def notify_creator_resolved(db: Session, ticket: models.Ticket, resolver: models
                    f"Ticket #{ticket.id} resuelto por {resolver.name or 'Sin nombre'}{who}. Vea la solución.")
 
 
+def notify_reporter_resolved(db: Session, background_tasks: BackgroundTasks, ticket: models.Ticket,
+                             resolver: models.User, exclude_ids: tuple[int, ...] = ()) -> None:
+    """Tickets por departamento: quien reportó por correo (un contacto, sin campana) recibe el «Resuelto» con la
+    solución documentada. Los tickets que creó el personal siguen sin correo (avisa la campana de quien lo creó)."""
+    creator = db.get(models.User, ticket.created_by)
+    if creator is None or creator.role != "requester":
+        return
+    row = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
+    lines = [f"{resolver.name or 'El equipo de soporte'} resolvió su ticket."]
+    if row is not None:
+        lines += ["", "Solución:", row.text]
+    notify_followers(db, background_tasks, ticket, resolver, f"[Ticket #{ticket.id}] Resuelto", lines,
+                     exclude_ids=exclude_ids)
+
+
 def save_solution(db: Session, ticket: models.Ticket, text: str, user: models.User) -> None:
     """La última documentación de la solución (si se reabre y se vuelve a resolver, se reemplaza). No hace commit."""
     row = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
@@ -735,8 +750,7 @@ def cancel_tickets(
                 f"Su ticket #{ticket.id} «{ticket.title}» fue cancelado.",
                 f"Motivo: {reason_label}.",
                 "",
-                "Si todavía necesita ayuda, puede crear una solicitud nueva.",
-                f"Puede ver sus solicitudes en {config.APP_URL}",
+                "Si todavía necesita ayuda, escriba un correo nuevo a soporte.",
             ])
             background_tasks.add_task(mailer.send_email, requester.email, f"[Ticket #{ticket.id}] Cancelado", body)
         result.append(ticket_read(ticket, current_user))
@@ -918,12 +932,14 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     if quiet_resolution:
         notify_creator_resolved(db, db_ticket, current_user)
         db.commit()
+        notify_reporter_resolved(db, background_tasks, db_ticket, current_user, exclude_ids=notified)
 
     # Tickets relacionados (posible incidente): se resuelven y se asignan junto con el principal
     if resolved_now:
         mails = grouping.resolve_related(db, db_ticket, current_user)
         db.commit()
-        for to, mail_subject, body in ([] if quiet_resolution else mails):
+        # Quien reportó cada ticket ligado por correo sí recibe su «Resuelto» (no tiene campana)
+        for to, mail_subject, body in mails:
             background_tasks.add_task(mailer.send_email, to, mail_subject, body)
     if db_ticket.assigned_to != old_assigned_to and db_ticket.assigned_to is not None:
         assigned = grouping.propagate_assignment(db, db_ticket, current_user)
