@@ -62,16 +62,6 @@ def test_list_without_actor(client):
     assert response.json()["detail"] == "Inicia sesión para continuar"
 
 
-def test_requester_sees_only_own_tickets(client, make_user, make_ticket):
-    ana = make_user("requester")
-    luis = make_user("requester")
-    de_ana = make_ticket(ana, "Ticket de Ana OWN1")
-    de_luis = make_ticket(luis, "Ticket de Luis OWN1")
-    result = ids(list_as(client, ana))
-    assert de_ana["id"] in result
-    assert de_luis["id"] not in result
-
-
 def test_technician_sees_only_own_tickets(client, make_user, make_ticket):
     # Ya no ve los tickets de los demás: solo los asignados y los que tuvo antes
     tecnico = make_user("technician")

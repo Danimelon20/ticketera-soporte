@@ -82,7 +82,7 @@ def _request_email(client, user, new_email, password=PASSWORD):
 # ----- Contraseña -----
 
 def test_password_change_requires_current_password(client, make_user):
-    user = make_user("requester")
+    user = make_user("technician")
     response = client.put(
         "/api/account/password", json={"current_password": "otra-clave-999", "new_password": "nueva-clave-1"},
         headers=user["headers"],
@@ -91,12 +91,10 @@ def test_password_change_requires_current_password(client, make_user):
     assert response.json()["detail"] == WRONG_PASSWORD
     response = client.put("/api/account/password", json={"new_password": "nueva-clave-1"}, headers=user["headers"])
     assert response.status_code == 422
-    assert _login(client, user["email"], "requester").status_code == 200
+    assert _login(client, user["email"], "technician").status_code == 200
 
 
 @pytest.mark.parametrize("role, password, ok", [
-    ("requester", "a" * 7, False),
-    ("requester", "a" * 8, True),
     ("technician", "a" * 11, False),
     ("technician", "a" * 12, True),
     ("coordinator", "a" * 11, False),
@@ -113,8 +111,7 @@ def test_password_minimum_depends_on_role(client, make_user, sent, role, passwor
         assert response.status_code == 204, response.text
     else:
         assert response.status_code == 422
-        minimum = 8 if role == "requester" else 12
-        assert response.json()["detail"] == f"La contraseña debe tener al menos {minimum} caracteres"
+        assert response.json()["detail"] == "La contraseña debe tener al menos 12 caracteres"
 
 
 def test_password_change_closes_other_sessions(client, make_user):
@@ -145,7 +142,7 @@ def test_staff_changes_phone_without_password(client, make_user):
 # ----- Correo -----
 
 def test_email_change_needs_code_from_new_email(client, make_user, sent):
-    user = make_user("requester")
+    user = make_user("technician")
     other = _second_session(client, user)
     new_email = _email()
     response = _request_email(client, user, new_email)
@@ -173,8 +170,8 @@ def test_email_change_needs_code_from_new_email(client, make_user, sent):
     # Las demás sesiones se cierran; esta sigue
     assert _me(client, other).status_code == 401
     assert _me(client, user["headers"]).status_code == 200
-    assert _login(client, new_email, "requester").status_code == 200
-    assert _login(client, user["email"], "requester").status_code == 401
+    assert _login(client, new_email, "technician").status_code == 200
+    assert _login(client, user["email"], "technician").status_code == 401
     assert _change(user["id"]) is None
 
 
@@ -190,7 +187,7 @@ def test_email_change_wrong_password_sends_nothing_and_counts(client, make_user,
 
 def test_email_in_use_gets_409_and_sends_nothing(client, make_user, sent):
     owner = make_user("coordinator")
-    user = make_user("requester")
+    user = make_user("technician")
     response = _request_email(client, user, owner["email"])
     assert response.status_code == 409
     assert response.json()["detail"] == EMAIL_IN_USE
@@ -201,7 +198,7 @@ def test_email_in_use_gets_409_and_sends_nothing(client, make_user, sent):
 
 def test_email_in_use_still_checks_password_first(client, make_user, sent):
     owner = make_user("coordinator")
-    user = make_user("requester")
+    user = make_user("technician")
     response = _request_email(client, user, owner["email"], password="otra-clave-999")
     assert response.status_code == 400
     assert response.json()["detail"] == WRONG_PASSWORD
@@ -209,7 +206,7 @@ def test_email_in_use_still_checks_password_first(client, make_user, sent):
 
 
 def test_free_email_gets_code(client, make_user, sent):
-    user = make_user("requester")
+    user = make_user("technician")
     new_email = _email()
     response = _request_email(client, user, new_email)
     assert response.status_code == 202
@@ -221,7 +218,7 @@ def test_free_email_gets_code(client, make_user, sent):
 @pytest.mark.parametrize("second_taken", [True, False])
 def test_email_requests_wait_60_seconds(client, make_user, sent, first_taken, second_taken):
     owner = make_user("coordinator")
-    user = make_user("requester")
+    user = make_user("technician")
     first = _request_email(client, user, owner["email"] if first_taken else _email())
     assert first.status_code == (409 if first_taken else 202)
     sent_before = len(sent)
@@ -237,7 +234,7 @@ def test_email_requests_wait_60_seconds(client, make_user, sent, first_taken, se
 
 
 def test_email_code_expires_in_15_minutes_and_allows_5_attempts(client, make_user, sent):
-    user = make_user("requester")
+    user = make_user("technician")
     before = datetime.now(timezone.utc).replace(tzinfo=None)
     _request_email(client, user, _email())
     change = _change(user["id"])
@@ -255,7 +252,7 @@ def test_email_code_expires_in_15_minutes_and_allows_5_attempts(client, make_use
 
 
 def test_email_code_resend_waits_60_seconds(client, make_user, sent):
-    user = make_user("requester")
+    user = make_user("technician")
     _request_email(client, user, _email())
     first = code_from(sent[-1][2])
     response = client.post("/api/account/email/resend", headers=user["headers"])

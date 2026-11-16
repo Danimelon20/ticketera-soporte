@@ -19,26 +19,28 @@ ahí. Trabaja solo en la tarea que se pida en cada mensaje.
 - app/models.py     tablas
 - app/schemas.py    esquemas Pydantic (usar model_config = ConfigDict)
 - app/routers/      users.py, catalogs.py, tickets.py
-- static/           index.html (#listPanel, #detailPanel, newTicketModal, usersModal), app.js, styles.css
+- static/           index.html (#listPanel, #detailPanel, newTicketModal, usersModal), app.js, css/ (estilos por capas)
 - tests/            conftest.py (fábricas make_user y make_ticket) y pruebas
 - docs/             requisitos, diseño y bitácora
 
 ## Comandos
-- Levantar: docker compose up --build -d
-- Detener: docker compose down
-- Pruebas: docker compose exec app pytest -v
+- Nunca ejecutes docker compose sin -f docker-compose.pruebas.yml: sin -f se toca la instancia real.
+- Levantar: docker compose -f docker-compose.pruebas.yml up --build -d
+- Detener: docker compose -f docker-compose.pruebas.yml down
+- Pruebas: docker compose -f docker-compose.pruebas.yml exec app pytest -v
 
 ## Reglas que no se deben romper
 - En main.py, app.mount de static va SIEMPRE al final, después de
   todos los routers.
 - Las rutas de la API no llevan barra final (/api/tickets, no
   /api/tickets/).
-- Roles: requester, technician, coordinator, admin y agent (Agente
-  virtual, no inicia sesión). Las reglas de permisos se validan en
-  el backend y responden 403.
+- Roles: requester (contacto: quien reporta por correo y las cuentas
+  de cliente archivadas; no inicia sesión), technician, coordinator,
+  admin y agent (Agente virtual, no inicia sesión). Las reglas de
+  permisos se validan en el backend y responden 403.
 - El rol admin nunca se obtiene registrándose ni con un código de
   invitación: el primer administrador se crea con
-  `docker compose exec -it app python -m app.create_admin`.
+  `docker compose -f docker-compose.pruebas.yml exec -it app python -m app.create_admin`.
 - Nunca subir a Git `.env`, la carpeta `data/` ni copias `.db` de
   la base de datos.
 - Nunca enviar al chatbot cédulas, teléfonos, correos ni

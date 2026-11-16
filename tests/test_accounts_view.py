@@ -6,6 +6,7 @@ import pytest
 
 from app import models
 from app.database import SessionLocal
+from org_helpers import placement_for
 
 FILTERS = ("all", "staff", "clients", "locked", "reported", "unverified", "invitations")
 
@@ -53,7 +54,7 @@ def _report(client, reporter, target):
 
 def _invite(client, actor, tag, role="technician"):
     response = client.post("/api/staff-invitations", json={
-        "email": f"inv-{uuid.uuid4().hex}@test.com", "name": f"Invitada {tag}", "role": role,
+        "email": f"inv-{uuid.uuid4().hex}@test.com", "name": f"Invitada {tag}", "role": role, **placement_for(role),
     }, headers=actor["headers"])
     assert response.status_code == 201, response.text
     return response.json()
@@ -88,7 +89,7 @@ def _ids(page, kind="user"):
     return {row["id"] for row in page["items"] if row["kind"] == kind}
 
 
-@pytest.mark.parametrize("role", ["technician", "requester"])
+@pytest.mark.parametrize("role", ["technician"])
 def test_technician_and_requester_get_403(client, make_user, role):
     viewer = make_user(role)
     target = make_user("requester")
@@ -112,7 +113,7 @@ def test_admin_quick_filters_and_counts(client, accounts_set):
     assert _ids(pages["invitations"]) == set()
     assert _ids(pages["all"]) == staff | clients and len(pages["all"]["items"]) == 9
 
-    expected = {"all": 9, "staff": 4, "clients": 3, "locked": 1, "reported": 1, "unverified": 1, "invitations": 2}
+    expected = {"all": 9, "staff": 4, "clients": 3, "archived": 0, "locked": 1, "reported": 1, "unverified": 1, "invitations": 2}
     for f in FILTERS:
         # Los contadores no dependen del filtro rápido elegido
         assert pages[f]["counts"] == expected
@@ -123,7 +124,7 @@ def test_search_narrows_counts(client, accounts_set):
     s = accounts_set
     page = _list(client, s["admin"], q=f"Reportada {s['tag']}")
     assert page["counts"] == {
-        "all": 1, "staff": 0, "clients": 1, "locked": 0, "reported": 1, "unverified": 0, "invitations": 0,
+        "all": 1, "staff": 0, "clients": 1, "archived": 0, "locked": 0, "reported": 1, "unverified": 0, "invitations": 0,
     }
 
 

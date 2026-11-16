@@ -32,7 +32,8 @@ REASON_CHARS = 300
 SEPARATE_ROLES = ("coordinator",)
 NO_PERMISSION = "No tienes permiso para separar estos tickets"
 # Llevan el número del ticket de otro cliente: el solicitante no los recibe
-STAFF_HISTORY_FIELDS = ("linked", "unlinked")
+# El solicitante no ve los cambios de departamento ni quién creó el ticket en su nombre
+STAFF_HISTORY_FIELDS = ("linked", "unlinked", "department", "created_on_behalf", "level_default")
 # Desde aquí empieza una firma: lo que sigue no se compara
 SIGNATURE_RE = re.compile(
     r"^\s*(?:--\s*$|saludos\b|atentamente\b|cordialmente\b|enviado desde\b|sent from\b)",
@@ -286,8 +287,7 @@ def send_merge_notice(requester: models.User, target_id: int) -> None:
             f"Buen día, {display_name(requester)}.",
             "",
             f"Su mensaje se agregó a su solicitud #{target_id}, que ya estamos atendiendo.",
-            "",
-            f"Puede verla en {config.APP_URL}/#ticket/{target_id}",
+            "Le avisaremos por este medio cuando haya cambios.",
         ]),
     )
 
@@ -390,14 +390,10 @@ def link_ticket(db: Session, related: models.Ticket, match: Match, actor_id: int
 
 
 def undo_link(db: Session, link: models.TicketLink, actor: models.User) -> None:
-    """Separar: el relacionado vuelve a la cola normal. No hace commit."""
+    """Separar: el relacionado deja el incidente, pero conserva su responsable y su estado. No hace commit.
+
+    Antes se le quitaba el técnico si lo había recibido por el incidente, y el ticket desaparecía de su bandeja."""
     related = db.get(models.Ticket, link.related_ticket_id)
-    if link.assigned_by_link and related.status in OPEN_STATUSES and related.assigned_to is not None:
-        db.add(models.History(ticket_id=related.id, field="assigned_to", old_value=str(related.assigned_to), new_value=None, changed_by=actor.id))
-        related.assigned_to = None
-        if related.status == "in_progress":
-            db.add(models.History(ticket_id=related.id, field="status", old_value="in_progress", new_value="new", changed_by=actor.id))
-            related.status = "new"
     db.add(models.History(ticket_id=related.id, field="unlinked", old_value=str(link.principal_ticket_id), new_value=None, changed_by=actor.id))
     link.undone_by = actor.id
     link.undone_at = _now()
@@ -469,8 +465,6 @@ def resolve_related(db: Session, principal: models.Ticket, actor: models.User) -
                 "",
                 "Respuesta del equipo de soporte:",
                 text,
-                "",
-                f"Puede verlo en {config.APP_URL}/#ticket/{related.id}",
             ])))
     return mails
 

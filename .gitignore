@@ -6,3 +6,9 @@ venv/
 .env
 .vscode/
 data/
+.env.pruebas
+data-pruebas/
+
+# Organigrama real de la empresa: se importa desde la página, nunca se sube al repositorio
+*organigrama*.csv
+*Organigrama*.csv

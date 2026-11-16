@@ -5,6 +5,7 @@ import pytest
 from app import hacienda, identity, models
 from app.database import SessionLocal
 from conftest import code_from
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 
@@ -44,7 +45,7 @@ def test_password_change_is_recorded_without_values(client, make_user):
 
 
 def test_email_change_is_recorded_masked_without_code(client, make_user, sent):
-    user = make_user("requester")
+    user = make_user("technician")
     new_email = f"nuevo-{uuid.uuid4().hex}@example.com"
     client.post("/api/account/email", json={"current_password": PASSWORD, "new_email": new_email}, headers=user["headers"])
     code = code_from(sent[-1][2])
@@ -60,37 +61,10 @@ def test_email_change_is_recorded_masked_without_code(client, make_user, sent):
 def test_phone_change_keeps_last_4_digits(client, make_user):
     user = make_user("coordinator")
     client.put("/api/account/phone", json={"phone": "8777-6655"}, headers=user["headers"])
-    requester = make_user("requester", "Laura Mora Vargas")
-    client.put(
-        "/api/profile", json={"name": "Laura Mora Vargas", "phone": "7111-2233", "id_number": requester["id_number"]},
-        headers=requester["headers"],
-    )
     assert _rows(user["id"], "phone_changed") == [
         {"actor_id": user["id"], "action": "phone_changed", "old": None, "new": "****6655", "label": None}
     ]
-    rows = _rows(requester["id"], "phone_changed")
-    assert rows[0]["old"] == "****1234" and rows[0]["new"] == "****2233"
-    assert "87776655" not in _text(_rows(user["id"])) and "71112233" not in _text(rows)
-
-
-def test_name_and_id_number_changes(client, make_user):
-    user = make_user("requester", "", profile=False)
-    client.put(
-        "/api/profile", json={"name": "Daniel Sáenz Maroto", "phone": "8888-1234", "id_number": "1-0234-0567"},
-        headers=user["headers"],
-    )
-    client.put(
-        "/api/profile", json={"name": "Daniel Alejandro Sáenz Maroto", "phone": "8888-1234", "id_number": "1-0987-0654"},
-        headers=user["headers"],
-    )
-    names = _rows(user["id"], "name_changed")
-    assert [(r["old"], r["new"]) for r in names] == [
-        (None, "Daniel Sáenz Maroto"), ("Daniel Sáenz Maroto", "Daniel Alejandro Sáenz Maroto")
-    ]
-    ids = _rows(user["id"], "id_number_changed")
-    assert [(r["old"], r["new"]) for r in ids] == [(None, "****0567"), ("****0567", "****0654")]
-    text = _text(_rows(user["id"]))
-    assert "102340567" not in text and "109870654" not in text
+    assert "87776655" not in _text(_rows(user["id"]))
 
 
 def test_contact_from_email_is_recorded_masked(client, make_user, monkeypatch):
@@ -113,11 +87,15 @@ def test_contact_from_email_is_recorded_masked(client, make_user, monkeypatch):
 def test_role_and_activation_changes(client, make_user):
     admin = make_user("admin")
     user = make_user("technician")
-    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator"}, headers=admin["headers"])
+    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator", **placement_for("coordinator")},
+                 headers=admin["headers"])
     client.patch(f"/api/admin/users/{user['id']}", json={"is_active": False}, headers=admin["headers"])
     client.patch(f"/api/admin/users/{user['id']}", json={"is_active": True}, headers=admin["headers"])
     rows = _rows(user["id"])
-    assert [(r["action"], r["old"], r["new"]) for r in rows] == [
+    actions = [(r["action"], r["old"], r["new"]) for r in rows]
+    # Rol y departamento cambian juntos
+    assert actions[1][0] == "placement_changed" and actions[1][1] == "Sin departamento"
+    assert actions[:1] + actions[2:] == [
         ("role_changed", "Técnico", "Coordinador"),
         ("account_deactivated", None, None),
         ("account_activated", None, None),
@@ -128,7 +106,7 @@ def test_role_and_activation_changes(client, make_user):
 def test_invitation_sent_and_used(client, make_user, sent):
     admin = make_user("admin")
     email = f"personal-{uuid.uuid4().hex}@test.com"
-    client.post("/api/staff-invitations", json={"email": email, "name": "Nueva Persona", "role": "technician"},
+    client.post("/api/staff-invitations", json={"email": email, "name": "Nueva Persona", "role": "technician", **placement_for("technician")},
                 headers=admin["headers"])
     code = code_from(sent[-1][2])
     label = email[:2] + "***@test.com"
@@ -171,7 +149,7 @@ def test_lockout_is_recorded(client, make_user, exists):
 
 # ----- Panel del administrador -----
 
-@pytest.mark.parametrize("role", ["coordinator", "technician", "requester"])
+@pytest.mark.parametrize("role", ["coordinator", "technician"])
 def test_only_admin_sees_account_changes(client, make_user, role):
     user = make_user(role)
     assert client.get("/api/admin/account-changes", headers=user["headers"]).status_code == 403
@@ -182,22 +160,24 @@ def test_admin_list_filters_and_pages(client, make_user):
     user = make_user("coordinator", f"Persona {uuid.uuid4().hex[:8]}")
     for i in range(23):
         client.put("/api/account/phone", json={"phone": f"8{i:07d}"}, headers=user["headers"])
-    client.patch(f"/api/admin/users/{user['id']}", json={"role": "technician"}, headers=admin["headers"])
+    client.patch(f"/api/admin/users/{user['id']}", json={"role": "technician", **placement_for("technician")},
+                 headers=admin["headers"])
 
     page1 = client.get("/api/admin/account-changes", params={"account": user["name"]}, headers=admin["headers"]).json()
-    assert page1["total"] == 24 and page1["pages"] == 2 and page1["page"] == 1
+    # 23 teléfonos, el rol y el departamento (que cambian juntos)
+    assert page1["total"] == 25 and page1["pages"] == 2 and page1["page"] == 1
     assert len(page1["items"]) == 20
     # Lo más reciente primero
-    assert page1["items"][0]["action"] == "role_changed"
-    assert page1["items"][0]["actor"] == admin["name"]
-    assert page1["items"][1]["new_value"] == "****0022"
-    assert user["name"] in page1["items"][0]["account"]
+    assert [i["action"] for i in page1["items"][:2]] == ["placement_changed", "role_changed"]
+    assert page1["items"][1]["actor"] == admin["name"]
+    assert page1["items"][2]["new_value"] == "****0022"
+    assert user["name"] in page1["items"][1]["account"]
     assert user["email"] not in str(page1)
 
     page2 = client.get(
         "/api/admin/account-changes", params={"account": user["name"], "page": 2}, headers=admin["headers"]
     ).json()
-    assert len(page2["items"]) == 4
+    assert len(page2["items"]) == 5
     assert page2["items"][-1]["new_value"] == "****0000"
 
     only_roles = client.get(

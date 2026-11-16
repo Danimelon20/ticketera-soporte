@@ -1,21 +1,11 @@
-"""Portal del solicitante: avance de 4 pasos derivado de los estados reales y última actualización visible."""
+"""Última actividad visible de un ticket (para el reporte de vencimiento): lo más reciente entre su último cambio y
+su último comentario público. Antes vivía en el portal del solicitante, que ya no existe."""
 from datetime import datetime
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import comments, models
-
-# 1 Recibida, 2 Asignada, 3 En atención, 4 Resuelta
-RECEIVED, ASSIGNED, IN_PROGRESS, RESOLVED = 1, 2, 3, 4
-
-
-def progress_step(ticket: models.Ticket) -> int:
-    if ticket.status in ("resolved", "closed"):
-        return RESOLVED
-    if ticket.status == "in_progress":
-        return IN_PROGRESS
-    return ASSIGNED if ticket.assigned_to is not None else RECEIVED
 
 
 def _naive(value: datetime | None) -> datetime | None:

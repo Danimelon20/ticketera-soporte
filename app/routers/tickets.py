@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException
@@ -5,17 +6,103 @@ from sqlalchemy.orm import Session
 from typing import Literal, Optional
 from ..database import get_db
 from .. import models
-from ..schemas import AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
+from ..schemas import StaffTicketCreated, TicketTransfer, TicketTransferResult, AttachmentRead, CancellationRead, ConversationViewRequest, TicketCancelRequest, TicketCreate, TicketRead, TicketUpdate, TicketDetail, HistoryRead, CommentCreate, CommentRead, AIAnalysisRead, AILevelUpdate, PersonRead, SuggestionRead
 from ..security import get_current_user
 from ..validators import mask_id_number
 from ..chatbot import _redact
 from .. import cancellations, config, hacienda, mailer
 from ..notifications import STATUS_LABELS, display_name, notify_followers
-from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, portal, ticket_access
+from .. import account_reports, alerts, attachments, assignment_notice, audit, auto_assign, availability, comments as internal_comments, email_analysis, grouping, identity, nav, routing, ticket_access, ticket_activity
 
 AI_ROLES = ("technician", "coordinator")
 # Dirigir la operación: crear a nombre de un cliente, sugerencias y reasignar
 OPERATION_ROLES = ("coordinator",)
+
+
+def can_operate(db: Session, user) -> bool:
+    """Asignar y reasignar: el coordinador; con tickets por departamento, también el administrador."""
+    return user.role in OPERATION_ROLES or (user.role == "admin" and routing.enforced(db))
+OUTSIDE_DEPARTMENT = "Esa persona no pertenece al departamento del ticket: transfiéralo primero"
+SOLUTION_REQUIRED = "Documente la solución (al menos 10 caracteres) para marcar el ticket como Resuelto"
+SOLUTION_MIN = 10
+
+
+def department_fields(db: Session, ticket: models.Ticket) -> dict:
+    """Solo el personal: departamento que atiende, quién reportó (y por qué canal) y la solución."""
+    by_id = routing.departments_by_id(db)
+    dept = routing.ticket_department(db, ticket.id)
+    fields = {"department_id": dept.id if dept else None, "department_name": routing.path_label(dept, by_id),
+              "routing_enforced": routing.enforced(db)}
+    if fields["routing_enforced"] and dept is not None:
+        # Reasignar: solo los técnicos activos del departamento (el servidor también rechaza a los de afuera)
+        fields["assignable_ids"] = [u.id for u in routing.department_technicians(db, dept.id)]
+        # Escalar: transferir al siguiente nivel del departamento (con motivo, como la transferencia)
+        target = routing.next_level(db, dept.id, by_id) if ticket.status in nav.OPEN_STATUSES else None
+        if target is not None:
+            fields["escalate_to"] = {"id": target.id, "path": routing.path_label(target, by_id)}
+    reporter = db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == ticket.id).first()
+    if reporter is not None:
+        fields["reporter"] = {
+            "name": reporter.name, "email": reporter.email, "phone": reporter.phone,
+            "area_name": routing.path_label(by_id.get(reporter.area_department_id), by_id),
+            "channel": reporter.channel, "channel_label": models.TICKET_CHANNELS.get(reporter.channel, reporter.channel),
+        }
+    solution = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
+    if solution is not None:
+        author = db.get(models.User, solution.resolved_by)
+        fields["solution"] = {"text": solution.text, "resolved_at": solution.resolved_at,
+                              "resolved_by_name": (author.name or "Sin nombre") if author else "Sin nombre"}
+    return fields
+
+
+def notify_creator_resolved(db: Session, ticket: models.Ticket, resolver: models.User) -> None:
+    """Aviso en la campana de quien creó el ticket (técnico, coordinador o administrador) para que le avise a quien
+    reportó. Si lo resolvió la misma persona, no hace falta. No hace commit."""
+    creator = db.get(models.User, ticket.created_by)
+    if creator is None or creator.role not in STAFF_CREATE_ROLES or creator.id == resolver.id:
+        return
+    reporter = db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == ticket.id).first()
+    who = f": avísele a {reporter.name}" if reporter is not None else ""
+    routing.notify(db, creator.id, "ticket_resolved", ticket.id,
+                   f"Ticket #{ticket.id} resuelto por {resolver.name or 'Sin nombre'}{who}. Vea la solución.")
+
+
+def notify_reporter_resolved(db: Session, background_tasks: BackgroundTasks, ticket: models.Ticket,
+                             resolver: models.User, exclude_ids: tuple[int, ...] = ()) -> None:
+    """Tickets por departamento: quien reportó por correo (un contacto, sin campana) recibe el «Resuelto» con la
+    solución documentada. Los tickets que creó el personal siguen sin correo (avisa la campana de quien lo creó)."""
+    creator = db.get(models.User, ticket.created_by)
+    if creator is None or creator.role != "requester":
+        return
+    row = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
+    lines = [f"{resolver.name or 'El equipo de soporte'} resolvió su ticket."]
+    if row is not None:
+        lines += ["", "Solución:", row.text]
+    notify_followers(db, background_tasks, ticket, resolver, f"[Ticket #{ticket.id}] Resuelto", lines,
+                     exclude_ids=exclude_ids)
+
+
+def save_solution(db: Session, ticket: models.Ticket, text: str, user: models.User) -> None:
+    """La última documentación de la solución (si se reabre y se vuelve a resolver, se reemplaza). No hace commit."""
+    row = db.query(models.TicketSolution).filter(models.TicketSolution.ticket_id == ticket.id).first()
+    if row is None:
+        row = models.TicketSolution(ticket_id=ticket.id, text=text, resolved_by=user.id)
+        db.add(row)
+    row.text = text
+    row.resolved_by = user.id
+    row.resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+OVERDUE_LOCKED = "El ticket está vencido: el coordinador decide su estado y su nivel"
+
+
+def check_overdue_lock(ticket: models.Ticket, user: models.User) -> None:
+    """Vencidos: el técnico no cambia estado, prioridad, categoría ni nivel (403); sí comenta y deja la causa."""
+    if user.role != "technician" or ticket.status not in nav.OPEN_STATUSES:
+        return
+    state, _percent = alerts.due_state(ticket, nav._now())
+    if state == alerts.OVERDUE:
+        raise HTTPException(status_code=403, detail=OVERDUE_LOCKED)
 
 router = APIRouter(prefix="/api", tags=["tickets"])
 
@@ -49,17 +136,16 @@ def get_visible_ticket(db: Session, ticket_id: int, current_user, full: bool = F
 def contact_fields(db_ticket: models.Ticket, current_user) -> tuple[Optional[str], Optional[str]]:
     """Teléfono y cédula del ticket según quién lo ve.
 
-    Coordinador, administrador o el creador: completos. Técnico asignado: teléfono completo y cédula
-    enmascarada. Técnico no asignado o rol desconocido: nada.
+    Coordinador o administrador: completos. Técnico asignado: teléfono completo y cédula enmascarada. Técnico no
+    asignado o rol desconocido: nada.
     """
-    is_creator = current_user.role != "requester" or db_ticket.created_by == current_user.id
     is_coordinator_or_admin = current_user.role in ("coordinator", "admin")
     is_assigned_technician = (
         current_user.role == "technician"
         and db_ticket.assigned_to is not None
         and db_ticket.assigned_to == current_user.id
     )
-    if is_coordinator_or_admin or (is_creator and current_user.role != "technician"):
+    if is_coordinator_or_admin:
         return db_ticket.contact_phone, db_ticket.contact_id_number
     if is_assigned_technician:
         return db_ticket.contact_phone, mask_id_number(db_ticket.contact_id_number)
@@ -86,13 +172,11 @@ def ticket_read(ticket: models.Ticket, current_user, last_activity_at=None) -> T
     # En la base queda el texto original; solo se enmascara la respuesta
     data = TicketRead.model_validate(ticket)
     data.assigned_name = person_name(ticket.assigned_user) if ticket.assigned_user else None
-    data.progress_step = portal.progress_step(ticket)
     data.last_activity_at = last_activity_at or ticket.updated_at
     if hides_personal_data(ticket, current_user):
         data.description = _redact(data.description)
     row = ticket.cancellation_row
-    # El solicitante ve su ticket "Cerrado", sin el motivo interno
-    if row is not None and current_user.role != "requester":
+    if row is not None:
         data.cancellation = CancellationRead(
             reason=row.reason,
             reason_label=models.CANCEL_REASONS.get(row.reason, row.reason),
@@ -154,12 +238,104 @@ def ai_analysis_read(row: models.TicketAIAnalysis, ticket: models.Ticket) -> AIA
     )
 
 
-@router.post("/tickets", response_model=TicketRead)
+STAFF_CREATE_ROLES = ("technician", "coordinator", "admin")
+REPORTER_REQUIRED = "Escriba el nombre de quien reporta"
+CHANNEL_REQUIRED = "Elija el canal: correo, teléfono o en persona"
+AREA_REQUIRED = "Elija el área de quien reporta"
+EMAIL_INVALID = "Escriba un correo válido para quien reporta"
+
+
+def _naive_utc(value: datetime) -> datetime:
+    """Fecha como la guarda la base: UTC sin zona."""
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+NO_CATEGORY = "Sin categoría"
+PRIORITY_REQUIRED = "Elija la prioridad: define el vencimiento"
+
+
+def _staff_category(db: Session, category_id: int | None) -> int:
+    """Categoría opcional: sin elegir, "Sin categoría" (se crea la primera vez que hace falta)."""
+    if category_id is not None:
+        category = db.get(models.Category, category_id)
+        if category is None:
+            raise HTTPException(status_code=422, detail="La categoría no existe")
+        return category.id
+    category = db.query(models.Category).filter(models.Category.name == NO_CATEGORY).first()
+    if category is None:
+        category = models.Category(name=NO_CATEGORY)
+        db.add(category)
+        db.flush()
+    return category.id
+
+
+def create_staff_ticket(db: Session, data: TicketCreate, user: models.User,
+                        background_tasks: BackgroundTasks) -> StaffTicketCreated:
+    """Técnico, coordinador o administrador crean un ticket en nombre de quien reporta. Asignación automática
+    solo con los técnicos del departamento (el creador, solo si es el único elegible)."""
+    title, description = (data.title or "").strip(), (data.description or "").strip()
+    if not title or not description:
+        raise HTTPException(status_code=422, detail="Escriba el título y la descripción")
+    reporter = " ".join((data.reporter_name or "").split())
+    if not reporter:
+        raise HTTPException(status_code=422, detail=REPORTER_REQUIRED)
+    if data.channel not in models.TICKET_CHANNELS:
+        raise HTTPException(status_code=422, detail=CHANNEL_REQUIRED)
+    email = (data.reporter_email or "").strip().lower() or None
+    if email is not None and "@" not in email:
+        raise HTTPException(status_code=422, detail=EMAIL_INVALID)
+    by_id = routing.departments_by_id(db)
+    area = by_id.get(data.reporter_area_id) if data.reporter_area_id else None
+    if area is None or not routing.is_active_path(area, by_id):
+        raise HTTPException(status_code=422, detail=AREA_REQUIRED)
+    dept = routing.serving_department(db, data.department_id)
+    # Prioridad obligatoria: fija el nivel del ticket (Baja 1 … Urgente 4) y con él el vencimiento
+    priority = db.get(models.Priority, data.priority_id) if data.priority_id else None
+    if priority is None or priority.level not in email_analysis.PRIORITY_BY_LEVEL:
+        raise HTTPException(status_code=422, detail=PRIORITY_REQUIRED)
+    category_id = _staff_category(db, data.category_id)
+
+    db_ticket = models.Ticket(
+        title=title, description=description, category_id=category_id, priority_id=priority.id, status="new",
+        created_by=user.id, source="web",
+    )
+    db.add(db_ticket)
+    db.flush()
+    # Nivel puesto por una persona: la IA no lo cambia (no analiza tickets que ya tienen nivel)
+    db.add(models.TicketAIAnalysis(
+        ticket_id=db_ticket.id, status="done", human_level=priority.level, human_level_by=user.id,
+        due_at=email_analysis.compute_due_at(_naive_utc(db_ticket.created_at), priority.level),
+    ))
+    routing.set_ticket_department(db, db_ticket, dept.id)
+    db.add(models.TicketReporter(ticket_id=db_ticket.id, name=reporter, email=email, area_department_id=area.id,
+                                 phone=(data.reporter_phone or "").strip() or None, channel=data.channel))
+    db.add(models.History(
+        ticket_id=db_ticket.id, field="created_on_behalf", old_value=None, changed_by=user.id,
+        new_value=f"Creado por {user.name or 'Sin nombre'} en nombre de {reporter} vía "
+                  f"{models.TICKET_CHANNELS[data.channel]}"[:500],
+    ))
+    db.commit()
+    # Asignación inmediata para la confirmación, con el nivel que fijó la prioridad
+    if config.AUTO_ASSIGN_ENABLED:
+        auto_assign.assign_new(db_ticket.id)
+    db.refresh(db_ticket)
+    assignee = db.get(models.User, db_ticket.assigned_to) if db_ticket.assigned_to else None
+    return StaffTicketCreated(id=db_ticket.id, title=db_ticket.title, department_name=routing.path_label(dept, by_id),
+                              assigned_to=assignee.id if assignee else None,
+                              assigned_name=(assignee.name or "Sin nombre") if assignee else None)
+
+
+@router.post("/tickets", response_model=TicketRead | StaffTicketCreated)
 def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Tickets por departamento: técnico, coordinador y administrador usan el mismo formulario
+    if current_user.role in STAFF_CREATE_ROLES and routing.enforced(db):
+        return create_staff_ticket(db, ticket, current_user, background_tasks)
     if current_user.role == "technician":
         raise HTTPException(status_code=403, detail="Los técnicos no pueden crear tickets")
     if current_user.role == "admin":
         raise HTTPException(status_code=403, detail="El administrador no crea tickets")
+    if ticket.category_id is None or ticket.priority_id is None:
+        raise HTTPException(status_code=422, detail="Elija la categoría y la prioridad")
     
     if ticket.requester_id is not None:
         if current_user.role not in OPERATION_ROLES:
@@ -175,6 +351,13 @@ def create_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: S
         detail = identity.INCOMPLETE_OWN if owner.id == current_user.id else identity.INCOMPLETE_OTHER
         raise HTTPException(status_code=400, detail=detail)
 
+    return create_for_owner(db, ticket, owner, background_tasks)
+
+
+def create_for_owner(db: Session, ticket: TicketCreate, owner: models.User,
+                     background_tasks: BackgroundTasks) -> models.Ticket:
+    """Ticket a nombre de una persona (el coordinador «a nombre de» con el interruptor apagado; las pruebas lo usan
+    para los tickets de un contacto). Después de responder: agrupación, análisis y asignación."""
     categoria = db.query(models.Category).filter(models.Category.id == ticket.category_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="La categoría no existe")
@@ -221,8 +404,8 @@ def list_tickets(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    # Solicitante: los suyos; técnico: asignados y los que tuvo; administrador: ninguno
-    if current_user.role == "admin":
+    # Técnico: asignados y los que tuvo; administrador: ninguno (todos con el interruptor)
+    if current_user.role == "admin" and not routing.enforced(db):
         raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
     query = ticket_access.filter_visible(db, current_user, db.query(models.Ticket))
 
@@ -236,6 +419,7 @@ def list_tickets(
         query = query.filter(models.Ticket.category_id == category_id)
 
     if assigned_to:
+        ticket_access.check_assignee_filter(db, current_user, assigned_to)
         query = query.filter(models.Ticket.assigned_to == assigned_to)
 
     if search:
@@ -245,16 +429,97 @@ def list_tickets(
         )
 
     query = query.order_by(models.Ticket.created_at.desc())
-    tickets = query.all()
-    activity = portal.last_activity(db, tickets)
-    return [ticket_read(t, current_user, activity[t.id]) for t in tickets]
+    return [ticket_read(t, current_user) for t in query.all()]
 
 
 # exclude_unset: el solicitante no recibe la clave ai_analysis
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail, response_model_exclude_unset=True)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Con tickets por departamento el administrador ve y gestiona todos (reemplaza el acceso a incidentes)
+    if current_user.role == "admin" and not routing.enforced(db):
+        return incident_detail_for_admin(db, ticket_id, current_user)
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     return ticket_detail(db, db_ticket, current_user)
+
+
+def incident_detail_for_admin(db: Session, ticket_id: int, admin) -> TicketDetail:
+    """Incidentes: el administrador abre el ticket principal en solo lectura, sin teléfono ni cédula.
+    Cualquier otro ticket sigue cerrado para él (solo con "Ver conversación", con motivo)."""
+    db_ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not db_ticket:
+        raise HTTPException(status_code=404, detail="El ticket no existe")
+    if ticket_id not in grouping.incident_ids(db):
+        raise HTTPException(status_code=403, detail=ticket_access.NO_PERMISSION)
+    detail = ticket_detail(db, db_ticket, admin)
+    detail.contact_phone = None
+    detail.contact_id_number = None
+    return detail
+
+
+TRANSFER_ROLES = ("technician", "coordinator", "admin")
+TRANSFER_OFF = "Encienda tickets por departamento para transferir (Administración › Activación)"
+TRANSFER_SAME = "El ticket ya es de ese departamento"
+TRANSFER_CLOSED = "Solo se transfieren tickets abiertos"
+TRANSFER_UNCLASSIFIED = "El ticket no tiene departamento: el administrador lo clasifica primero"
+
+
+@router.post("/tickets/{ticket_id}/transfer", response_model=TicketTransferResult)
+def transfer_ticket(ticket_id: int, data: TicketTransfer, background_tasks: BackgroundTasks,
+                    db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Transferir a otro departamento con motivo. Si el técnico asignado no pertenece al destino, sale de su
+    bandeja y el ticket entra a la asignación automática del destino. El vencimiento sigue corriendo."""
+    if current_user.role not in TRANSFER_ROLES:
+        raise HTTPException(status_code=403, detail="No tienes permiso para transferir tickets")
+    if not routing.enforced(db):
+        raise HTTPException(status_code=409, detail=TRANSFER_OFF)
+    db_ticket = get_visible_ticket(db, ticket_id, current_user, full=True)
+    if db_ticket.status not in nav.OPEN_STATUSES:
+        raise HTTPException(status_code=409, detail=TRANSFER_CLOSED)
+    source = routing.ticket_department(db, db_ticket.id)
+    if source is None:
+        raise HTTPException(status_code=409, detail=TRANSFER_UNCLASSIFIED)
+    target = routing.serving_department(db, data.department_id)
+    if target.id == source.id:
+        raise HTTPException(status_code=400, detail=TRANSFER_SAME)
+
+    by_id = routing.departments_by_id(db)
+    from_label, to_label = routing.path_label(source, by_id), routing.path_label(target, by_id)
+    actor = current_user.name or "Sin nombre"
+    routing.set_ticket_department(db, db_ticket, target.id)
+    db.add(models.DepartmentTransfer(ticket_id=db_ticket.id, from_department_id=source.id,
+                                     to_department_id=target.id, reason=data.reason, transferred_by=current_user.id))
+    db.add(models.History(ticket_id=db_ticket.id, field="department", old_value=from_label, changed_by=current_user.id,
+                          new_value=f"Transferido de {from_label} a {to_label} por {actor}: {data.reason}"[:500]))
+    # El técnico que no pertenece al destino sale de su bandeja; el ticket vuelve a la asignación automática
+    requeue = False
+    assignee = db.get(models.User, db_ticket.assigned_to) if db_ticket.assigned_to else None
+    if assignee is not None and not routing.belongs_to(db, assignee, target.id):
+        db.add(models.History(ticket_id=db_ticket.id, field="assigned_to", old_value=str(assignee.id),
+                              new_value=None, changed_by=current_user.id))
+        db_ticket.assigned_to = None
+        if db_ticket.status == "in_progress":
+            db.add(models.History(ticket_id=db_ticket.id, field="status", old_value="in_progress", new_value="new",
+                                  changed_by=current_user.id))
+            db_ticket.status = "new"
+    if db_ticket.assigned_to is None:
+        row = db.query(models.TicketAutoAssignment).filter(
+            models.TicketAutoAssignment.ticket_id == db_ticket.id).first()
+        if row is not None:
+            row.status, row.user_id, row.assigned_at, row.history_id = "waiting", None, None, None
+        requeue = True
+    # Aviso en la bandeja del coordinador del destino (sin correo)
+    coordinator = routing.coordinator_of(db, target.id)
+    if coordinator is not None and coordinator.user_id != current_user.id:
+        routing.notify(db, coordinator.user_id, "ticket_transferred", db_ticket.id,
+                       f"Ticket #{db_ticket.id} transferido de {from_label} a {to_label} por {actor}: {data.reason}")
+    db.commit()
+    if requeue and config.AUTO_ASSIGN_ENABLED:
+        background_tasks.add_task(auto_assign.assign_new, db_ticket.id)
+    db.refresh(db_ticket)
+    return TicketTransferResult(
+        department_name=to_label, assigned_to=db_ticket.assigned_to,
+        still_visible=ticket_access.access(db, current_user, db_ticket) is not None,
+    )
 
 
 @router.post("/tickets/{ticket_id}/view-conversation", response_model=TicketDetail, response_model_exclude_unset=True)
@@ -291,45 +556,31 @@ def ticket_detail(db: Session, db_ticket: models.Ticket, current_user) -> Ticket
         .order_by(models.History.id.asc())
         .all()
     )
-    if current_user.role == "requester":
-        history = [h for h in history if h.field not in grouping.STAFF_HISTORY_FIELDS]
-    comments_query = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id)
-    if current_user.role == "requester":
-        # El solicitante nunca recibe los comentarios internos
-        comments_query = internal_comments.not_internal(comments_query)
-    comments = comments_query.order_by(models.Comment.id.asc()).all()
+    comments = db.query(models.Comment).filter(models.Comment.ticket_id == ticket_id).order_by(models.Comment.id.asc()).all()
     internal = internal_comments.internal_ids(db, [c.id for c in comments])
-    # Solo los adjuntos de los comentarios que esta persona puede ver (sin notas internas para el solicitante)
     files = attachments.by_comment(db, [c.id for c in comments])
-    following = (
-        db.query(models.TicketFollower)
-        .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
-        .first()
-        is not None
-    )
     extra = {}
-    if current_user.role == "admin" or ticket_access.access(db, current_user, db_ticket) == ticket_access.READ:
+    # Administrador: solo lectura, salvo con tickets por departamento (entonces los gestiona)
+    if ticket_access.access(db, current_user, db_ticket) != ticket_access.FULL:
         extra["read_only"] = True
     if current_user.role in AI_ROLES or current_user.role == "admin":
         row = db_ticket.ai_analysis
         extra["ai_analysis"] = ai_analysis_read(row, db_ticket) if row else None
-    if current_user.role != "requester":
-        # Solo el personal: el solicitante nunca recibe esta clave
-        flags = account_reports.staff_flags(db, db.get(models.User, db_ticket.created_by))
-        if flags is not None:
-            extra["requester_flags"] = flags
-        extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
-        extra["grouping"] = grouping.staff_view(db, db_ticket, current_user)
+    flags = account_reports.staff_flags(db, db.get(models.User, db_ticket.created_by))
+    if flags is not None:
+        extra["requester_flags"] = flags
+    extra["due_state"], extra["consumed_pct"] = alerts.due_state(db_ticket, nav._now())
+    extra["grouping"] = grouping.staff_view(db, db_ticket, current_user)
+    extra.update(department_fields(db, db_ticket))
     merge = grouping.active_merge_of(db, db_ticket.id)
     if merge is not None:
         extra["merged_into"] = merge.target_ticket_id
     return TicketDetail(
-        **ticket_read(db_ticket, current_user, portal.last_activity(db, [db_ticket])[db_ticket.id]).model_dump(),
+        **ticket_read(db_ticket, current_user, ticket_activity.last_activity(db, [db_ticket])[db_ticket.id]).model_dump(),
         history=[HistoryRead.model_validate(h) for h in history],
         comments=[comment_read(c, db_ticket, current_user, c.id in internal, files.get(c.id, ())) for c in comments],
         contact_phone=contact_phone,
         contact_id_number=contact_id_number,
-        following=following,
         people=ticket_people(db, db_ticket, comments, history),
         auto_assigned=auto_assign.is_auto_assigned(db, db_ticket),
         **extra,
@@ -341,13 +592,15 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
     if current_user.role not in AI_ROLES:
         raise HTTPException(status_code=403, detail="No tienes permiso para corregir el análisis")
     db_ticket = get_visible_ticket(db, ticket_id, current_user, full=True)
+    check_overdue_lock(db_ticket, current_user)
     row = db_ticket.ai_analysis
     if row is None:
         raise HTTPException(status_code=404, detail="Este ticket no tiene análisis de la IA")
     # Solo el análisis cambia: prioridad, estado y asignación quedan igual
     row.human_level = data.level
     row.human_level_by = current_user.id
-    row.due_at = email_analysis.compute_due_at(db_ticket.created_at, data.level)
+    # Un ticket abierto nunca queda sin vencimiento: "No es soporte" vence como Estándar
+    row.due_at = email_analysis.compute_due_at(db_ticket.created_at, email_analysis.due_level(data.level))
     db.commit()
     db.refresh(row)
     return ai_analysis_read(row, db_ticket)
@@ -356,39 +609,11 @@ def update_ai_level(ticket_id: int, data: AILevelUpdate, db: Session = Depends(g
 @router.get("/tickets/{ticket_id}/suggestion", response_model=Optional[SuggestionRead])
 def get_suggestion(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Sugerencia de responsable con la lógica de la asignación automática. No asigna nada."""
-    if current_user.role not in OPERATION_ROLES:
+    if not can_operate(db, current_user):
         raise HTTPException(status_code=403, detail="No tiene permiso para ver sugerencias de asignación")
     db_ticket = get_visible_ticket(db, ticket_id, current_user)
     found = nav.suggestion(db, db_ticket)
     return SuggestionRead(**found) if found else None
-
-
-@router.post("/tickets/{ticket_id}/follow", status_code=204)
-def follow_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    get_visible_ticket(db, ticket_id, current_user)
-    exists = (
-        db.query(models.TicketFollower)
-        .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
-        .first()
-    )
-    if not exists:
-        db.add(models.TicketFollower(ticket_id=ticket_id, user_id=current_user.id))
-        db.commit()
-    return Response(status_code=204)
-
-
-@router.delete("/tickets/{ticket_id}/follow", status_code=204)
-def unfollow_ticket(ticket_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    get_visible_ticket(db, ticket_id, current_user)
-    follower = (
-        db.query(models.TicketFollower)
-        .filter(models.TicketFollower.ticket_id == ticket_id, models.TicketFollower.user_id == current_user.id)
-        .first()
-    )
-    if follower:
-        db.delete(follower)
-        db.commit()
-    return Response(status_code=204)
 
 
 def check_can_comment(db: Session, ticket_id: int, current_user, internal: bool) -> models.Ticket:
@@ -397,9 +622,6 @@ def check_can_comment(db: Session, ticket_id: int, current_user, internal: bool)
         raise HTTPException(status_code=404, detail="El ticket no existe")
     if db_ticket.status == "closed":
         raise HTTPException(status_code=400, detail="No se puede comentar un ticket cerrado")
-    # Regla: el solicitante solo comenta en los tickets que él creó
-    if current_user.role == "requester" and db_ticket.created_by != current_user.id:
-        raise HTTPException(status_code=403, detail="Solo puedes comentar en tus propios tickets")
     # Técnico: solo el asignado; el administrador no comenta
     check_access(db, db_ticket, current_user, full=True)
     if internal and current_user.role not in nav.STAFF_ROLES:
@@ -528,8 +750,7 @@ def cancel_tickets(
                 f"Su ticket #{ticket.id} «{ticket.title}» fue cancelado.",
                 f"Motivo: {reason_label}.",
                 "",
-                "Si todavía necesita ayuda, puede crear una solicitud nueva.",
-                f"Puede ver sus solicitudes en {config.APP_URL}",
+                "Si todavía necesita ayuda, escriba un correo nuevo a soporte.",
             ])
             background_tasks.add_task(mailer.send_email, requester.email, f"[Ticket #{ticket.id}] Cancelado", body)
         result.append(ticket_read(ticket, current_user))
@@ -557,11 +778,10 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     if db_ticket.status == "closed":
         raise HTTPException(status_code=400, detail="No se puede modificar un ticket cerrado")
 
-    # Regla: el solicitante no puede cambiar estado, prioridad, categoría ni asignación
-    if current_user.role == "requester":
-        raise HTTPException(status_code=403, detail="Los solicitantes no pueden modificar tickets")
     # Técnico: solo el que tiene asignado; el administrador no entra al flujo de tickets
     check_access(db, db_ticket, current_user, full=True)
+    if data.status is not None or data.priority_id is not None or data.category_id is not None:
+        check_overdue_lock(db_ticket, current_user)
 
     # Transiciones de status permitidas
     if data.status is not None:
@@ -573,6 +793,11 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         current_status = db_ticket.status
         if data.status not in allowed_transitions.get(current_status, []):
             raise HTTPException(status_code=400, detail="Cambio de estado no permitido")
+    # Tickets por departamento: la solución se documenta al resolver
+    solution = " ".join((data.solution or "").split()) if data.solution else ""
+    if data.status == "resolved" and db_ticket.status != "resolved" and routing.enforced(db):
+        if len(solution) < SOLUTION_MIN:
+            raise HTTPException(status_code=422, detail=SOLUTION_REQUIRED)
 
     # Regla 2 - No se inicia sin asignar:
     # En el PATCH, calcula assigned_final = data.assigned_to si viene en la petición, si no db_ticket.assigned_to. 
@@ -594,7 +819,12 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         if user.role not in ("technician", "coordinator"):
             raise HTTPException(status_code=400, detail="Solo se puede asignar a técnicos o coordinadores")
         # Regla: asignar y reasignar es del coordinador (el técnico solo atiende lo suyo)
-        if current_user.role not in OPERATION_ROLES and data.assigned_to != db_ticket.assigned_to:
+        # Tickets por departamento: el responsable es un técnico del departamento del ticket (o su coordinador)
+        if routing.enforced(db) and data.assigned_to != db_ticket.assigned_to:
+            ticket_dept = routing.ticket_department(db, db_ticket.id)
+            if ticket_dept is not None and not routing.belongs_to(db, user, ticket_dept.id):
+                raise HTTPException(status_code=400, detail=OUTSIDE_DEPARTMENT)
+        if not can_operate(db, current_user) and data.assigned_to != db_ticket.assigned_to:
             raise HTTPException(status_code=403, detail="Solo un coordinador puede asignar tickets")
         # Se permite asignar a un técnico no disponible, pero solo con confirmación explícita
         if (
@@ -627,6 +857,8 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
     old_category_id = db_ticket.category_id
 
     # Aplicar cambios solo si son diferentes
+    if data.status == "resolved" and db_ticket.status != "resolved" and solution:
+        save_solution(db, db_ticket, (data.solution or "").strip(), current_user)
     if data.status is not None and data.status != db_ticket.status:
         db_ticket.status = data.status
         if data.status != old_status:
@@ -692,13 +924,21 @@ def update_ticket(ticket_id: int, data: TicketUpdate, background_tasks: Backgrou
         if assignment_notice.should_notify(assignee, current_user):
             assignment_notice.schedule(background_tasks, db_ticket, assignee)
             notified = (assignee.id,)
-    if lines:
+    # Tickets por departamento: al resolverse no sale ningún correo; avisa la campana de quien lo creó
+    resolved_now = db_ticket.status == "resolved" and old_status != "resolved"
+    quiet_resolution = resolved_now and routing.enforced(db)
+    if lines and not quiet_resolution:
         notify_followers(db, background_tasks, db_ticket, current_user, subject, lines, exclude_ids=notified)
+    if quiet_resolution:
+        notify_creator_resolved(db, db_ticket, current_user)
+        db.commit()
+        notify_reporter_resolved(db, background_tasks, db_ticket, current_user, exclude_ids=notified)
 
     # Tickets relacionados (posible incidente): se resuelven y se asignan junto con el principal
-    if db_ticket.status == "resolved" and old_status != "resolved":
+    if resolved_now:
         mails = grouping.resolve_related(db, db_ticket, current_user)
         db.commit()
+        # Quien reportó cada ticket ligado por correo sí recibe su «Resuelto» (no tiene campana)
         for to, mail_subject, body in mails:
             background_tasks.add_task(mailer.send_email, to, mail_subject, body)
     if db_ticket.assigned_to != old_assigned_to and db_ticket.assigned_to is not None:

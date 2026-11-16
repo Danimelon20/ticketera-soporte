@@ -1,8 +1,11 @@
 """Comando de servidor para cuentas de administrador (scripts.admin_tools)."""
+import uuid
+
 import pytest
 
 from app import accounts, models
 from app.database import SessionLocal
+from conftest import only_active_admins
 from scripts import admin_tools
 
 
@@ -51,7 +54,9 @@ def test_reactivate_admin(client, make_user):
     viewer = make_user("admin")
     target = make_user("admin", "Admin Vuelve")
     assert _run("deactivate", target["email"]) == 0
-    assert _run("reactivate", target["email"]) == 0
+    # Solo puede haber un administrador activo: se reactiva cuando no queda ninguno
+    with only_active_admins():
+        assert _run("reactivate", target["email"]) == 0
     assert _db_user(target["id"]).is_active
     row = next(c for c in _changes(client, viewer, "server_account_activated") if "Admin Vuelve" in c["account"])
     assert row["actor"] == "Servidor"
@@ -113,3 +118,15 @@ def test_rejects_unknown_command(make_user):
     with pytest.raises(SystemExit):
         admin_tools.main(["delete", "--email", target["email"]], confirm=lambda prompt: target["email"])
     assert _db_user(target["id"]).is_active
+
+
+# ----- Comandos de solicitantes quitados al eliminar el portal -----
+
+@pytest.mark.parametrize("command", ["internal-requesters", "delete-requester", "archive-requester"])
+def test_requester_commands_no_longer_exist(client, make_user, command):
+    """Sin clientes ya no tienen sentido; delete-requester borraba datos que ahora se archivan."""
+    contact = make_user("requester")
+    with pytest.raises(SystemExit):
+        admin_tools.main([command, "--email", contact["email"]], confirm=lambda prompt: contact["email"])
+    user = _db_user(contact["id"])
+    assert user is not None and user.email == contact["email"] and user.is_active

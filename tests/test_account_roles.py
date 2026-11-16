@@ -2,6 +2,7 @@ import pytest
 
 from app import accounts, audit, models
 from app.database import SessionLocal
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 ACTIONS = ("deactivate", "reactivate", "reset-access", "unlock")
@@ -32,7 +33,10 @@ def _sessions(user_id):
 ALLOWED = {
     ("admin", target, action)
     for target in ("coordinator", "technician", "requester")
-    for action in ("deactivate", "reactivate", "unlock")
+    for action in ("deactivate", "reactivate")
+} | {
+    # Desbloquear: solo el personal (un contacto no inicia sesión)
+    ("admin", "coordinator", "unlock"), ("admin", "technician", "unlock"),
 } | {
     ("admin", "coordinator", "reset-access"), ("admin", "technician", "reset-access"),
 }
@@ -45,7 +49,10 @@ def test_permission_matrix(client, make_user, sent, actor_role, target_role, act
     actor = make_user(actor_role)
     target = make_user(target_role)
     response = _post(client, actor, target["id"], action)
-    if (actor_role, target_role, action) in ALLOWED:
+    if actor_role == "requester":
+        # Un contacto no tiene sesión
+        assert response.status_code == 401, response.text
+    elif (actor_role, target_role, action) in ALLOWED:
         assert response.status_code in (202, 204), response.text
     else:
         assert response.status_code == 403, response.text
@@ -55,7 +62,7 @@ def test_permission_matrix(client, make_user, sent, actor_role, target_role, act
 @pytest.mark.parametrize("action", ACTIONS)
 def test_nobody_manages_own_account(client, make_user, sent, role, action):
     user = make_user(role)
-    assert _post(client, user, user["id"], action).status_code == 403
+    assert _post(client, user, user["id"], action).status_code == (401 if role == "requester" else 403)
     assert _db_user(user["id"]).is_active
 
 
@@ -71,7 +78,7 @@ def test_only_admin_changes_roles_directly(client, make_user, role):
     actor = make_user(role)
     target = make_user("requester")
     response = client.patch(f"/api/admin/users/{target['id']}", json={"role": "technician"}, headers=actor["headers"])
-    assert response.status_code == 403
+    assert response.status_code == (401 if role == "requester" else 403)
     assert _db_user(target["id"]).role == "requester"
 
 
@@ -160,7 +167,8 @@ def test_role_change_closes_sessions(client, make_user):
     admin = make_user("admin")
     user = make_user("technician")
     assert _sessions(user["id"]) == 1
-    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator"}, headers=admin["headers"])
+    client.patch(f"/api/admin/users/{user['id']}", json={"role": "coordinator", **placement_for("coordinator")},
+                 headers=admin["headers"])
     assert _sessions(user["id"]) == 0
     assert client.get("/api/auth/me", headers=user["headers"]).status_code == 401
 
@@ -174,8 +182,10 @@ def test_admin_deactivates_and_reactivates_requester(client, make_user):
     login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
     assert login.status_code == 401
     assert _post(client, coordinator, requester["id"], "reactivate").status_code == 204
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
-    assert login.status_code == 200
+    assert _db_user(requester["id"]).is_active
+    # Reactivado sigue sin poder entrar: los contactos nunca inician sesión
+    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
+    assert login.status_code == 401
 
 
 def _assign(client, coordinator, ticket, technician):
@@ -249,9 +259,10 @@ def test_unlock_clears_lockout(client, make_user):
                       headers=coordinator["headers"]).json()
     assert rows[0]["login_locked"] is True
 
-    assert _post(client, coordinator, requester["id"], "unlock").status_code == 204
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
-    assert login.status_code == 200
+    # Un contacto no inicia sesión: desbloquearlo no aplica y sigue recibiendo el mismo error
+    assert _post(client, coordinator, requester["id"], "unlock").status_code == 403
+    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD})
+    assert login.status_code in (401, 429)
 
 
 def test_directory_state_filter(client, make_user):
@@ -273,3 +284,59 @@ def test_audit_rejects_unknown_action():
     finally:
         db.rollback()
         db.close()
+
+
+# ----- Cambio técnico ↔ coordinador (administrador) -----
+
+def _role_changes(user_id):
+    db = SessionLocal()
+    try:
+        rows = db.query(models.AccountChange).filter(
+            models.AccountChange.target_user_id == user_id, models.AccountChange.action == "role_changed"
+        ).order_by(models.AccountChange.id).all()
+        return [(r.actor_id, r.old_value, r.new_value) for r in rows]
+    finally:
+        db.close()
+
+
+def test_admin_switches_technician_and_coordinator_without_reason(client, make_user):
+    admin = make_user("admin")
+    user = make_user("technician")
+    for role in ("coordinator", "technician"):
+        # Sin motivo: solo el rol
+        response = client.patch(f"/api/admin/users/{user['id']}", json={"role": role, **placement_for(role)},
+                                headers=admin["headers"])
+        assert response.status_code == 200, response.text
+        assert _db_user(user["id"]).role == role
+    assert _role_changes(user["id"]) == [
+        (admin["id"], "Técnico", "Coordinador"),
+        (admin["id"], "Coordinador", "Técnico"),
+    ]
+
+
+@pytest.mark.parametrize("legacy_portal", ["admin", "staff", "requester", None])
+def test_reset_after_role_roundtrip_ignores_legacy_portal(client, make_user, sent, legacy_portal):
+    """Caso real: técnico → coordinador → técnico y después "Olvidé mi contraseña" respondía 202 sin correo.
+
+    La causa era la pestaña del inicio de sesión que recordaba el navegador (la del administrador que hizo los
+    cambios). Prueba de compatibilidad: una página vieja que todavía envía portal no impide el restablecimiento."""
+    admin = make_user("admin")
+    user = make_user("technician")
+    for role in ("coordinator", "technician"):
+        client.patch(f"/api/admin/users/{user['id']}", json={"role": role, **placement_for(role)},
+                     headers=admin["headers"])
+    body = {"email": user["email"]}
+    if legacy_portal is not None:
+        body["portal"] = legacy_portal
+    response = client.post("/api/auth/password-reset", json=body)
+    assert response.status_code == 202
+    assert [to for to, _, _ in sent] == [user["email"]]
+
+
+def test_reset_for_staff_still_blocked_with_microsoft(client, make_user, sent, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "MS_LOGIN_ENABLED", True)
+    user = make_user("technician")
+    response = client.post("/api/auth/password-reset", json={"email": user["email"], "portal": "admin"})
+    assert response.status_code == 202
+    assert sent == []

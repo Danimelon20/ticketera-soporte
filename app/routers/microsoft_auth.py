@@ -10,12 +10,11 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import audit, config, entra_login
 from ..schemas import AuthResponse, EmailCodeRequest, MicrosoftExchange, MicrosoftLoginConfig, MicrosoftStart
-from .auth import PORTAL_ROLES, _create_session, normalize_email, valid_invitation
+from .auth import _create_session, normalize_email, valid_invitation
 
 router = APIRouter(tags=["microsoft-login"])
 
-# Pestañas de la pantalla de inicio que entran con Microsoft
-MICROSOFT_PORTALS = ("staff", "admin")
+# Vuelta a la página después de Microsoft (#microsoft?code=... o ?error=...)
 RETURN_PATH = "/#microsoft"
 EXCHANGE_FAILED = "El inicio de sesión con Microsoft venció. Intente de nuevo."
 UNAVAILABLE = "No se pudo conectar con Microsoft. Intente más tarde."
@@ -48,16 +47,15 @@ def microsoft_config():
 
 
 @router.get("/auth/microsoft/login")
-def microsoft_login(portal: str = "staff", db: Session = Depends(get_db)):
+def microsoft_login(db: Session = Depends(get_db)):
+    """Un solo botón: técnicos, coordinadores y el administrador (el rol sale de la cuenta)."""
     _require_enabled()
-    if portal not in MICROSOFT_PORTALS:
-        portal = "staff"
     try:
-        auth_uri, browser = entra_login.start(db, "login", portal=portal)
+        auth_uri, browser = entra_login.start(db, "login")
     except Exception as exc:
         db.rollback()
         logging.error("No se pudo iniciar el ingreso con Microsoft (%s)", type(exc).__name__)
-        return _back_to_app({"error": "unavailable", "portal": portal})
+        return _back_to_app({"error": "unavailable"})
     response = RedirectResponse(auth_uri, status_code=302)
     response.headers["Cache-Control"] = "no-store"
     _set_browser_cookie(response, browser)
@@ -72,19 +70,17 @@ def microsoft_callback(request: Request, db: Session = Depends(get_db)):
         identity = entra_login.finish(db, dict(request.query_params), browser)
         if identity.purpose == "activate":
             user = entra_login.activate(db, identity)
-            portal = "staff"
         else:
-            portal = identity.portal
-            user = entra_login.resolve_user(db, identity, PORTAL_ROLES.get(portal or "", ()))
+            user = entra_login.resolve_user(db, identity)
         code = entra_login.new_handoff(db, user, browser)
     except entra_login.LoginRejected as exc:
         entra_login.record_rejection(db, exc)
-        return _back_to_app({"error": exc.reason, "portal": exc.portal or ""})
+        return _back_to_app({"error": exc.reason})
     except Exception as exc:
         db.rollback()
         logging.error("Falló la vuelta del ingreso con Microsoft (%s)", type(exc).__name__)
-        return _back_to_app({"error": "failed", "portal": ""})
-    return _back_to_app({"code": code, "portal": portal or ""})
+        return _back_to_app({"error": "failed"})
+    return _back_to_app({"code": code})
 
 
 @router.post("/api/auth/microsoft/exchange", response_model=AuthResponse)

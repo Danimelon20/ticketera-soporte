@@ -3,7 +3,7 @@ import os
 import sqlite3
 import tempfile
 from collections import deque
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -15,11 +15,13 @@ from starlette.background import BackgroundTask
 from ..database import engine, get_db
 from .. import (
     account_reports, accounts, alerts, auto_assign, availability, cancellations, config, daily_summary, email_analysis, email_poller,
-    identity, models, schedules, throttle,
+    identity, models, people_activity, routing, schedules, throttle,
 )
 from ..schemas import (
-    AccountChangePage, AccountChangeRead, AccountCounts, AccountListPage, AccountListRow, AccountRecentTicket,
-    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, TeamMember,
+    AccountChangePage, AccountChangeRead, AccountCounts, AccountDepartmentOption, AccountListPage, AccountListRow,
+    AccountRecentTicket,
+    AccountSummary, AdminAccountAlerts, AdminAccountDetail, AdminAccountRow, AdminUserUpdate, DirectoryUser, PersonActivityPage,
+    PersonHeader, PersonHit, TeamMember, ActivitySummary,
 )
 from ..security import get_current_user, mask_email, session_expired
 from ..validators import mask_id_number, mask_last4
@@ -97,7 +99,8 @@ def _schedule_fields(rows: list[models.TechnicianSchedule] | None, now: datetime
 
 @router.get("/directory", response_model=list[DirectoryUser])
 def get_directory(
-    role: Optional[Literal["requester", "technician", "coordinator", "admin"]] = None,
+    # staff: técnicos, coordinadores y administradores (Invitaciones › Usuarios existentes)
+    role: Optional[Literal["requester", "technician", "coordinator", "admin", "staff"]] = None,
     q: Optional[str] = None,
     state: Optional[Literal["active", "inactive"]] = None,
     db: Session = Depends(get_db),
@@ -107,7 +110,9 @@ def get_directory(
         raise HTTPException(status_code=403, detail="No tienes permiso para ver esta información")
 
     query = db.query(models.User).filter(models.User.role != "agent")
-    if role:
+    if role == "staff":
+        query = query.filter(models.User.role.in_(TEAM_ROLES))
+    elif role:
         query = query.filter(models.User.role == role)
     if state:
         query = query.filter(models.User.is_active.is_(state == "active"))
@@ -134,6 +139,7 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
     users.sort(key=lambda u: order[u.role])
     periods = availability.periods_for(db, availability.ids_with_status(users))
     loads = auto_assign.loads(db, [u.id for u in users]) if current_user.role == "coordinator" else None
+    departments_of = routing.placement_labels(db)
     members = []
     for row in _directory_rows(db, users):
         member = TeamMember(
@@ -141,9 +147,14 @@ def get_team(db: Session = Depends(get_db), current_user=Depends(get_current_use
             is_active=row.is_active, tickets_assigned_open=row.tickets_assigned_open, login_locked=row.login_locked,
             availability=row.availability, return_date=row.return_date, schedule=row.schedule,
             schedule_today=row.schedule_today, on_shift=row.on_shift, periods=periods.get(row.id, []),
+            department_name=departments_of.get(row.id),
         )
         if loads is not None:
             member.load = loads[row.id]
+        # El coordinador no ve los tickets de otros coordinadores (ni cuántos tienen)
+        if current_user.role == "coordinator" and row.role == "coordinator" and row.id != current_user.id:
+            member.tickets_assigned_open = None
+            member.load = None
         members.append(member)
     return members
 
@@ -164,13 +175,22 @@ def update_user(
     if user.id == admin.id:
         raise HTTPException(status_code=403, detail=accounts.SELF_CHANGE)
     if data.role is not None and data.role != user.role:
-        accounts.check_can_manage(admin, user, "role")
+        accounts.check_can_manage(admin, user, "role", new_role=data.role)
     if data.is_active is not None and data.is_active != user.is_active:
         # Con el rol que tiene ahora: un administrador no se desactiva desde aquí
         accounts.check_can_manage(admin, user, "active")
 
-    if data.role is not None:
-        accounts.change_role(db, admin, user, data.role)
+    if data.role is not None and data.role != user.role:
+        new_role = data.role
+        if new_role in routing.PLACED_ROLES:
+            # Rol y departamento juntos: se valida antes de cambiar nada (422 sin departamento, 409 si el
+            # departamento ya tiene coordinador)
+            dept = routing.serving_department(db, data.department_id)
+            if new_role == "coordinator":
+                routing.check_coordinator_free(db, dept.id, user.id)
+        accounts.change_role(db, admin, user, new_role)
+        if new_role in routing.PLACED_ROLES:
+            routing.set_placement(db, admin, user, dept.id)
     if data.is_active is not None:
         accounts.set_active(db, admin, user, data.is_active, background_tasks)
     db.commit()
@@ -206,6 +226,7 @@ def account_changes(
     account: Optional[str] = None,
     action: Optional[str] = None,
     page: int = 1,
+    exclude_access: bool = False,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
@@ -214,6 +235,9 @@ def account_changes(
     )
     if action:
         query = query.filter(models.AccountChange.action == action)
+    if exclude_access:
+        # "Actividad reciente": sin ingresos ni intentos, que están en la ficha de cada persona
+        query = query.filter(~models.AccountChange.action.in_(("login", "login_failed", "microsoft_login")))
     if account and account.strip():
         term = f"%{account.strip().lower()}%"
         query = query.filter(
@@ -233,6 +257,45 @@ def account_changes(
 
     items = [_change_read(row) for row in rows]
     return AccountChangePage(items=items, total=total, page=page, pages=pages)
+
+
+# ----- Registro de cambios por persona (solo lectura) -----
+@router.get("/admin/people", response_model=list[PersonHit])
+def search_people(query: str = "", db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return people_activity.search(db, query)
+
+
+@router.get("/admin/people/{user_id}/activity", response_model=PersonActivityPage)
+def person_activity(
+    user_id: int,
+    types: Optional[str] = None,
+    from_: Optional[date] = Query(default=None, alias="from"),
+    to: Optional[date] = None,
+    ticket: Optional[int] = None,
+    cursor: Optional[str] = None,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    user = people_activity.person(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="No existe esa persona")
+    if from_ and to and from_ > to:
+        raise HTTPException(status_code=400, detail="La fecha inicial no puede ser posterior a la final")
+    start, end = people_activity.date_range(from_, to)
+    groups = [g.strip() for g in types.split(",") if g.strip()] if types else None
+    try:
+        items, next_cursor = people_activity.timeline(db, user, groups, start, end, ticket, cursor)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="El cursor no es válido")
+    summary = None
+    if user.role in people_activity.STAFF_ROLES and not cursor:
+        summary = ActivitySummary(**people_activity.summary(db, user, start, end))
+    return PersonActivityPage(
+        person=PersonHeader(**people_activity.header(db, user)),
+        summary=summary,
+        items=items,
+        next_cursor=next_cursor,
+    )
 
 
 # ----- Admin › Cuentas -----
@@ -301,6 +364,7 @@ def admin_accounts(
     identities = identity.hacienda_codes(db, [u.id for u in users if u.role == "requester"])
     sessions = _open_sessions(db, ids, now)
     shifts = schedules.for_users(db, ids) if by_schedule else {}
+    departments_of = routing.placement_labels(db)
 
     rows = []
     for u in users:
@@ -316,6 +380,7 @@ def admin_accounts(
             last_activity=max(sessions[u.id]) if sessions[u.id] else None,
             identity=identities.get(u.id),
             schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
+            department_name=departments_of.get(u.id),
         )
         if state and row.state != state:
             continue
@@ -402,7 +467,7 @@ def admin_account_detail(user_id: int, db: Session = Depends(get_db), admin=Depe
 
 
 # ----- Cuentas: una sola lista con filtros rápidos (administrador y coordinador) -----
-ACCOUNT_FILTERS = ("all", "staff", "clients", "locked", "reported", "unverified", "invitations")
+ACCOUNT_FILTERS = ("all", "staff", "clients", "archived", "locked", "reported", "unverified", "invitations")
 STAFF_ACCOUNT_ROLES = ("technician", "coordinator", "admin")
 RECENT_ITEMS = 5
 # Cuentas que ve cada rol: el coordinador, solo técnicos y clientes
@@ -464,6 +529,8 @@ def _account_actions(
     else:
         if _can(viewer, user, "role"):
             actions.append("change-role")
+        if _can(viewer, user, "department"):
+            actions.append("placement")
         if _can(viewer, user, "schedule"):
             actions.append("schedule")
         if _can(viewer, user, "availability"):
@@ -490,18 +557,27 @@ def account_list(
     schedule_start: Optional[str] = Query(default=None, max_length=5),
     schedule_end: Optional[str] = Query(default=None, max_length=5),
     schedule_match: Literal[schedules.MATCH_MODES] = "covers",
+    # Filtro por departamento: el id (solo ese, sin subdepartamentos) o "none" (personal sin departamento)
+    department: Optional[str] = Query(default=None, max_length=12),
     db: Session = Depends(get_db),
     viewer: models.User = Depends(require_account_viewer),
 ):
-    """Lista y contadores de los filtros rápidos. Los contadores usan la búsqueda y el horario, no el filtro rápido."""
+    """Lista y contadores de los filtros rápidos. Los contadores usan la búsqueda, el horario y el departamento, no
+    el filtro rápido."""
     now = auto_assign._now()
     by_schedule = schedule_day is not None
     if by_schedule:
         if schedule_start is None or schedule_end is None:
             raise HTTPException(status_code=422, detail="Indique la hora de entrada y la de salida")
         schedules.check_range(schedule_start, schedule_end)
+    by_id = routing.departments_by_id(db)
+    department_id = _department_filter(department, by_id)
+    by_department = department is not None
     scope = ACCOUNT_SCOPE[viewer.role]
     roles = [r for r in scope if r in schedules.SCHEDULE_ROLES] if by_schedule else list(scope)
+    if by_department:
+        # Solo el personal que tiene departamento (técnicos y coordinadores)
+        roles = [r for r in roles if r in routing.PLACED_ROLES]
     term = f"%{q.strip().lower()}%" if q and q.strip() else None
 
     query = db.query(models.User).filter(models.User.role.in_(roles))
@@ -515,9 +591,14 @@ def account_list(
     reported = account_reports.reported_ids(db, requester_ids)
     open_counts = _open_tickets(db, users)
     shifts = schedules.for_users(db, ids) if by_schedule else {}
+    departments_of = routing.placement_labels(db)
+    placed_in = routing.placements(db)
+    archived = accounts.archived_ids(db, requester_ids)
 
     rows = []
     for u in users:
+        if by_department and placed_in.get(u.id) != department_id:
+            continue
         shift = None
         if by_schedule:
             # Sin turno ese día no aparece; de vacaciones o ausente sí (con su estado visible)
@@ -528,6 +609,7 @@ def account_list(
             kind="user", id=u.id, name=u.name or "Sin nombre", email=mask_email(u.email), role=u.role,
             state=_account_state(db, u, statuses), identity=identities.get(u.id), reported=u.id in reported,
             open_tickets=open_counts.get(u.id, 0), schedule_day=f"{shift[0]}–{shift[1]}" if shift else None,
+            department_name=departments_of.get(u.id), archived=u.id in archived,
         ))
 
     # Invitaciones pendientes: todavía no son cuentas (ni tienen horario). El coordinador solo ve las suyas
@@ -543,6 +625,14 @@ def account_list(
             query = query.filter(
                 func.lower(models.StaffInvitation.name).like(term) | func.lower(models.StaffInvitation.email).like(term)
             )
+        if by_department:
+            # El departamento con el que se invitó (sin fila: sin departamento)
+            placed = db.query(models.StaffInvitationPlacement.invitation_id)
+            if department_id is None:
+                query = query.filter(models.StaffInvitation.id.notin_(placed))
+            else:
+                query = query.filter(models.StaffInvitation.id.in_(
+                    placed.filter(models.StaffInvitationPlacement.department_id == department_id)))
         invitations = [
             AccountListRow(
                 kind="invitation", id=inv.id, name=inv.name, email=mask_email(inv.email), role=inv.role,
@@ -554,15 +644,35 @@ def account_list(
     groups = {
         "staff": [r for r in rows if r.role in STAFF_ACCOUNT_ROLES],
         "clients": [r for r in rows if r.role == "requester"],
+        "archived": [r for r in rows if r.archived],
         "locked": [r for r in rows if r.state == "locked"],
         "reported": [r for r in rows if r.role == "requester" and r.reported],
         "unverified": [r for r in rows if r.role == "requester" and r.identity == "unverified"],
         "invitations": invitations,
     }
     groups["all"] = rows + invitations
+    # Opciones: los departamentos que atienden tickets y cualquiera donde haya personal de su alcance
+    in_scope = {u.id for u in db.query(models.User.id).filter(models.User.role.in_(scope))}
+    option_ids = {d.id for d in by_id.values() if routing.serves_tickets(d, by_id)}
+    option_ids |= {dept for user_id, dept in placed_in.items() if user_id in in_scope and dept in by_id}
+    options = sorted((AccountDepartmentOption(id=i, path=routing.path_label(by_id[i], by_id)) for i in option_ids),
+                     key=lambda o: o.path.casefold())
     return AccountListPage(
         items=groups[filter_], counts=AccountCounts(**{key: len(value) for key, value in groups.items()}),
+        departments=options,
     )
+
+
+DEPARTMENT_FILTER_INVALID = "El departamento no existe"
+
+
+def _department_filter(value: str | None, by_id: dict) -> int | None:
+    """"none" o el id de un departamento existente. 422 si no."""
+    if value is None or value == "none":
+        return None
+    if not value.isdigit() or int(value) not in by_id:
+        raise HTTPException(status_code=422, detail=DEPARTMENT_FILTER_INVALID)
+    return int(value)
 
 
 @router.get("/accounts/{user_id}", response_model=AccountSummary)
@@ -625,6 +735,7 @@ def account_summary(user_id: int, db: Session = Depends(get_db), viewer: models.
         is_active=user.is_active,
         identity=identity.hacienda_label_code(db, user) if user.role == "requester" else None,
         reported=bool(account_reports.reported_ids(db, [user.id])) if user.role == "requester" else False,
+        archived=bool(accounts.archived_ids(db, [user.id])),
         availability=status[0] if status else None,
         return_date=status[1] if status else None,
         schedule=schedules.as_dicts(schedule_rows) if schedule_rows is not None else None,
@@ -657,8 +768,9 @@ def admin_health(db: Session = Depends(get_db), admin=Depends(require_admin)):
     return {
         "database": database,
         "users_by_role": users_by_role,
+        "active_admins": accounts.active_admins(db),
         "tickets_by_status": tickets_by_status,
-        "email_enabled": config.EMAIL_ENABLED,
+        "email_enabled": config.MAIL_TRANSPORT != "log",
         "email_last_run": last_run.isoformat() if last_run else None,
         "email_last_processed": email_poller.last_processed,
         "email_last_error": email_poller.last_error,
@@ -685,7 +797,7 @@ def send_daily_summary_now(db: Session = Depends(get_db), admin=Depends(get_curr
     # Reporte de operación: lo envía el coordinador. Envío manual: no cuenta para el control de una vez por día
     if admin.role != "coordinator":
         raise HTTPException(status_code=403, detail="Solo un coordinador puede enviar el resumen")
-    if not config.EMAIL_ENABLED:
+    if config.MAIL_TRANSPORT == "log":
         raise HTTPException(status_code=400, detail="El envío de correos está apagado")
     sent, total = daily_summary.send_summary(db)
     logging.info("Resumen diario enviado a mano por el usuario %s a %s destinatarios", admin.id, sent)
@@ -700,7 +812,11 @@ def analyze_missing(background_tasks: BackgroundTasks, db: Session = Depends(get
         ticket_id
         for (ticket_id,) in db.query(models.Ticket.id)
         .outerjoin(models.TicketAIAnalysis, models.TicketAIAnalysis.ticket_id == models.Ticket.id)
-        .filter(models.Ticket.status.in_(("new", "in_progress")), models.TicketAIAnalysis.id.is_(None))
+        .filter(
+            models.Ticket.status.in_(("new", "in_progress")),
+            # Sin análisis, o en Estándar por defecto (con su línea automática); nunca un nivel de una persona
+            email_analysis.retry_filter(db),
+        )
         .order_by(models.Ticket.id)
         .all()
     ]

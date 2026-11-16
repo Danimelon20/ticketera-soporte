@@ -36,24 +36,6 @@ def _assert_no_personal_data(prompt):
     assert "8888-1234" not in prompt
 
 
-def test_requester_sees_only_own_tickets(client, make_user, make_ticket, prompts):
-    requester = make_user("requester", "Ana Solicitante")
-    other = make_user("requester")
-    make_ticket(requester, title="Impresora del tercer piso")
-    make_ticket(other, title="Ticket ajeno secreto")
-
-    response = _chat(client, requester)
-    assert response.status_code == 200
-    assert response.json() == {"reply": "Respuesta de prueba"}
-
-    prompt = prompts[-1]
-    assert "Impresora del tercer piso" in prompt
-    assert "Ticket ajeno secreto" not in prompt
-    assert "Hablas con Ana Solicitante, que tiene el rol solicitante." in prompt
-    assert prompt.rstrip().split("DATOS:")[1].strip()
-    _assert_no_personal_data(prompt)
-
-
 def test_no_personal_data_in_any_prompt(client, make_user, make_ticket, prompts):
     requester = make_user("requester")
     coordinator = make_user("coordinator")
@@ -63,13 +45,14 @@ def test_no_personal_data_in_any_prompt(client, make_user, make_ticket, prompts)
     client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
     client.post(
         f"/api/tickets/{ticket['id']}/comments",
-        json={"content": "Mi teléfono es 8888-1234 y mi correo ana@ejemplo.com"},
-        headers=requester["headers"],
+        json={"content": "Su teléfono es 8888-1234 y su correo ana@ejemplo.com"},
+        headers=coordinator["headers"],
     )
 
-    for user in (requester, technician, coordinator):
+    # Los contactos no usan el asistente: solo el personal
+    for user in (technician, coordinator):
         assert _chat(client, user).status_code == 200
-    assert len(prompts) == 3
+    assert len(prompts) == 2
     for prompt in prompts:
         _assert_no_personal_data(prompt)
     assert "[dato oculto]" in prompts[0]
@@ -105,7 +88,7 @@ def test_coordinator_sees_team_summary(client, make_user, make_ticket, prompts):
 
 def test_disabled_returns_503(client, make_user, prompts, monkeypatch):
     monkeypatch.setattr(config, "CHATBOT_ENABLED", False)
-    response = _chat(client, make_user("requester"))
+    response = _chat(client, make_user("technician"))
     assert response.status_code == 503
     assert response.json()["detail"] == "El asistente no está disponible en este momento"
     assert prompts == []
@@ -116,30 +99,30 @@ def test_unavailable_returns_503(client, make_user, prompts, monkeypatch):
         raise chatbot.ChatbotUnavailable()
 
     monkeypatch.setattr(chatbot, "call_llm", _broken)
-    response = _chat(client, make_user("requester"))
+    response = _chat(client, make_user("technician"))
     assert response.status_code == 503
     assert response.json()["detail"] == "El asistente no está disponible en este momento"
 
 
 def test_rate_limit(client, make_user, prompts):
-    user = make_user("requester")
+    user = make_user("technician")
     for _ in range(20):
         assert _chat(client, user).status_code == 200
     response = _chat(client, user)
     assert response.status_code == 429
     assert response.json()["detail"] == "Has enviado muchos mensajes. Espera unos minutos."
     # Otro usuario no se ve afectado
-    assert _chat(client, make_user("requester")).status_code == 200
+    assert _chat(client, make_user("technician")).status_code == 200
 
 
 def test_message_too_long(client, make_user, prompts):
-    response = _chat(client, make_user("requester"), message="a" * 1001)
+    response = _chat(client, make_user("technician"), message="a" * 1001)
     assert response.status_code == 422
 
 
 def test_history_too_long(client, make_user, prompts):
     history = [{"role": "user", "text": "hola"}] * 11
-    response = _chat(client, make_user("requester"), history=history)
+    response = _chat(client, make_user("technician"), history=history)
     assert response.status_code == 422
 
 

@@ -166,7 +166,8 @@ def test_free_email_creates_draft_without_reply(make_user, sent):
     assert draft.subject == "Problema con la impresora"
     assert "impresora del tercer piso" in draft.body
     assert draft.contact_phone == "88881234"
-    assert draft.contact_id_number == "102340567"
+    # La cédula del correo ya no se lee
+    assert draft.contact_id_number is None
     assert sent == []
 
 
@@ -188,40 +189,6 @@ def test_ticket_with_contact_is_pending_review(make_user, sent, llm):
     assert "Buen día, Laura Cliente." in body
     assert "un técnico está revisando su solicitud" in body.lower()
     assert "Teléfono:" not in body
-
-
-def test_ticket_without_contact_waits_and_reply_completes_it(make_user, sent, llm):
-    requester = make_user("requester", profile=False)
-    draft = _draft_from(requester, llm, _answer(level=2))
-
-    assert draft.status == "waiting_contact"
-    assert _get(models.Priority, draft.priority_id).name == "Media"
-    subject, body = sent[0][1], sent[0][2]
-    assert subject == "[Soporte] Recibimos su correo"
-    assert "Teléfono: ..." in body and "Cédula: ..." in body
-
-    reply = "Teléfono: 8888-1234\nCédula: 1-0234-0567\n\nEl lun, 12 oct 2026, Soporte escribió:\n> Teléfono: ..."
-    assert _process(_email(requester["email"], body=reply, subject="RE: [Soporte] Recibimos su correo")) == "contact_updated"
-
-    drafts = _drafts(requester["id"])
-    assert len(drafts) == 1
-    assert drafts[0].status == "pending_review"
-    assert drafts[0].contact_phone == "88881234"
-    assert drafts[0].contact_id_number == "102340567"
-    user = _get(models.User, requester["id"])
-    assert user.phone == "88881234" and user.id_number == "102340567"
-    assert sent[-1][1] == "[Soporte] Gracias, recibimos sus datos de contacto"
-
-
-def test_partial_contact_keeps_waiting(make_user, sent, llm):
-    requester = make_user("requester", profile=False)
-    _draft_from(requester, llm, _answer())
-    assert _process(_email(requester["email"], body="Teléfono: 8888-1234", subject="RE: datos")) == "contact_updated"
-    draft = _drafts(requester["id"])[-1]
-    assert draft.status == "waiting_contact"
-    assert draft.contact_phone == "88881234"
-    assert sent[-1][1] == "[Soporte] Falta un dato de contacto"
-    assert "Todavía falta: Cédula" in sent[-1][2]
 
 
 def _processed_result(msg):
@@ -453,7 +420,7 @@ def test_invalid_json_needs_review(make_user, sent, llm):
     requester = make_user("requester", profile=False)
     draft = _draft_from(requester, llm, "esto no es JSON")
     assert draft.needs_review is True
-    assert draft.status == "waiting_contact"  # se trata como ticket; falta el contacto
+    assert draft.status == "pending_review"  # se trata como ticket; ya no espera teléfono ni cédula
     assert draft.title == "Problema con la impresora"
     assert "impresora del tercer piso" in draft.description
     assert draft.category_id is None and draft.ai_level is None
@@ -521,7 +488,7 @@ def test_list_and_confirm(client, make_user, sent, llm):
 
     listed = client.get("/api/drafts", headers=technician["headers"]).json()
     item = next(d for d in listed if d["id"] == draft.id)
-    assert item["status"] == "waiting_contact"
+    assert item["status"] == "pending_review"
     assert item["requester_name"] == "Laura Cliente"
     assert item["body"] == draft.body
     assert item["ai_level"] == 3 and item["summary"]
@@ -567,19 +534,6 @@ def test_list_and_confirm(client, make_user, sent, llm):
     assert all(d["id"] != draft.id for d in listed)
 
 
-def test_confirm_requires_contact(client, make_user, sent, llm):
-    requester = make_user("requester", profile=False)
-    coordinator = make_user("coordinator")
-    draft = _draft_from(requester, llm, _answer())
-
-    payload = _confirm_payload()
-    del payload["contact_phone"]
-    assert client.post(f"/api/drafts/{draft.id}/confirm", json=payload, headers=coordinator["headers"]).status_code == 422
-    payload = _confirm_payload(contact_id_number="")
-    assert client.post(f"/api/drafts/{draft.id}/confirm", json=payload, headers=coordinator["headers"]).status_code == 422
-    assert _get(models.EmailDraft, draft.id).status == "waiting_contact"
-
-
 def test_discard(client, make_user, sent, llm):
     requester = make_user("requester", profile=False)
     # El administrador no entra a los borradores: descarta el coordinador
@@ -592,15 +546,6 @@ def test_discard(client, make_user, sent, llm):
     assert response.json()["status"] == "discarded"
     assert sent == []
     assert client.get("/api/drafts?status=discarded", headers=admin["headers"]).json()[0]["id"] == draft.id
-
-
-def test_requester_gets_403(client, make_user, sent, llm):
-    requester = make_user("requester", profile=False)
-    draft = _draft_from(requester, llm, _answer())
-    headers = requester["headers"]
-    assert client.get("/api/drafts", headers=headers).status_code == 403
-    assert client.post(f"/api/drafts/{draft.id}/confirm", json=_confirm_payload(), headers=headers).status_code == 403
-    assert client.post(f"/api/drafts/{draft.id}/discard", headers=headers).status_code == 403
 
 
 def test_health_counts_drafts(client, make_user, sent, llm):
@@ -617,7 +562,13 @@ def test_reply_adds_comment_without_quote(client, make_user, make_ticket, sent, 
     requester = make_user("requester", "Ana Cliente")
     follower = make_user("coordinator", "Carla Seguidora")
     ticket = make_ticket(requester, title="Sin red")
-    client.post(f"/api/tickets/{ticket['id']}/follow", headers=follower["headers"])
+    # Seguimiento de antes del cambio: el personal ya no recibe estos correos
+    db = SessionLocal()
+    try:
+        db.add(models.TicketFollower(ticket_id=ticket["id"], user_id=follower["id"]))
+        db.commit()
+    finally:
+        db.close()
 
     body = (
         "Ya reinicié el router y sigue igual.\n\n"
@@ -633,10 +584,8 @@ def test_reply_adds_comment_without_quote(client, make_user, make_ticket, sent, 
     finally:
         db.close()
     assert [(c.user_id, c.content) for c in comments] == [(requester["id"], "Ya reinicié el router y sigue igual.")]
-    assert [(to, subject) for to, subject, _ in sent] == [
-        (follower["email"], f"[Ticket #{ticket['id']}] Nuevo comentario de Ana Cliente")
-    ]
-    assert "Ya reinicié el router y sigue igual." in sent[0][2]
+    # Quien escribe no recibe su propio comentario y el personal ya no sigue tickets por correo
+    assert sent == []
 
 
 def test_reply_from_unrelated_sender_follows_normal_flow(make_user, make_ticket, sent, monkeypatch):
@@ -679,7 +628,9 @@ FULL_VALUES = ("88881234", "8888-1234", "102340567", "1-0234-0567", "ana@ejemplo
 
 
 def _personal_draft(make_user, llm):
+    # Contacto que ya tenía cédula (como una cuenta de cliente archivada): se sigue mostrando, enmascarada al técnico
     requester = make_user("requester", profile=False)
+    _set(models.User, requester["id"], id_number="102340567")
     return _draft_from(
         requester, llm,
         _answer(summary="Llamar al 8888-1234.", description="Celular 8888-1234, cédula 1-0234-0567."),
@@ -784,6 +735,35 @@ def test_request_details_sends_and_deletes_draft(client, make_user, sent, llm):
     assert len(_notices(requester["id"])) == 1
 
 
+def test_request_details_reaches_mailpit_for_demo_requester(client, make_user, llm, monkeypatch):
+    """Diagnóstico: en pruebas los borradores demo son de cuentas .invalid y el correo nunca salía (502).
+    Con APP_ENV=pruebas y SMTP (solo Mailpit) "Pedir detalles" sí llega."""
+    import smtplib
+
+    from test_mail_transport import FakeSMTP
+
+    coordinator = make_user("coordinator")
+    requester, draft, _msg = _pending_with_message(make_user, llm)
+    demo_email = f"cliente-{draft.id}@demo.invalid"
+    db = SessionLocal()
+    try:
+        db.get(models.User, requester["id"]).email = demo_email
+        db.commit()
+    finally:
+        db.close()
+    FakeSMTP.instances = []
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(config, "APP_ENV", "pruebas")
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "smtp")
+    monkeypatch.setattr(config, "SMTP_HOST", "mailpit")
+
+    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=coordinator["headers"])
+    assert response.status_code == 200, response.text
+    [msg] = FakeSMTP.instances[0].sent_messages
+    assert msg["To"] == demo_email
+    assert msg["Subject"] == "[Soporte] Necesitamos más detalles sobre su solicitud"
+
+
 def test_request_details_ignores_recent_notice(client, make_user, sent, llm):
     coordinator = make_user("coordinator")
     requester, draft, _msg = _pending_with_message(make_user, llm)
@@ -813,13 +793,6 @@ def test_request_details_send_failure_changes_nothing(client, make_user, sent, l
     assert _notices(requester["id"]) == []
 
 
-def test_request_details_requester_gets_403(client, make_user, sent, llm):
-    requester, draft, _msg = _pending_with_message(make_user, llm)
-    response = client.post(f"/api/drafts/{draft.id}/request-details", headers=requester["headers"])
-    assert response.status_code == 403
-    assert _get(models.EmailDraft, draft.id) is not None
-
-
 def test_request_details_missing_or_not_pending(client, make_user, sent, llm):
     coordinator = make_user("coordinator")
     response = client.post("/api/drafts/999999/request-details", headers=coordinator["headers"])
@@ -841,50 +814,3 @@ def _reason(draft_id):
     finally:
         db.close()
 
-
-def test_reply_with_id_number_of_other_account_stays_pending(client, make_user, sent, llm):
-    owner = make_user("requester")
-    requester = make_user("requester", profile=False)
-    draft = _draft_from(requester, llm, _answer())
-    assert draft.status == "waiting_contact"
-
-    reply = f"Teléfono: 8888-1234\nCédula: {owner['id_number']}"
-    assert _process(_email(requester["email"], body=reply, subject="RE: datos")) == "contact_updated"
-
-    draft = _drafts(requester["id"])[-1]
-    assert draft.status == "pending_review"
-    assert draft.contact_id_number is None
-    assert _reason(draft.id) == "cédula en uso por otra cuenta"
-    user = _get(models.User, requester["id"])
-    assert user.id_number is None
-    assert user.phone == "88881234"
-    # El cliente no se entera de a quién pertenece la cédula
-    assert owner["email"] not in sent[-1][2]
-
-    coordinator = make_user("coordinator")
-    item = next(d for d in client.get("/api/drafts", headers=coordinator["headers"]).json() if d["id"] == draft.id)
-    assert item["pending_reason"] == "cédula en uso por otra cuenta"
-
-
-def test_new_email_with_id_number_of_other_account_is_flagged(client, make_user, sent, llm):
-    owner = make_user("requester")
-    requester = make_user("requester", profile=False)
-    body = f"{FREE_BODY}\nTeléfono: 8888-1234\nCédula: {owner['id_number']}"
-    draft = _draft_from(requester, llm, _answer(), body=body)
-    assert draft.status == "pending_review"
-    assert draft.contact_id_number is None
-    assert _reason(draft.id) == "cédula en uso por otra cuenta"
-    assert _get(models.User, requester["id"]).id_number is None
-    assert "Cédula: ..." not in sent[-1][2]
-
-
-def test_reply_does_not_change_locked_id_number(client, make_user, make_ticket, sent, llm):
-    requester = make_user("requester")
-    make_ticket(requester)
-    _set(models.User, requester["id"], phone=None)
-    _draft_from(requester, llm, _answer())
-    reply = "Teléfono: 7777-1234\nCédula: 1-0987-0654"
-    assert _process(_email(requester["email"], body=reply, subject="RE: datos")) == "contact_updated"
-    user = _get(models.User, requester["id"])
-    assert user.id_number == requester["id_number"]
-    assert user.phone == "77771234"

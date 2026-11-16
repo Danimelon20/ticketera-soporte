@@ -8,6 +8,28 @@ SUPPORT_MAILBOX = os.getenv("SUPPORT_MAILBOX", "").lower()
 MAIL_FOLDER = os.getenv("MAIL_FOLDER", "Ticketera")
 MS_TOKEN_CACHE = os.getenv("MS_TOKEN_CACHE", "data/ms_token_cache.json")
 EMAIL_POLL_SECONDS = int(os.getenv("EMAIL_POLL_SECONDS", "60"))
+
+# Entorno: "pruebas" activa la protección del correo (mailer.check_mail_config)
+APP_ENV = os.getenv("APP_ENV", "").strip().lower()
+MAIL_TRANSPORTS = ("graph", "smtp", "log")
+
+
+def resolve_mail_settings(env) -> tuple[str, bool]:
+    """(transporte, lee el buzón). Sin las variables nuevas, todo sale de EMAIL_ENABLED como antes."""
+    email_enabled = env.get("EMAIL_ENABLED", "false").lower() == "true"
+    transport = env.get("MAIL_TRANSPORT", "").strip().lower() or ("graph" if email_enabled else "log")
+    poll = env.get("MAILBOX_POLL_ENABLED", "").strip().lower()
+    return transport, (poll == "true") if poll else email_enabled
+
+
+# graph: Microsoft Graph; smtp: servidor SMTP (Mailpit en pruebas); log: no envía, solo lo anota en el log
+MAIL_TRANSPORT, MAILBOX_POLL_ENABLED = resolve_mail_settings(os.environ)
+SMTP_HOST = os.getenv("SMTP_HOST", "mailpit")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
+SMTP_TIMEOUT_SECONDS = float(os.getenv("SMTP_TIMEOUT_SECONDS", "10"))
+MAIL_FROM = os.getenv("MAIL_FROM", "ticketera@pruebas.local")
+# Con APP_ENV=pruebas, los únicos servidores SMTP aceptados
+SMTP_ALLOWED_HOSTS = [h.strip().lower() for h in os.getenv("SMTP_ALLOWED_HOSTS", "mailpit").split(",") if h.strip()]
 APP_URL = os.getenv("APP_URL", "http://localhost:8000")
 
 # Inicio de sesión del personal con Microsoft (Entra ID). Mismo registro de app que el buzón, pero
@@ -17,6 +39,12 @@ MS_LOGIN_TENANT_ID = os.getenv("MS_LOGIN_TENANT_ID", "")
 MS_LOGIN_CLIENT_ID = os.getenv("MS_LOGIN_CLIENT_ID", "")
 MS_LOGIN_CLIENT_SECRET = os.getenv("MS_LOGIN_CLIENT_SECRET", "")
 MS_LOGIN_REDIRECT_URI = os.getenv("MS_LOGIN_REDIRECT_URI", "http://localhost:8000/auth/microsoft/callback")
+
+# Dominios de la empresa (separados por coma): sus correos no pueden ser cuentas de solicitante. Vacío: no bloquea
+INTERNAL_DOMAINS = [d.strip().lower().lstrip("@") for d in os.getenv("INTERNAL_DOMAINS", "").split(",") if d.strip()]
+# Remitente de los correos entrantes: "auth" (por defecto) exige las marcas de autenticidad de Exchange Online
+# (interno, o DMARC/compauth en pass); "domain" solo mira el dominio del «De:» (que se puede falsificar)
+EMAIL_SENDER_CHECK = "domain" if os.getenv("EMAIL_SENDER_CHECK", "auth").strip().lower() == "domain" else "auth"
 
 # Asistente de la página (modelo local servido por Ollama)
 CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "false").lower() == "true"
@@ -47,6 +75,9 @@ AUTO_ASSIGN_ENABLED = os.getenv("AUTO_ASSIGN_ENABLED", "false").lower() == "true
 # levels: suma de niveles de sus tickets abiertos; count: cantidad de tickets abiertos
 AUTO_ASSIGN_LOAD_MODE = os.getenv("AUTO_ASSIGN_LOAD_MODE", "levels").lower()
 AUTO_ASSIGN_CHECK_SECONDS = int(os.getenv("AUTO_ASSIGN_CHECK_SECONDS", "60"))
+
+# Ningún ticket abierto sin vencimiento: cada cuántos segundos se revisa (0: solo al arrancar)
+DUE_DATES_CHECK_SECONDS = int(os.getenv("DUE_DATES_CHECK_SECONDS", "60"))
 
 # Agrupación de tickets similares (mismo cliente: se fusiona; varios clientes: incidente)
 GROUPING_ENABLED = os.getenv("GROUPING_ENABLED", "false").lower() == "true"

@@ -2,6 +2,7 @@ import pytest
 
 from app import models
 from app.database import SessionLocal
+from org_helpers import placement_for
 
 PASSWORD = "clave-segura-123"
 
@@ -37,7 +38,7 @@ def test_coordinator_sees_directory_without_agent(client, make_user):
     assert all("password_hash" not in r for r in rows)
 
 
-@pytest.mark.parametrize("role", ["technician", "requester"])
+@pytest.mark.parametrize("role", ["technician"])
 def test_others_cannot_see_directory(client, make_user, role):
     response = _directory(client, make_user(role))
     assert response.status_code == 403
@@ -84,36 +85,37 @@ def test_directory_filters(client, make_user):
 def test_admin_changes_role_and_coordinator_cannot(client, make_user):
     admin = make_user("admin")
     coordinator = make_user("coordinator")
-    requester = make_user("requester")
+    technician = make_user("technician")
 
-    response = _patch_user(client, coordinator, requester["id"], role="technician")
+    response = _patch_user(client, coordinator, technician["id"], role="coordinator")
     assert response.status_code == 403
     assert response.json()["detail"] == "Solo el administrador puede hacer esto"
 
-    response = _patch_user(client, admin, requester["id"], role="technician")
+    # El administrador cambia técnico ↔ coordinador
+    response = _patch_user(client, admin, technician["id"], role="coordinator", **placement_for("coordinator"))
     assert response.status_code == 200
-    assert response.json()["role"] == "technician"
+    assert response.json()["role"] == "coordinator"
     assert _patch_user(client, admin, 999999, role="technician").status_code == 404
 
 
 def test_deactivated_user_loses_session_and_login(client, make_user):
     admin = make_user("admin")
-    requester = make_user("requester")
-    assert client.get("/api/auth/me", headers=requester["headers"]).status_code == 200
+    person = make_user("technician")
+    assert client.get("/api/auth/me", headers=person["headers"]).status_code == 200
 
-    response = _patch_user(client, admin, requester["id"], is_active=False)
+    response = _patch_user(client, admin, person["id"], is_active=False)
     assert response.status_code == 200
     assert response.json()["is_active"] is False
 
-    me = client.get("/api/auth/me", headers=requester["headers"])
+    me = client.get("/api/auth/me", headers=person["headers"])
     assert me.status_code == 401
     assert me.json()["detail"] == "Inicia sesión para continuar"
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
+    login = client.post("/api/auth/login", json={"email": person["email"], "password": PASSWORD, "portal": "staff"})
     assert login.status_code == 401
 
     # Activada de nuevo puede entrar
-    assert _patch_user(client, admin, requester["id"], is_active=True).status_code == 200
-    login = client.post("/api/auth/login", json={"email": requester["email"], "password": PASSWORD, "portal": "requester"})
+    assert _patch_user(client, admin, person["id"], is_active=True).status_code == 200
+    login = client.post("/api/auth/login", json={"email": person["email"], "password": PASSWORD, "portal": "staff"})
     assert login.status_code == 200
 
 

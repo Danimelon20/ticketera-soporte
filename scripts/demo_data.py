@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 from sqlalchemy import delete, func, select, update
 
-from app import config, grouping, models, suspicion
+from app import config, departments, email_analysis, grouping, models, routing, suspicion
 from app.business_hours import add_business_hours, business_hours_between
 from app.database import SessionLocal
 from app.main import init_db
@@ -35,7 +35,7 @@ PASSWORD = "Demo-Ticketera-2026"
 DEMO_ID_PREFIX = "9990"
 # Banderas que este proceso apaga mientras corre
 QUIET_FLAGS = (
-    "EMAIL_ENABLED", "AI_ANALYSIS_ENABLED", "CHATBOT_ENABLED", "GROUPING_ENABLED",
+    "EMAIL_ENABLED", "MAILBOX_POLL_ENABLED", "AI_ANALYSIS_ENABLED", "CHATBOT_ENABLED", "GROUPING_ENABLED",
     "AUTO_ASSIGN_ENABLED", "ALERTS_ENABLED", "DAILY_SUMMARY_ENABLED",
 )
 # Tablas principales: una referencia opcional a algo DEMO se borra (queda en NULL), la fila real se conserva
@@ -52,10 +52,54 @@ ALERT_KINDS = ("critical", "due_soon", "overdue")
 
 # Cuentas y títulos de los escenarios (verificar los busca por aquí: los números cambian en cada base)
 MORNING, EVENING, AWAY, COORDINATOR = "tecnica.manana", "tecnico.tarde", "tecnico.vacaciones", "coordinadora"
+# Departamentos: coordinador de Redes y un técnico sin departamento (con turno siempre)
+NET_COORDINATOR, UNPLACED = "coordinador.redes", "tecnico.sindepto"
+# Organigrama DEMO: (padre, nombre, atiende tickets). Los nombres llevan [DEMO] para limpiarlos
+# Fase 2: ticket sin departamento, ticket creado por el personal en nombre de alguien y transferido
+UNCLASSIFIED = "Pregunta por el horario de la oficina"
+TRANSFERRED = "No hay internet en la sala de reuniones"
+TRANSFER_REASON = "Es una falla de la red del edificio, no del equipo"
+DEMO_DEPARTMENTS = (
+    (None, "Gerencia General", False),
+    ("Gerencia General", "Soporte N1", True),
+    ("Gerencia General", "Redes", True),
+    (None, "Recursos Humanos", False),
+)
+# Fichas de la clasificación de los dos departamentos que atienden tickets (sin datos personales). Los ejemplos
+# no repiten ni parafrasean los correos de scripts.eval_classifier: si se parecieran, la evaluación acertaría por
+# copia (tests/test_demo_data.py lo revisa)
+DEMO_PROFILES = {
+    "Redes": {
+        "handles": "Conectividad: internet, wifi, cableado y puntos de red, VPN y acceso remoto, telefonía IP.",
+        "examples": "\n".join((
+            "El puerto de red de mi escritorio no enciende la luz aunque cambié el cable",
+            "En la sala de reuniones la señal inalámbrica es muy débil y se corta",
+            "Necesitamos instalar un punto de red nuevo en la bodega",
+            "El teléfono IP de recepción no tiene tono",
+            "El escritorio remoto al servidor de archivos se desconecta cada pocos minutos",
+        )),
+        "not_handles": "Computadoras, impresoras, programas y cuentas de usuario: van a Soporte N1.",
+    },
+    "Soporte N1": {
+        "handles": "Equipos y periféricos (computadoras, monitores, teclados, impresoras, escáneres), programas de "
+                   "oficina y su instalación, cuentas de usuario y contraseñas.",
+        "examples": "\n".join((
+            "El monitor nuevo no muestra imagen cuando lo conecto",
+            "El mouse inalámbrico dejó de responder aunque le puse baterías nuevas",
+            "El escáner no envía los documentos escaneados a mi correo",
+            "Necesito que configuren el correo de la empresa en mi celular nuevo",
+            "Word no me deja guardar documentos en la carpeta compartida",
+            "La computadora tarda muchísimo en encender y hace un ruido extraño",
+        )),
+        "not_handles": "Internet, wifi, cableado, VPN o acceso remoto: van a Redes.",
+    },
+}
 ANA, BETO, CARLA, IMPOSTOR = "ana.cliente", "beto.cliente", "carla.cliente", "suplantador"
 MAIL_TARGET = "No puedo entrar al correo de la oficina"
 MAIL_SOURCE = "Outlook me pide la contraseña todo el tiempo"
 NETWORK = ("Sin internet en el piso 2", "No carga ninguna página", "Se cayó la red")
+# Incidente separado: el relacionado sale del incidente y sigue a cargo del mismo técnico
+SEPARATED = ("Falla el lector de huellas de la entrada", "El lector de huellas no me reconoce")
 DUE_SOON = "La impresora del contador no imprime"
 OVERDUE = "No abre el sistema de planillas"
 OVERDUE_WITH_CAUSE = "Necesito acceso a la carpeta de Finanzas"
@@ -81,9 +125,10 @@ def _email(local: str) -> str:
 @contextmanager
 def quiet():
     """Sin correos, IA, agrupación ni asignación automática en este proceso; al salir, como estaba."""
-    saved = {name: getattr(config, name) for name in QUIET_FLAGS}
+    saved = {name: getattr(config, name) for name in (*QUIET_FLAGS, "MAIL_TRANSPORT")}
     for name in QUIET_FLAGS:
         setattr(config, name, False)
+    config.MAIL_TRANSPORT = "log"
     try:
         yield
     finally:
@@ -97,7 +142,9 @@ def _demo_roots(db) -> dict[str, set[int]]:
     users = set(db.scalars(select(models.User.id).where(func.lower(models.User.email).like(f"%@{DEMO_DOMAIN}"))))
     tickets = set(db.scalars(select(models.Ticket.id).where(models.Ticket.created_by.in_(users)))) if users else set()
     drafts = set(db.scalars(select(models.EmailDraft.id).where(models.EmailDraft.requester_id.in_(users)))) if users else set()
-    return {"users": users, "tickets": tickets, "email_drafts": drafts}
+    # Departamentos DEMO por la etiqueta del nombre; lo que cuelga de ellos (alias, ubicaciones) sigue por FK
+    departments = set(db.scalars(select(models.Department.id).where(models.Department.name.like(f"{DEMO_TAG}%"))))
+    return {"users": users, "tickets": tickets, "email_drafts": drafts, "departments": departments}
 
 
 def _ticket_label_ids(label: str | None) -> set[int]:
@@ -171,6 +218,32 @@ def clean(db) -> dict[str, int]:
     if not any(ids.values()):
         return {}
     files = _stored_names(db, ids)
+    # Cuenta de cliente archivada (sin columna id): la de los usuarios DEMO
+    demo_users = ids.get("users", set())
+    if demo_users:
+        db.execute(delete(models.ArchivedAccount).where(models.ArchivedAccount.user_id.in_(demo_users)))
+    # Siguiente nivel (sin columna id): las filas que salen de un departamento DEMO o llegan a uno
+    demo_departments = ids.get("departments", set())
+    if demo_departments:
+        escalation = models.DepartmentEscalation
+        db.execute(delete(escalation).where(escalation.department_id.in_(demo_departments)
+                                            | escalation.next_department_id.in_(demo_departments)))
+        # Ficha de la clasificación (tampoco tiene columna id)
+        profile = models.DepartmentProfile
+        db.execute(delete(profile).where(profile.department_id.in_(demo_departments)))
+    # Clasificación de los borradores (sin columna id): la de los borradores DEMO y la que apunta a un
+    # departamento DEMO (en ese caso el borrador real vuelve a «sin clasificación»)
+    demo_drafts = ids.get("email_drafts", set())
+    classification = models.DraftClassification
+    condition = classification.draft_id.in_(demo_drafts) if demo_drafts else None
+    if demo_departments:
+        to_demo = (classification.department_id.in_(demo_departments)
+                   | classification.ai_department_id.in_(demo_departments)
+                   | classification.option1_id.in_(demo_departments)
+                   | classification.option2_id.in_(demo_departments))
+        condition = to_demo if condition is None else (condition | to_demo)
+    if condition is not None:
+        db.execute(delete(classification).where(condition))
     tables = {table.name: table for table in models.Base.metadata.sorted_tables}
     for table_name, column_name, rows in references:
         table = tables[table_name]
@@ -242,6 +315,9 @@ class Builder:
         db.add(ticket)
         db.flush()
         db.add(models.TicketFollower(ticket_id=ticket.id, user_id=owner.id))
+        # Sin fecha dada: la del nivel (antes quedaban "Sin fecha límite")
+        if due_at is None:
+            due_at = email_analysis.compute_due_at(created_at, email_analysis.due_level(level))
         db.add(models.TicketAIAnalysis(
             ticket_id=ticket.id, status="done", ai_level=level, summary=summary or title[:300],
             due_at=due_at, model="demo", analyzed_at=created_at, created_at=created_at,
@@ -298,13 +374,44 @@ def load(db) -> list[dict]:
     db.add(models.AvailabilityPeriod(user_id=away.id, kind="vacation", start_date=today,
                                      end_date=today + timedelta(days=6), created_by=None, created_at=now))
     coordinator = _user(db, COORDINATOR, "Coordinadora Demo", "coordinator")
+    net_coordinator = _user(db, NET_COORDINATOR, "Coordinador Redes", "coordinator")
+    unplaced = _user(db, UNPLACED, "Técnico Sin Departamento", "technician")
+    _schedule(db, unplaced, range(0, 7), "00:00", "23:59")
 
-    # Clientes con perfil completo y uno sin cédula que intenta usar la de otro
+    # Organigrama: dos departamentos que atienden tickets dentro de Gerencia General, y RR. HH. (no atiende)
+    depts = {}
+    for parent, name, handles in DEMO_DEPARTMENTS:
+        row = models.Department(name=f"{DEMO_TAG} {name}", parent_id=depts[parent].id if parent else None,
+                                is_active=True, handles_tickets=handles)
+        db.add(row)
+        db.flush()
+        depts[name] = row
+    db.add(models.DepartmentAlias(department_id=depts["Soporte N1"].id,
+                                  alias=f"{DEMO_TAG} Gerencia General / {DEMO_TAG} Soporte Nivel 1",
+                                  normalized=departments.normalize_path([f"{DEMO_TAG} Gerencia General",
+                                                                         f"{DEMO_TAG} Soporte Nivel 1"])))
+    db.add_all([
+        models.DepartmentCoordinator(department_id=depts["Soporte N1"].id, user_id=coordinator.id),
+        models.DepartmentCoordinator(department_id=depts["Redes"].id, user_id=net_coordinator.id),
+        # Sin nivel del técnico: los niveles de soporte son departamentos
+        models.StaffPlacement(user_id=morning.id, department_id=depts["Soporte N1"].id),
+        models.StaffPlacement(user_id=evening.id, department_id=depts["Redes"].id),
+        models.StaffPlacement(user_id=away.id, department_id=depts["Soporte N1"].id),
+        # Escalamiento de ejemplo: lo que Soporte N1 no resuelve sube a Redes
+        models.DepartmentEscalation(department_id=depts["Soporte N1"].id, next_department_id=depts["Redes"].id),
+        # Fichas de la clasificación: así scripts.eval_classifier funciona después de cargar el demo
+        *(models.DepartmentProfile(department_id=depts[name].id, **profile) for name, profile in DEMO_PROFILES.items()),
+    ])
+    db.flush()
+
+    # Contactos: empleados que reportan por correo (no inician sesión). El «suplantador» es una cuenta de cliente
+    # de antes de quitar el portal, archivada, que intentó usar la cédula de Ana (el reporte se conserva)
     ids = _free_id_numbers(db, 3)
     ana = _user(db, ANA, "Ana Cliente Uno", "requester", "80000001", ids[0])
     beto = _user(db, BETO, "Beto Cliente Dos", "requester", "80000002", ids[1])
     carla = _user(db, CARLA, "Carla Cliente Tres", "requester", "80000003", ids[2])
     impostor = _user(db, IMPOSTOR, "Cliente Suplantador", "requester", "80000004")
+    db.add(models.ArchivedAccount(user_id=impostor.id))
 
     # Agrupación A: el mismo cliente con el mismo problema en otras palabras (se fusiona)
     mail_1 = b.ticket(ana, MAIL_TARGET,
@@ -328,6 +435,20 @@ def load(db) -> list[dict]:
         grouping.link_ticket(db, related, grouping.Match(
             "link", net[0].id, 0.88, f"{DEMO_TAG} Misma falla de red en el mismo piso"), b.agent.id)
 
+    # Incidente separado: el relacionado recibió al técnico por el incidente y, al separarlo, lo conserva
+    finger = b.ticket(carla, SEPARATED[0], "Desde hoy el lector de la entrada no marca a nadie.",
+                      category="Hardware", created_at=now - timedelta(minutes=40), assigned=evening)
+    finger_related = b.ticket(beto, SEPARATED[1], "Pongo el dedo y no pasa nada.",
+                              category="Hardware", created_at=now - timedelta(minutes=30))
+    grouping.link_ticket(db, finger_related, grouping.Match(
+        "link", finger.id, 0.86, f"{DEMO_TAG} Misma falla del lector de huellas"), b.agent.id)
+    db.flush()
+    finger_link = db.query(models.TicketLink).filter(
+        models.TicketLink.principal_ticket_id == finger.id, models.TicketLink.related_ticket_id == finger_related.id,
+        models.TicketLink.undone_at.is_(None),
+    ).order_by(models.TicketLink.id.desc()).first()
+    grouping.undo_link(db, finger_link, coordinator)
+
     # Vencimientos: por vencer (más del 80 % de las horas hábiles), vencido sin causa y vencido con causa
     start = now - timedelta(days=10)
     used = business_hours_between(start, now) or 8.0
@@ -345,29 +466,82 @@ def load(db) -> list[dict]:
                                recorded_by=coordinator.id, recorded_at=now))
 
     # Borradores del correo: uno con revisor y uno "Sin revisor"
-    b.draft(carla, DRAFT_ASSIGNED, "Buenas, el monitor parpadea cada rato y se apaga.", assigned_to=morning)
-    b.draft(beto, DRAFT_UNASSIGNED, "Algunas teclas no escriben desde ayer.")
+    demo_drafts = [b.draft(carla, DRAFT_ASSIGNED, "Buenas, el monitor parpadea cada rato y se apaga.", assigned_to=morning),
+                   b.draft(beto, DRAFT_UNASSIGNED, "Algunas teclas no escriben desde ayer.")]
+    # Tickets por departamento: los dos son de Soporte N1 (los revisa la coordinadora; apagado no se usa)
+    for demo_draft in demo_drafts:
+        db.add(models.DraftClassification(draft_id=demo_draft.id, status="routed", department_id=depts["Soporte N1"].id,
+                                          created_at=now))
 
     # Suplantación: intenta usar la cédula de Ana (queda el reporte automático del Agente virtual)
     suspicion.id_number_conflict(db, impostor, ana.id_number, "profile", actor_id=impostor.id)
+
+    # Tickets por departamento: los de red los atiende Redes y los demás Soporte N1 (la coordinadora sigue
+    # viéndolos con el interruptor encendido); uno queda "Sin departamento" para clasificarlo
+    network_ids = {t.id for t in net}
+    for ticket in db.query(models.Ticket).filter(models.Ticket.created_by.in_([ana.id, beto.id, carla.id])).all():
+        dept = depts["Redes"] if ticket.id in network_ids else depts["Soporte N1"]
+        db.add(models.TicketDepartment(ticket_id=ticket.id, department_id=dept.id))
+    b.ticket(beto, UNCLASSIFIED, "Quiero saber a qué hora abren el sábado.", created_at=now - timedelta(minutes=20))
+    # Creado por la coordinadora en nombre de alguien de RR. HH. y transferido a Redes con motivo
+    moved = models.Ticket(title=f"{DEMO_TAG} {TRANSFERRED}", description="La sala 3 no tiene conexión.",
+                          category_id=b.categories.get("Red") or next(iter(b.categories.values())),
+                          priority_id=b.priorities.get(2) or next(iter(b.priorities.values())),
+                          status="new", created_by=coordinator.id, source="web", created_at=now - timedelta(minutes=15))
+    db.add(moved)
+    db.flush()
+    # La instancia que esté corriendo no manda alertas por correo de los tickets DEMO
+    for kind in ALERT_KINDS:
+        db.add(models.AlertSent(kind=kind, ticket_id=moved.id, sent_at=now))
+    db.add(models.TicketAIAnalysis(ticket_id=moved.id, status="done", ai_level=2, summary=TRANSFERRED, model="demo",
+                                   due_at=email_analysis.compute_due_at(moved.created_at, 2),
+                                   analyzed_at=moved.created_at, created_at=moved.created_at))
+    db.add(models.TicketReporter(ticket_id=moved.id, name="Laura Jiménez (RR. HH.)", channel="phone",
+                                 area_department_id=depts["Recursos Humanos"].id, phone="Ext. 210"))
+    db.add(models.TicketDepartment(ticket_id=moved.id, department_id=depts["Redes"].id))
+    db.add(models.History(ticket_id=moved.id, field="created_on_behalf", changed_by=coordinator.id,
+                          new_value=f"Creado por {coordinator.name} en nombre de Laura Jiménez (RR. HH.) vía teléfono"))
+    from_label = f"{DEMO_TAG} Gerencia General / {DEMO_TAG} Soporte N1"
+    to_label = f"{DEMO_TAG} Gerencia General / {DEMO_TAG} Redes"
+    db.add(models.DepartmentTransfer(ticket_id=moved.id, from_department_id=depts["Soporte N1"].id,
+                                     to_department_id=depts["Redes"].id, reason=f"{DEMO_TAG} {TRANSFER_REASON}",
+                                     transferred_by=coordinator.id))
+    db.add(models.History(ticket_id=moved.id, field="department", old_value=from_label, changed_by=coordinator.id,
+                          new_value=f"Transferido de {from_label} a {to_label} por {coordinator.name}: "
+                                    f"{DEMO_TAG} {TRANSFER_REASON}"))
+    db.add(models.InboxNotification(user_id=net_coordinator.id, kind="ticket_transferred", ticket_id=moved.id,
+                                    text=f"Ticket #{moved.id} transferido de {from_label} a {to_label} "
+                                         f"por {coordinator.name}: {DEMO_TAG} {TRANSFER_REASON}", created_at=now))
     db.commit()
 
     rows += [
         {"rol": "Técnico", "correo": morning.email,
-         "probar": "Turno L-V 07-15. Tiene el ticket por vencer y el borrador \"El monitor parpadea\"."},
+         "probar": "Soporte N1. Turno L-V 07-15. Tiene el ticket por vencer. No ve borradores: los revisa la "
+                   "coordinadora de su departamento."},
         {"rol": "Técnico", "correo": evening.email,
-         "probar": "Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa."},
+         "probar": "Redes. Turno L-V 13-21 y sábado 08-12. Tiene un ticket vencido sin causa y el #%d, "
+                   "separado de un incidente, sigue en Mis tickets." % finger_related.id},
         {"rol": "Técnico", "correo": away.email,
-         "probar": "De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
+         "probar": "Soporte N1. De vacaciones 7 días: no está Disponible. Tiene el vencido con causa."},
         {"rol": "Coordinador", "correo": coordinator.email,
-         "probar": "Agrupación (#%d en #%d y la red en #%d), vencimientos, borrador \"Sin revisor\"."
-                   % (mail_2.id, mail_1.id, net[0].id)},
-        {"rol": "Cliente", "correo": ana.email,
-         "probar": "Dueña de la cédula que intentan usar. Ve su ticket fusionado (#%d)." % mail_1.id},
-        {"rol": "Cliente", "correo": beto.email, "probar": "Ticket de red principal y borrador sin revisor."},
-        {"rol": "Cliente", "correo": carla.email, "probar": "Ticket de red ligado y borrador con revisor."},
-        {"rol": "Cliente", "correo": impostor.email,
-         "probar": "Intentó usar la cédula de Ana: el admin ve el reporte del Agente virtual."},
+         "probar": "Coordina Soporte N1. Agrupación (#%d en #%d), vencimientos, los 2 borradores de Soporte N1 "
+                   "(al crear el ticket elige el técnico). "
+                   "Escalar en el #%d: Redes ya elegido, motivo obligatorio." % (mail_2.id, mail_1.id, soon.id)},
+        {"rol": "Coordinador", "correo": net_coordinator.email,
+         "probar": "Coordina Redes. Con el interruptor encendido ve los tickets de red (#%d y sus ligados), el "
+                   "transferido #%d (aviso en la campana) y no ve los de Soporte N1." % (net[0].id, moved.id)},
+        {"rol": "Técnico", "correo": unplaced.email,
+         "probar": "Sin departamento: con el interruptor encendido ve el aviso y no recibe tickets."},
+        {"rol": "Contacto", "correo": ana.email,
+         "probar": "No inicia sesión (reporta por correo). Su ticket #%d tiene otro fusionado; es la dueña de la "
+                   "cédula que intentó usar el suplantador." % mail_1.id},
+        {"rol": "Contacto", "correo": beto.email,
+         "probar": "No inicia sesión. Ticket de red principal y el borrador \"El teclado no responde\" (Soporte N1)."},
+        {"rol": "Contacto", "correo": carla.email,
+         "probar": "No inicia sesión. Ticket de red ligado y el borrador \"El monitor parpadea\" (Soporte N1)."},
+        {"rol": "Cliente archivado", "correo": impostor.email,
+         "probar": "Cuenta de antes del cambio, archivada: Cuentas › Archivados. Intentó usar la cédula de Ana "
+                   "(el admin ve el reporte del Agente virtual)."},
     ]
     for row in rows:
         row["clave"] = PASSWORD
@@ -400,8 +574,9 @@ class DemoApi:
         self.tokens: dict[str, str] = {}
         self.login_errors: dict[str, str] = {}
 
-    def login(self, local: str, portal: str) -> None:
-        response = self.http.post("/api/auth/login", json={"email": _email(local), "password": PASSWORD, "portal": portal})
+    def login(self, local: str) -> None:
+        # Un solo formulario: el rol sale de la cuenta
+        response = self.http.post("/api/auth/login", json={"email": _email(local), "password": PASSWORD})
         token = response.json().get("token") if response.status_code == 200 else None
         if token:
             self.tokens[local] = token
@@ -443,12 +618,22 @@ def _scenario_ids(db) -> dict | None:
         "mail_target": ticket(MAIL_TARGET), "mail_source": ticket(MAIL_SOURCE),
         "network": [ticket(t) for t in NETWORK],
         "due_soon": ticket(DUE_SOON), "overdue": ticket(OVERDUE), "overdue_cause": ticket(OVERDUE_WITH_CAUSE),
+        "separated": ticket(SEPARATED[1]),
+        "unclassified": ticket(UNCLASSIFIED), "transferred": ticket(TRANSFERRED),
         "draft_assigned": drafts.get(f"{DEMO_TAG} {DRAFT_ASSIGNED}"),
         "draft_unassigned": drafts.get(f"{DEMO_TAG} {DRAFT_UNASSIGNED}"),
+        "enforced": routing.enforced(db),
     }
-    needed = [found[k] for k in found if k not in ("users", "network")] + found["network"]
-    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, ANA, IMPOSTOR)]
+    needed = [found[k] for k in found if k not in ("users", "network", "enforced")] + found["network"]
+    needed += [users.get(k) for k in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED, ANA, IMPOSTOR)]
     return found if all(needed) else None
+
+
+def _open_without_due(db, ids: dict) -> list[int]:
+    """Tickets DEMO abiertos sin fecha límite (deberían ser ninguno)."""
+    tickets = db.query(models.Ticket).filter(models.Ticket.created_by.in_(ids["users"].values()),
+                                             models.Ticket.status.in_(("new", "in_progress"))).all()
+    return sorted(t.id for t in tickets if t.ai_analysis is None or t.ai_analysis.due_at is None)
 
 
 def _fingerprint(db) -> tuple:
@@ -472,6 +657,13 @@ def _fingerprint(db) -> tuple:
             models.TicketLink.principal_ticket_id.in_(tickets))),
         sorted((c.ticket_id, c.cause) for c in db.query(models.OverdueCause).filter(
             models.OverdueCause.ticket_id.in_(tickets))),
+        sorted((p.user_id, p.department_id) for p in db.query(models.StaffPlacement).filter(
+            models.StaffPlacement.user_id.in_(users))),
+        sorted((e.department_id, e.next_department_id) for e in db.query(models.DepartmentEscalation)),
+        sorted((c.user_id, c.department_id) for c in db.query(models.DepartmentCoordinator).filter(
+            models.DepartmentCoordinator.user_id.in_(users))),
+        sorted((r.ticket_id, r.department_id) for r in db.query(models.TicketDepartment).filter(
+            models.TicketDepartment.ticket_id.in_(tickets))),
         db.query(models.Ticket).filter(models.Ticket.created_by.in_(users)).count(),
     )
 
@@ -510,14 +702,22 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
     def linked():
         found = []
         for ticket_id in related:
-            response = api.get(COORDINATOR, f"/api/tickets/{ticket_id}")
+            # Los tickets de red son de Redes
+            response = api.get(NET_COORDINATOR, f"/api/tickets/{ticket_id}")
             group = response.json().get("grouping") or {} if response.status_code == 200 else {}
             found.append(((group.get("principal") or {}).get("ticket_id"), ticket_id))
         ok = all(p == principal for p, _ in found)
         return ok, ", ".join(f"#{t} → #{p}" if p else f"#{t} sin ligar" for p, t in found)
 
-    add("Agrupación", "Coordinador", ", ".join(f"#{t} → #{principal}" for t in related), linked)
-    add("Agrupación", "Cliente (Ana)", f"ve que #{source} se agregó a #{target}", lambda: merged_into(ANA))
+    add("Agrupación", "Coordinador Redes", ", ".join(f"#{t} → #{principal}" for t in related), linked)
+    def contact_cannot_login():
+        # Un contacto (quien reporta por correo o un cliente archivado) recibe el error de siempre
+        response = api.http.post("/api/auth/login", json={"email": _email(ANA), "password": PASSWORD})
+        ok = response.status_code == 401 and response.json().get("detail") == "Correo o contraseña incorrectos"
+        return ok, f"HTTP {response.status_code}"
+
+    add("Acceso", "Contacto (Ana)", "no inicia sesión: el mismo error que una contraseña incorrecta",
+        contact_cannot_login)
 
     def bell():
         response = api.get(MORNING, "/api/notifications/overdue")
@@ -568,15 +768,32 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
             return False, "no lo ve"
         return bool(draft.get("can_review")), "lo ve, " + ("confirmable" if draft.get("can_review") else "no confirmable")
 
-    add("Borradores", "Técnico (mañana)", f"borrador #{assigned} visible y confirmable", reviewer_sees)
-
-    def other_cannot_confirm():
+    def other_cannot_confirm(local=EVENING):
         body = {"title": "Verificación", "description": "Verificación", "category_id": MISSING_CATEGORY_ID,
                 "priority_id": MISSING_CATEGORY_ID}
-        response = api.post(EVENING, f"/api/drafts/{assigned}/confirm", body)
+        response = api.post(local, f"/api/drafts/{assigned}/confirm", body)
         return response.status_code == 403, f"HTTP {response.status_code}"
 
-    add("Borradores", "Técnico (tarde)", f"confirmar #{assigned}: HTTP 403", other_cannot_confirm)
+    def technician_without_drafts():
+        code = api.get(MORNING, "/api/drafts").status_code
+        return code == 403, f"HTTP {code}"
+
+    def coordinator_reviews_department():
+        draft, error = drafts(COORDINATOR, assigned)
+        if error:
+            return False, error
+        if draft is None:
+            return False, "no lo ve"
+        ok = draft.get("can_review") and draft.get("assigned_to") is None and not draft.get("can_reassign")
+        return bool(ok), "lo ve, sin revisor y confirmable" if ok else "lo ve, con revisor o no confirmable"
+
+    if ids["enforced"]:
+        # Tickets por departamento: los técnicos ya no ven borradores; los revisa el coordinador del departamento
+        add("Borradores", "Técnico (mañana)", "sin borradores: HTTP 403", technician_without_drafts)
+        add("Borradores", "Coordinador Redes", f"confirmar #{assigned} (de Soporte N1): HTTP 403",
+            lambda: other_cannot_confirm(NET_COORDINATOR))
+        add("Borradores", "Coordinador", f"borrador #{assigned} de Soporte N1 visible, sin revisor",
+            coordinator_reviews_department)
 
     def coordinator_sees_unassigned():
         draft, error = drafts(COORDINATOR, unassigned)
@@ -587,7 +804,21 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
         return draft.get("assigned_to") is None, "lo ve, " + (
             "Sin revisor" if draft.get("assigned_to") is None else "con revisor")
 
-    add("Borradores", "Coordinador", f"borrador #{unassigned} visible, Sin revisor", coordinator_sees_unassigned)
+    if not ids["enforced"]:
+        add("Borradores", "Técnico (mañana)", f"borrador #{assigned} visible y confirmable", reviewer_sees)
+        add("Borradores", "Técnico (tarde)", f"confirmar #{assigned}: HTTP 403", other_cannot_confirm)
+        add("Borradores", "Coordinador", f"borrador #{unassigned} visible, Sin revisor", coordinator_sees_unassigned)
+
+    separated = ids["separated"]
+
+    def separated_still_mine():
+        response = api.get(EVENING, "/api/queue", view="mine_open", search=DEMO_TAG)
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        mine = {i["id"] for i in response.json()["items"]}
+        return separated in mine, "en Mis tickets" if separated in mine else "no aparece en Mis tickets"
+
+    add("Agrupación", "Técnico (tarde)", f"#{separated} separado del incidente, en Mis tickets", separated_still_mine)
 
     def foreign_ticket():
         response = api.get(EVENING, f"/api/tickets/{soon}")
@@ -607,6 +838,81 @@ def _checks(api: DemoApi, ids: dict) -> list[Check]:
 
     add("Suplantación", "Coordinador", "reporte abierto y sin la etiqueta \"Reportada\"", impostor_report)
     checks.append(Check("Suplantación", "Administrador", "el reporte lo abrió el Agente virtual", NO_ADMIN, None))
+
+    # ----- Departamentos -----
+    def me(local):
+        response = api.get(local, "/api/auth/me")
+        if response.status_code != 200:
+            raise LookupError(f"HTTP {response.status_code}")
+        return response.json()
+
+    def coordinator_department():
+        name = me(COORDINATOR).get("department_name") or ""
+        return name.endswith(f"{DEMO_TAG} Soporte N1"), name or "sin departamento"
+
+    add("Departamentos", "Coordinador", f"dirige {DEMO_TAG} Soporte N1", coordinator_department)
+
+    def technician_department():
+        # Sin nivel del técnico: los niveles de soporte son departamentos
+        data = me(EVENING)
+        ok = (data.get("department_name") or "").endswith(f"{DEMO_TAG} Redes") and "tier" not in data
+        return ok, data.get("department_name") or "sin departamento"
+
+    add("Departamentos", "Técnico (tarde)", f"{DEMO_TAG} Redes, sin nivel", technician_department)
+
+    expected = "ve el aviso «Su cuenta no tiene departamento asignado»"
+    if ids["enforced"]:
+        def unplaced_notice():
+            missing = me(UNPLACED).get("placement_missing")
+            return missing is True, "ve el aviso" if missing else "no ve el aviso"
+
+        add("Departamentos", "Técnico sin departamento", expected, unplaced_notice)
+    else:
+        checks.append(Check("Departamentos", "Técnico sin departamento", expected,
+                            "Interruptor de tickets por departamento apagado (Administración › Activación)", None))
+    checks.append(Check("Departamentos", "Administrador", "el técnico sin departamento aparece en la alerta",
+                        NO_ADMIN, None))
+
+    # ----- Tickets por departamento (solo con el interruptor encendido) -----
+    transferred, unclassified = ids["transferred"], ids["unclassified"]
+    switch_off = "Interruptor de tickets por departamento apagado (Administración › Activación)"
+
+    def status_of(local, ticket_id):
+        return api.get(local, f"/api/tickets/{ticket_id}").status_code
+
+    def scoped(local, ticket_id, expected):
+        code = status_of(local, ticket_id)
+        return code == expected, f"HTTP {code}"
+
+    def transfer_seen():
+        response = api.get(NET_COORDINATOR, f"/api/tickets/{transferred}")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        lines = [h.get("new_value") or "" for h in response.json()["history"] if h["field"] == "department"]
+        ok = any(line.startswith("Transferido de ") for line in lines)
+        return ok, "lo ve, con la transferencia en el historial" if ok else "lo ve, sin la transferencia"
+
+    def escalate_offered():
+        response = api.get(COORDINATOR, f"/api/tickets/{soon}")
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        target = response.json().get("escalate_to") or {}
+        ok = (target.get("path") or "").endswith(f"{DEMO_TAG} Redes")
+        return ok, f"Escalar a {target['path']}" if target else "sin Escalar"
+
+    scope_checks = [
+        ("Coordinador Redes", f"#{principal} (de red): lo ve", lambda: scoped(NET_COORDINATOR, principal, 200)),
+        ("Coordinador", f"#{principal} (de red, en Redes): HTTP 403", lambda: scoped(COORDINATOR, principal, 403)),
+        ("Coordinador", f"#{soon}: Escalar con {DEMO_TAG} Redes ya elegido", escalate_offered),
+        ("Coordinador Redes", f"#{soon} (de Soporte N1): HTTP 403", lambda: scoped(NET_COORDINATOR, soon, 403)),
+        ("Coordinador Redes", f"#{transferred} transferido desde Soporte N1, con motivo", transfer_seen),
+        ("Coordinador", f"#{unclassified} (sin departamento): HTTP 403", lambda: scoped(COORDINATOR, unclassified, 403)),
+    ]
+    for role, expected_text, test in scope_checks:
+        if ids["enforced"]:
+            add("Por departamento", role, expected_text, test)
+        else:
+            checks.append(Check("Por departamento", role, expected_text, switch_off, None))
     return checks
 
 
@@ -635,16 +941,19 @@ def verify(db, http) -> int:
         return 1
 
     before = _fingerprint(db)
+    without_due = _open_without_due(db, ids)
     api = DemoApi(http)
     try:
-        for local in (MORNING, EVENING, COORDINATOR):
-            api.login(local, "staff")
-        api.login(ANA, "requester")
+        for local in (MORNING, EVENING, COORDINATOR, NET_COORDINATOR, UNPLACED):
+            api.login(local)
         checks = _checks(api, ids)
     finally:
         api.logout_all()
     db.expire_all()
     after = _fingerprint(db)
+    checks.append(Check("Vencimientos", "—", "ningún ticket abierto sin fecha límite",
+                        "todos con fecha" if not without_due else "sin fecha: " + ", ".join(f"#{t}" for t in without_due),
+                        not without_due))
     checks.append(Check("Solo lectura", "—", "los datos DEMO no cambian",
                         "sin cambios" if after == before else "CAMBIARON", after == before))
 

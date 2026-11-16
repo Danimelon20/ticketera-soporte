@@ -15,10 +15,10 @@ COORDINATOR_KEYS = {
     "unassigned", "due_soon", "overdue", "open", "resolved_today", "drafts_pending", "cancelled", "shift",
 }
 TECHNICIAN_KEYS = {
-    "mine_open", "mine_due_soon", "following_open", "mine_resolved_today", "drafts_pending", "shift", "overdue",
+    "mine_open", "mine_due_soon", "mine_resolved_today", "drafts_pending", "shift", "overdue",
 }
 # El administrador no entra al flujo de tickets: solo contadores de cuentas
-ADMIN_KEYS = {"reports_open", "invitations_pending", "approvals_pending"}
+ADMIN_KEYS = {"reports_open", "invitations_pending", "approvals_pending", "active_admins", "unclassified"}
 
 
 @pytest.fixture(autouse=True)
@@ -169,8 +169,6 @@ def test_technician_counts_only_own_scope(make_user, make_ticket, client, monkey
     assert set(counts) == TECHNICIAN_KEYS
     assert counts["mine_open"] == 1
     assert counts["mine_due_soon"] == 1
-    # Sigue un ticket de otro técnico (desde antes): ya no lo ve, así que no cuenta
-    assert counts["following_open"] == 0
     assert counts["mine_resolved_today"] == 1
     assert counts["overdue"] == 0
     assert counts["shift"] == {"start": "08:00", "end": "16:00", "on_shift": True, "load": 2}
@@ -202,14 +200,8 @@ def test_technician_without_shift_today(make_user):
     assert shift == {"start": None, "end": None, "on_shift": False, "load": 0}
 
 
-def test_requester_cannot_read_counts_or_status(make_user, client):
-    requester = make_user("requester")
-    assert client.get("/api/nav/counts", headers=requester["headers"]).status_code == 403
-    assert client.get("/api/system/status", headers=requester["headers"]).status_code == 403
-
-
 def test_system_status_only_flags_and_counts(make_user, client, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     monkeypatch.setattr(config, "AUTO_ASSIGN_ENABLED", True)
     monkeypatch.setattr(config, "AUTO_ASSIGN_LOAD_MODE", "count")
     technician = make_user("technician")

@@ -1,46 +1,111 @@
 """Gestión de cuentas por rol: quién puede desactivar, restablecer o desbloquear a quién."""
+import logging
+from datetime import datetime, timezone
+
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 
-from . import audit, comments, config, daily_summary, mailer, models
+from . import audit, comments, config, daily_summary, mailer, models, routing
 
 NO_PERMISSION = "No tienes permiso para gestionar esta cuenta"
 SELF_CHANGE = "No puedes cambiar tu propio rol ni desactivarte"
 AGENT_LOCKED = "El Agente virtual no se puede modificar"
 LAST_ADMIN = "Debe quedar al menos un administrador activo"
 STAFF_USE_MICROSOFT = "El personal entra con su cuenta Microsoft"
+NO_ADMIN_ROLE = "El rol de administrador no se asigna desde la página: solo con python -m app.create_admin"
 RELEASED_COMMENT = "Técnico desactivado; ticket liberado"
 RELEASED_LIST_MAX = 10
 OPEN_STATUSES = ("new", "in_progress")
+# Los únicos roles entre los que el administrador cambia a alguien (técnico ↔ coordinador)
+STAFF_ROLE_CHOICES = ("technician", "coordinator")
 
 # Roles de las cuentas que cada rol puede gestionar, por acción. Ningún administrador actúa sobre otro
 # administrador (el primero y los siguientes se crean con app.create_admin)
 PERMISSIONS = {
     "admin": {
+        # Un contacto (quien reporta por correo o un cliente archivado) no inicia sesión: desbloquear o cerrar
+        # sus sesiones no aplica. Desactivarlo sí (deja de poder reportar por correo)
         "active": ("coordinator", "technician", "requester"),
         "reset": ("coordinator", "technician"),
-        "unlock": ("coordinator", "technician", "requester"),
+        "unlock": ("coordinator", "technician"),
         # Vacaciones e incapacidades (la disponibilidad en sí es automática)
         "availability": ("technician", "coordinator"),
         # Horario del coordinador: informativo (la asignación automática solo usa técnicos)
         "schedule": ("technician", "coordinator"),
-        "sessions": ("coordinator", "technician", "requester"),
-        # Cambio directo de rol
-        "role": ("coordinator", "technician", "requester"),
+        "sessions": ("coordinator", "technician"),
+        # Cambio directo de rol: técnico ↔ coordinador (nunca a administrador)
+        "role": STAFF_ROLE_CHOICES,
+        # Departamento del técnico o coordinador
+        "department": STAFF_ROLE_CHOICES,
     },
     # Desactivar, restablecer, desbloquear y cerrar sesiones: solo el administrador (cuida las cuentas).
     # El coordinador maneja turnos y disponibilidad de los técnicos
     "coordinator": {
         "availability": ("technician",),
         "schedule": ("technician",),
-        # Solo como solicitud con aprobación del administrador
-        "role": ("technician", "requester"),
+        # Solo como solicitud con aprobación del administrador, y nunca hacia coordinador ni administrador.
+        # Solo técnicos: el administrador ya no cambia el rol de solicitantes
+        "role": ("technician",),
     },
 }
 
 
-def check_can_manage(actor: models.User, target: models.User, action: str) -> None:
-    """403 si el actor no puede hacer esa acción sobre la cuenta (nunca sobre sí mismo)."""
+def archived_ids(db: Session, user_ids: list[int]) -> set[int]:
+    """De esas cuentas, las de cliente archivadas al quitar el portal."""
+    if not user_ids:
+        return set()
+    return {uid for (uid,) in db.query(models.ArchivedAccount.user_id).filter(
+        models.ArchivedAccount.user_id.in_(user_ids))}
+
+
+ARCHIVED_NOT_INVITABLE = "Esa cuenta es de un cliente archivado: no se puede invitar como personal."
+INACTIVE_CONTACT = "Ese contacto está desactivado: no se puede invitar como personal."
+
+
+def contact_invite_block(db: Session, user: models.User) -> str | None:
+    """Un contacto (rol requester) se puede invitar como personal, salvo si es un cliente archivado o está
+    desactivado: devuelve el motivo, o None si se puede."""
+    if db.get(models.ArchivedAccount, user.id) is not None:
+        return ARCHIVED_NOT_INVITABLE
+    if not user.is_active:
+        return INACTIVE_CONTACT
+    return None
+
+
+def is_invitable_contact(db: Session, user: models.User | None) -> bool:
+    return user is not None and user.role == "requester" and contact_invite_block(db, user) is None
+
+
+def staff_from_invitation(db: Session, invitation: models.StaffInvitation, user: models.User | None,
+                          password_hash: str) -> models.User:
+    """Activa la invitación. Sin cuenta: crea la del personal. Con un contacto que se puede invitar: lo convierte
+    en el rol invitado y conserva su historial (los tickets que reportó siguen siendo suyos). Quien llama ya
+    revisó que user sea None o un contacto invitable. No hace commit."""
+    if user is None:
+        user = models.User(name=invitation.name, email=invitation.email, role=invitation.role,
+                           password_hash=password_hash)
+        db.add(user)
+        db.flush()
+        old_role = None
+    else:
+        old_role = user.role
+        user.name = invitation.name
+        user.role = invitation.role
+        user.password_hash = password_hash
+    invitation.used_by = user.id
+    invitation.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    audit.record(db, user.id, "invitation_used", target=user, old=audit.role_name(old_role),
+                 new=audit.role_name(user.role))
+    # Departamento elegido al invitar
+    routing.apply_invitation_placement(db, invitation, user)
+    return user
+
+
+def check_can_manage(actor: models.User, target: models.User, action: str, new_role: str | None = None) -> None:
+    """403 si el actor no puede hacer esa acción sobre la cuenta (nunca sobre sí mismo).
+    new_role: con action="role", el rol pedido; ninguna pantalla asigna el de administrador."""
+    if action == "role" and new_role == "admin":
+        raise HTTPException(status_code=403, detail=NO_ADMIN_ROLE)
     if target.role == "agent":
         raise HTTPException(status_code=403, detail=AGENT_LOCKED)
     if target.id == actor.id:
@@ -122,12 +187,28 @@ def active_admins(db: Session, excluding: int | None = None) -> int:
     return query.count()
 
 
+MANY_ADMINS = "Hay %d administradores activos y solo debe haber uno: corríjalo con python -m scripts.admin_tools list-admins y demote"
+
+
+def warn_if_many_admins(db: Session) -> int:
+    """Bases anteriores a la regla de un solo administrador: avisa en el log, sin cambiar a nadie."""
+    count = active_admins(db)
+    if count > 1:
+        logging.warning(MANY_ADMINS, count)
+    return count
+
+
 def change_role(db: Session, actor: models.User, user: models.User, role: str) -> None:
     """Cambia el rol y cierra sus sesiones. No hace commit."""
     if role == user.role:
         return
+    # Segunda defensa: el administrador solo se crea con app.create_admin
+    if role == "admin":
+        raise HTTPException(status_code=403, detail=NO_ADMIN_ROLE)
     if user.role == "admin" and active_admins(db, excluding=user.id) == 0:
         raise HTTPException(status_code=400, detail=LAST_ADMIN)
     audit.record(db, actor.id, "role_changed", target=user, old=audit.role_name(user.role), new=audit.role_name(role))
+    # La ubicación anterior no sirve para el rol nuevo: quien cambia el rol elige la nueva (routing.set_placement)
+    routing.clear_placement(db, user)
     user.role = role
     close_sessions(db, user.id)

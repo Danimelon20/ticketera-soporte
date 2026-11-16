@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from . import chatbot, config, mailer, models
+from . import chatbot, config, mailer, models, routing
 from .business_hours import add_business_hours, day_hours
 from .database import SessionLocal
 from .email_parser import _PREFIX_RE, _SUPPORT_TAG_RE, _clean_title, normalize, strip_quoted
@@ -81,6 +81,92 @@ def compute_due_at(created_at: datetime, level: int | None) -> datetime | None:
 
 def effective_level(row: models.TicketAIAnalysis) -> int | None:
     return row.human_level if row.human_level is not None else row.ai_level
+
+
+# Ningún ticket abierto queda sin vencimiento: sin nivel de la IA (o "No es soporte") se usa Estándar
+DEFAULT_LEVEL = 2
+DEFAULT_LEVEL_FIELD = "level_default"
+DEFAULT_LEVEL_TEXT = "Nivel 2 (Solicitud estándar) por defecto: la IA no indicó el nivel"
+TICKET_OPEN_STATUSES = ("new", "in_progress")
+# Sin fila de análisis después de este tiempo: el análisis en segundo plano ya no la va a crear
+MISSING_ANALYSIS_MINUTES = 30
+
+
+def due_level(level: int | None) -> int:
+    """Nivel con el que se calcula el vencimiento: sin nivel o "No es soporte" vence como Estándar."""
+    return level if level_hours(level) is not None else DEFAULT_LEVEL
+
+
+def apply_default_level(db: Session, ticket: models.Ticket, row: models.TicketAIAnalysis) -> bool:
+    """Ticket abierto sin nivel de la IA: Estándar por defecto, para revisión y con su línea en el historial.
+    Un nivel puesto por una persona no se cambia (solo se le calcula el vencimiento). No hace commit."""
+    if ticket.status not in TICKET_OPEN_STATUSES:
+        return False
+    changed = False
+    if row.human_level is None and level_hours(row.ai_level) is None:
+        row.ai_level = DEFAULT_LEVEL
+        row.needs_review = True
+        changed = True
+        from . import audit
+        agent_id = audit.agent_id(db)
+        # Una sola línea por ticket aunque la IA vuelva a fallar al reintentar
+        if agent_id is not None and not has_default_line(db, ticket.id):
+            db.add(models.History(ticket_id=ticket.id, field=DEFAULT_LEVEL_FIELD, old_value=None,
+                                  new_value=DEFAULT_LEVEL_TEXT, changed_by=agent_id))
+    if row.due_at is None:
+        row.due_at = compute_due_at(ticket.created_at, due_level(effective_level(row)))
+        changed = True
+    return changed
+
+
+def has_default_line(db: Session, ticket_id: int) -> bool:
+    return db.query(models.History.id).filter(models.History.ticket_id == ticket_id,
+                                              models.History.field == DEFAULT_LEVEL_FIELD).first() is not None
+
+
+def retry_filter(db: Session):
+    """Condición de "Analizar tickets sin nivel" (con TicketAIAnalysis en outer join): sin análisis, o que quedó
+    en Estándar por defecto (tiene la línea automática del historial) y la IA todavía no lo analizó. Nunca un
+    nivel puesto por una persona (aunque sea Estándar)."""
+    row = models.TicketAIAnalysis
+    defaulted = db.query(models.History.ticket_id).filter(models.History.field == DEFAULT_LEVEL_FIELD)
+    return row.id.is_(None) | (
+        models.Ticket.id.in_(defaulted) & row.human_level.is_(None) & row.model.is_(None) & (row.status != "pending")
+    )
+
+
+def waits_for_ai(db: Session, ticket: models.Ticket) -> bool:
+    """La misma condición para un ticket (se revisa otra vez justo antes de analizarlo)."""
+    row = ticket.ai_analysis
+    if row is None:
+        return True
+    return (row.human_level is None and row.model is None and row.status != "pending"
+            and has_default_line(db, ticket.id))
+
+
+def fill_missing_due_dates(db: Session, now: datetime | None = None) -> int:
+    """Respaldo: tickets abiertos sin vencimiento (análisis terminado o fallido, o sin análisis cuando la IA está
+    apagada o ya no lo va a hacer). Los que esperan el análisis no se tocan. Hace commit. Devuelve cuántos."""
+    now = now or _now()
+    open_tickets = db.query(models.Ticket).filter(models.Ticket.status.in_(TICKET_OPEN_STATUSES))
+    count = 0
+    # Con la IA apagada, los "pending" (correos) nunca se analizan
+    finished = ("done", "error") if config.AI_ANALYSIS_ENABLED else ("done", "error", "pending")
+    with_row = open_tickets.join(models.TicketAIAnalysis).filter(
+        models.TicketAIAnalysis.status.in_(finished), models.TicketAIAnalysis.due_at.is_(None))
+    for ticket in with_row.all():
+        count += apply_default_level(db, ticket, ticket.ai_analysis)
+    without_row = open_tickets.filter(models.Ticket.id.notin_(db.query(models.TicketAIAnalysis.ticket_id)))
+    if config.AI_ANALYSIS_ENABLED:
+        without_row = without_row.filter(models.Ticket.created_at < now - timedelta(minutes=MISSING_ANALYSIS_MINUTES))
+    for ticket in without_row.all():
+        row = models.TicketAIAnalysis(ticket_id=ticket.id, status="done", attempts=0)
+        db.add(row)
+        count += apply_default_level(db, ticket, row)
+    db.commit()
+    if count:
+        logging.info("Vencimiento por defecto (Estándar) para %s tickets abiertos sin nivel", count)
+    return count
 
 
 def _clean(text: str | None) -> str:
@@ -208,6 +294,8 @@ def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
         row.attempts = (row.attempts or 0) + 1
         if row.attempts >= MAX_ATTEMPTS:
             row.status = "error"
+            # Sin más intentos: vence como Estándar
+            apply_default_level(db, ticket, row)
         logging.warning("No se pudo analizar el ticket %s (intento %s): %s", ticket.id, row.attempts, type(exc).__name__)
         db.commit()
         return row.status
@@ -223,6 +311,8 @@ def analyze_ticket(db: Session, ticket: models.Ticket) -> str:
     row.analyzed_at = _now()
     row.due_at = compute_due_at(ticket.created_at, effective_level(row))
     row.status = "done"
+    # La IA no indicó el nivel (o dijo "No es soporte"): Estándar por defecto
+    apply_default_level(db, ticket, row)
     db.commit()
     logging.info("Ticket %s analizado por la IA", ticket.id)
     return row.status
@@ -270,7 +360,7 @@ def analyze_ticket_by_id(ticket_id: int) -> str:
         try:
             ticket = db.get(models.Ticket, ticket_id)
             # Otro análisis pudo terminarlo mientras esperaba el turno
-            if ticket is None or ticket.ai_analysis is not None:
+            if ticket is None or not waits_for_ai(db, ticket):
                 return "skipped"
             return analyze_ticket(db, ticket)
         except Exception:
@@ -382,7 +472,7 @@ def status_reply_body(db: Session, user: models.User, text: str) -> str:
                 f"- Ticket #{t.id}: {t.title} | Estado: {STATUS_LABELS.get(t.status, t.status)} "
                 f"| Técnico asignado: {assignee}"
             )
-    lines += ["", f"Puede ver el detalle en {config.APP_URL}"]
+    lines += ["", "Puede responder el correo de cada ticket para agregar información."]
     return "\n".join(lines)
 
 
@@ -451,22 +541,12 @@ def _handle_unclear(db: Session, draft: models.EmailDraft, user: models.User, fo
     return "unclear"
 
 
-def _received_body(user: models.User, missing_contact: bool) -> str:
-    lines = [
+def _received_body(user: models.User) -> str:
+    return "\n".join([
         f"Buen día, {display_name(user)}.",
         "",
         "Recibimos su correo. Un técnico está revisando su solicitud y recibirá el número de ticket cuando se confirme.",
-    ]
-    if missing_contact:
-        lines += [
-            "",
-            "Para poder registrar su solicitud necesitamos sus datos de contacto. "
-            "Por favor responda este mismo correo con estas dos líneas:",
-            "",
-            "Teléfono: ...",
-            "Cédula: ...",
-        ]
-    return "\n".join(lines)
+    ])
 
 
 def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
@@ -490,9 +570,14 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         logging.warning("No se pudo analizar el borrador %s (intento %s): %s", draft.id, draft.attempts, type(exc).__name__)
         db.commit()
         if draft.status == "error":
-            # Con error también lo revisa una persona
-            from . import auto_assign
-            auto_assign.assign_draft(draft.id)
+            # Con error también lo revisa una persona: con tickets por departamento, desde «Por clasificar»
+            if routing.enforced(db):
+                from . import draft_classification
+                draft_classification.mark_ai_error(db, draft)
+                db.commit()
+            else:
+                from . import auto_assign
+                auto_assign.assign_draft(draft.id)
         return draft.status
 
     result = _parse_draft(content, categories)
@@ -525,19 +610,20 @@ def analyze_draft(db: Session, draft: models.EmailDraft) -> str:
         draft.description = result["description"] or (draft.body or "").strip()[:DRAFT_DESCRIPTION_CHARS] or None
         draft.category_id = result["category_id"]
         draft.priority_id = priority.id if priority else None
-        missing_contact = not draft.contact_phone or not draft.contact_id_number
-        # Con un motivo anotado (por ejemplo, cédula de otra cuenta) lo decide una persona
-        has_reason = (
-            db.query(models.DraftPendingReason).filter(models.DraftPendingReason.draft_id == draft.id).first()
-            is not None
-        )
-        missing_contact = missing_contact and not has_reason
-        draft.status = "waiting_contact" if missing_contact else "pending_review"
+        # Teléfono y cédula ya no se piden: pasa directo a revisión
+        draft.status = "pending_review"
         db.commit()
-        # Ya espera a una persona: se le busca revisor (import local: auto_assign importa este módulo)
-        from . import auto_assign
-        auto_assign.assign_draft(draft.id)
-        mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user, missing_contact))
+        if routing.enforced(db):
+            # Tickets por departamento: la IA elige el departamento con las fichas (al coordinador o a
+            # «Por clasificar»). Ya tiene el turno del modelo: la clasificación no lo vuelve a pedir
+            from . import draft_classification
+            draft_classification.classify_draft(db, draft, lock=False)
+            db.commit()
+        else:
+            # Ya espera a una persona: se le busca revisor (import local: auto_assign importa este módulo)
+            from . import auto_assign
+            auto_assign.assign_draft(draft.id)
+        mailer.send_email(user.email, "[Soporte] Recibimos su correo", _received_body(user))
 
     logging.info("Borrador %s analizado por la IA: %s", draft.id, draft.status)
     return draft.status

@@ -80,18 +80,27 @@ def id_number_taken(db: Session, id_number: str, user_id: int | None) -> bool:
     return query.first() is not None
 
 
-def hacienda_label_code(db: Session, user: models.User) -> str:
-    """Solo el resultado (match, mismatch, not_found o unverified), nunca el nombre de Hacienda."""
+def hacienda_label_code(db: Session, user: models.User) -> str | None:
+    """Solo el resultado (match, mismatch, not_found o unverified), nunca el nombre de Hacienda. Sin cédula (quien
+    reporta por correo): None, no hay identidad que verificar."""
+    if not user.id_number:
+        return None
     row = _row(db, user)
     return row.hacienda_result if row is not None and row.hacienda_result else "unverified"
 
 
 def hacienda_codes(db: Session, user_ids: list[int]) -> dict[int, str]:
+    """Resultado de Hacienda de cada cuenta con cédula (los clientes archivados). Los contactos sin cédula (quien
+    reporta por correo) no tienen identidad que verificar: no aparecen (ni como «Sin verificar»)."""
     if not user_ids:
         return {}
-    rows = db.query(models.RequesterIdentity).filter(models.RequesterIdentity.user_id.in_(user_ids)).all()
+    with_id = [uid for (uid,) in db.query(models.User.id).filter(
+        models.User.id.in_(user_ids), models.User.id_number.isnot(None), models.User.id_number != "")]
+    if not with_id:
+        return {}
+    rows = db.query(models.RequesterIdentity).filter(models.RequesterIdentity.user_id.in_(with_id)).all()
     found = {r.user_id: r.hacienda_result for r in rows if r.hacienda_result}
-    return {uid: found.get(uid, "unverified") for uid in user_ids}
+    return {uid: found.get(uid, "unverified") for uid in with_id}
 
 
 def save_hacienda_result(db: Session, user: models.User, name: str, id_number: str) -> str:

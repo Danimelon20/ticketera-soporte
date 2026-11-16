@@ -43,6 +43,14 @@ Lo que quedó fuera de las fases ya entregadas, con lo que haría falta para cad
 
 - **Remitente falsificado**: no se revisan SPF ni DKIM, así que alguien podría escribir como si fuera un cliente.
   Haría falta leer los encabezados de autenticación que entrega Microsoft y rechazar o marcar los que fallan.
+- **Límite de intentos por IP real**: hoy el bloqueo por intentos fallidos se cuenta solo por correo (5 fallos,
+  15 minutos), así que no frena a quien prueba una contraseña contra muchas cuentas. La app no puede usar la IP:
+  todo llega desde la puerta de enlace de Docker (172.18.0.1), por Funnel y también por conexión directa al puerto,
+  y por eso tampoco puede confiar en `X-Forwarded-For` (cualquiera que llegue directo lo podría inventar). Haría
+  falta: (1) publicar el puerto 8000 solo en la interfaz local o de Tailscale (por ejemplo `127.0.0.1:8000:8000`)
+  para que nadie llegue sin pasar por el proxy; (2) una lista de proxies de confianza y tomar de
+  `X-Forwarded-For` la primera dirección de la derecha que no esté en esa lista; (3) un segundo límite por esa IP,
+  aparte del de cada correo.
 - **Límites de envío de Microsoft 365**: si se superan, las respuestas y avisos no salen. Haría falta una cola de
   reintentos y un aviso en Estado del sistema.
 - **Administrador DEMO para `verificar`**: dos comprobaciones de `scripts.demo_data verificar` (la cola del admin y

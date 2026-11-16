@@ -1,12 +1,14 @@
 """scripts.demo_data: cargar y limpiar no dejan nada DEMO y no tocan los datos reales."""
 import os
+import re
+import unicodedata
 
 from sqlalchemy import func
 
-from app import attachments, audit, config, graph, mailer, models
+from app import routing, attachments, audit, classifier, config, graph, mailer, models
 from app.alerts import due_state
 from app.database import SessionLocal, engine
-from scripts import demo_data
+from scripts import demo_data, eval_classifier
 
 DEMO = "%@demo.invalid"
 
@@ -41,20 +43,57 @@ def test_load_creates_the_scenarios(client, sent):
         users = _demo_users(db)
         assert all(u.name.startswith("[DEMO] ") for u in users)
         roles = sorted(u.role for u in users)
-        assert roles == ["coordinator"] + ["requester"] * 4 + ["technician"] * 3
+        assert roles == ["coordinator"] * 2 + ["requester"] * 4 + ["technician"] * 4
         demo_ids = {u.id for u in users}
 
+        # Departamentos: dos atienden tickets (con su coordinador), un técnico sin departamento
+        by_id = routing.departments_by_id(db)
+        demo_depts = {routing.path_label(d, by_id): d for d in by_id.values() if d.name.startswith("[DEMO] ")}
+        serving = sorted(path for path, d in demo_depts.items() if d.handles_tickets)
+        assert serving == ["[DEMO] Gerencia General / [DEMO] Redes", "[DEMO] Gerencia General / [DEMO] Soporte N1"]
+        assert len(demo_depts) == 4
+        assert all(routing.coordinator_of(db, demo_depts[path].id) is not None for path in serving)
+        unplaced = [u for u in routing.unplaced_staff(db) if u.id in demo_ids]
+        assert [u.email for u in unplaced] == [demo_data._email(demo_data.UNPLACED)]
+
         tickets = _demo_tickets(db)
-        assert len(tickets) == 8
+        assert len(tickets) == 12
         ticket_ids = {t.id for t in tickets}
         # Agrupación: una fusión del mismo cliente y dos tickets ligados de clientes distintos
         merges = db.query(models.TicketMerge).filter(models.TicketMerge.target_ticket_id.in_(ticket_ids)).all()
         assert len(merges) == 1
-        links = db.query(models.TicketLink).filter(models.TicketLink.principal_ticket_id.in_(ticket_ids)).all()
+        links = db.query(models.TicketLink).filter(
+            models.TicketLink.principal_ticket_id.in_(ticket_ids), models.TicketLink.undone_at.is_(None)
+        ).all()
         assert len(links) == 2
+        # Incidente separado: el relacionado sigue con el técnico que recibió por el incidente
+        related = next(t for t in tickets if t.title.endswith(demo_data.SEPARATED[1]))
+        principal = next(t for t in tickets if t.title.endswith(demo_data.SEPARATED[0]))
+        separated = db.query(models.TicketLink).filter(
+            models.TicketLink.principal_ticket_id == principal.id, models.TicketLink.related_ticket_id == related.id,
+        ).one()
+        assert separated.undone_at is not None
+        assert related.assigned_to == principal.assigned_to and related.assigned_to is not None
         owners = {db.get(models.Ticket, link.related_ticket_id).created_by for link in links}
         owners.add(db.get(models.Ticket, links[0].principal_ticket_id).created_by)
         assert len(owners) == 3
+
+        # Tickets de red en Redes; los demás con departamento, en Soporte N1 (salvo el sin clasificar)
+        redes = demo_depts["[DEMO] Gerencia General / [DEMO] Redes"]
+        soporte = demo_depts["[DEMO] Gerencia General / [DEMO] Soporte N1"]
+        network = [t for t in tickets if any(t.title.endswith(title) for title in demo_data.NETWORK)]
+        assert len(network) == 3
+        assert all(routing.ticket_department(db, t.id).id == redes.id for t in network)
+        others = [routing.ticket_department(db, t.id) for t in tickets if t not in network]
+        assert {d.id for d in others if d is not None} == {soporte.id, redes.id}
+        # Escalamiento de ejemplo: Soporte N1 → Redes
+        assert routing.next_level(db, soporte.id).id == redes.id
+        # Sin nivel del técnico (la columna queda con su valor por defecto)
+        assert {p.tier for p in db.query(models.StaffPlacement).filter(
+            models.StaffPlacement.user_id.in_(demo_ids))} == {1}
+        # Ningún ticket abierto sin fecha límite
+        assert all(t.ai_analysis is not None and t.ai_analysis.due_at is not None
+                   for t in tickets if t.status in ("new", "in_progress"))
 
         # Vencimientos
         now = demo_data._now()
@@ -94,9 +133,12 @@ def test_load_creates_the_scenarios(client, sent):
 def test_quiet_turns_off_and_restores_flags(monkeypatch):
     monkeypatch.setattr(config, "AUTO_ASSIGN_ENABLED", True)
     monkeypatch.setattr(config, "GROUPING_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "smtp")
     with demo_data.quiet():
         assert all(getattr(config, name) is False for name in demo_data.QUIET_FLAGS)
+        assert config.MAIL_TRANSPORT == "log"
     assert config.AUTO_ASSIGN_ENABLED is True and config.GROUPING_ENABLED is True
+    assert config.MAIL_TRANSPORT == "smtp"
 
 
 def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make_user, make_ticket, sent):
@@ -111,7 +153,7 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
     db = SessionLocal()
     try:
         before_users, before_tickets = _real_snapshot(db)
-        assert len(_demo_users(db)) == 8 and len(_demo_tickets(db)) == 8
+        assert len(_demo_users(db)) == 10 and len(_demo_tickets(db)) == 12
 
         # Uso de la página mezclado con datos reales: ticket real asignado a un técnico DEMO,
         # cambio de un admin real sobre una cuenta DEMO y un adjunto en un ticket DEMO
@@ -166,14 +208,14 @@ def test_load_twice_and_clean_leave_nothing_demo_and_keep_real_data(client, make
 
 
 def test_mailer_never_sends_to_invalid_domain(monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
 
     def _fail(*args, **kwargs):
         raise AssertionError("No debe llamar a Microsoft Graph")
 
     monkeypatch.setattr(graph, "graph_request", _fail)
     assert mailer.send_email("tecnica.manana@demo.invalid", "Asunto", "Cuerpo") is False
-    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
 
 
 # ----- verificar -----
@@ -192,10 +234,12 @@ def test_verify_all_scenarios_pass_without_leaking(client, capsys, sent):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 0
     out = capsys.readouterr().out
-    assert "13 de 13 correctos (2 omitidos)" in out
+    # Interruptor apagado en las pruebas: el aviso del técnico sin departamento queda OMITIDO
+    assert "17 de 17 correctos (10 omitidos)" in out
     # La columna del resultado (el encabezado dice "OK/FALLA")
     assert "| FALLA" not in out
-    assert out.count("OMITIDO") == 2
+    assert out.count("OMITIDO") == 10
+    assert "ningún ticket abierto sin fecha límite" in out
     # Ni contraseñas ni tokens; y cierra las sesiones que abrió
     assert demo_data.PASSWORD not in out and "Bearer" not in out
     assert _demo_sessions() == 0
@@ -218,7 +262,7 @@ def test_verify_reports_a_broken_scenario(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     out = capsys.readouterr().out
-    assert out.count("| FALLA") == 2 and "11 de 13 correctos" in out
+    assert out.count("| FALLA") == 2 and "15 de 17 correctos" in out
     demo_data.run("limpiar")
 
 
@@ -239,3 +283,145 @@ def test_verify_without_demo_data(client, capsys):
     capsys.readouterr()
     assert demo_data.run("verificar", http=client.c) == 1
     assert "Ejecute primero" in capsys.readouterr().out
+
+
+def test_verify_checks_the_unplaced_notice_with_the_switch_on(client, sent, capsys, routing_on):
+    """Con el interruptor encendido, el aviso del técnico sin departamento se comprueba de verdad."""
+    demo_data.run("cargar")
+    capsys.readouterr()
+    assert demo_data.run("verificar", http=client.c) == 0
+    out = capsys.readouterr().out
+    assert "24 de 24 correctos (3 omitidos)" in out
+    assert "ve el aviso" in out
+    # Tickets de red en Redes y Escalar en Soporte N1 con Redes ya elegido
+    assert "(de red, en Redes): HTTP 403" in out and "Escalar con [DEMO] Redes ya elegido" in out
+    # Fase 3: los borradores son de la coordinadora de Soporte N1; los técnicos ya no los ven
+    assert "sin borradores: HTTP 403" in out and "visible, sin revisor" in out
+
+
+
+def test_clean_removes_demo_department_profiles(client, sent):
+    """La ficha de la clasificación (sin columna id) se borra con su departamento DEMO."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        dept_id = db.query(models.Department).filter(models.Department.name == "[DEMO] Redes").one().id
+        # Ya viene con la ficha DEMO: se cambia
+        db.merge(models.DepartmentProfile(department_id=dept_id, handles="Internet", examples="Sin internet"))
+        db.add(models.DepartmentExampleEmbedding(department_id=dept_id, text_hash="x" * 64, vector="[1.0]"))
+        db.commit()
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        assert db.query(models.DepartmentProfile).filter(models.DepartmentProfile.department_id == dept_id).count() == 0
+        assert db.query(models.DepartmentExampleEmbedding).filter(
+            models.DepartmentExampleEmbedding.department_id == dept_id).count() == 0
+    finally:
+        db.close()
+
+
+def test_clean_removes_draft_classifications_of_demo(client, sent):
+    """La clasificación de los borradores (sin columna id) no impide borrar los departamentos DEMO."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        dept_id = db.query(models.Department).filter(models.Department.name == "[DEMO] Redes").one().id
+        draft = db.query(models.EmailDraft).filter(models.EmailDraft.title.like("[DEMO]%")).first()
+        draft_id = draft.id
+        # Ya viene clasificado (Soporte N1): se cambia a Redes
+        db.merge(models.DraftClassification(draft_id=draft_id, status="routed", department_id=dept_id,
+                                            ai_department_id=dept_id, option1_id=dept_id))
+        db.commit()
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        assert db.get(models.DraftClassification, draft_id) is None
+        assert db.query(models.Department).filter(models.Department.id == dept_id).count() == 0
+    finally:
+        db.close()
+
+
+def test_load_creates_department_tickets(client, sent):
+    """Fase 2: los tickets de los escenarios tienen departamento, uno queda sin departamento y uno se transfirió."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        tickets = {t.title: t for t in _demo_tickets(db)}
+        unclassified = tickets[f"[DEMO] {demo_data.UNCLASSIFIED}"]
+        moved = tickets[f"[DEMO] {demo_data.TRANSFERRED}"]
+        assert routing.ticket_department(db, unclassified.id) is None
+        assert routing.ticket_department(db, moved.id).name == "[DEMO] Redes"
+        assert db.query(models.DepartmentTransfer).filter(models.DepartmentTransfer.ticket_id == moved.id).count() == 1
+        assert db.query(models.TicketReporter).filter(models.TicketReporter.ticket_id == moved.id).count() == 1
+        # Los de red, en Redes; los demás, en Soporte N1
+        network = [tickets[f"[DEMO] {title}"] for title in demo_data.NETWORK]
+        assert all(routing.ticket_department(db, t.id).name == "[DEMO] Redes" for t in network)
+        others = [t for t in tickets.values() if t.id not in (unclassified.id, moved.id) and t not in network]
+        assert all(routing.ticket_department(db, t.id).name == "[DEMO] Soporte N1" for t in others)
+    finally:
+        db.close()
+    assert sent == []
+
+
+def test_load_creates_the_demo_profiles(client, sent):
+    """Redes y Soporte N1 cargan su ficha (qué atiende, ejemplos y qué no atiende): eval_classifier funciona
+    siempre después de cargar el demo."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        people = {p.path.rsplit("/", 1)[-1].strip(): p for p in classifier.participants(db)}
+        for name in ("Redes", "Soporte N1"):
+            person = people[f"{demo_data.DEMO_TAG} {name}"]
+            assert person.handles and person.not_handles and len(person.examples) >= 5
+    finally:
+        db.close()
+    # Volver a cargar no duplica ni pierde las fichas
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        demo_ids = [d.id for d in db.query(models.Department).filter(models.Department.name.like("[DEMO]%"))]
+        assert db.query(models.DepartmentProfile).filter(
+            models.DepartmentProfile.department_id.in_(demo_ids)).count() == 2
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+
+
+def _words(text):
+    text = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
+    return re.findall(r"[a-z0-9]+", text)
+
+
+def test_demo_examples_do_not_copy_the_eval_cases():
+    """Si un ejemplo de la ficha se pareciera a un correo de eval_classifier, la evaluación acertaría por copia:
+    pocas palabras de contenido en común y ninguna secuencia de tres palabras igual."""
+    for profile in demo_data.DEMO_PROFILES.values():
+        for example in classifier.split_examples(profile["examples"]):
+            mine = _words(example)
+            for name, subject, body, _expected in eval_classifier.CASES:
+                theirs = _words(f"{subject} {body}")
+                a, b = {w for w in mine if len(w) > 3}, {w for w in theirs if len(w) > 3}
+                assert len(a & b) / min(len(a), len(b)) < 0.4, (example, name)
+                trigrams = {tuple(theirs[i:i + 3]) for i in range(len(theirs) - 2)}
+                assert not {tuple(mine[i:i + 3]) for i in range(len(mine) - 2)} & trigrams, (example, name)
+
+
+def test_demo_has_an_archived_client_and_cleans_it(client, sent):
+    """Sin portal: los clientes DEMO son contactos y el suplantador es una cuenta de cliente archivada."""
+    demo_data.run("cargar")
+    db = SessionLocal()
+    try:
+        impostor = db.query(models.User).filter(models.User.email == f"{demo_data.IMPOSTOR}@demo.invalid").one()
+        assert db.get(models.ArchivedAccount, impostor.id) is not None
+    finally:
+        db.close()
+    demo_data.run("limpiar")
+    db = SessionLocal()
+    try:
+        assert db.get(models.ArchivedAccount, impostor.id) is None
+    finally:
+        db.close()

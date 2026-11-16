@@ -287,14 +287,14 @@ def test_failed_send_is_retried(make_user, monkeypatch):
 # "Enviar resumen ahora" es un reporte de operación: lo envía el coordinador
 @pytest.mark.parametrize("role", ["admin", "technician"])
 def test_send_now_requires_coordinator(client, make_user, sent, monkeypatch, role):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     user = make_user(role)
     assert client.post("/api/admin/daily-summary/send-now", headers=user["headers"]).status_code == 403
     assert sent == []
 
 
 def test_send_now_ignores_daily_control(client, make_user, sent, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     admin = make_user("coordinator")
     assert _maybe_send(MONDAY_9AM) is True
     before = len(sent)
@@ -308,7 +308,7 @@ def test_send_now_ignores_daily_control(client, make_user, sent, monkeypatch):
 
 
 def test_send_now_with_email_off(client, make_user, sent, monkeypatch):
-    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
     admin = make_user("coordinator")
     response = client.post("/api/admin/daily-summary/send-now", headers=admin["headers"])
     assert response.status_code == 400

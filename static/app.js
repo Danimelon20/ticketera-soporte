@@ -18,13 +18,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const topbar = document.querySelector('.topbar');
     const mainContent = document.querySelector('main');
     const loginPanel = document.getElementById('loginPanel');
-    const signupPanel = document.getElementById('signupPanel');
     const activatePanel = document.getElementById('activatePanel');
     const forgotPanel = document.getElementById('forgotPanel');
     const loginForm = document.getElementById('loginForm');
-    const signupForm = document.getElementById('signupForm');
     const activateForm = document.getElementById('activateForm');
-    const confirmEmailNotice = document.getElementById('confirmEmailNotice');
     const sessionNotice = document.getElementById('sessionNotice');
     // Mismo texto que app/security.py: la sesión venció por inactividad o por tiempo total
     const SESSION_EXPIRED = 'Su sesión venció. Inicie sesión de nuevo.';
@@ -47,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const ROLE_MAP = {
-        requester: 'Solicitante',
+        requester: 'Contacto',
         technician: 'Técnico',
         coordinator: 'Coordinador',
         agent: 'Agente virtual',
@@ -144,7 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
             headers
         });
 
-        if (response.status === 401) {
+        // En el inicio de sesión un 401 es "correo o contraseña incorrectos", no una sesión vencida
+        if (response.status === 401 && endpoint !== '/auth/login') {
             const data = await response.json().catch(() => ({}));
             handleUnauthorized(data.detail);
             throw new Error('Unauthorized');
@@ -212,8 +210,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 userAvatarEl.textContent = getInitials(currentUser.name);
             }
             if (openNewTicketBtn) {
-                // Ni el técnico ni el administrador crean tickets
-                openNewTicketBtn.style.display = ['technician', 'admin'].includes(currentUser.role) ? 'none' : 'block';
+                // Ni el técnico ni el administrador crean tickets, salvo con tickets por departamento
+                const staffCreates = staffCreatesTickets();
+                openNewTicketBtn.style.display = ['technician', 'admin'].includes(currentUser.role) && !staffCreates
+                    ? 'none' : 'block';
             }
         }
 
@@ -223,19 +223,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         renderInvitesSection();
+        renderPlacementNotice();
         updateRoleTabs();
-        if (profileRequired()) {
-            showProfile();
-        } else {
-            showView('tickets');
-        }
+        showView('tickets');
         refreshDraftsBadge();
         refreshReportsBadge();
-        // El personal ve los contadores en el menú lateral; el solicitante no tiene borradores
+        // El personal ve los contadores en el menú lateral
         setupStaffShell();
         // El personal entra por la ruta del enlace (#/módulo/sección) o al inicio de su rol
-        if (isStaffShell() && !profileRequired()) startStaffRoute();
-        setupPortal();
+        if (isStaffShell()) startStaffRoute();
         setupChat();
     }
 
@@ -245,24 +241,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (ticketLink) linkedTicketId = Number(ticketLink[1]);
 
     function openLinkedTicket() {
-        if (!linkedTicketId || !currentUser || profileRequired()) return;
+        if (!linkedTicketId || !currentUser) return;
         const ticketId = linkedTicketId;
         linkedTicketId = null;
-        // El personal pasa a la ruta del ticket (#/módulo/sección/N); el portal queda sin ruta
-        if (!isStaffShell()) history.replaceState(null, '', window.location.pathname + window.location.search);
-        if (isRequesterPortal()) openPortalTicket(ticketId);
-        else if (isStaffShell()) openTicketById(ticketId);
+        // El personal pasa a la ruta del ticket (#/módulo/sección/N)
+        if (isStaffShell()) openTicketById(ticketId);
     }
 
     function showAuthScreen() {
-        document.body.classList.remove('profile-required');
         sessionNotice.hidden = true;
         resetEmailChange();
-        loginPortal = null;
         forgotMode = false;
         stopDraftsPolling();
         teardownStaffShell();
-        teardownPortal();
         resetChat();
         if (authScreen) authScreen.style.display = 'grid';
         if (topbar) topbar.style.display = 'none';
@@ -276,49 +267,38 @@ document.addEventListener('DOMContentLoaded', () => {
         showAuthPanel();
     }
 
-    // ===== Pantallas de inicio: iniciar sesión, crear cuenta de cliente, activar cuenta de personal =====
-    const AUTH_ROUTES = { '#crear-cuenta': 'signup', '#activar-cuenta': 'activate' };
-    // Enlace del correo de restablecimiento: #restablecer?portal=staff&correo=...
+    // ===== Pantallas de inicio: iniciar sesión y activar cuenta de personal (no hay registro de clientes) =====
+    const AUTH_ROUTES = { '#activar-cuenta': 'activate' };
+    // Enlace del correo de restablecimiento: #restablecer?correo=...
     const RESET_ROUTE = '#restablecer';
 
-    // Cada opción de inicio de sesión solo deja entrar a sus roles (lo verifica el servidor).
-    // Son las pestañas Cliente / Personal / Administración de la tarjeta.
-    const PORTALS = {
-        admin: { title: 'Administración', link: null },
-        staff: { title: 'Personal', link: { href: '#activar-cuenta', question: '¿Recibió una invitación?', text: 'Activar mi cuenta' } },
-        requester: { title: 'Cliente', link: { href: '#crear-cuenta', question: '¿No tiene cuenta?', text: 'Crear una cuenta' } }
-    };
-    const LOGIN_PORTAL_KEY = 'ticketeraLoginPortal';
+    // Un solo formulario: el rol sale de la cuenta y, al entrar, cada uno llega a la pantalla de su rol.
+    // Antes había pestañas (Cliente / Personal / Administración) y el navegador recordaba la última;
+    // ese valor viejo se borra una vez.
+    try {
+        localStorage.removeItem('ticketeraLoginPortal');
+    } catch (err) {
+        // Sin almacenamiento: no hay nada que borrar
+    }
 
-    // Personal y administración entran con Microsoft cuando el servidor lo tiene encendido (MS_LOGIN_ENABLED).
+    // Con MS_LOGIN_ENABLED el botón de Microsoft va arriba (técnicos, coordinadores y el administrador).
     // Vuelta de Microsoft: #microsoft?code=... (código de un solo uso) o #microsoft?error=clave
     const MICROSOFT_ROUTE = '#microsoft';
-    const MICROSOFT_PORTALS = ['staff', 'admin'];
     const MICROSOFT_ERRORS = {
         state: 'El inicio de sesión con Microsoft venció o no es válido. Intente de nuevo.',
         failed: 'Microsoft no confirmó su identidad. Intente de nuevo.',
         unavailable: 'No se pudo conectar con Microsoft. Intente más tarde.',
         tenant: 'Esa cuenta Microsoft no pertenece a la organización.',
         not_staff: 'Esa cuenta Microsoft no corresponde a nadie del personal. Si es nuevo, active su invitación.',
-        requester: 'Esa es una cuenta de cliente: entre por la pestaña Cliente.',
         inactive: 'Su cuenta está desactivada. Comuníquese con el administrador.',
-        wrong_portal: 'Esta cuenta no entra por esta opción. Pruebe con la otra pestaña.',
         already_linked: 'Su cuenta ya está enlazada a otra cuenta Microsoft. Comuníquese con el administrador.',
         invitation: 'La invitación no es válida o venció. Pida una nueva al administrador.',
         invitation_email: 'Entre con la cuenta Microsoft del correo al que llegó la invitación.'
     };
     const MICROSOFT_AUTH_HOST = 'https://login.microsoftonline.com/';
     const microsoftLoginBox = document.getElementById('microsoftLogin');
-    const microsoftLoginBtn = document.getElementById('microsoftLoginBtn');
-    const emergencyAccessLink = document.getElementById('emergencyAccessLink');
     let microsoftLogin = false;
-    // Administración: el formulario de contraseña y código solo después de "Acceso de emergencia"
-    let emergencyAccess = false;
-    const loginTabs = document.getElementById('loginTabs');
-    const loginExtra = document.getElementById('loginExtra');
-    const loginExtraLink = document.getElementById('loginExtraLink');
-    let loginPortal = null;
-    // "Olvidé mi contraseña" de la opción elegida (loginPortal)
+    // "Olvidé mi contraseña" abierto
     let forgotMode = false;
 
     function showAuthPanel() {
@@ -331,14 +311,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const route = AUTH_ROUTES[window.location.hash];
-        const panel = route || (forgotMode && loginPortal ? 'forgot' : 'login');
-        // Sin opción elegida: la última usada en este navegador, o Personal
-        if (panel === 'login' && !loginPortal) applyPortal(savedLoginPortal());
+        const panel = route || (forgotMode ? 'forgot' : 'login');
         loginPanel.hidden = panel !== 'login';
-        signupPanel.hidden = panel !== 'signup';
         activatePanel.hidden = panel !== 'activate';
         forgotPanel.hidden = panel !== 'forgot';
-        confirmEmailNotice.hidden = true;
         if (panel !== 'activate') clearActivationResult();
         if (panel !== 'forgot') clearForgot();
         hideError();
@@ -348,59 +324,18 @@ document.addEventListener('DOMContentLoaded', () => {
         history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
-    function savedLoginPortal() {
-        try {
-            const saved = localStorage.getItem(LOGIN_PORTAL_KEY);
-            return PORTALS[saved] ? saved : 'staff';
-        } catch (err) {
-            return 'staff';
-        }
-    }
-
-    // Marca la pestaña elegida y ajusta los textos de la tarjeta
-    function applyPortal(portal) {
-        const info = PORTALS[portal];
-        if (!info) return;
-        loginPortal = portal;
-        loginTabs.querySelectorAll('[data-portal]').forEach(tab => {
-            const selected = tab.dataset.portal === portal;
-            tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-            tab.tabIndex = selected ? 0 : -1;
-            if (selected) loginForm.setAttribute('aria-labelledby', tab.id);
-        });
-        document.getElementById('loginAdminNotice').hidden = portal !== 'admin';
-        applyMicrosoftLogin();
-        loginExtra.hidden = !info.link;
-        if (info.link) {
-            document.getElementById('loginExtraText').textContent = info.link.question;
-            loginExtraLink.href = info.link.href;
-            loginExtraLink.textContent = info.link.text;
-        }
-        try {
-            localStorage.setItem(LOGIN_PORTAL_KEY, portal);
-        } catch (err) {
-            // Sin almacenamiento: la próxima vez vuelve a Personal
-        }
-    }
-
-    function openPortal(portal, focusEmail = true) {
-        if (!PORTALS[portal]) return;
-        emergencyAccess = false;
-        applyPortal(portal);
-        // El correo escrito se conserva al cambiar de pestaña; la contraseña no
+    // Vuelve al formulario de inicio (el correo escrito se conserva; la contraseña no)
+    function openLogin(focusEmail = true) {
+        forgotMode = false;
         document.getElementById('loginPassword').value = '';
         clearHash();
         showAuthPanel();
         if (focusEmail) document.getElementById('loginEmail').focus();
     }
 
-    // Muestra el botón de Microsoft o el formulario según la pestaña elegida
+    // Botón de Microsoft arriba del formulario, solo si el servidor lo tiene encendido
     function applyMicrosoftLogin() {
-        const useMicrosoft = microsoftLogin && MICROSOFT_PORTALS.includes(loginPortal);
-        microsoftLoginBox.hidden = !useMicrosoft;
-        if (useMicrosoft) microsoftLoginBtn.href = `/auth/microsoft/login?portal=${loginPortal}`;
-        emergencyAccessLink.hidden = !(useMicrosoft && loginPortal === 'admin' && !emergencyAccess);
-        loginForm.hidden = useMicrosoft && !(loginPortal === 'admin' && emergencyAccess);
+        microsoftLoginBox.hidden = !microsoftLogin;
         document.getElementById('activateSubmit').textContent = microsoftLogin ? 'Activar con Microsoft' : 'Activar cuenta';
     }
 
@@ -415,18 +350,10 @@ document.addEventListener('DOMContentLoaded', () => {
         applyMicrosoftLogin();
     }
 
-    emergencyAccessLink.addEventListener('click', () => {
-        emergencyAccess = true;
-        applyMicrosoftLogin();
-        document.getElementById('loginEmail').focus();
-    });
-
     // Vuelta de Microsoft: se quita el código de la barra de direcciones antes de canjearlo
     function finishMicrosoftLogin() {
         const params = new URLSearchParams(window.location.hash.slice(MICROSOFT_ROUTE.length).replace(/^\?/, ''));
         clearHash();
-        const portal = params.get('portal');
-        if (PORTALS[portal]) applyPortal(portal);
         showAuthPanel();
         const code = params.get('code');
         if (code) exchangeMicrosoftCode(code);
@@ -448,31 +375,9 @@ document.addEventListener('DOMContentLoaded', () => {
         completeLogin(result.data);
     }
 
-    loginTabs.addEventListener('click', (e) => {
-        const tab = e.target.closest('[data-portal]');
-        if (tab) openPortal(tab.dataset.portal, false);
-    });
-
-    // Flechas izquierda/derecha, Inicio y Fin entre las pestañas
-    loginTabs.addEventListener('keydown', (e) => {
-        const tabs = [...loginTabs.querySelectorAll('[data-portal]')];
-        const index = tabs.indexOf(document.activeElement);
-        if (index === -1) return;
-        let next = null;
-        if (e.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
-        if (e.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
-        if (e.key === 'Home') next = tabs[0];
-        if (e.key === 'End') next = tabs[tabs.length - 1];
-        if (!next) return;
-        e.preventDefault();
-        openPortal(next.dataset.portal, false);
-        next.focus();
-    });
-
     window.addEventListener('hashchange', () => {
         if (currentUser) return;
-        // Desde registro o activación, "Volver al inicio de sesión" lleva a las opciones
-        loginPortal = null;
+        // Desde registro o activación, "Volver al inicio de sesión" lleva al formulario
         forgotMode = false;
         showAuthPanel();
     });
@@ -489,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await apiFetch('/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password, portal: loginPortal })
+                    body: JSON.stringify({ email, password })
                 });
                 loginForm.reset();
                 if (data.requires_code) {
@@ -498,56 +403,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 completeLogin(data);
             } catch (err) {
-                // apiFetch ya mostró el error; si falta confirmar el correo se ofrece el código
-                if (err.message === CONFIRM_EMAIL_MESSAGE) {
-                    pendingSignupEmail = email;
-                    confirmEmailNotice.hidden = false;
-                }
+                // apiFetch ya mostró el error
             }
         });
     }
-
-    const CONFIRM_EMAIL_MESSAGE = 'Confirme su correo para iniciar sesión';
-    let pendingSignupEmail = null;
-
-    document.getElementById('confirmEmailBtn').addEventListener('click', async () => {
-        if (!pendingSignupEmail) return;
-        let result;
-        try {
-            result = await postAuth('/auth/register/resend', { email: pendingSignupEmail });
-        } catch (err) {
-            showError('No se pudo conectar con el servidor');
-            return;
-        }
-        if (!result.ok) {
-            showError(getErrorMessage(result.data));
-            return;
-        }
-        loginForm.reset();
-        showSignupVerify(pendingSignupEmail, result.data.email_hint);
-    });
-
-    signupForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        hideError();
-        const email = document.getElementById('signupEmail').value.trim();
-        const password = document.getElementById('signupPassword').value;
-        let result;
-        try {
-            result = await postAuth('/auth/register', { email, password });
-        } catch (err) {
-            showError('No se pudo conectar con el servidor');
-            return;
-        }
-        if (!result.ok) {
-            showError(result.status === 422 && Array.isArray(result.data.detail)
-                ? 'La contraseña debe tener al menos 8 caracteres'
-                : getErrorMessage(result.data));
-            return;
-        }
-        signupForm.reset();
-        showSignupVerify(email, result.data.email_hint);
-    });
 
     // ----- Activar cuenta de personal -----
     const activateResult = document.getElementById('activateResult');
@@ -620,7 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('activateToLogin').addEventListener('click', () => {
         clearActivationResult();
-        openPortal('staff');
+        openLogin();
     });
 
     activateResendBtn.addEventListener('click', async () => {
@@ -669,9 +528,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const forgotCodeInput = document.getElementById('forgotCode');
     const forgotCodeEmail = document.getElementById('forgotCodeEmail');
     const forgotNotice = document.getElementById('forgotNotice');
-    const forgotPasswordFields = document.getElementById('forgotPasswordFields');
-    const forgotNewPassword = document.getElementById('forgotNewPassword');
-    const forgotConfirmPassword = document.getElementById('forgotConfirmPassword');
     const forgotResendBtn = document.getElementById('forgotResend');
     const forgotResult = document.getElementById('forgotResult');
     const forgotPasswordValue = document.getElementById('forgotPassword');
@@ -699,19 +555,10 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotResendBtn.textContent = 'Reenviar código';
     }
 
-    function forgotIsRequester() {
-        return loginPortal === 'requester';
-    }
-
     function openForgot() {
-        if (!PORTALS[loginPortal]) return;
         forgotMode = true;
         clearForgot();
-        forgotTitle.textContent = `Olvidé mi contraseña — ${PORTALS[loginPortal].title}`;
-        // El solicitante elige su contraseña; al personal se le genera una
-        forgotPasswordFields.hidden = !forgotIsRequester();
-        forgotNewPassword.required = forgotIsRequester();
-        forgotConfirmPassword.required = forgotIsRequester();
+        forgotTitle.textContent = 'Olvidé mi contraseña';
         clearHash();
         showAuthPanel();
         forgotEmailInput.focus();
@@ -730,23 +577,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.hash.slice(RESET_ROUTE.length).replace(/^\?/, ''));
         // El correo no se queda en la barra de direcciones
         clearHash();
-        const portal = params.get('portal');
-        if (!PORTALS[portal]) {
-            loginPortal = null;
-            forgotMode = false;
-            showAuthPanel();
-            return;
-        }
-        loginPortal = portal;
         openForgot();
         showForgotCodeStep(params.get('correo') || '');
     }
 
     function backFromForgot() {
-        const portal = loginPortal;
-        forgotMode = false;
         clearForgot();
-        openPortal(portal);
+        openLogin();
     }
 
     function startForgotResendCountdown() {
@@ -781,7 +618,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = forgotEmailInput.value.trim();
         let result;
         try {
-            result = await postAuth('/auth/password-reset', { email, portal: loginPortal });
+            result = await postAuth('/auth/password-reset', { email });
         } catch (err) {
             showError('No se pudo conectar con el servidor');
             return;
@@ -811,18 +648,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showError('Escriba los 6 dígitos del código');
             return;
         }
-        const body = { email: forgotEmail, portal: loginPortal, code };
-        if (forgotIsRequester()) {
-            if (forgotNewPassword.value.length < 8) {
-                showError('La contraseña debe tener al menos 8 caracteres');
-                return;
-            }
-            if (forgotNewPassword.value !== forgotConfirmPassword.value) {
-                showError('Las contraseñas no coinciden');
-                return;
-            }
-            body.new_password = forgotNewPassword.value;
-        }
+        const body = { email: forgotEmail, code };
         let result;
         try {
             result = await postAuth('/auth/password-reset/confirm', body);
@@ -834,11 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(getErrorMessage(result.data));
             return;
         }
-        if (forgotIsRequester()) {
-            backFromForgot();
-            showSuccess('Contraseña restablecida. Inicie sesión con la nueva.');
-            return;
-        }
+        // El servidor genera la contraseña y la muestra una sola vez
         forgotGenerated = result.data.password;
         forgotPasswordValue.textContent = forgotGenerated;
         forgotCodeForm.hidden = true;
@@ -857,7 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
         forgotResendBtn.disabled = true;
         let result;
         try {
-            result = await postAuth('/auth/password-reset/resend', { email: forgotEmail, portal: loginPortal });
+            result = await postAuth('/auth/password-reset/resend', { email: forgotEmail });
         } catch (err) {
             forgotResendBtn.disabled = false;
             showError('No se pudo conectar con el servidor');
@@ -909,11 +731,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const resendCodeBtn = document.getElementById('resendCode');
     const resendNotice = document.getElementById('resendNotice');
     const backToLoginBtn = document.getElementById('backToLogin');
-    const signupHaveAccountBtn = document.getElementById('signupHaveAccount');
 
     const verifyTitle = document.getElementById('verifyTitle');
-    // Inicio de sesión del administrador: 10 minutos. Confirmar una cuenta nueva: 15 minutos.
-    const CODE_SECONDS = { login: 10 * 60, signup: 15 * 60 };
+    // Código del administrador al iniciar sesión: 10 minutos
+    const CODE_SECONDS = { login: 10 * 60 };
     const RESEND_WAIT_SECONDS = 60;
 
     let challengeId = null;
@@ -937,9 +758,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
             if (left === 0) {
                 clearInterval(expiryTimer);
-                verifyTimer.textContent = verifyMode === 'signup'
-                    ? 'El código venció. Pida uno nuevo.'
-                    : 'El código venció. Inicie sesión de nuevo.';
+                verifyTimer.textContent = 'El código venció. Inicie sesión de nuevo.';
                 verifySubmit.disabled = true;
                 return;
             }
@@ -988,24 +807,10 @@ document.addEventListener('DOMContentLoaded', () => {
         openVerifyScreen(data.challenge_id, data.email_hint);
     }
 
-    // Confirmar el correo de una cuenta de cliente nueva
-    function showSignupVerify(email, emailHint) {
-        verifyMode = 'signup';
-        verifyEmail = email;
-        verifyTitle.textContent = 'Confirme su correo';
-        openVerifyScreen(null, emailHint);
-    }
-
     function openVerifyScreen(newChallengeId, emailHint) {
         resetChat();
         challengeId = newChallengeId;
-        // Registro: no se sabe si el correo ya tenía cuenta (la API responde igual)
-        verifyHint.textContent = verifyMode === 'signup'
-            ? 'Si ese correo está disponible, le enviamos un código de confirmación. '
-                + 'Si ya tiene una cuenta con ese correo, le enviamos un aviso para que inicie sesión. '
-                + 'Revise también la carpeta de spam.'
-            : 'Enviamos un código de 6 dígitos a ' + emailHint;
-        signupHaveAccountBtn.hidden = verifyMode !== 'signup';
+        verifyHint.textContent = 'Enviamos un código de 6 dígitos a ' + emailHint;
         clearTimeout(verifyRedirectTimer);
         verifyBusy = false;
         clearDigits();
@@ -1065,9 +870,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let result;
         try {
-            result = verifyMode === 'signup'
-                ? await postAuth('/auth/register/verify', { email: verifyEmail, code })
-                : await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
+            result = await postAuth('/auth/verify-code', { challenge_id: challengeId, code });
         } catch (err) {
             verifyBusy = false;
             verifySubmit.disabled = false;
@@ -1166,9 +969,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let result;
         try {
-            result = verifyMode === 'signup'
-                ? await postAuth('/auth/register/resend', { email: verifyEmail })
-                : await postAuth('/auth/resend-code', { challenge_id: challengeId });
+            result = await postAuth('/auth/resend-code', { challenge_id: challengeId });
         } catch (err) {
             resendCodeBtn.disabled = false;
             showVerifyError('No se pudo conectar con el servidor');
@@ -1182,9 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
             clearDigits();
             startExpiryCountdown();
             startResendCountdown();
-            resendNotice.textContent = verifyMode === 'signup'
-                ? 'Si ese correo está disponible, le enviamos un código nuevo. Revise también la carpeta de spam.'
-                : 'Le enviamos un código nuevo';
+            resendNotice.textContent = 'Le enviamos un código nuevo';
             digitInputs[0].focus();
             return;
         }
@@ -1200,11 +999,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     backToLoginBtn.addEventListener('click', backToLogin);
-
-    signupHaveAccountBtn.addEventListener('click', () => {
-        backToLogin();
-        openPortal('requester');
-    });
 
     // ===== Asistente =====
     const chatToggle = document.getElementById('chatToggle');
@@ -1233,10 +1027,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.innerWidth >= 768 && !nav.hidden && nav.getClientRects().length) left = nav.getBoundingClientRect().right;
         const bar = document.querySelector('.topbar');
         if (bar && bar.getClientRects().length) top = Math.max(0, bar.getBoundingClientRect().bottom);
-        ['portalFooter'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el && !el.hidden && el.getClientRects().length) bottom = Math.min(bottom, el.getBoundingClientRect().top);
-        });
         const size = chatToggle.offsetHeight || 56;
         return {
             top, bottom, left, size,
@@ -1619,11 +1409,6 @@ document.addEventListener('DOMContentLoaded', () => {
             pollNavCounts(false);
             return;
         }
-        if (isRequesterPortal()) {
-            await loadPortalList();
-            return;
-        }
-        
         const params = new URLSearchParams();
         if (filters.status) params.append('status', filters.status);
         if (filters.category_id) params.append('category_id', filters.category_id);
@@ -1788,16 +1573,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderFollowButton(btn, hint, following) {
-        btn.textContent = following ? 'Siguiendo' : 'Dar seguimiento';
-        btn.setAttribute('aria-pressed', following ? 'true' : 'false');
-        btn.classList.toggle('following', following);
-        hint.textContent = following
-            ? 'Te avisaremos por correo de cambios de estado, asignación y comentarios nuevos.'
-            : '';
-        hint.hidden = !following;
-    }
-
     function showTicketDetail(ticket) {
         currentTicket = ticket;
         // Nombres de quienes aparecen en el ticket (el solicitante no recibe la lista de cuentas)
@@ -1807,10 +1582,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (isStaffShell()) {
             renderStaffDetail(ticket);
-            return;
-        }
-        if (isRequesterPortal()) {
-            renderPortalDetail(ticket);
             return;
         }
         detailContent.replaceChildren();
@@ -1856,17 +1627,6 @@ document.addEventListener('DOMContentLoaded', () => {
         titleRow.className = 'detail-title-row';
         titleRow.appendChild(h1);
 
-        const followBox = document.createElement('div');
-        followBox.className = 'follow-box';
-        const followBtn = document.createElement('button');
-        followBtn.type = 'button';
-        followBtn.className = 'follow-btn';
-        const followHint = document.createElement('p');
-        followHint.className = 'follow-hint';
-        followBox.appendChild(followBtn);
-        followBox.appendChild(followHint);
-        titleRow.appendChild(followBox);
-        renderFollowButton(followBtn, followHint, Boolean(ticket.following));
         detailContent.appendChild(titleRow);
 
         const descP = document.createElement('p');
@@ -1931,7 +1691,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         detailContent.appendChild(dl);
 
-        if (currentUser.role !== 'requester' && ticket.ai_analysis) {
+        if (ticket.ai_analysis) {
             detailContent.appendChild(renderAiCard(ticket));
         }
 
@@ -1944,20 +1704,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const state = ticket.status;
         const isClosed = state === 'closed';
 
-        if (currentUser.role === 'requester') {
-            if (!isClosed) {
-                const msg = document.createElement('p');
-                msg.textContent = 'Solo el equipo de soporte puede cambiar el estado o la asignación';
-                msg.className = 'requester-msg';
-                msg.style.color = 'var(--muted)';
-                actionsSection.appendChild(msg);
-            } else {
-                const closedMsg = document.createElement('p');
-                closedMsg.textContent = 'Ticket cerrado: no se puede modificar';
-                closedMsg.className = 'closed-msg';
-                actionsSection.appendChild(closedMsg);
-            }
-        } else if (currentUser.role === 'technician') {
+        if (currentUser.role === 'technician') {
             const actionDiv = document.createElement('div');
             actionDiv.style.display = 'flex';
             actionDiv.style.gap = '10px';
@@ -2330,12 +2077,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         correct.appendChild(label);
         correct.appendChild(select);
-        card.appendChild(correct);
+        // Vencido: el técnico no corrige el nivel (el servidor responde 403)
+        if (!technicianOverdueLocked(ticket)) card.appendChild(correct);
         return card;
+    }
+
+    // Vencidos: el técnico no cambia estado ni nivel; el coordinador decide (lo revisa también el servidor)
+    function technicianOverdueLocked(ticket) {
+        return Boolean(currentUser) && currentUser.role === 'technician' && ticket.due_state === 'overdue'
+            && ['new', 'in_progress'].includes(ticket.status);
     }
 
     // Texto de un cambio del historial: "Ana cambió el estado de Nuevo a En proceso"
     function appendHistoryText(target, entry, changedByName) {
+        // Departamentos: el servidor ya guarda la frase completa ("Transferido de X a Y por Z: motivo",
+        // "Creado por X en nombre de Y vía teléfono", "Clasificado en X por Z")
+        if (entry.field === 'department' || entry.field === 'created_on_behalf' || entry.field === 'level_default') {
+            target.appendChild(document.createTextNode(entry.new_value || ''));
+            return;
+        }
         const strongWho = document.createElement('strong');
         strongWho.textContent = changedByName;
         target.appendChild(strongWho);
@@ -2796,8 +2556,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showSuccess(`Ticket #${created.id} creado`);
             } else {
                 showView('tickets');
-                if (isRequesterPortal()) loadPortalList();
-                showSuccess('Solicitud enviada');
+                showSuccess(`Ticket #${created.id} creado`);
             }
         });
     }
@@ -2908,11 +2667,9 @@ document.addEventListener('DOMContentLoaded', () => {
         navReports.hidden = !REPORT_REVIEW_ROLES.includes(role);
         // Invitaciones: solo el administrador (cuida las cuentas)
         navUsers.hidden = role !== 'admin';
-        navDrafts.hidden = !DRAFT_ROLES.includes(role);
+        navDrafts.hidden = !canSeeDrafts();
         // Mi cuenta: todos los roles que inician sesión
         navProfile.hidden = !role || role === 'agent';
-        // Portal del solicitante: el asistente también como pestaña
-        document.getElementById('navAssistant').hidden = role !== 'requester';
     }
 
     function showView(name) {
@@ -2944,7 +2701,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         setActiveTab(tabs[name]);
         if (name === 'tickets') {
-            setDocumentTitle(currentUser && currentUser.role === 'requester' ? 'Mis solicitudes' : 'Tickets');
+            setDocumentTitle('Tickets');
         } else {
             setDocumentTitle(SCREEN_TITLES[name]);
         }
@@ -2977,64 +2734,34 @@ document.addEventListener('DOMContentLoaded', () => {
         showView('reports');
     });
 
-    // ----- Perfil del solicitante -----
-    const profileForm = document.getElementById('profileForm');
-    const profileName = document.getElementById('profileName');
-    const profileIdNumber = document.getElementById('profileIdNumber');
-    const profilePhone = document.getElementById('profilePhone');
-    const profileCancel = document.getElementById('profileCancel');
-
-    function profileRequired() {
-        return Boolean(currentUser && currentUser.role === 'requester' && !currentUser.profile_complete);
-    }
-
+    // ----- Mi cuenta (solo el personal: los contactos no inician sesión) -----
     function showProfile() {
-        const required = profileRequired();
-        const isRequester = currentUser.role === 'requester';
-        // Mientras falte el perfil no se puede usar el resto de la página
-        document.body.classList.toggle('profile-required', required);
-        document.getElementById('profileTitle').textContent = required ? 'Complete su perfil' : 'Mi cuenta';
-        document.getElementById('profileIntro').hidden = !required;
-        // El solicitante cambia el teléfono en sus datos personales; el personal, en su propio formulario.
-        // Qué secciones existen para este rol; applyProfileTab muestra solo las de la pestaña elegida.
+        // Qué secciones existen para este rol; applyProfileTab muestra solo las de la pestaña elegida
         const technician = hasAvailability(currentUser);
         const allowed = {
-            accountPersonal: isRequester,
-            accountStaffProfile: !isRequester,
-            accountPhone: !isRequester && !required,
+            accountStaffProfile: true,
+            accountPhone: true,
             accountAvailability: technician,
             accountSchedule: technician,
-            accountEmail: !required,
+            accountEmail: true,
             // Con Microsoft, técnicos y coordinadores no tienen contraseña (el servidor responde 403)
-            accountPassword: !required && !staffUsesMicrosoft(currentUser),
+            accountPassword: !staffUsesMicrosoft(currentUser),
         };
         Object.entries(allowed).forEach(([id, ok]) => { document.getElementById(id).dataset.allowed = ok ? '1' : ''; });
         // Disponibilidad y horario propios: técnicos y coordinadores (el servidor no los da a otros roles)
         document.getElementById('accountTabTurno').hidden = !technician;
         document.getElementById('accountTabSeguridad').hidden = staffUsesMicrosoft(currentUser);
-        document.getElementById('accountTabs').hidden = required;
-        document.getElementById('accountHome').hidden = required;
         document.getElementById('accountAvatar').textContent = getInitials(currentUser.name);
         document.getElementById('accountWhoName').textContent = currentUser.name || currentUser.email;
         document.getElementById('accountWhoRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
         document.getElementById('accountStaffName').textContent = currentUser.name || '—';
         document.getElementById('accountStaffRole').textContent = ROLE_MAP[currentUser.role] || currentUser.role;
-        if (required || (profileTab === 'turno' && !technician)
+        if ((profileTab === 'turno' && !technician)
             || (profileTab === 'seguridad' && staffUsesMicrosoft(currentUser))) profileTab = 'perfil';
         applyProfileTab();
         fillAccountSections();
-        profileCancel.hidden = required;
-        profileName.value = currentUser.name || '';
-        profileIdNumber.value = currentUser.id_number || '';
-        profilePhone.value = currentUser.phone || '';
-        const locked = Boolean(currentUser.identity_locked);
-        profileName.readOnly = locked;
-        profileIdNumber.readOnly = locked;
-        document.getElementById('profileLockedNote').hidden = !locked;
         showView('profile');
-        if (required) setDocumentTitle('Complete su perfil');
-        else setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
-        if (isRequester) (locked ? profilePhone : profileName).focus();
+        setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
     }
 
     // ----- Pestañas de Mi cuenta: Perfil, Correo, Seguridad y (técnico) Disponibilidad y horario -----
@@ -3049,7 +2776,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tab.dataset.accountTab === profileTab) tab.setAttribute('aria-current', 'page');
             else tab.removeAttribute('aria-current');
         });
-        if (!profileRequired()) setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
+        setDocumentTitle(`${PROFILE_TAB_TITLES[profileTab]} · Mi cuenta`);
     }
 
     document.getElementById('accountTabs').addEventListener('click', (e) => {
@@ -3068,40 +2795,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('accountLogout').addEventListener('click', () => switchAccountBtn.click());
-
-    profileForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        hideError();
-        const name = profileName.value.trim();
-        const idNumber = profileIdNumber.value.trim();
-        const phone = profilePhone.value.trim();
-        if (name.split(/\s+/).length < 2 && !currentUser.identity_locked) {
-            showError('Escriba su nombre completo (nombre y apellidos)');
-            return;
-        }
-        const contactError = validatePhone(phone) || validateIdNumber(idNumber);
-        if (contactError) {
-            showError(contactError);
-            return;
-        }
-        try {
-            currentUser = await apiFetch('/profile', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, id_number: idNumber, phone })
-            });
-        } catch (err) {
-            return; // apiFetch ya mostró el error
-        }
-        document.body.classList.remove('profile-required');
-        // Nombre e iniciales en la barra
-        document.querySelector('.topbar-user-name').textContent = currentUser.name;
-        document.querySelector('.topbar-avatar').textContent = getInitials(currentUser.name);
-        showView('tickets');
-        showSuccess('Perfil guardado');
-    });
-
-    profileCancel.addEventListener('click', () => showView('tickets'));
 
     // ----- Mi cuenta: teléfono (personal), correo y contraseña (todos) -----
     const accountPhoneSection = document.getElementById('accountPhone');
@@ -3130,7 +2823,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mismo mínimo que app/security.py
     function passwordMinimum() {
-        return currentUser && currentUser.role === 'requester' ? 8 : 12;
+        return 12;
     }
 
     function fillAccountSections() {
@@ -3344,6 +3037,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----- Borradores de correos -----
     // El administrador no entra a los borradores (no confirma ni descarta)
     const DRAFT_ROLES = ['technician', 'coordinator'];
+
+    // Con tickets por departamento los técnicos ya no ven borradores: los revisa el coordinador del departamento
+    function canSeeDrafts() {
+        return Boolean(currentUser) && DRAFT_ROLES.includes(currentUser.role)
+            && !(currentUser.role === 'technician' && currentUser.routing_enforced);
+    }
     const DRAFT_STATUS_LABELS = {
         analyzing: 'Analizando',
         pending_review: 'Por revisar',
@@ -3365,7 +3064,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftPrioritySelect = document.getElementById('draftPriority');
     const draftDescriptionInput = document.getElementById('draftDescription');
     const draftPhoneInput = document.getElementById('draftPhone');
-    const draftIdNumberInput = document.getElementById('draftIdNumber');
     const draftConfirmBtn = document.getElementById('draftConfirmBtn');
     const draftDiscardBtn = document.getElementById('draftDiscardBtn');
     const draftDetailsBtn = document.getElementById('draftDetailsBtn');
@@ -3396,7 +3094,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function refreshDraftsBadge() {
-        if (!currentUser || !DRAFT_ROLES.includes(currentUser.role)) return;
+        if (!canSeeDrafts()) return;
         try {
             const list = await apiFetch('/drafts');
             updateDraftsBadge(list.length);
@@ -3435,20 +3133,54 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function startDraftsPolling() {
         stopDraftsPolling();
-        if (!currentUser || !DRAFT_ROLES.includes(currentUser.role)) return;
+        if (!canSeeDrafts()) return;
         draftsPollTimer = setInterval(pollDraftsBadge, 60000);
     }
 
     // El coordinador ve todos y filtra; el técnico, solo los que le asignaron
     const draftsFilter = document.getElementById('draftsFilter');
     const draftReassign = document.getElementById('draftReassign');
+    const draftTechnicianField = document.getElementById('draftTechnicianField');
+    const draftTechnicianSelect = document.getElementById('draftTechnician');
+    // Tickets por departamento: técnicos activos del departamento del coordinador, con carga y disponibilidad
+    let draftTechnicians = [];
+
+    function draftsByDepartment() {
+        return Boolean(currentUser && currentUser.routing_enforced);
+    }
 
     function setupDraftsFilter() {
         const manager = OPERATION_ROLES.includes(currentUser.role);
-        document.getElementById('draftsFilterField').hidden = !manager;
-        document.getElementById('draftsIntro').textContent = manager
-            ? 'La IA leyó estos correos. Cada uno tiene un técnico que lo revisa; usted puede reasignarlo.'
-            : 'Mis borradores: los correos que le asignaron. Usted decide si se vuelven ticket.';
+        // Con tickets por departamento: una sola lista, la de su departamento
+        document.getElementById('draftsFilterField').hidden = !manager || draftsByDepartment();
+        document.getElementById('draftsIntro').textContent = draftsByDepartment()
+            ? 'Correos de su departamento que leyó la IA. Al crear el ticket, usted elige el técnico que lo atenderá.'
+            : manager
+                ? 'La IA leyó estos correos. Cada uno tiene un técnico que lo revisa; usted puede reasignarlo.'
+                : 'Mis borradores: los correos que le asignaron. Usted decide si se vuelven ticket.';
+    }
+
+    async function loadDraftTechnicians() {
+        draftTechnicians = [];
+        if (!draftsByDepartment() || currentUser.role !== 'coordinator') return;
+        try {
+            draftTechnicians = await apiFetch('/drafts/technicians', { silent: true });
+        } catch (err) {
+            showError(err.message || 'No se pudo cargar la lista de técnicos');
+        }
+    }
+
+    function fillDraftTechnicians() {
+        draftTechnicianSelect.replaceChildren();
+        const empty = staffOption('', draftTechnicians.length ? 'Seleccionar…' : 'Sin técnicos activos en su departamento', true);
+        empty.disabled = true;
+        draftTechnicianSelect.appendChild(empty);
+        // La misma carga que usa la asignación automática
+        const byLevels = lastSystemStatus && lastSystemStatus.auto_assign_mode === 'levels';
+        draftTechnicians.forEach(tech => {
+            const load = `carga ${tech.load}${byLevels ? ' (suma de niveles)' : ''}`;
+            draftTechnicianSelect.appendChild(staffOption(String(tech.id), `${tech.name} — ${load} · ${tech.availability_text}`, false));
+        });
     }
 
     // Secciones de Borradores: el filtro del coordinador (el técnico ve siempre los suyos)
@@ -3468,8 +3200,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     draftsFilter.addEventListener('change', () => {
         selectedDraftId = null;
-        // Todos y Sin revisor tienen su sección en el menú; "Mis borradores" queda en la misma página
-        const routes = { all: 'borradores/todos', none: 'borradores/sin-revisor' };
+        // Todos tiene su sección en el menú; "Mis borradores" queda en la misma página
+        const routes = { all: 'borradores/todos' };
         if (routes[draftsFilter.value]) {
             goRoute(routes[draftsFilter.value]);
             return;
@@ -3480,10 +3212,11 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadDrafts() {
         if (!drafts.length) showSkeleton(draftsList, { rows: 4 });
         setupDraftsFilter();
-        const query = OPERATION_ROLES.includes(currentUser.role) && draftsFilter.value !== 'all'
+        const query = OPERATION_ROLES.includes(currentUser.role) && !draftsByDepartment() && draftsFilter.value !== 'all'
             ? `?assigned=${draftsFilter.value}` : '';
         try {
             drafts = await apiFetch(`/drafts${query}`, { silent: true });
+            await loadDraftTechnicians();
         } catch (err) {
             draftsList.removeAttribute('aria-busy');
             draftsList.replaceChildren();
@@ -3501,10 +3234,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             selectedDraftId = null;
             draftContent.hidden = true;
-            draftPlaceholder.hidden = false;
+            // Sin borradores el mensaje va en la lista (se ve también a 375 px): el detalle queda vacío
+            draftPlaceholder.hidden = !drafts.length;
             draftPlaceholder.replaceChildren(drafts.length
                 ? emptyState({ title: 'Elija un correo de la lista', text: 'Verá el correo original y lo que propone la IA.' })
-                : emptyState({ title: 'No hay borradores pendientes', text: 'Cuando llegue un correo que la IA no pueda convertir sola, aparecerá aquí.' }));
+                : '');
         }
     }
 
@@ -3517,6 +3251,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (draft.needs_review) return ['Revisar', 'is-warn'];
         if (draft.status === 'pending_review') return ['Listo para crear', 'is-ok'];
         return [DRAFT_STATUS_LABELS[draft.status] || draft.status, ''];
+    }
+
+    // Tickets por departamento: elegido por la IA, por el administrador o todavía «Por clasificar»
+    function draftDepartmentText(draft) {
+        if (!draft.department_name) return 'Por clasificar';
+        return draft.classification === 'routed' ? `${draft.department_name} (IA)` : draft.department_name;
     }
 
     function draftOwnerText(draft) {
@@ -3541,6 +3281,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderDraftList() {
         draftsList.replaceChildren();
+        if (!drafts.length) {
+            const empty = makeEl('li', 'drafts-empty');
+            empty.appendChild(draftsByDepartment()
+                ? emptyState({ title: 'No hay borradores de su departamento', text: 'Cuando la IA o el administrador le envíen un correo de soporte, aparecerá aquí.' })
+                : emptyState({ title: 'No hay borradores pendientes', text: 'Cuando llegue un correo que la IA no pueda convertir sola, aparecerá aquí.' }));
+            draftsList.appendChild(empty);
+            return;
+        }
         drafts.forEach(draft => {
             const li = document.createElement('li');
             const btn = makeEl('button', 'draft-item');
@@ -3556,7 +3304,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const [tag, tone] = draftTag(draft);
             const tags = makeEl('span', 'draft-item-tags');
             tags.appendChild(makeEl('span', `ui-tag ${tone}`, tag));
-            tags.appendChild(makeEl('span', draft.assigned_name ? 'ui-tag' : 'ui-tag is-warn', draftOwnerText(draft)));
+            // Con tickets por departamento no hay revisor: el técnico se elige al crear el ticket
+            if (!draftsByDepartment()) tags.appendChild(makeEl('span', draft.assigned_name ? 'ui-tag' : 'ui-tag is-warn', draftOwnerText(draft)));
+            if (draft.classification) tags.appendChild(makeEl('span', draft.department_name ? 'ui-tag is-info' : 'ui-tag is-warn', draftDepartmentText(draft)));
             btn.appendChild(tags);
             li.appendChild(btn);
             draftsList.appendChild(li);
@@ -3598,7 +3348,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftTagEl = document.getElementById('draftTag');
         draftTagEl.textContent = tag;
         draftTagEl.className = `ui-tag ${tone}`;
-        document.getElementById('draftAssignee').textContent = draftOwnerText(draft);
+        const draftAssignee = document.getElementById('draftAssignee');
+        draftAssignee.textContent = draftOwnerText(draft);
+        draftAssignee.hidden = draftsByDepartment();
+        const pickTechnician = draftsByDepartment() && draft.can_review;
+        draftTechnicianField.hidden = !pickTechnician;
+        draftTechnicianSelect.required = pickTechnician;
+        if (pickTechnician) fillDraftTechnicians();
         // Reasignar: solo el coordinador. Confirmar o descartar: el revisor o un coordinador
         document.getElementById('draftReassignField').hidden = !draft.can_reassign;
         if (draft.can_reassign) fillDraftReassign(draft);
@@ -3609,6 +3365,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftReason = document.getElementById('draftReason');
         draftReason.textContent = draft.pending_reason ? `Pendiente: ${draft.pending_reason}` : '';
         draftReason.hidden = !draft.pending_reason;
+        const draftTransferNote = document.getElementById('draftTransferNote');
+        draftTransferNote.textContent = draft.transfer_note || '';
+        draftTransferNote.hidden = !draft.transfer_note;
+        document.getElementById('draftTransferBtn').hidden = !draft.can_transfer;
+        const draftDepartment = document.getElementById('draftDepartment');
+        draftDepartment.textContent = draft.classification ? `Departamento: ${draftDepartmentText(draft)}` : '';
+        draftDepartment.hidden = !draft.classification;
         document.getElementById('draftBody').textContent = draft.body;
         // Adjuntos del correo y lo que no se tomó (rechazados, más de 5, enlaces a la nube)
         const draftAttachments = document.getElementById('draftAttachments');
@@ -3635,17 +3398,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (draft.status === 'waiting_contact') {
             const waiting = document.createElement('p');
             waiting.className = 'ai-muted';
-            waiting.textContent = 'Se pidió al cliente su teléfono y su cédula. Si los consiguió por otro medio, escríbalos abajo.';
+            // Borradores de antes: ya no hace falta esperar esos datos para crear el ticket
+            waiting.textContent = 'Este correo llegó cuando todavía se pedían teléfono y cédula. Ya no hacen falta: puede crear el ticket.';
             ai.appendChild(waiting);
         }
 
         draftTitleInput.value = draft.title || '';
         draftDescriptionInput.value = draft.description || '';
+        // Teléfono opcional; vacío o enmascarado se usa el guardado. La cédula ya no se pide
         draftPhoneInput.value = draft.contact_phone || '';
-        draftIdNumberInput.value = draft.contact_id_number || '';
-        // Si el borrador ya los tiene, vacíos o enmascarados se usan los guardados
-        draftPhoneInput.required = !draft.contact_phone;
-        draftIdNumberInput.required = !draft.contact_id_number;
         fillDraftSelect(draftCategorySelect, categoryMap, draft.category_id);
         fillDraftSelect(draftPrioritySelect, priorityMap, draft.priority_id);
         draftConfirmBtn.disabled = false;
@@ -3657,7 +3418,73 @@ document.addEventListener('DOMContentLoaded', () => {
         draftConfirmBtn.disabled = busy;
         draftDiscardBtn.disabled = busy;
         draftDetailsBtn.disabled = busy;
+        document.getElementById('draftTransferBtn').disabled = busy;
     }
+
+    // ----- Transferir un borrador a otro departamento -----
+    const draftTransferDialog = document.getElementById('draftTransferDialog');
+    const draftTransferError = document.getElementById('draftTransferError');
+    const draftTransferTarget = document.getElementById('draftTransferTarget');
+    const draftTransferReason = document.getElementById('draftTransferReason');
+
+    document.getElementById('draftTransferBtn').addEventListener('click', async () => {
+        if (!shownDraft) return;
+        const draft = shownDraft;
+        let options;
+        try {
+            options = await apiFetch('/drafts/transfer-options', { silent: true });
+        } catch (err) {
+            showError(err.message || 'No se pudieron cargar los departamentos');
+            return;
+        }
+        draftTransferTarget.replaceChildren(staffOption('', 'Seleccionar…', true));
+        draftTransferTarget.firstChild.disabled = true;
+        options.forEach(o => {
+            // Los que no se pueden elegir salen deshabilitados con el motivo
+            const option = staffOption(String(o.id), o.enabled ? o.path : `${o.path} — ${o.disabled_reason}`, false);
+            option.disabled = !o.enabled;
+            draftTransferTarget.appendChild(option);
+        });
+        draftTransferTarget.value = '';
+        draftTransferReason.value = '';
+        document.getElementById('draftTransferDraft').textContent = `Borrador #${draft.id} · ${draft.subject || '(Sin asunto)'}`;
+        draftTransferError.hidden = true;
+        draftTransferDialog.dataset.draftId = String(draft.id);
+        draftTransferDialog.showModal();
+        draftTransferTarget.focus();
+    });
+
+    document.getElementById('draftTransferCancel').addEventListener('click', () => draftTransferDialog.close());
+    document.getElementById('draftTransferForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const reason = draftTransferReason.value.trim();
+        if (!draftTransferTarget.value) {
+            draftTransferError.textContent = 'Elija el departamento destino';
+            draftTransferError.hidden = false;
+            return;
+        }
+        if (reason.length < 15) {
+            draftTransferError.textContent = 'El motivo debe tener al menos 15 caracteres';
+            draftTransferError.hidden = false;
+            return;
+        }
+        let result;
+        try {
+            result = await apiFetch(`/drafts/${draftTransferDialog.dataset.draftId}/transfer`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ department_id: Number(draftTransferTarget.value), reason }),
+            });
+        } catch (err) {
+            draftTransferError.textContent = err.message || 'No se pudo transferir el borrador';
+            draftTransferError.hidden = false;
+            return;
+        }
+        draftTransferDialog.close();
+        showSuccess(`Borrador #${result.draft_id} transferido a ${result.department_name}`);
+        // Ya no es de su departamento: sale de la lista
+        selectedDraftId = null;
+        await loadDrafts();
+    });
 
     draftReassign.addEventListener('change', async () => {
         if (selectedDraftId === null || !draftReassign.value) return;
@@ -3702,11 +3529,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // Solo se valida lo que se escribió nuevo (sin asteriscos)
         const isNew = value => value.trim() !== '' && !value.includes('*');
         const phoneError = isNew(draftPhoneInput.value) ? validatePhone(draftPhoneInput.value) : null;
-        const idError = isNew(draftIdNumberInput.value) ? validateIdNumber(draftIdNumberInput.value) : null;
-        if (phoneError || idError) {
-            showError(phoneError || idError);
+        if (phoneError) {
+            showError(phoneError);
             return;
         }
+        // Tickets por departamento: el técnico que lo atenderá (el servidor valida que sea de su departamento)
+        const technician = draftsByDepartment()
+            ? draftTechnicians.find(tech => String(tech.id) === draftTechnicianSelect.value) : null;
+        if (draftsByDepartment() && !technician) {
+            showError('Elija el técnico de su departamento que atenderá el ticket');
+            return;
+        }
+        // Igual que al reasignar: a alguien no disponible, solo confirmando
+        const confirmUnavailable = Boolean(technician) && technician.availability !== 'available';
+        if (confirmUnavailable && !window.confirm(`${technician.name}: ${technician.availability_text}. ¿Asignarle el ticket de todas formas?`)) return;
         setDraftBusy(true);
         try {
             const result = await apiFetch(`/drafts/${selectedDraftId}/confirm`, {
@@ -3718,10 +3554,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     priority_id: parseInt(draftPrioritySelect.value, 10),
                     description: draftDescriptionInput.value.trim(),
                     contact_phone: draftPhoneInput.value,
-                    contact_id_number: draftIdNumberInput.value
+                    ...(technician ? { assigned_to: technician.id, confirm_unavailable: confirmUnavailable } : {})
                 })
             });
-            showSuccess(`Ticket #${result.ticket_id} creado`);
+            showSuccess(technician ? `Ticket #${result.ticket_id} creado y asignado a ${technician.name}` : `Ticket #${result.ticket_id} creado`);
             selectedDraftId = null;
             await loadDrafts();
             loadTickets(getFilters());
@@ -3771,12 +3607,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let directorySearchTimer = null;
     let directorySeq = 0;
 
+    // Roles que el administrador asigna desde la página: técnico ↔ coordinador. Nunca administrador
+    // (solo con python -m app.create_admin; el servidor lo rechaza)
     const ROLE_OPTIONS = [
-        ['requester', 'Solicitante'],
         ['technician', 'Técnico'],
-        ['coordinator', 'Coordinador'],
-        ['admin', 'Administrador']
+        ['coordinator', 'Coordinador']
     ];
+    const ROLE_CHANGE_ROLES = ROLE_OPTIONS.map(([value]) => value);
 
     function maskIdNumber(value) {
         if (!value) return '';
@@ -3826,10 +3663,12 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(makeCell(user.email));
 
             const roleTd = document.createElement('td');
-            if (isAdmin && !isSelf) {
+            if (isAdmin && !isSelf && ROLE_CHANGE_ROLES.includes(user.role)) {
                 const select = document.createElement('select');
                 select.className = 'directory-role-select';
                 select.setAttribute('aria-label', `Rol de ${user.name}`);
+                select.dataset.userName = user.name || '';
+                select.dataset.role = user.role;
                 ROLE_OPTIONS.forEach(([value, label]) => {
                     const option = document.createElement('option');
                     option.value = value;
@@ -3888,20 +3727,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             directoryBody.appendChild(row);
         });
-    }
-
-    async function updateDirectoryUser(userId, changes) {
-        try {
-            await apiFetch(`/admin/users/${userId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(changes)
-            });
-            showSuccess('Usuario actualizado');
-        } catch (err) {
-            // apiFetch ya mostró el error
-        }
-        await loadDirectory();
+        labelTableCells(directoryBody.closest('table'));
     }
 
     directorySearch.addEventListener('input', () => {
@@ -3932,11 +3758,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     directoryState.addEventListener('change', loadDirectory);
 
-    directoryBody.addEventListener('change', (e) => {
+    directoryBody.addEventListener('change', async (e) => {
         const select = e.target.closest('.directory-role-select');
-        if (select) {
-            select.disabled = true;
-            updateDirectoryUser(select.closest('tr').dataset.userId, { role: select.value });
+        if (!select) return;
+        // El rol y el departamento cambian juntos: se piden en el diálogo de Cambiar rol
+        const user = { id: Number(select.closest('tr').dataset.userId), name: select.dataset.userName,
+            role: select.dataset.role };
+        const chosen = select.value;
+        select.value = user.role;
+        if (await openRoleDialog(user, chosen)) {
+            showSuccess('Usuario actualizado');
+            await loadDirectory();
         }
     });
 
@@ -3951,13 +3783,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mismas reglas que app/accounts.py (solo comodidad: el servidor también las revisa)
     const MANAGE_RULES = {
         admin: {
+            // Como app/accounts.py: un contacto no inicia sesión (sin desbloquear ni cerrar sesiones)
             active: ['coordinator', 'technician', 'requester'],
             reset: ['coordinator', 'technician'],
-            unlock: ['coordinator', 'technician', 'requester'],
+            unlock: ['coordinator', 'technician'],
             availability: ['technician', 'coordinator'],
             schedule: ['technician', 'coordinator'],
-            sessions: ['coordinator', 'technician', 'requester'],
-            role: ['coordinator', 'technician', 'requester']
+            sessions: ['coordinator', 'technician'],
+            // Técnico ↔ coordinador; nunca a administrador
+            role: ['coordinator', 'technician']
         },
         // Las cuentas las cuida el administrador: el coordinador maneja turnos y disponibilidad de técnicos
         coordinator: {
@@ -3967,7 +3801,7 @@ document.addEventListener('DOMContentLoaded', () => {
             availability: ['technician'],
             schedule: ['technician'],
             sessions: [],
-            role: ['technician', 'requester']
+            role: ['technician']
         }
     };
 
@@ -4057,6 +3891,106 @@ document.addEventListener('DOMContentLoaded', () => {
     const REPORT_REVIEW_ROLES = ['admin'];
     const OPERATION_ROLES = ['coordinator'];
 
+    // Tickets por departamento: técnico, coordinador y administrador crean con el mismo formulario
+    function staffCreatesTickets() {
+        return Boolean(currentUser) && ['technician', 'coordinator', 'admin'].includes(currentUser.role)
+            && Boolean(currentUser.routing_enforced);
+    }
+
+    // ----- Nuevo ticket del personal (tickets por departamento) -----
+    const staffTicketDialog = document.getElementById('staffTicketDialog');
+    const staffTicketForm = document.getElementById('staffTicketForm');
+    const staffTicketDone = document.getElementById('staffTicketDone');
+    const staffTicketError = document.getElementById('staffTicketError');
+
+    async function openStaffTicketDialog() {
+        let options;
+        try {
+            options = await apiFetch('/departments/options', { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        staffTicketForm.reset();
+        staffTicketForm.hidden = false;
+        staffTicketDone.hidden = true;
+        staffTicketError.hidden = true;
+        const fill = (select, list) => {
+            select.replaceChildren(staffOption('', 'Seleccionar', true));
+            list.forEach(d => select.appendChild(staffOption(String(d.id), d.path, false)));
+        };
+        fill(document.getElementById('stReporterArea'), options.areas);
+        fill(document.getElementById('stDepartment'), options.serving);
+        // Prioridad obligatoria con su plazo; categoría opcional ("Sin categoría" si no se elige)
+        staffPriorities = options.priorities;
+        const priority = document.getElementById('stPriority');
+        priority.replaceChildren(staffOption('', 'Seleccionar', true));
+        options.priorities.forEach(p => priority.appendChild(staffOption(String(p.id), `${p.name} · vence en ${p.due_text}`, false)));
+        const category = document.getElementById('stCategory');
+        category.replaceChildren(staffOption('', 'Sin categoría', true));
+        options.categories.forEach(c => category.appendChild(staffOption(String(c.id), c.name, false)));
+        showPriorityDue();
+        staffTicketDialog.showModal();
+        document.getElementById('stReporterName').focus();
+    }
+
+    let staffPriorities = [];
+
+    // "Alta: vence en 16 horas hábiles": quien crea el ticket ve la consecuencia de la prioridad
+    function showPriorityDue() {
+        const chosen = staffPriorities.find(p => String(p.id) === document.getElementById('stPriority').value);
+        document.getElementById('stPriorityDue').textContent = chosen
+            ? `${chosen.name}: vence en ${chosen.due_text}.` : 'Define el vencimiento del ticket.';
+    }
+    document.getElementById('stPriority').addEventListener('change', showPriorityDue);
+
+    document.getElementById('staffTicketCancel').addEventListener('click', () => staffTicketDialog.close());
+    document.getElementById('staffTicketClose').addEventListener('click', () => {
+        staffTicketDialog.close();
+        // La confirmación no queda visible: se vuelve a la lista
+        if (isStaffShell()) pollNavCounts();
+    });
+    staffTicketForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        staffTicketError.hidden = true;
+        const value = id => document.getElementById(id).value.trim();
+        const submit = document.getElementById('staffTicketSubmit');
+        submit.disabled = true;
+        let created;
+        try {
+            created = await apiFetch('/tickets', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({
+                    title: value('stTitle'), description: value('stDescription'),
+                    department_id: Number(value('stDepartment')) || null,
+                    priority_id: Number(value('stPriority')) || null,
+                    category_id: Number(value('stCategory')) || null,
+                    reporter_name: value('stReporterName'), reporter_email: value('stReporterEmail') || null,
+                    reporter_area_id: Number(value('stReporterArea')) || null,
+                    reporter_phone: value('stReporterPhone') || null, channel: value('stChannel') || null,
+                }),
+            });
+        } catch (err) {
+            // Mensaje del servidor (getErrorMessage en apiFetch)
+            staffTicketError.textContent = err.message || 'No se pudo crear el ticket';
+            staffTicketError.hidden = false;
+            return;
+        } finally {
+            submit.disabled = false;
+        }
+        staffTicketForm.hidden = true;
+        document.getElementById('staffTicketDoneNumber').textContent = `Ticket #${created.id} · ${created.department_name}`;
+        document.getElementById('staffTicketDoneAssignee').textContent = created.assigned_name
+            ? `Asignado a ${created.assigned_name}.` : 'Pendiente de asignación: queda en la cola del departamento.';
+        staffTicketDone.hidden = false;
+        document.getElementById('staffTicketClose').focus();
+    });
+
+    function canOperateTickets() {
+        return Boolean(currentUser) && (OPERATION_ROLES.includes(currentUser.role)
+            || (currentUser.role === 'admin' && Boolean(currentUser.routing_enforced)));
+    }
+
     // "2026-11-03" → "03/11/2026" sin pasar por la zona horaria
     function formatPlainDate(value) {
         const [year, month, day] = value.split('-');
@@ -4075,9 +4009,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return tag;
     }
 
+    // Contacto: identidad de Hacienda solo si tiene cédula (cliente archivado); archivado y reportado
     function requesterTags(flags) {
-        const identity = flags.identity || 'unverified';
-        const tags = [makeTag(IDENTITY_LABELS[identity] || IDENTITY_LABELS.unverified, `tag-identity-${identity}`)];
+        const tags = [];
+        if (flags.identity) {
+            tags.push(makeTag(IDENTITY_LABELS[flags.identity] || IDENTITY_LABELS.unverified, `tag-identity-${flags.identity}`));
+        }
+        if (flags.archived) tags.push(makeTag('Cliente archivado', 'tag-archived'));
         if (flags.reported) tags.push(makeTag('Reportada', 'tag-reported'));
         return tags;
     }
@@ -4978,7 +4916,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // apiFetch ya mostró el error; la solicitud sigue pendiente
         }
         loadPendingRequests();
-        changesPage = 1;
         loadAccountChanges();
     });
 
@@ -5212,12 +5149,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadAdminPanel() {
         loadAdminHealth();
         loadAdminLogs();
-        changesPage = 1;
         loadAccountChanges();
         loadPendingRequests();
     }
 
-    // ----- Registro de cambios de cuentas (solo administrador) -----
+    // ----- Registro de cambios por persona (solo administrador, solo lectura) -----
     const CHANGE_ACTIONS = {
         password_changed: 'Contraseña cambiada',
         email_changed: 'Correo cambiado',
@@ -5234,6 +5170,8 @@ document.addEventListener('DOMContentLoaded', () => {
         microsoft_login_rejected: 'Ingreso con Microsoft rechazado',
         emergency_access: 'Acceso de emergencia',
         id_number_conflict: 'Cédula de otra cuenta',
+        login: 'Ingreso',
+        login_failed: 'Intento de ingreso fallido',
         login_locked: 'Bloqueo por intentos',
         password_reset: 'Contraseña restablecida',
         access_reset_sent: 'Código de acceso enviado',
@@ -5248,9 +5186,15 @@ document.addEventListener('DOMContentLoaded', () => {
         availability_changed: 'Disponibilidad cambiada',
         availability_period_added: 'Vacaciones o ausencia registrada',
         availability_period_removed: 'Vacaciones o ausencia quitada',
+        schedule_changed: 'Horario cambiado',
+        report_created: 'Cuenta reportada',
+        report_confirmed: 'Reporte confirmado',
+        report_dismissed: 'Reporte descartado',
         server_account_deactivated: 'Cuenta desactivada',
         server_account_activated: 'Cuenta activada',
         server_role_changed: 'Rol cambiado',
+        server_account_deleted: 'Cuenta borrada',
+        server_account_archived: 'Cuenta archivada',
         overdue_report_downloaded: 'PDF de reporte de vencimiento descargado',
         attachment_uploaded: 'Adjunto subido',
         attachment_downloaded: 'Adjunto descargado',
@@ -5261,26 +5205,23 @@ document.addEventListener('DOMContentLoaded', () => {
         ticket_linked: 'Tickets relacionados',
         ticket_link_undone: 'Relación separada',
         incident_marked: 'Posible incidente',
-        conversation_viewed: 'Ver conversación'
+        conversation_viewed: 'Ver conversación',
+        server_admin_created: 'Administrador creado',
+        server_password_reset: 'Contraseña restablecida desde el servidor',
+        department_created: 'Departamento creado',
+        department_changed: 'Departamento cambiado',
+        department_profile_changed: 'Ficha de departamento cambiada',
+        departments_imported: 'Organigrama importado',
+        placement_changed: 'Departamento asignado',
+        setting_changed: 'Interruptor de activación'
     };
-    const changesAccount = document.getElementById('changesAccount');
-    const changesAction = document.getElementById('changesAction');
     const changesList = document.getElementById('changesList');
     const changesEmpty = document.getElementById('changesEmpty');
-    const changesPrev = document.getElementById('changesPrev');
-    const changesNext = document.getElementById('changesNext');
-    const changesPageLabel = document.getElementById('changesPage');
-    let changesPage = 1;
-    let changesPages = 1;
-    let changesSearchTimer = null;
+    const convAccessList = document.getElementById('convAccessList');
+    const convAccessEmpty = document.getElementById('convAccessEmpty');
+    const convAccessMore = document.getElementById('convAccessMore');
+    let convAccessPage = 1;
     let changesSeq = 0;
-
-    Object.entries(CHANGE_ACTIONS).forEach(([value, label]) => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        changesAction.appendChild(option);
-    });
 
     function changeLine(labelText, value) {
         const line = document.createElement('span');
@@ -5313,72 +5254,367 @@ document.addEventListener('DOMContentLoaded', () => {
         return li;
     }
 
+    // Pantalla principal: accesos a conversaciones (con "Ver más") y los últimos 20 cambios
     async function loadAccountChanges() {
         const seq = ++changesSeq;
-        const params = new URLSearchParams({ page: String(changesPage) });
-        if (changesAccount.value.trim()) params.set('account', changesAccount.value.trim());
-        if (changesAction.value) params.set('action', changesAction.value);
-        let data;
+        convAccessPage = 1;
+        let recent;
+        let access;
         try {
-            data = await apiFetch(`/admin/account-changes?${params.toString()}`);
+            [recent, access] = await Promise.all([
+                apiFetch('/admin/account-changes?page=1&exclude_access=true'),
+                apiFetch('/admin/account-changes?page=1&action=conversation_viewed'),
+            ]);
         } catch (err) {
             return; // apiFetch ya mostró el error
         }
         if (seq !== changesSeq) return;
-        changesPage = data.page;
-        changesPages = data.pages;
-        changesList.replaceChildren(...data.items.map(renderChange));
-        changesEmpty.hidden = data.items.length > 0;
-        changesPageLabel.textContent = `Página ${data.page} de ${data.pages}`;
-        changesPrev.disabled = data.page <= 1;
-        changesNext.disabled = data.page >= data.pages;
+        changesList.replaceChildren(...recent.items.map(renderChange));
+        changesEmpty.hidden = recent.items.length > 0;
+        convAccessList.replaceChildren(...access.items.map(renderChange));
+        convAccessEmpty.hidden = access.items.length > 0;
+        convAccessMore.hidden = access.page >= access.pages;
     }
 
-    changesAccount.addEventListener('input', () => {
-        clearTimeout(changesSearchTimer);
-        changesSearchTimer = setTimeout(() => {
-            changesPage = 1;
-            loadAccountChanges();
-        }, 300);
+    convAccessMore.addEventListener('click', async () => {
+        convAccessMore.disabled = true;
+        try {
+            const data = await apiFetch(`/admin/account-changes?page=${convAccessPage + 1}&action=conversation_viewed`);
+            convAccessPage = data.page;
+            convAccessList.append(...data.items.map(renderChange));
+            convAccessMore.hidden = data.page >= data.pages;
+        } catch (err) {
+            // apiFetch ya mostró el error
+        } finally {
+            convAccessMore.disabled = false;
+        }
     });
 
-    // Filtros rápidos: la misma acción que el selector
-    const changesQuick = document.getElementById('changesQuick');
+    // Buscador de personas con sugerencias (combobox)
+    const peopleHome = document.getElementById('peopleHome');
+    const peopleSearch = document.getElementById('peopleSearch');
+    const peopleSuggestions = document.getElementById('peopleSuggestions');
+    let peopleTimer = null;
+    let peopleSeq = 0;
+    let peopleActive = -1;
 
-    function renderChangesQuick() {
-        changesQuick.querySelectorAll('.aa-quick-btn').forEach(button => {
-            button.setAttribute('aria-pressed', button.dataset.action === changesAction.value ? 'true' : 'false');
-        });
+    function closePeopleSuggestions() {
+        peopleSuggestions.hidden = true;
+        peopleSuggestions.replaceChildren();
+        peopleSearch.setAttribute('aria-expanded', 'false');
+        peopleSearch.removeAttribute('aria-activedescendant');
+        peopleActive = -1;
     }
 
-    changesQuick.addEventListener('click', (e) => {
+    function setPeopleActive(index) {
+        const options = [...peopleSuggestions.querySelectorAll('[role="option"]')];
+        if (!options.length) return;
+        peopleActive = (index + options.length) % options.length;
+        options.forEach((option, i) => option.setAttribute('aria-selected', i === peopleActive ? 'true' : 'false'));
+        peopleSearch.setAttribute('aria-activedescendant', options[peopleActive].id);
+        options[peopleActive].scrollIntoView({ block: 'nearest' });
+    }
+
+    async function loadPeopleSuggestions() {
+        const query = peopleSearch.value.trim();
+        if (query.length < 2) {
+            closePeopleSuggestions();
+            return;
+        }
+        const seq = ++peopleSeq;
+        let hits;
+        try {
+            hits = await apiFetch(`/admin/people?query=${encodeURIComponent(query)}`);
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        if (seq !== peopleSeq) return;
+        peopleActive = -1;
+        peopleSearch.removeAttribute('aria-activedescendant');
+        if (!hits.length) {
+            const empty = makeEl('li', 'people-suggestion-empty', 'Nadie coincide con esa búsqueda.');
+            empty.setAttribute('role', 'presentation');
+            peopleSuggestions.replaceChildren(empty);
+        } else {
+            peopleSuggestions.replaceChildren(...hits.map((hit, index) => {
+                const li = makeEl('li', 'people-suggestion');
+                li.id = `peopleOption-${hit.id}`;
+                li.setAttribute('role', 'option');
+                li.setAttribute('aria-selected', 'false');
+                li.dataset.personId = hit.id;
+                li.append(
+                    makeEl('span', 'people-suggestion-name', hit.name),
+                    makeEl('span', 'people-suggestion-meta', `${ACCOUNT_TYPE_LABELS[hit.role] || hit.role} · ${hit.email}`),
+                );
+                return li;
+            }));
+        }
+        peopleSuggestions.hidden = false;
+        peopleSearch.setAttribute('aria-expanded', 'true');
+    }
+
+    function openPersonFromSuggestion(option) {
+        if (!option) return;
+        const id = option.dataset.personId;
+        closePeopleSuggestions();
+        peopleSearch.value = '';
+        goRoute(`admin/registro/persona/${id}`);
+    }
+
+    peopleSearch.addEventListener('input', () => {
+        clearTimeout(peopleTimer);
+        peopleTimer = setTimeout(loadPeopleSuggestions, 250);
+    });
+
+    peopleSearch.addEventListener('keydown', (e) => {
+        const open = !peopleSuggestions.hidden;
+        if (e.key === 'ArrowDown' && open) {
+            e.preventDefault();
+            setPeopleActive(peopleActive + 1);
+        } else if (e.key === 'ArrowUp' && open) {
+            e.preventDefault();
+            setPeopleActive(peopleActive - 1);
+        } else if (e.key === 'Enter' && open) {
+            const options = peopleSuggestions.querySelectorAll('[role="option"]');
+            const option = options[peopleActive >= 0 ? peopleActive : 0];
+            if (option) {
+                e.preventDefault();
+                openPersonFromSuggestion(option);
+            }
+        } else if (e.key === 'Escape' && open) {
+            e.preventDefault();
+            closePeopleSuggestions();
+        }
+    });
+
+    // mousedown: elegir antes de que el campo pierda el foco y cierre la lista
+    peopleSuggestions.addEventListener('mousedown', (e) => {
+        const option = e.target.closest('[role="option"]');
+        if (!option) return;
+        e.preventDefault();
+        openPersonFromSuggestion(option);
+    });
+
+    peopleSearch.addEventListener('blur', closePeopleSuggestions);
+
+    // ----- Ficha de una persona -----
+    const personView = document.getElementById('personView');
+    const personGroups = document.getElementById('personGroups');
+    const personRange = document.getElementById('personRange');
+    const personDates = document.getElementById('personDates');
+    const personFrom = document.getElementById('personFrom');
+    const personTo = document.getElementById('personTo');
+    const personTicket = document.getElementById('personTicket');
+    const personTicketField = document.getElementById('personTicketField');
+    const personTimeline = document.getElementById('personTimeline');
+    const personEmpty = document.getElementById('personEmpty');
+    const personMore = document.getElementById('personMore');
+    const PERSON_GROUPS = {
+        staff: [['', 'Todo'], ['access', 'Acceso'], ['tickets', 'Tickets'], ['drafts', 'Borradores'], ['shifts', 'Turnos'], ['account', 'Cuenta']],
+        client: [['', 'Todo'], ['access', 'Acceso'], ['data', 'Datos'], ['reports', 'Reportes'], ['status', 'Estado']],
+    };
+    const PERSON_STATES = { active: 'Activa', locked: 'Bloqueada', inactive: 'Desactivada' };
+    const PERSON_STATS = [
+        ['assigned', 'Asignados'], ['resolved', 'Resueltos'], ['reassigned_received', 'Reasignados recibidos'],
+        ['reassigned_given', 'Reasignados dados'], ['overdue', 'Vencidos'], ['drafts_confirmed', 'Borradores confirmados'],
+        ['drafts_discarded', 'Borradores descartados'], ['logins', 'Ingresos'],
+    ];
+    let personId = null;
+    let personCrumb = '';
+    let personIsClient = false;
+    let personGroup = '';
+    let personCursor = null;
+    let personSeq = 0;
+    let personTicketTimer = null;
+
+    function localDateString(date) {
+        const pad = n => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function personParams(cursor) {
+        const params = new URLSearchParams();
+        if (personGroup) params.set('types', personGroup);
+        if (personRange.value === 'custom') {
+            if (personFrom.value) params.set('from', personFrom.value);
+            if (personTo.value) params.set('to', personTo.value);
+        } else {
+            const days = Number(personRange.value);
+            const from = new Date();
+            from.setDate(from.getDate() - days);
+            params.set('from', localDateString(from));
+            params.set('to', localDateString(new Date()));
+        }
+        const ticket = personTicket.value.trim();
+        if (!personIsClient && /^\d+$/.test(ticket)) params.set('ticket', ticket);
+        if (cursor) params.set('cursor', cursor);
+        return params;
+    }
+
+    function renderPersonGroups() {
+        const groups = PERSON_GROUPS[personIsClient ? 'client' : 'staff'];
+        personGroups.replaceChildren(...groups.map(([value, label]) => {
+            const button = makeEl('button', 'aa-quick-btn', label);
+            button.type = 'button';
+            button.dataset.group = value;
+            button.setAttribute('aria-pressed', value === personGroup ? 'true' : 'false');
+            return button;
+        }));
+    }
+
+    function personFact(term, value) {
+        const wrap = makeEl('div', 'person-fact');
+        wrap.append(makeEl('dt', '', term), makeEl('dd', '', value));
+        return wrap;
+    }
+
+    function renderPersonHead(person) {
+        document.getElementById('personName').textContent = person.name;
+        document.getElementById('personMeta').textContent = `${ACCOUNT_TYPE_LABELS[person.role] || person.role} · ${person.email}`;
+        const facts = [personFact('Cuenta', PERSON_STATES[person.state] || person.state)];
+        if (person.role === 'requester') {
+            facts.push(personFact('Teléfono', person.phone || '—'));
+            facts.push(personFact('Verificación con Hacienda', IDENTITY_LABELS[person.identity] || IDENTITY_LABELS.unverified));
+            if (person.reported) facts.push(personFact('Etiqueta', 'Reportada'));
+        } else {
+            facts.push(personFact('Turno hoy', person.schedule_today
+                ? `${person.schedule_today}${person.on_shift ? ' · en turno' : ''}` : 'Sin turno hoy'));
+            facts.push(personFact('Disponibilidad', AVAILABILITY_LABELS[person.availability] || '—'));
+            facts.push(personFact('Último acceso', person.last_access ? formatDateTime(person.last_access) : 'Sin registro'));
+            facts.push(personFact('Microsoft', person.microsoft ? 'Entra con Microsoft' : 'No enlazada'));
+        }
+        document.getElementById('personFacts').replaceChildren(...facts);
+    }
+
+    function renderPersonSummary(summary) {
+        const box = document.getElementById('personSummary');
+        box.hidden = !summary;
+        if (!summary) return;
+        document.getElementById('personStats').replaceChildren(...PERSON_STATS.map(([key, label]) => {
+            const stat = makeEl('div', 'ui-stat person-stat');
+            stat.append(makeEl('span', 'ui-stat-label', label), makeEl('span', 'ui-stat-value ui-num', String(summary[key])));
+            return stat;
+        }));
+    }
+
+    function renderPersonItem(item) {
+        const li = makeEl('li', `person-event is-${item.group}`);
+        const when = makeEl('time', 'person-event-time', formatDateTime(item.at));
+        when.dateTime = item.at;
+        const group = PERSON_GROUPS[personIsClient ? 'client' : 'staff'].find(([value]) => value === item.group);
+        li.append(when, makeEl('span', 'ui-tag person-event-group', group ? group[1] : item.group), makeEl('span', 'person-event-text', item.text));
+        return li;
+    }
+
+    async function loadPersonActivity(append = false) {
+        if (personId === null) return;
+        const seq = ++personSeq;
+        const params = personParams(append ? personCursor : null);
+        let data;
+        personMore.disabled = true;
+        try {
+            data = await apiFetch(`/admin/people/${personId}/activity?${params.toString()}`, { silent: true });
+        } catch (err) {
+            personMore.disabled = false;
+            if (seq !== personSeq) return;
+            if (!append && err.status === 404) {
+                // Persona inexistente o administrador: de vuelta a la vista principal, con aviso
+                history.replaceState(null, '', '#/admin/registro');
+                closePerson();
+                renderPageHead();
+                setDocumentTitle(ADMIN_SECTION_TITLES.changes);
+                showError('Esa persona no existe o no tiene ficha en el registro.');
+            } else if (err.message !== 'Unauthorized') {
+                showError(err.message || 'No se pudo cargar la ficha');
+            }
+            return;
+        }
+        if (seq !== personSeq) return;
+        personMore.disabled = false;
+        if (!append) {
+            // Cliente: otros grupos y sin filtro por ticket (su ficha nunca trae tickets)
+            const client = data.person.role === 'requester';
+            if (client !== personIsClient) {
+                personIsClient = client;
+                personTicketField.hidden = client;
+                renderPersonGroups();
+            }
+            renderPersonHead(data.person);
+            personCrumb = data.person.name;
+            renderPageHead();
+            setDocumentTitle(data.person.name);
+            renderPersonSummary(data.summary);
+            personTimeline.replaceChildren();
+        }
+        personTimeline.append(...data.items.map(renderPersonItem));
+        personEmpty.hidden = personTimeline.children.length > 0;
+        personCursor = data.next_cursor;
+        personMore.hidden = !personCursor;
+    }
+
+    function openPerson(id) {
+        personId = id;
+        personCrumb = '';
+        personGroup = '';
+        personCursor = null;
+        personTicket.value = '';
+        personRange.value = '30';
+        personDates.hidden = true;
+        peopleHome.hidden = true;
+        personView.hidden = false;
+        personTimeline.replaceChildren();
+        personEmpty.hidden = true;
+        personMore.hidden = true;
+        document.getElementById('personName').textContent = '';
+        document.getElementById('personMeta').textContent = '';
+        document.getElementById('personFacts').replaceChildren();
+        document.getElementById('personSummary').hidden = true;
+        // El tipo de persona llega con la ficha; mientras tanto, los filtros del personal
+        personIsClient = false;
+        personTicketField.hidden = false;
+        renderPersonGroups();
+        // Pantalla aparte: empieza arriba
+        window.scrollTo(0, 0);
+        loadPersonActivity();
+    }
+
+    function closePerson() {
+        personId = null;
+        personCrumb = '';
+        personSeq++;
+        personView.hidden = true;
+        peopleHome.hidden = false;
+    }
+
+    personGroups.addEventListener('click', (e) => {
         const button = e.target.closest('.aa-quick-btn');
         if (!button) return;
-        changesAction.value = button.dataset.action;
-        renderChangesQuick();
-        changesPage = 1;
-        loadAccountChanges();
+        personGroup = button.dataset.group;
+        renderPersonGroups();
+        loadPersonActivity();
     });
 
-    changesAction.addEventListener('change', () => {
-        renderChangesQuick();
-        changesPage = 1;
-        loadAccountChanges();
+    personRange.addEventListener('change', () => {
+        personDates.hidden = personRange.value !== 'custom';
+        if (personRange.value !== 'custom') loadPersonActivity();
     });
 
-    changesPrev.addEventListener('click', () => {
-        if (changesPage > 1) {
-            changesPage -= 1;
-            loadAccountChanges();
+    [personFrom, personTo].forEach(input => input.addEventListener('change', () => {
+        if (personFrom.value && personTo.value && personFrom.value > personTo.value) {
+            showError('La fecha "Desde" no puede ser posterior a "Hasta".');
+            return;
         }
+        loadPersonActivity();
+    }));
+
+    personTicket.addEventListener('input', () => {
+        clearTimeout(personTicketTimer);
+        personTicketTimer = setTimeout(() => loadPersonActivity(), 400);
     });
 
-    changesNext.addEventListener('click', () => {
-        if (changesPage < changesPages) {
-            changesPage += 1;
-            loadAccountChanges();
-        }
-    });
+    personMore.addEventListener('click', () => loadPersonActivity(true));
+
+    document.getElementById('personBack').addEventListener('click', () => goRoute('admin/registro'));
 
     refreshLogsBtn.addEventListener('click', loadAdminLogs);
 
@@ -5587,6 +5823,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (openNewTicket) {
         openNewTicket.addEventListener('click', async () => {
             hideError();
+            // Tickets por departamento: el personal usa el formulario de quien reporta (diálogo)
+            if (staffCreatesTickets()) {
+                openStaffTicketDialog();
+                return;
+            }
             exitTicketPage();
             setSideNavActive(null);
             // Ruta propia: Atrás vuelve a la sección de donde vino
@@ -5596,16 +5837,13 @@ document.addEventListener('DOMContentLoaded', () => {
             resetRequesterField();
             const canChooseRequester = currentUser && OPERATION_ROLES.includes(currentUser.role);
             requesterGroup.hidden = !canChooseRequester;
-            const portal = isRequesterPortal();
-            document.getElementById('newTicketTitle').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
-            document.getElementById('newTicketCrumb').textContent = portal ? 'Nueva solicitud' : 'Nuevo ticket';
-            document.getElementById('newTicketCrumbBase').textContent = portal ? 'Mis solicitudes' : 'Tickets';
-            document.getElementById('newTicketBack').textContent = portal ? '← Volver a mis solicitudes' : '← Volver a Tickets';
-            document.getElementById('newTicketSubmit').textContent = portal ? 'Enviar solicitud' : 'Crear ticket';
-            document.getElementById('newTicketIntro').textContent = portal
-                ? 'Cuéntenos qué pasa. Le avisaremos por correo cada vez que haya novedades.'
-                : 'Para registrar un caso que llegó por teléfono o en persona.';
-            setDocumentTitle(portal ? 'Nueva solicitud' : 'Nuevo ticket');
+            document.getElementById('newTicketTitle').textContent = 'Nuevo ticket';
+            document.getElementById('newTicketCrumb').textContent = 'Nuevo ticket';
+            document.getElementById('newTicketCrumbBase').textContent = 'Tickets';
+            document.getElementById('newTicketBack').textContent = '← Volver a Tickets';
+            document.getElementById('newTicketSubmit').textContent = 'Crear ticket';
+            document.getElementById('newTicketIntro').textContent = 'Para registrar un caso que llegó por teléfono o en persona.';
+            setDocumentTitle('Nuevo ticket');
             if (currentUser) {
                 document.getElementById('contactName').value = currentUser.name;
                 document.getElementById('contactEmail').value = currentUser.email;
@@ -5617,6 +5855,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const usersList = document.getElementById('usersList');
+
+    // Invitaciones › Usuarios existentes: el personal ya registrado, filtrado por rol, nombre o correo
+    const usersRoleFilter = document.getElementById('usersRoleFilter');
+    const usersSearch = document.getElementById('usersSearch');
+    const usersEmpty = document.getElementById('usersEmpty');
+    let usersSearchTimer = null;
+    let usersSeq = 0;
+
+    async function loadExistingUsers() {
+        if (!usersList || !currentUser || !['coordinator', 'admin'].includes(currentUser.role)) return;
+        const params = new URLSearchParams({ role: usersRoleFilter.value || 'staff' });
+        const q = usersSearch.value.trim();
+        if (q) params.set('q', q);
+        const seq = ++usersSeq;
+        let users;
+        try {
+            users = await apiFetch(`/directory?${params}`, { silent: true });
+        } catch (err) {
+            // apiFetch ya armó el mensaje del servidor con getErrorMessage
+            if (seq === usersSeq) showError(err.message || 'No se pudo cargar la lista de usuarios');
+            return;
+        }
+        // Una respuesta vieja no pisa la del último filtro
+        if (seq !== usersSeq) return;
+        usersList.replaceChildren();
+        users.forEach(user => {
+            const li = document.createElement('li');
+            li.className = 'users-list-item';
+            li.textContent = `${user.name || 'Sin nombre'} (${user.email}) — ${ROLE_MAP[user.role] || user.role}`
+                + (user.is_active === false ? ' · inactivo' : '');
+            usersList.appendChild(li);
+        });
+        usersEmpty.hidden = users.length > 0;
+    }
+
+    if (usersRoleFilter) usersRoleFilter.addEventListener('change', loadExistingUsers);
+    if (usersSearch) {
+        usersSearch.addEventListener('input', () => {
+            clearTimeout(usersSearchTimer);
+            usersSearchTimer = setTimeout(loadExistingUsers, 300);
+        });
+    }
 
     async function loadUsers() {
         userMap = {};
@@ -5631,14 +5911,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // El técnico recibe solo nombre y rol del personal: la lista con correos es para quien gestiona cuentas
         const showList = currentUser.role === 'coordinator' || currentUser.role === 'admin';
 
+        if (usersList && showList) loadExistingUsers();
+
         users.forEach(user => {
-            if (usersList && showList) {
-                const li = document.createElement('li');
-                li.className = 'users-list-item';
-                li.textContent = `${user.name} (${user.email}) — ${ROLE_MAP[user.role] || user.role}`;
-                usersList.appendChild(li);
-            }
-            
             userMap[user.id] = user.name;
             userRoleMap[user.id] = user.role || '';
             userAvailabilityMap[user.id] = user.availability || null;
@@ -5690,28 +5965,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (evContainer) {
                     renderEventsList(currentTicket, evContainer);
                 }
-            }
-            return;
-        }
-
-        const followBtn = e.target.closest('.follow-btn');
-        if (followBtn) {
-            const ticketId = selectedTicketId;
-            const following = followBtn.getAttribute('aria-pressed') === 'true';
-            followBtn.disabled = true;
-            try {
-                await apiFetch(`/tickets/${ticketId}/follow`, { method: following ? 'DELETE' : 'POST' });
-                // Si mientras tanto se abrió otro ticket, no tocar su botón
-                if (ticketId === selectedTicketId) {
-                    const hint = followBtn.parentElement.querySelector('.follow-hint');
-                    renderFollowButton(followBtn, hint, !following);
-                    if (currentTicket) currentTicket.following = !following;
-                }
-                showSuccess(following ? 'Ya no das seguimiento a este ticket' : 'Ahora das seguimiento a este ticket');
-            } catch (err) {
-                showError(err.message || 'No se pudo actualizar el seguimiento');
-            } finally {
-                followBtn.disabled = false;
             }
             return;
         }
@@ -5832,7 +6085,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----- Invitaciones del personal (admin: técnicos y coordinadores; coordinador: técnicos) -----
-    const INVITE_STATUS = { available: 'Disponible', expired: 'Vencida', used: 'Activada' };
+    const INVITE_STATUS = { available: 'Pendiente', expired: 'Vencida', used: 'Activada', registered: 'Ya registrado' };
+    // Solo las pendientes y las vencidas se reenvían (la vencida recibe un código nuevo)
+    const INVITE_RESENDABLE = ['available', 'expired'];
     const INVITE_ROLES = { technician: 'Técnico', coordinator: 'Coordinador' };
 
     function inviteField(labelText, input) {
@@ -5885,11 +6140,26 @@ document.addEventListener('DOMContentLoaded', () => {
             option.textContent = INVITE_ROLES[value];
             role.appendChild(option);
         });
+        // Departamento obligatorio (solo los que atienden tickets). Sin nivel: los niveles son departamentos
+        const department = document.createElement('select');
+        department.id = 'inviteDepartment';
+        department.required = true;
+        const noDepartments = makeEl('p', 'help-text invite-no-departments',
+            'Cree primero un departamento que atienda tickets (Administración › Departamentos).');
+        noDepartments.hidden = true;
+        loadOrgDepartments().then(() => {
+            departmentOptions(department, { servingOnly: true });
+            noDepartments.hidden = department.options.length > 1;
+        }).catch(() => {
+            // Sin la lista, el servidor igual exige el departamento al enviar
+        });
+
         const submit = document.createElement('button');
         submit.type = 'submit';
         submit.className = 'ui-btn ui-btn-primary';
         submit.textContent = 'Enviar invitación';
-        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role), submit);
+        form.append(inviteField('Correo', email), inviteField('Nombre completo', name), inviteField('Rol', role),
+            inviteField('Departamento', department), noDepartments, submit);
 
         // Cada sección es nueva: el listener se registra una sola vez por formulario
         form.addEventListener('submit', async (e) => {
@@ -5899,7 +6169,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await apiFetch('/staff-invitations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: email.value.trim(), name: name.value.trim(), role: role.value })
+                    body: JSON.stringify({
+                        email: email.value.trim(), name: name.value.trim(), role: role.value,
+                        department_id: Number(department.value) || null,
+                    })
                 });
                 form.reset();
                 if (data.email_sent) {
@@ -5922,7 +6195,7 @@ document.addEventListener('DOMContentLoaded', () => {
         table.className = 'invites-table ui-table';
         const head = document.createElement('thead');
         const headRow = document.createElement('tr');
-        ['Correo', 'Nombre', 'Rol', 'Vence', 'Estado', ''].forEach(text => {
+        ['Correo', 'Nombre', 'Rol', 'Departamento', 'Vence', 'Estado', ''].forEach(text => {
             const th = document.createElement('th');
             th.textContent = text;
             headRow.appendChild(th);
@@ -5966,14 +6239,15 @@ document.addEventListener('DOMContentLoaded', () => {
         tableBody.replaceChildren();
         invites.forEach(invite => {
             const row = document.createElement('tr');
-            [invite.email, invite.name, INVITE_ROLES[invite.role] || invite.role,
+            const placement = invite.department_name || '—';
+            [invite.email, invite.name, INVITE_ROLES[invite.role] || invite.role, placement,
                 formatDate(invite.expires_at), INVITE_STATUS[invite.status] || invite.status].forEach(text => {
                 const td = document.createElement('td');
                 td.textContent = text;
                 row.appendChild(td);
             });
             const actions = document.createElement('td');
-            if (invite.status !== 'used') {
+            if (INVITE_RESENDABLE.includes(invite.status)) {
                 const resend = document.createElement('button');
                 resend.type = 'button';
                 resend.className = 'ui-btn ui-btn-secondary ui-btn-sm';
@@ -5984,6 +6258,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(actions);
             tableBody.appendChild(row);
         });
+        labelTableCells(tableBody.closest('table'));
     }
 
     // ===== Mesa de servicio: menú lateral, contadores, buscador global y barra de estado =====
@@ -6056,7 +6331,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return [
                 { id: 'work', label: 'Mi trabajo', icon: 'tickets', sections: [
                     queueSection('mine_open', 'Mis tickets', 'mi-trabajo/tickets', {
-                        count: 'mine_open', aliases: ['mine_resolved_today', 'following'],
+                        // La pestaña Por vencer de aquí reemplaza la sección suelta que repetía lo mismo
+                        count: 'mine_open', aliases: ['mine_due_soon', 'mine_resolved_today'],
                         tabs: [
                             ['mine_open', 'Abiertos', 'mine_open', ''],
                             ['mine_due_soon', 'Por vencer', 'mine_due_soon', 'warn'],
@@ -6068,12 +6344,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             return `${head} · ordenados por vencimiento`;
                         },
                     }),
-                    draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
+                    // Con tickets por departamento los borradores los revisa el coordinador
+                    ...(currentUser.routing_enforced ? [] : [draftsSection('drafts', 'Mis borradores', 'mi-trabajo/borradores', 'all', {
                         count: 'drafts_pending', context: 'Correos que le asignaron. Al confirmar uno, el ticket queda a su cargo.',
-                    }),
-                    queueSection('mine_due_soon', 'Por vencer', 'mi-trabajo/por-vencer', {
-                        count: 'mine_due_soon', tone: 'warn', context: 'Sus tickets cerca del tiempo de respuesta',
-                    }),
+                    })]),
                     queueSection('overdue', 'Vencidos', 'mi-trabajo/vencidos', {
                         count: 'overdue', tone: 'alert', context: 'Sus tickets que pasaron el tiempo de respuesta',
                     }),
@@ -6083,6 +6357,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (role === 'admin') {
             return [
                 { id: 'admin', label: 'Administración', icon: 'accounts', sections: [
+                    // Portada del administrador: una fila por departamento que atiende tickets
+                    navSection('panel', 'Panel', 'admin/panel', () => showAdminSection('panel'), {
+                        context: 'Departamentos que atienden tickets y personal sin departamento',
+                    }),
                     navSection('accounts', 'Cuentas', 'admin/cuentas', () => openAccounts(), {
                         context: 'Personal y clientes · datos de contacto enmascarados',
                     }),
@@ -6096,16 +6374,56 @@ document.addEventListener('DOMContentLoaded', () => {
                     navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
                         count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
                     }),
+                    // Solo lectura: la lista y el ticket principal (sin datos de contacto)
+                    navSection('incidents', 'Incidentes', 'admin/incidentes', () => showListPage('incidents'), {
+                        title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla · solo lectura',
+                    }),
                     navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
                         context: 'Horarios de la semana, vacaciones y ausencias',
                     }),
-                    navSection('changes', 'Registro de cambios', 'admin/registro', () => showAdminSection('changes'), {
+                    navSection('drafts-unclassified', 'Por clasificar', 'admin/por-clasificar', () => showAdminSection('drafts-unclassified'), {
+                        count: 'drafts_unclassified', tone: 'warn', context: 'Correos que la IA no envió directo a un coordinador',
+                    }),
+                    navSection('precision', 'Precisión de la IA', 'admin/precision-ia', () => showAdminSection('precision'), {
+                        context: 'Correos directo y corregidos por departamento, y por qué fueron a «Por clasificar»',
+                    }),
+                    navSection('unclassified', 'Sin departamento', 'admin/sin-departamento', () => showAdminSection('unclassified'), {
+                        count: 'unclassified', tone: 'warn', context: 'Tickets abiertos que todavía no tienen departamento',
+                    }),
+                    navSection('departments', 'Departamentos', 'admin/departamentos', () => showAdminSection('departments'), {
+                        context: 'Organigrama y departamentos que atienden tickets',
+                    }),
+                    navSection('activation', 'Activación', 'admin/activacion', () => showAdminSection('activation'), {
+                        context: 'Tickets por departamento: lista de verificación y personal sin departamento',
+                    }),
+                    navSection('changes', 'Registro de cambios', 'admin/registro', () => {
+                        closePerson();
+                        showAdminSection('changes');
+                    }, {
                         context: 'Quién hizo qué y cuándo · los datos personales salen enmascarados',
                     }),
                     navSection('health', 'Estado del sistema', 'admin/estado', () => showAdminSection('health'), {
                         context: 'Servicios, copias de seguridad y registros del servidor',
                     }),
                 ] },
+                // Tickets por departamento encendido: el administrador ve y gestiona los tickets de todos
+                ...(currentUser.routing_enforced ? [{ id: 'admin-tickets', label: 'Tickets', icon: 'tickets', sections: [
+                    queueSection('open', 'Todos', 'tickets/todos', {
+                        title: 'Tickets de todos los departamentos', count: 'open', aliases: ['due_soon', 'resolved_today'],
+                        tabs: [
+                            ['open', 'Abiertos', 'open', ''],
+                            ['due_soon', 'Por vencer', 'due_soon', 'warn'],
+                            ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
+                        ],
+                        context: 'Abiertos · ordenados por vencimiento · filtre por departamento',
+                    }),
+                    queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
+                        count: 'unassigned', tone: 'warn', context: 'Tickets abiertos sin responsable',
+                    }),
+                    queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
+                        count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
+                    }),
+                ] }] : []),
             ];
         }
         return [
@@ -6135,17 +6453,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla: se atienden desde el ticket principal',
                 }),
                 // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
-                navSection('clients', 'Clientes', 'tickets/clientes', () => openAccounts('clients'), {
-                    aliases: ['accounts'], context: 'Fichas de los clientes, en solo lectura',
+                navSection('clients', 'Contactos', 'tickets/clientes', () => openAccounts('clients'), {
+                    aliases: ['accounts'], context: 'Quien reporta por correo y los clientes archivados, en solo lectura',
                 }),
             ] },
             { id: 'drafts', label: 'Borradores', icon: 'mail', sections: [
                 draftsSection('drafts', 'Todos', 'borradores/todos', 'all', {
                     title: 'Borradores de correo', count: 'drafts_pending',
-                    context: 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
-                }),
-                draftsSection('drafts_none', 'Sin revisor', 'borradores/sin-revisor', 'none', {
-                    title: 'Borradores sin revisor', count: 'drafts_unassigned', tone: 'warn', context: 'Llegaron sin nadie en turno: se asignan solos al entrar alguien, o puede repartirlos',
+                    context: currentUser.routing_enforced
+                        ? 'Correos de su departamento: al crear el ticket, usted elige el técnico'
+                        : 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
                 }),
             ] },
             { id: 'team', label: 'Equipo', icon: 'team', sections: [
@@ -6207,7 +6524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function homeRoute() {
-        return { technician: 'mi-trabajo/tickets', coordinator: 'inicio', admin: 'admin/cuentas' }[currentUser.role];
+        return { technician: 'mi-trabajo/tickets', coordinator: 'inicio', admin: 'admin/panel' }[currentUser.role];
     }
 
     function routePath() {
@@ -6222,6 +6539,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // "tickets/vencidos", "tickets/vencidos/176" o "tickets/vencidos/176/reporte". Desconocida: null
     function parseRoute(path) {
+        // Ficha de una persona en el Registro de cambios (solo administrador)
+        const person = path.match(/^(admin\/registro)\/persona\/(\d+)$/);
+        if (person) {
+            const section = allSections().find(s => s.route === person[1]);
+            return section ? { section, personId: Number(person[2]) } : null;
+        }
         const match = path.match(/^(.*?)(?:\/(\d+)(\/reporte)?)?$/);
         const section = allSections().find(s => s.route === match[1]);
         if (!section) return null;
@@ -6236,7 +6559,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function applyRoute() {
-        if (!currentUser || !isStaffShell() || profileRequired()) return;
+        if (!currentUser || !isStaffShell()) return;
         // Enlace de un correo (#ticket/N) con la sesión abierta: pasa a la ruta del ticket
         const linked = window.location.hash.match(/^#ticket\/(\d+)$/);
         if (linked) history.replaceState(null, '', `#/${ticketRoute(Number(linked[1]))}`);
@@ -6251,7 +6574,11 @@ document.addEventListener('DOMContentLoaded', () => {
             hideError();
             closeBellPanel();
             closeProfileMenu();
-            if (route.ticketId) {
+            if (route.personId) {
+                route.section.open();
+                setSideNavActive(route.section.id);
+                openPerson(route.personId);
+            } else if (route.ticketId) {
                 setSideNavActive(route.section.id);
                 if (route.report) openOverdueReport(route.ticketId);
                 else openTicketById(route.ticketId);
@@ -6276,8 +6603,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.addEventListener('popstate', applyRoute);
 
+    // Grupos del menú abiertos o cerrados por la persona; se recuerda en este navegador (por rol)
+    const NAV_OPEN_KEY = 'ticketera.navOpenModules';
+    let navOpenModules = null;
+
+    function loadNavOpenModules() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(`${NAV_OPEN_KEY}.${currentUser.role}`) || 'null');
+            navOpenModules = Array.isArray(saved) ? new Set(saved) : null;
+        } catch (err) {
+            navOpenModules = null;
+        }
+    }
+
+    function saveNavOpenModules() {
+        try {
+            localStorage.setItem(`${NAV_OPEN_KEY}.${currentUser.role}`, JSON.stringify([...navOpenModules]));
+        } catch (err) {
+            // Sin almacenamiento: queda así solo en esta visita
+        }
+    }
+
+    function applyNavOpenModules() {
+        sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
+            const sub = li.querySelector('.nav-sections');
+            if (!sub) return;
+            // Con un solo módulo (técnico) queda siempre abierto
+            const open = navModules.length === 1 || navOpenModules.has(li.dataset.module);
+            sub.hidden = !open;
+            li.querySelector('.nav-module').setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    }
+
     function renderSideNav() {
         navModules = navModulesFor(currentUser.role);
+        loadNavOpenModules();
         navItems = {};
         sideNavGroups.replaceChildren();
         const heading = makeEl('h2', 'nav-modules-title', 'Módulos');
@@ -6294,6 +6654,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (single) button.dataset.navId = module.sections[0].id;
             button.appendChild(navIcon(module.icon));
             button.appendChild(makeEl('span', 'nav-item-label', module.label));
+            // Nombre visible como tooltip cuando el menú está contraído
+            button.dataset.tooltip = module.label;
             li.appendChild(button);
             if (single) {
                 navItems[module.sections[0].id] = module.sections[0];
@@ -6358,19 +6720,32 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const module = section ? moduleOf(section) : null;
         sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
-            // Con un solo módulo (técnico) queda siempre abierto
-            const open = navModules.length === 1 || Boolean(module && li.dataset.module === module.id);
             li.querySelector('.nav-module').classList.toggle('is-active', Boolean(module && li.dataset.module === module.id));
-            const sub = li.querySelector('.nav-sections');
-            if (sub) {
-                sub.hidden = !open;
-                li.querySelector('.nav-module').setAttribute('aria-expanded', open ? 'true' : 'false');
-            }
         });
+        // Sin preferencia guardada, solo el grupo de la página abierta; al llegar a una página, su grupo se abre
+        // (sin cerrar los demás) para que se vea dónde está
+        if (navOpenModules === null) navOpenModules = new Set();
+        if (module && !navOpenModules.has(module.id)) {
+            navOpenModules.add(module.id);
+            saveNavOpenModules();
+        }
+        applyNavOpenModules();
         if (section) pushRoute(section.route);
         renderPageHead();
         renderQueueViews();
         renderMyWork();
+    }
+
+    // Solo puede haber un administrador activo; las bases anteriores a esa regla se corrigen a mano
+    function renderManyAdmins() {
+        const notice = document.getElementById('manyAdminsNotice');
+        const count = navCounts.active_admins;
+        const many = currentUser && currentUser.role === 'admin' && typeof count === 'number' && count > 1;
+        notice.hidden = !many;
+        if (many) {
+            notice.textContent = `Hay ${count} administradores activos y solo debe haber uno. `
+                + 'Corríjalo desde la terminal: python -m scripts.admin_tools list-admins y luego demote.';
+        }
     }
 
     function renderNavCounts() {
@@ -6381,29 +6756,23 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
         });
         renderNavShift();
+        renderManyAdmins();
         renderQueueViews();
         renderPageHead();
         renderMyWork();
         if (!homeView.hidden) renderHome();
     }
 
-    // Abajo del menú: el turno de hoy (técnico y coordinador) o el estado del sistema (administrador)
+    // Abajo del menú: el turno de hoy (técnico y coordinador)
     let lastSystemStatus = null;
 
     function renderNavShift() {
         const box = document.getElementById('navShift');
         const text = document.getElementById('navShiftText');
         if (!currentUser) return;
+        // El administrador no ve el estado del sistema aquí: está en Administración › Estado del sistema
         if (currentUser.role === 'admin') {
-            if (!lastSystemStatus) {
-                box.hidden = true;
-                return;
-            }
-            const off = [['email', 'correo'], ['ai_analysis', 'IA'], ['auto_assign', 'asignación automática']]
-                .filter(([key]) => !lastSystemStatus[key]).map(([, label]) => label);
-            box.hidden = false;
-            box.className = `nav-shift ${off.length ? 'is-warn' : 'is-on'}`;
-            text.textContent = off.length ? `Sistema: ${off.join(', ')} apagado` : 'Sistema: todo funciona';
+            box.hidden = true;
             return;
         }
         const shift = navCounts.shift;
@@ -6419,33 +6788,70 @@ document.addEventListener('DOMContentLoaded', () => {
     const pageActions = document.getElementById('pageActions');
     let currentViewName = null;
 
+    document.getElementById('pageCrumb').addEventListener('click', (e) => {
+        const link = e.target.closest('.page-crumb-link');
+        if (!link) return;
+        e.preventDefault();
+        goRoute(link.dataset.route);
+    });
+
+    // Altura de la cabecera fija: los encabezados de tabla se quedan justo debajo
+    if (window.ResizeObserver) {
+        new ResizeObserver(() => {
+            document.body.style.setProperty('--page-head-h', `${pageHead.hidden ? 0 : pageHead.offsetHeight}px`);
+        }).observe(pageHead);
+        // Igual con la barra del ticket: la columna derecha del detalle se queda debajo de ella
+        const ticketBarEl = document.getElementById('ticketBar');
+        new ResizeObserver(() => {
+            document.body.style.setProperty('--ticket-bar-h', `${ticketBarEl.hidden ? 0 : ticketBarEl.offsetHeight}px`);
+        }).observe(ticketBarEl);
+    }
+
     function renderPageHead() {
         if (!isStaffShell()) {
             pageHead.hidden = true;
             return;
         }
+        // Cada paso de la ruta lleva a su página: el módulo abre su primera sección
         const crumbs = [];
         let title = '';
         let context = '';
         const section = activeSection;
         if (section) {
             const module = moduleOf(section);
-            if (module && module.sections.length > 1) crumbs.push(module.label);
-            if (section.parent) crumbs.push(section.parent.label);
-            crumbs.push(section.label);
+            if (module && module.sections.length > 1) crumbs.push({ label: module.label, route: module.sections[0].route });
+            if (section.parent) crumbs.push({ label: section.parent.label, route: section.parent.route });
+            crumbs.push({ label: section.label });
+            // Ficha de una persona: "Registro de cambios" lleva de vuelta a la búsqueda
+            if (section.id === 'changes' && personId !== null) {
+                crumbs[crumbs.length - 1].route = section.route;
+                crumbs.push({ label: personCrumb || 'Ficha' });
+                title = personCrumb || 'Ficha de la persona';
+                context = '';
+            }
             title = typeof section.title === 'function' ? section.title() : (section.title || section.label);
             context = typeof section.context === 'function' ? section.context() : (section.context || '');
         } else if (currentViewName === 'tickets') {
             // Búsqueda o tickets de un cliente: sin sección del menú
-            crumbs.push('Tickets', queueTitle.textContent);
+            const ticketsModule = navModules.find(m => m.id === 'tickets');
+            crumbs.push({ label: 'Tickets', route: ticketsModule ? ticketsModule.sections[0].route : null }, { label: queueTitle.textContent });
             title = queueTitle.textContent;
         }
         // Nuevo ticket y el reporte de vencimiento tienen su propia barra
         pageHead.hidden = !crumbs.length || ['newTicket', 'overdueReport'].includes(currentViewName);
         const list = document.getElementById('pageCrumb');
         list.replaceChildren(...crumbs.map((crumb, index) => {
-            const li = makeEl('li', 'page-crumb-item', crumb);
-            if (index === crumbs.length - 1) li.setAttribute('aria-current', 'page');
+            const last = index === crumbs.length - 1;
+            const li = makeEl('li', 'page-crumb-item');
+            if (last || !crumb.route) {
+                li.textContent = crumb.label;
+                if (last) li.setAttribute('aria-current', 'page');
+            } else {
+                const link = makeEl('a', 'page-crumb-link', crumb.label);
+                link.href = `#/${crumb.route}`;
+                link.dataset.route = crumb.route;
+                li.appendChild(link);
+            }
             return li;
         }));
         document.getElementById('pageTitle').textContent = title;
@@ -6497,7 +6903,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderIncidentsPage(items) {
         listViewBody.replaceChildren();
-        listViewNote.textContent = 'Al resolver el ticket principal se resuelven también los relacionados, y cada cliente recibe el aviso.';
+        listViewNote.textContent = currentUser.role === 'admin'
+            ? 'Solo lectura: el coordinador los atiende desde el ticket principal.'
+            : 'Al resolver el ticket principal se resuelven también los relacionados, y cada cliente recibe el aviso.';
         if (!items.length) {
             listViewBody.appendChild(emptyState({
                 title: 'No hay posibles incidentes', text: 'Aparecen cuando varios clientes reportan lo mismo en poco tiempo.',
@@ -6512,7 +6920,7 @@ document.addEventListener('DOMContentLoaded', () => {
             button.dataset.ticketId = String(item.principal_id);
             button.appendChild(makeEl('span', 'ui-tag is-danger', 'Incidente'));
             const text = makeEl('span', 'list-row-text');
-            text.appendChild(makeEl('span', 'list-row-title', `${item.clients} clientes reportan «${item.title}»`));
+            text.appendChild(makeEl('span', 'list-row-title', `${item.clients} personas reportan «${item.title}»`));
             text.appendChild(makeEl('span', 'list-row-sub', `Principal #${item.principal_id}`));
             button.appendChild(text);
             button.appendChild(makeEl('span', 'list-row-go', 'Ver ›'));
@@ -6615,7 +7023,7 @@ document.addEventListener('DOMContentLoaded', () => {
     listViewBody.addEventListener('click', async (e) => {
         const incident = e.target.closest('.list-incident');
         if (incident) {
-            openTicketById(Number(incident.dataset.ticketId));
+            openTicketById(Number(incident.dataset.ticketId), { incident: true });
             return;
         }
         const edit = e.target.closest('.list-availability-edit');
@@ -6648,7 +7056,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const byLevels = lastSystemStatus && lastSystemStatus.auto_assign_mode === 'levels';
         document.getElementById('asideShiftLoad').textContent = shift
             ? `Carga actual: ${shift.load}${byLevels ? ' (suma de niveles)' : ''}` : '';
-        loadAsideDrafts();
+        // Con tickets por departamento el técnico ya no tiene borradores
+        document.getElementById('asideDraftsCard').hidden = !canSeeDrafts();
+        if (canSeeDrafts()) loadAsideDrafts();
     }
 
     async function loadAsideDrafts() {
@@ -6696,15 +7106,52 @@ document.addEventListener('DOMContentLoaded', () => {
     sideNavGroups.addEventListener('click', (e) => {
         const button = e.target.closest('.nav-item, .nav-module');
         if (!button) return;
-        // Un módulo abre su primera sección; una sección, la suya
         const module = button.classList.contains('nav-module')
             ? navModules.find(m => m.id === button.dataset.moduleId) : null;
+        // Un grupo con varias páginas se abre o se cierra sin cambiar de página. Con el menú contraído a íconos
+        // (las páginas no se ven) lleva a su primera página, como antes
+        const iconsOnly = document.body.classList.contains('nav-collapsed') && window.matchMedia('(min-width: 768px)').matches;
+        if (module && module.sections.length > 1 && navModules.length > 1 && !iconsOnly) {
+            if (navOpenModules.has(module.id)) navOpenModules.delete(module.id);
+            else navOpenModules.add(module.id);
+            saveNavOpenModules();
+            applyNavOpenModules();
+            return;
+        }
+        // Un módulo de una sola página (o contraído) abre su primera sección; una sección, la suya
         const section = module ? module.sections[0] : navItems[button.dataset.navId];
         if (!section) return;
         goRoute(section.route);
     });
 
     document.getElementById('navUser').addEventListener('click', () => goRoute(PROFILE_SECTION.route));
+
+    // ----- Menú contraíble a solo íconos; la preferencia queda en este navegador -----
+    const NAV_COLLAPSED_KEY = 'ticketera.navCollapsed';
+    const navCollapse = document.getElementById('navCollapse');
+
+    function applyNavCollapsed(collapsed) {
+        document.body.classList.toggle('nav-collapsed', collapsed);
+        navCollapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        navCollapse.querySelector('.nav-collapse-label').textContent = collapsed ? 'Expandir menú' : 'Contraer menú';
+        navCollapse.dataset.tooltip = 'Expandir menú';
+    }
+
+    try {
+        applyNavCollapsed(localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
+    } catch (err) {
+        applyNavCollapsed(false);
+    }
+
+    navCollapse.addEventListener('click', () => {
+        const collapsed = !document.body.classList.contains('nav-collapsed');
+        applyNavCollapsed(collapsed);
+        try {
+            localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? '1' : '0');
+        } catch (err) {
+            // Sin almacenamiento: el menú queda así solo en esta visita
+        }
+    });
 
     // ----- Perfil en la barra superior: Mi cuenta y Cerrar sesión -----
     const topProfile = document.getElementById('topProfile');
@@ -6788,14 +7235,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.visibilityState !== 'visible' || !authToken || !currentUser) return;
         if (!STAFF_SHELL_ROLES.includes(currentUser.role)) return;
         try {
-            const coordinator = OPERATION_ROLES.includes(currentUser.role);
-            const [counts, status, notices, unassignedDrafts] = await Promise.all([
+            const [counts, status, notices] = await Promise.all([
                 silentGet('/nav/counts'), silentGet('/system/status'), silentGet('/notifications/overdue'),
-                // Borradores › Sin revisor: el contador sale de la misma lista que ve el coordinador
-                coordinator ? silentGet('/drafts?assigned=none') : Promise.resolve(null),
             ]);
             if (counts) {
-                if (unassignedDrafts) counts.drafts_unassigned = unassignedDrafts.length;
                 navCounts = counts;
                 renderNavCounts();
             }
@@ -6830,9 +7273,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ----- Buscador global: #número abre el ticket; el texto busca tickets y, con permiso, clientes -----
-    async function openTicketById(ticketId) {
-        // El administrador no abre tickets directamente: primero el motivo de "Ver conversación"
-        const admin = currentUser && currentUser.role === 'admin';
+    async function openTicketById(ticketId, { incident = false } = {}) {
+        // El administrador no abre tickets directamente: primero el motivo de "Ver conversación".
+        // Excepción: el principal de un incidente, en solo lectura y sin datos de contacto (lo revisa el servidor)
+        const admin = currentUser && currentUser.role === 'admin' && !incident;
         // Abierto desde una ruta (Atrás, Adelante, enlace): no se agrega otra entrada al historial
         const fromRoute = routing;
         const reason = admin ? await askConversationReason(ticketId) : null;
@@ -6929,10 +7373,11 @@ document.addEventListener('DOMContentLoaded', () => {
         queueTitle.textContent = currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos';
         queueSearch = '';
         queuePageNum = 1;
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => { select.value = ''; });
         while (queueAssignee.options.length > 2) queueAssignee.remove(2);
-        // El técnico no crea tickets (igual que el botón de la barra superior)
-        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician';
+        while (queueDepartment.options.length > 2) queueDepartment.remove(2);
+        // El técnico no crea tickets (igual que el botón de la barra superior), salvo con tickets por departamento
+        document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician' && !staffCreatesTickets();
         renderSideNav();
         startNavPolling();
     }
@@ -6963,6 +7408,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const queueStatus = document.getElementById('queueStatus');
     const queueLevel = document.getElementById('queueLevel');
     const queueAssignee = document.getElementById('queueAssignee');
+    const queueDepartment = document.getElementById('queueDepartment');
     const queueSource = document.getElementById('queueSource');
     const queuePrev = document.getElementById('queuePrev');
     const queueNext = document.getElementById('queueNext');
@@ -6993,6 +7439,62 @@ document.addEventListener('DOMContentLoaded', () => {
         if (text !== undefined) node.textContent = text;
         return node;
     }
+
+    // En el celular las tablas se ven como tarjetas: cada celda muestra el nombre de su columna
+    function labelTableCells(table) {
+        if (!table) return;
+        const heads = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+        table.querySelectorAll('tbody tr').forEach(row => {
+            [...row.children].forEach((cell, index) => {
+                if (heads[index]) cell.dataset.label = heads[index];
+            });
+        });
+    }
+
+    // ----- Errores de validación en línea (personal): el mensaje va debajo del campo, no en la burbuja -----
+    function fieldErrorFor(field) {
+        const id = field.id ? `${field.id}-error` : '';
+        return id ? document.getElementById(id) : null;
+    }
+
+    function clearFieldError(field) {
+        const error = fieldErrorFor(field);
+        if (error) error.hidden = true;
+        field.removeAttribute('aria-invalid');
+    }
+
+    document.addEventListener('invalid', (e) => {
+        const field = e.target;
+        if (!isStaffShell() || !field.id || !(field instanceof HTMLElement)) return;
+        e.preventDefault();
+        let error = fieldErrorFor(field);
+        if (!error) {
+            error = makeEl('p', 'ui-field-error');
+            error.id = `${field.id}-error`;
+            error.setAttribute('aria-live', 'polite');
+            // Debajo del campo (o de su fila, si comparte línea con un botón)
+            const anchor = field.parentElement && field.parentElement.classList.contains('requester-row') ? field.parentElement : field;
+            anchor.after(error);
+            const described = (field.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+            field.setAttribute('aria-describedby', [...described, error.id].join(' '));
+        }
+        error.textContent = field.validationMessage;
+        error.hidden = false;
+        field.setAttribute('aria-invalid', 'true');
+        // El primer campo con error recibe el foco
+        const form = field.form;
+        if (form && !form.querySelector('[aria-invalid="true"]:focus')) {
+            const first = form.querySelector(':invalid');
+            if (first === field) field.focus();
+        }
+    }, true);
+
+    ['input', 'change'].forEach(type => document.addEventListener(type, (e) => {
+        const field = e.target;
+        if (field instanceof HTMLElement && field.getAttribute('aria-invalid') === 'true' && field.checkValidity && field.checkValidity()) {
+            clearFieldError(field);
+        }
+    }, true));
 
     function formatDuration(seconds) {
         const minutes = Math.max(0, Math.round(seconds / 60));
@@ -7029,6 +7531,8 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(userMap).forEach(userId => {
             const role = userRoleMap[userId];
             if (role !== 'technician' && role !== 'coordinator') return;
+            // El coordinador no filtra por otro coordinador (el servidor responde 403)
+            if (role === 'coordinator' && currentUser.role === 'coordinator' && Number(userId) !== currentUser.id) return;
             const opt = document.createElement('option');
             opt.value = userId;
             opt.textContent = userMap[userId];
@@ -7105,6 +7609,16 @@ document.addEventListener('DOMContentLoaded', () => {
         loadQueue();
     });
 
+    async function fillDepartmentFilter() {
+        try {
+            await loadOrgDepartments();
+        } catch (err) {
+            return; // Sin la lista, la cola funciona igual sin este filtro
+        }
+        orgDepartments.filter(d => d.handles_tickets && d.active_path)
+            .forEach(d => queueDepartment.appendChild(staffOption(String(d.id), `Depto.: ${d.path}`, false)));
+    }
+
     function queueParams() {
         const params = new URLSearchParams({ view: queueView, page: String(queuePageNum) });
         if (queueStatus.value) params.set('status', queueStatus.value);
@@ -7114,23 +7628,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (queueAssignee.value && currentUser.role !== 'technician') params.set('assigned_to', queueAssignee.value);
         if (queueSearch) params.set('search', queueSearch);
         if (queueRequester) params.set('requester_id', String(queueRequester.id));
+        if (queueDepartment.value && !queueDepartment.hidden) params.set('department_id', queueDepartment.value);
         return params;
     }
 
     function queueFiltersSet() {
-        return [queueStatus, queueLevel, queueSource].some(select => select.value)
+        return [queueStatus, queueLevel, queueSource, queueDepartment].some(select => select.value)
             || (queueAssignee.value && currentUser.role !== 'technician');
     }
 
     // Filtros como chips: punteados sin valor, azules con valor
     function renderQueueChips() {
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => {
             select.classList.toggle('is-set', Boolean(select.value));
         });
     }
 
     function clearQueueFilters() {
-        [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => { select.value = ''; });
+        [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => { select.value = ''; });
         renderQueueChips();
         queuePageNum = 1;
         loadQueue();
@@ -7144,6 +7659,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isStaffShell()) return;
         queueAssignee.hidden = currentUser.role === 'technician';
         if (queueAssignee.options.length <= 2) fillAssigneeFilter();
+        // Filtro por departamento: el administrador con tickets por departamento
+        const byDepartment = currentUser.role === 'admin' && Boolean(currentUser.routing_enforced);
+        queueDepartment.hidden = !byDepartment;
+        if (byDepartment && queueDepartment.options.length <= 2) await fillDepartmentFilter();
         renderQueueChips();
         const seq = ++queueSeq;
         if (!quiet) {
@@ -7234,7 +7753,6 @@ document.addEventListener('DOMContentLoaded', () => {
             resolved_today: ['Todavía no se resolvió ningún ticket hoy', 'Los que se resuelvan hoy aparecerán aquí.'],
             mine_open: ['No tiene tickets abiertos asignados', 'Puede tomar uno de los que están sin asignar.'],
             mine_due_soon: ['Ninguno de sus tickets está por vencer', 'Sus tickets abiertos están a tiempo.'],
-            following: ['No sigue ningún ticket abierto', 'Use "Seguir" en un ticket para tenerlo a mano aquí.'],
             mine_resolved_today: ['Todavía no resolvió tickets hoy', 'Los que resuelva hoy aparecerán aquí.'],
             cancelled: ['No hay tickets cancelados', 'Los tickets que se cancelen aparecen aquí y se pueden reabrir.'],
         };
@@ -7251,11 +7769,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return currentUser.role === 'technician' ? 'Mis abiertos' : 'Todos abiertos';
     }
 
-    // Nivel con color: 1 gris, 2 azul, 3 azul marino, 4 rojo
+    // Nivel con las palabras del formulario de creación (no "N1…N4": esos son departamentos) y su color:
+    // 1 gris, 2 azul, 3 azul marino, 4 rojo
+    const LEVEL_LABELS = { 0: 'No es soporte', 1: 'Baja', 2: 'Media', 3: 'Alta', 4: 'Urgente' };
+
     function levelTag(level) {
-        if (level === null || level === undefined) return makeEl('span', 'ui-tag is-mono', '—');
+        if (level === null || level === undefined) return makeEl('span', 'ui-tag', '—');
         const tone = { 2: ' is-info', 3: ' is-navy', 4: ' is-danger' }[level] || '';
-        const tag = makeEl('span', `ui-tag is-mono${tone}`, `N${level}`);
+        const tag = makeEl('span', `ui-tag${tone}`, LEVEL_LABELS[level] || `Nivel ${level}`);
         tag.title = AI_LEVEL_NAMES[level] ? `Nivel ${level} · ${AI_LEVEL_NAMES[level]}` : `Nivel ${level}`;
         return tag;
     }
@@ -7322,6 +7843,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (item.reported) meta.appendChild(makeEl('span', 'queue-flag-reported', 'Reportada'));
             if (item.auto_assigned) meta.appendChild(makeEl('span', 'queue-flag-auto', 'asignado automáticamente'));
             if (item.incident) meta.appendChild(makeEl('span', 'ui-tag is-danger queue-flag-incident', 'Incidente'));
+            // Tickets por departamento: el administrador ve de qué departamento es cada uno
+            if (currentUser.role === 'admin' && currentUser.routing_enforced) {
+                meta.appendChild(makeEl('span', 'queue-flag-dept', item.department_name || 'Sin departamento'));
+            }
             subject.appendChild(meta);
 
             const level = queueCell('Nivel', 'col-level');
@@ -7489,7 +8014,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ['tickets/sin-asignar', 'Sin asignar', value('unassigned'), homeOnShift === 0 ? 'nadie en turno' : '', 'warn'],
             ['tickets/vencidos', 'Vencidos', overdue,
              overdue && homeOverdueNoCause ? `${homeOverdueNoCause} sin causa registrada` : '', 'alert'],
-            ['borradores/sin-revisor', 'Borradores sin revisor', value('drafts_unassigned'), '', 'warn'],
+            // Una sola lista de borradores (los que llegaron sin revisor salen ahí con su etiqueta)
+            ['borradores/todos', 'Borradores pendientes', value('drafts_pending'), '', 'warn'],
         ];
     }
 
@@ -7582,7 +8108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         homeIncidents.hidden = !items.length;
         items.forEach(item => {
             const row = makeEl('div', 'ui-notice is-danger home-incident');
-            row.appendChild(makeEl('span', '', `Posible incidente: ${item.clients} clientes reportan «${item.title}»`));
+            row.appendChild(makeEl('span', '', `Posible incidente: ${item.clients} personas reportan «${item.title}»`));
             const open = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm home-incident-open', 'Ver');
             open.type = 'button';
             open.dataset.ticketId = String(item.principal_id);
@@ -7746,7 +8272,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         openQueueTicket(Number(row.dataset.id));
     });
-    [queueStatus, queueLevel, queueAssignee, queueSource].forEach(select => {
+    [queueStatus, queueLevel, queueAssignee, queueSource, queueDepartment].forEach(select => {
         select.addEventListener('change', () => {
             queuePageNum = 1;
             renderQueueChips();
@@ -7765,6 +8291,148 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ----- Panel de detalle -----
+    // ----- Tickets por departamento: departamento, quién reporta y solución en el detalle -----
+    function departmentControl(ticket, locked) {
+        const box = makeEl('span', 'route-field');
+        box.appendChild(makeEl('span', '', ticket.department_name || 'Sin departamento'));
+        if (ticket.routing_enforced && !locked && ticket.department_id) {
+            const transfer = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm route-change td-transfer', 'Transferir');
+            transfer.type = 'button';
+            box.appendChild(transfer);
+            // Escalar: la misma transferencia, con el siguiente nivel del departamento ya elegido
+            if (ticket.escalate_to) {
+                const escalate = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm route-change td-escalate', 'Escalar');
+                escalate.type = 'button';
+                escalate.title = `Escalar a ${ticket.escalate_to.path}`;
+                box.appendChild(escalate);
+            }
+        }
+        return box;
+    }
+
+    function reporterCard(reporter) {
+        const card = makeEl('section', 'ui-card td-card td-reporter');
+        card.appendChild(makeEl('h2', 'ui-kicker', 'Quién reportó'));
+        const list = makeEl('dl', 'td-props');
+        staffField(list, 'Nombre', reporter.name);
+        staffField(list, 'Canal', reporter.channel_label);
+        if (reporter.area_name) staffField(list, 'Área', reporter.area_name);
+        if (reporter.email) staffField(list, 'Correo', reporter.email);
+        if (reporter.phone) staffField(list, 'Teléfono o extensión', reporter.phone);
+        card.appendChild(list);
+        return card;
+    }
+
+    function solutionCard(solution) {
+        const card = makeEl('section', 'ui-card td-card td-solution');
+        card.id = 'ticketSolution';
+        card.appendChild(makeEl('h2', 'ui-kicker', 'Solución'));
+        card.appendChild(makeEl('p', 'td-solution-text', solution.text));
+        card.appendChild(makeEl('p', 'org-row-sub', `${solution.resolved_by_name} · ${formatDateTime(solution.resolved_at)}`));
+        return card;
+    }
+
+    // Transferir a otro departamento: departamento destino y motivo (mínimo 15 caracteres)
+    const transferDialog = document.getElementById('transferDialog');
+    const transferError = document.getElementById('transferError');
+
+    // escalate: {id, path} del siguiente nivel; el destino queda elegido y solo falta el motivo
+    async function openTransferDialog(ticket, escalate = null) {
+        let options;
+        try {
+            options = await apiFetch('/departments/options', { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        const select = document.getElementById('transferTarget');
+        select.replaceChildren(staffOption('', 'Seleccionar', true));
+        options.serving.filter(d => d.id !== ticket.department_id)
+            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, Boolean(escalate) && d.id === escalate.id)));
+        document.getElementById('transferDialogTitle').textContent = escalate
+            ? `Escalar a ${escalate.path}` : 'Transferir a otro departamento';
+        transferDialog.querySelector('button[type="submit"]').textContent = escalate ? 'Escalar' : 'Transferir';
+        document.getElementById('transferReason').value = '';
+        document.getElementById('transferTicket').textContent = `Ticket #${ticket.id} · ${ticket.department_name || ''}`;
+        transferError.hidden = true;
+        transferDialog.dataset.ticketId = String(ticket.id);
+        transferDialog.showModal();
+        (escalate ? document.getElementById('transferReason') : select).focus();
+    }
+
+    document.getElementById('transferCancel').addEventListener('click', () => transferDialog.close());
+    document.getElementById('transferForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const reason = document.getElementById('transferReason').value.trim();
+        if (reason.length < 15) {
+            transferError.textContent = 'El motivo debe tener al menos 15 caracteres';
+            transferError.hidden = false;
+            return;
+        }
+        let result;
+        try {
+            result = await apiFetch(`/tickets/${transferDialog.dataset.ticketId}/transfer`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ department_id: Number(document.getElementById('transferTarget').value) || 0, reason }),
+            });
+        } catch (err) {
+            transferError.textContent = err.message || 'No se pudo transferir';
+            transferError.hidden = false;
+            return;
+        }
+        transferDialog.close();
+        showSuccess(`Transferido a ${result.department_name}`);
+        if (result.still_visible) await reloadSelectedTicketAndList();
+        else exitTicketPage();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.td-transfer') && currentTicket) openTransferDialog(currentTicket);
+        else if (e.target.closest('.td-escalate') && currentTicket && currentTicket.escalate_to) {
+            openTransferDialog(currentTicket, currentTicket.escalate_to);
+        }
+    });
+
+    // Diálogo de la solución: devuelve el texto o null si se cancela
+    const solutionDialog = document.getElementById('solutionDialog');
+    const solutionText = document.getElementById('solutionText');
+    const solutionError = document.getElementById('solutionError');
+    let solutionDone = null;
+
+    function askSolution(ticketId) {
+        return new Promise(resolve => {
+            solutionDone = resolve;
+            document.getElementById('solutionTarget').textContent = `Ticket #${ticketId}`;
+            solutionText.value = '';
+            solutionError.hidden = true;
+            solutionDialog.showModal();
+            solutionText.focus();
+        });
+    }
+
+    function closeSolutionDialog(value) {
+        if (solutionDialog.open) solutionDialog.close();
+        const resolve = solutionDone;
+        solutionDone = null;
+        if (resolve) resolve(value);
+    }
+
+    document.getElementById('solutionCancel').addEventListener('click', () => closeSolutionDialog(null));
+    solutionDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeSolutionDialog(null);
+    });
+    document.getElementById('solutionForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = solutionText.value.trim();
+        if (text.length < 10) {
+            solutionError.textContent = 'Escriba al menos 10 caracteres';
+            solutionError.hidden = false;
+            return;
+        }
+        closeSolutionDialog(text);
+    });
+
     function staffField(list, label, content) {
         const box = makeEl('div', 'sd-field');
         box.appendChild(makeEl('dt', '', label));
@@ -7786,7 +8454,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffStatusControl(ticket) {
         const next = STATUS_TRANSITIONS[ticket.status] || [];
-        if (ticket.status === 'closed' || next.length === 0) {
+        if (ticket.status === 'closed' || next.length === 0 || technicianOverdueLocked(ticket)) {
             return makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status);
         }
         const select = makeEl('select', 'sd-status-select');
@@ -7798,8 +8466,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffLevelControl(ticket) {
         const ai = ticket.ai_analysis;
-        // Sin análisis no hay nivel que corregir
-        if (!ai || ticket.status === 'closed') return levelText(ai ? ai.effective_level : null);
+        // Sin análisis no hay nivel que corregir; vencido, el técnico solo lo ve
+        if (!ai || ticket.status === 'closed' || technicianOverdueLocked(ticket)) {
+            return levelText(ai ? ai.effective_level : null);
+        }
         const select = makeEl('select', 'ai-level-select');
         select.setAttribute('aria-label', 'Nivel');
         if (ai.effective_level === null) select.appendChild(staffOption('', 'Sin nivel', true));
@@ -7811,7 +8481,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function staffAssigneeControl(ticket) {
         const name = ticket.assigned_to !== null ? (userMap[ticket.assigned_to] || 'Sin nombre') : null;
-        const canAssign = OPERATION_ROLES.includes(currentUser.role) && ticket.status !== 'closed';
+        const canAssign = canOperateTickets() && ticket.status !== 'closed';
         if (!canAssign) {
             // El técnico ve "Usted" en sus tickets
             const own = currentUser.role === 'technician' && ticket.assigned_to === currentUser.id;
@@ -7826,9 +8496,22 @@ document.addEventListener('DOMContentLoaded', () => {
             empty.disabled = true;
             select.appendChild(empty);
         }
+        // Tickets por departamento: solo los técnicos activos del departamento del ticket
+        const allowed = Array.isArray(ticket.assignable_ids) ? ticket.assignable_ids.map(String) : null;
+        if (allowed && ticket.assigned_to !== null && !allowed.includes(String(ticket.assigned_to))) {
+            // El responsable actual ya no es del departamento: se muestra, pero no se puede volver a elegir
+            const current = staffOption(String(ticket.assigned_to), `${name} (otro departamento)`, true);
+            current.disabled = true;
+            select.appendChild(current);
+        }
+        if (allowed && !allowed.length) {
+            const none = staffOption('', 'Sin técnicos activos en el departamento', false);
+            none.disabled = true;
+            select.appendChild(none);
+        }
         Object.keys(userMap).forEach(userId => {
             const role = userRoleMap[userId];
-            if (role !== 'technician' && role !== 'coordinator') return;
+            if (allowed ? !allowed.includes(userId) : (role !== 'technician' && role !== 'coordinator')) return;
             const availability = userAvailabilityMap[userId];
             // Se puede asignar a alguien no disponible, con confirmación del servidor
             const text = availability && availability !== 'available'
@@ -8355,7 +9038,8 @@ document.addEventListener('DOMContentLoaded', () => {
         detailContent.replaceChildren();
         detailPanel.scrollTop = 0;
         const isClosed = ticket.status === 'closed';
-        const canManage = OPERATION_ROLES.includes(currentUser.role);
+        // Coordinador; con tickets por departamento, también el administrador (reasigna, transfiere, estado)
+        const canManage = canOperateTickets();
         // Técnico que lo tuvo antes o administrador con "Ver conversación": solo lectura
         const readOnly = Boolean(ticket.read_only);
         const clientName = userMap[ticket.created_by] || 'Solicitante';
@@ -8364,13 +9048,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const head = makeEl('header', 'td-head');
         const titleRow = makeEl('div', 'td-title-row');
         titleRow.appendChild(makeEl('h1', 'td-title', ticket.title));
-        const followBox = makeEl('div', 'follow-box');
-        const followBtn = makeEl('button', 'follow-btn');
-        followBtn.type = 'button';
-        const followHint = makeEl('p', 'follow-hint');
-        followBox.append(followBtn, followHint);
-        renderFollowButton(followBtn, followHint, Boolean(ticket.following));
-        if (currentUser.role !== 'admin') titleRow.appendChild(followBox);
+        // Sin "Dar seguimiento": el personal no sigue tickets por correo
         const status = staffStatusControl(ticket);
         if (!readOnly && status.tagName === 'SELECT') {
             const statusLabel = makeEl('label', 'td-status-label', 'Cambiar estado');
@@ -8470,6 +9148,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const props = makeEl('section', 'ui-card td-card');
         props.appendChild(makeEl('h2', 'ui-kicker', 'Propiedades'));
         const fields = makeEl('dl', 'td-props');
+        // Departamento que atiende (con el interruptor encendido se puede transferir con motivo)
+        if (ticket.routing_enforced || ticket.department_name) {
+            staffField(fields, 'Departamento', departmentControl(ticket, readOnly || isClosed));
+        }
         staffField(fields, 'Responsable', staffAssigneeControl(ticket));
         staffField(fields, 'Nivel', readOnly
             ? levelText(ticket.ai_analysis ? ticket.ai_analysis.effective_level : null) : staffLevelControl(ticket));
@@ -8485,6 +9167,10 @@ document.addEventListener('DOMContentLoaded', () => {
             props.appendChild(makeEl('p', 'td-props-note', 'Para cambiar de responsable, pídaselo a su coordinador.'));
         }
         side.appendChild(props);
+
+        // Quién reportó (ticket creado por el personal en su nombre) y la solución documentada
+        if (ticket.reporter) side.appendChild(reporterCard(ticket.reporter));
+        if (ticket.solution) side.appendChild(solutionCard(ticket.solution));
 
         const suggestionSlot = makeEl('div', 'sd-suggestion-slot');
         side.appendChild(suggestionSlot);
@@ -8709,12 +9395,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusSelect = e.target.closest('.sd-status-select');
         if (statusSelect) {
             if (statusSelect.value === currentTicket.status) return;
+            const body = { status: statusSelect.value };
+            // Tickets por departamento: al resolver se documenta la solución (el servidor la exige)
+            if (statusSelect.value === 'resolved' && currentTicket.routing_enforced) {
+                const solution = await askSolution(currentTicket.id);
+                if (solution === null) {
+                    statusSelect.value = currentTicket.status;
+                    return;
+                }
+                body.solution = solution;
+            }
             statusSelect.disabled = true;
             try {
                 await apiFetch(`/tickets/${selectedTicketId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: statusSelect.value })
+                    body: JSON.stringify(body)
                 });
             } catch (err) {
                 statusSelect.value = currentTicket.status;
@@ -8748,12 +9444,12 @@ document.addEventListener('DOMContentLoaded', () => {
         vacation: 'Vacaciones', incapacity: 'Ausencia', away: 'Ausente', invited: 'Invitación pendiente'
     };
     const ACCOUNT_TYPE_LABELS = {
-        requester: 'Cliente', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
+        requester: 'Contacto', technician: 'Técnico', coordinator: 'Coordinador', admin: 'Administrador'
     };
     // Grupos del menú "Acciones ▾", en este orden; la zona delicada va separada y en rojo
     const ACCOUNT_MENU_GROUPS = [
         { title: 'Seguimiento', actions: ['view-tickets', 'report', 'review-reports', 'request-name', 'request-id_number', 'full-data'] },
-        { title: 'Rol y turno', actions: ['change-role', 'schedule', 'availability'] },
+        { title: 'Rol y turno', actions: ['change-role', 'placement', 'schedule', 'availability'] },
         { title: 'Acceso', actions: ['unlock', 'close-sessions', 'reset-access'] },
         { title: 'Zona delicada', actions: ['deactivate', 'reactivate'], danger: true },
         { title: 'Invitación', actions: ['resend-invitation'] },
@@ -8762,12 +9458,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCOUNT_MENU_LABELS = {
         'view-tickets': 'Ver sus tickets', report: 'Reportar cuenta', 'review-reports': 'Revisar reportes',
         'request-name': 'Corregir nombre', 'request-id_number': 'Corregir cédula', 'full-data': 'Ver datos completos',
-        'change-role': 'Cambiar rol…', schedule: 'Editar horario', availability: 'Vacaciones y ausencias',
+        'change-role': 'Cambiar rol…', placement: 'Departamento…', schedule: 'Editar horario',
+        availability: 'Vacaciones y ausencias',
         unlock: 'Desbloquear', 'close-sessions': 'Cerrar sesiones', 'reset-access': 'Forzar restablecimiento',
         deactivate: 'Desactivar', reactivate: 'Reactivar',
         'resend-invitation': 'Reenviar invitación', 'cancel-invitation': 'Cancelar invitación'
     };
     const aaScheduleOn = document.getElementById('aaScheduleOn');
+    // Filtro por departamento: solo ese (sin subdepartamentos) o «Sin departamento»; lo resuelve el servidor
+    const aaDepartment = document.getElementById('aaDepartment');
     const aaScheduleFields = document.getElementById('aaScheduleFields');
     const aaDay = document.getElementById('aaDay');
     const aaStart = document.getElementById('aaStart');
@@ -8797,6 +9496,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('aaInvite').hidden = currentUser.role !== 'admin';
         aaFilter = filter;
         aaSearch.value = search;
+        aaDepartment.value = '';
         aaSelected = null;
         aaPlaceholder();
         adminAccountsView.classList.remove('show-detail');
@@ -8806,6 +9506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadAdminAccounts() {
         const params = new URLSearchParams({ filter: aaFilter });
         if (aaSearch.value.trim()) params.set('q', aaSearch.value.trim());
+        if (aaDepartment.value) params.set('department', aaDepartment.value);
         // Filtro por horario: lo resuelve el servidor (solo técnicos y coordinadores con turno ese día)
         if (aaScheduleOn.checked) {
             if (!aaStart.value || !aaEnd.value) {
@@ -8837,7 +9538,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (seq !== aaSeq) return;
         aaRows = data.items;
         renderAccountFilters(data.counts);
+        renderAccountDepartments(data.departments || []);
         renderAdminAccounts();
+    }
+
+    // Opciones fijas (Todos, Sin departamento) y las que manda el servidor; se conserva la elegida
+    function renderAccountDepartments(options) {
+        const current = aaDepartment.value;
+        aaDepartment.replaceChildren(staffOption('', 'Todos los departamentos', current === ''),
+            staffOption('none', 'Sin departamento', current === 'none'));
+        options.forEach(o => aaDepartment.appendChild(staffOption(String(o.id), o.path, String(o.id) === current)));
+        aaDepartment.value = current;
     }
 
     function renderAccountFilters(counts) {
@@ -8861,6 +9572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (row.reported) return ['Reportada', 'is-danger'];
         if (row.state === 'locked') return ['Bloqueada', 'is-danger'];
         if (row.state === 'inactive') return ['Desactivada', ''];
+        if (row.archived) return ['Cliente archivado', ''];
         if (row.state === 'vacation' || row.state === 'away') return [ACCOUNT_STATE_LABELS[row.state], 'is-warn'];
         if (row.kind === 'invitation') return [`Invitación · ${row.invitation_hours_left} h`, 'is-info'];
         return null;
@@ -8889,6 +9601,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // El nombre completo siempre se ve (puede ocupar dos líneas); el correo ya viene enmascarado
             text.appendChild(makeEl('span', 'aa-row-name', row.name));
             let sub = `${ACCOUNT_TYPE_LABELS[row.role] || row.role} · ${row.email}`;
+            // Personal: su departamento (o "Sin departamento")
+            if (row.kind === 'user' && ROLE_CHANGE_ROLES.includes(row.role)) {
+                sub += ` · ${row.department_name || 'Sin departamento'}`;
+            }
             if (row.kind === 'user' && row.open_tickets) sub += ` · ${row.open_tickets} abiertos`;
             if (row.schedule_day) sub += ` · Turno: ${row.schedule_day}`;
             text.appendChild(makeEl('span', 'aa-row-sub', sub));
@@ -8972,7 +9688,7 @@ document.addEventListener('DOMContentLoaded', () => {
         aaDetail.replaceChildren();
         const box = makeEl('div', 'aa-account');
         const { head, tags } = accountPanelHead(d, accountMenuActions(d));
-        if (d.role === 'requester') requesterTags({ identity: d.identity, reported: d.reported }).forEach(t => tags.appendChild(t));
+        if (d.role === 'requester') requesterTags({ identity: d.identity, reported: d.reported, archived: d.archived }).forEach(t => tags.appendChild(t));
         box.appendChild(head);
 
         const alerts = makeEl('ul', 'aa-alerts');
@@ -9182,6 +9898,8 @@ document.addEventListener('DOMContentLoaded', () => {
             done = await openReportDialog(item.id, item.name);
         } else if (action === 'change-role') {
             done = await openRoleDialog({ id: item.id, name: item.name, role: item.role });
+        } else if (action === 'placement') {
+            done = await openPlacementDialog({ id: item.id, name: item.name, role: item.role });
         } else if (action === 'schedule') {
             done = await openScheduleDialog(item.id, item.name, item.schedule || []);
         } else if (action === 'availability') {
@@ -9274,6 +9992,7 @@ document.addEventListener('DOMContentLoaded', () => {
     [aaDay, aaStart, aaEnd, aaMatch].forEach(field => field.addEventListener('change', () => {
         if (aaScheduleOn.checked) loadAdminAccounts();
     }));
+    aaDepartment.addEventListener('change', loadAdminAccounts);
     aaSearch.addEventListener('input', () => {
         clearTimeout(aaSearchTimer);
         aaSearchTimer = setTimeout(loadAdminAccounts, 300);
@@ -9336,218 +10055,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ===== Portal del solicitante: Centro de Soporte =====
-    const portalList = document.getElementById('portalList');
-    const portalEmpty = document.getElementById('portalEmpty');
-    const portalTotal = document.getElementById('portalTotal');
-    const portalFooter = document.getElementById('portalFooter');
-    const portalLogo = document.getElementById('portalLogo');
-    const navAssistant = document.getElementById('navAssistant');
-    const brandName = document.getElementById('brandName');
-    // Pasos derivados de los estados reales (app/portal.py)
-    const PORTAL_STEPS = ['Recibida', 'Asignada', 'En atención', 'Resuelta'];
-
-    function isRequesterPortal() {
-        return Boolean(currentUser && currentUser.role === 'requester');
-    }
-
-    async function loadPortalList() {
-        let tickets;
-        if (!portalList.children.length) showSkeleton(portalList, { rows: 3 });
-        try {
-            tickets = await apiFetch('/tickets', { silent: true });
-        } catch (err) {
-            portalList.removeAttribute('aria-busy');
-            portalList.replaceChildren(errorState(err, loadPortalList));
-            return;
-        }
-        portalList.removeAttribute('aria-busy');
-        tickets.sort((a, b) => parseServerDate(b.last_activity_at) - parseServerDate(a.last_activity_at));
-        portalList.replaceChildren();
-        portalEmpty.hidden = tickets.length > 0;
-        portalEmpty.replaceChildren(emptyState({
-            title: 'Todavía no tiene solicitudes',
-            text: 'Cuéntenos qué pasa y el equipo de soporte le responderá por correo.',
-            action: 'Nueva solicitud',
-            onAction: () => openNewTicket.click(),
-        }));
-        portalTotal.textContent = `${tickets.length} ${tickets.length === 1 ? 'solicitud' : 'solicitudes'}`;
-        tickets.forEach(ticket => {
-            const li = makeEl('li');
-            const button = makeEl('button', 'portal-item');
-            button.type = 'button';
-            button.dataset.id = String(ticket.id);
-            if (ticket.id === selectedTicketId) button.classList.add('selected');
-            button.appendChild(makeEl('span', 'portal-item-title', ticket.title));
-            const meta = makeEl('span', 'portal-item-meta');
-            meta.appendChild(makeEl('span', 'ui-num', `#${ticket.id}`));
-            meta.appendChild(makeEl('span', `state-tag state-${ticket.status}`, STATE_MAP[ticket.status] || ticket.status));
-            const updated = makeEl('span', '', 'Actualizada ');
-            updated.appendChild(timeTag(ticket.last_activity_at));
-            meta.appendChild(updated);
-            button.appendChild(meta);
-            // Avance en una línea: "Paso 2 de 4 · Asignada"
-            const step = ticket.progress_step || 1;
-            const progress = makeEl('span', 'portal-item-progress');
-            const bar = makeEl('span', 'ui-bar');
-            bar.setAttribute('aria-hidden', 'true');
-            const fill = makeEl('span');
-            fill.style.width = `${(step / PORTAL_STEPS.length) * 100}%`;
-            bar.appendChild(fill);
-            progress.append(bar, makeEl('span', 'portal-item-step', `Paso ${step} de ${PORTAL_STEPS.length} · ${PORTAL_STEPS[step - 1]}`));
-            button.appendChild(progress);
-            li.appendChild(button);
-            portalList.appendChild(li);
-        });
-    }
-
-    async function openPortalTicket(ticketId) {
-        portalList.querySelectorAll('.portal-item').forEach(b => b.classList.toggle('selected', Number(b.dataset.id) === ticketId));
-        selectedTicketId = ticketId;
-        document.querySelector('.split').classList.add('show-detail');
-        try {
-            const ticket = await apiFetch(`/tickets/${ticketId}`);
-            showTicketDetail(ticket);
-        } catch (err) {
-            selectedTicketId = null;
-            document.querySelector('.split').classList.remove('show-detail');
-            renderDetailPlaceholder();
-        }
-    }
-
-    portalList.addEventListener('click', (e) => {
-        const item = e.target.closest('.portal-item');
-        if (item) openPortalTicket(Number(item.dataset.id));
-    });
-
-    function renderPortalSteps(step) {
-        const list = makeEl('ol', 'portal-steps');
-        list.setAttribute('aria-label', 'Avance de la solicitud');
-        PORTAL_STEPS.forEach((label, index) => {
-            const number = index + 1;
-            const state = number < step ? 'done' : number === step ? 'current' : 'todo';
-            const li = makeEl('li', `portal-step is-${state}`);
-            if (state === 'current') li.setAttribute('aria-current', 'step');
-            li.appendChild(makeEl('span', 'portal-step-dot', String(number)));
-            li.appendChild(makeEl('span', 'portal-step-label', label));
-            list.appendChild(li);
-        });
-        return list;
-    }
-
-    function renderPortalDetail(ticket) {
-        detailContent.replaceChildren();
-        detailPanel.scrollTop = 0;
-        const created = makeEl('p', 'sd-meta portal-detail-meta', `SOLICITUD #${ticket.id} · creada `);
-        created.appendChild(timeTag(ticket.created_at));
-        detailContent.appendChild(created);
-        detailContent.appendChild(makeEl('h1', 'portal-detail-title', ticket.title));
-        if (ticket.merged_into) {
-            const notice = makeEl('div', 'ui-notice is-ok portal-merged');
-            notice.appendChild(makeEl('span', '', `Su mensaje se agregó a su solicitud #${ticket.merged_into}, que ya estamos atendiendo.`));
-            const open = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm portal-merged-open', `Ver #${ticket.merged_into}`);
-            open.type = 'button';
-            open.dataset.ticketId = String(ticket.merged_into);
-            notice.appendChild(open);
-            detailContent.appendChild(notice);
-        }
-        detailContent.appendChild(renderPortalSteps(ticket.progress_step || 1));
-        if (ticket.assigned_name) {
-            detailContent.appendChild(makeEl('p', 'sd-muted portal-owner', `Le atiende: ${ticket.assigned_name}`));
-        }
-        const original = makeEl('div', 'portal-original');
-        original.appendChild(makeEl('p', 'portal-message-meta', 'Su solicitud'));
-        original.appendChild(makeEl('p', 'portal-message-text', ticket.description));
-        detailContent.appendChild(original);
-
-        detailContent.appendChild(makeEl('h2', 'portal-subtitle', 'Conversación'));
-        // El servidor nunca envía notas internas al solicitante; el filtro es solo por si acaso
-        const messages = (ticket.comments || []).filter(c => !c.internal);
-        if (messages.length === 0) {
-            detailContent.appendChild(emptyState({ title: 'Todavía no hay mensajes', text: 'Cuando el equipo le responda, lo verá aquí y le llegará un correo.' }));
-        } else {
-            const list = makeEl('ol', 'portal-messages');
-            messages.forEach(comment => {
-                const own = comment.user_id === currentUser.id;
-                const li = makeEl('li', `portal-message${own ? ' is-own' : ''}`);
-                const author = own ? 'Usted' : (userMap[comment.user_id] || 'Equipo de soporte');
-                const meta = makeEl('p', 'portal-message-meta', `${author} · `);
-                meta.appendChild(timeTag(comment.created_at));
-                li.appendChild(meta);
-                if (comment.content) li.appendChild(makeEl('p', 'portal-message-text', comment.content));
-                const files = attachmentList(comment.attachments);
-                if (files) li.appendChild(files);
-                list.appendChild(li);
-            });
-            detailContent.appendChild(list);
-        }
-
-        if (ticket.status === 'closed') {
-            detailContent.appendChild(makeEl('p', 'sd-muted', 'Esta solicitud está cerrada y ya no admite respuestas.'));
-            return;
-        }
-        const composer = makeEl('div', 'ui-card sd-composer portal-composer');
-        const label = makeEl('label', 'sr-only', 'Su respuesta');
-        label.htmlFor = 'portalReply';
-        const textarea = makeEl('textarea', 'sd-reply');
-        textarea.id = 'portalReply';
-        textarea.rows = 3;
-        textarea.maxLength = 5000;
-        textarea.placeholder = 'Escriba su respuesta';
-        const actions = makeEl('div', 'sd-composer-actions');
-        const send = makeEl('button', 'ui-btn ui-btn-primary ui-btn-sm portal-send', 'Enviar respuesta');
-        send.type = 'button';
-        actions.appendChild(send);
-        composer.append(label, textarea, attachmentPicker(), actions);
-        detailContent.appendChild(composer);
-    }
-
-    detailPanel.addEventListener('click', async (e) => {
-        const merged = e.target.closest('.portal-merged-open');
-        if (merged && isRequesterPortal()) {
-            openPortalTicket(Number(merged.dataset.ticketId));
-            return;
-        }
-        const send = e.target.closest('.portal-send');
-        if (!send || !selectedTicketId || !isRequesterPortal()) return;
-        const textarea = document.getElementById('portalReply');
-        const content = textarea.value.trim();
-        if (!content && !pendingFiles.length) {
-            showError('Escriba su respuesta antes de enviarla');
-            return;
-        }
-        send.disabled = true;
-        if (!(await sendComment(content, false))) {
-            send.disabled = false;
-            return;
-        }
-        await reloadSelectedTicketAndList();
-        showSuccess('Respuesta enviada');
-    });
-
-    navAssistant.addEventListener('click', () => {
-        if (chatPanel.hidden) openChat();
-    });
-    portalLogo.addEventListener('error', () => { portalLogo.hidden = true; });
-
-    function setupPortal() {
-        const portal = isRequesterPortal();
-        document.body.classList.toggle('requester-portal', portal);
-        portalFooter.hidden = !portal;
-        brandName.textContent = portal ? 'Centro de Soporte' : 'Mesa de Servicio';
-        navTickets.textContent = portal ? 'Mis solicitudes' : 'Tickets';
-        openNewTicket.textContent = portal ? '+ Nueva solicitud' : '+ Nuevo ticket';
-    }
-
-    function teardownPortal() {
-        document.body.classList.remove('requester-portal');
-        portalFooter.hidden = true;
-        brandName.textContent = 'Mesa de Servicio';
-    }
-
     // ===== Una sola sección por opción del menú =====
     const ACCOUNT_SECTION_TITLES = { team: 'Equipo y turnos', requests: 'Mis solicitudes' };
-    const ADMIN_SECTION_TITLES = { health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios' };
+    const ADMIN_SECTION_TITLES = {
+        health: 'Estado del sistema', approvals: 'Aprobaciones', changes: 'Registro de cambios',
+        departments: 'Departamentos', activation: 'Activación', panel: 'Panel',
+        unclassified: 'Tickets sin departamento',
+        'drafts-unclassified': 'Correos por clasificar',
+        precision: 'Precisión de la IA',
+    };
+    // Secciones que cargan sus datos al abrirse (departamentos, personal y activación)
+    const ADMIN_SECTION_LOADERS = {};
 
     function showAccountsSection(section) {
         accountsView.querySelectorAll('[data-account-section]').forEach(el => {
@@ -9565,7 +10083,992 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('adminTitle').textContent = ADMIN_SECTION_TITLES[section];
         showView('admin');
         setDocumentTitle(ADMIN_SECTION_TITLES[section]);
+        if (ADMIN_SECTION_LOADERS[section]) ADMIN_SECTION_LOADERS[section]();
     }
+
+    // ----- Administración › Departamentos (organigrama) -----
+    let orgDepartments = [];
+
+    async function loadOrgDepartments() {
+        orgDepartments = await apiFetch('/admin/departments', { silent: true });
+    }
+
+    // Opciones de un select con la ruta completa de cada departamento
+    function departmentOptions(select, { empty = 'Seleccionar', activeOnly = true, servingOnly = false,
+        ids = null, selected = null } = {}) {
+        select.replaceChildren(staffOption('', empty, selected === null));
+        orgDepartments
+            .filter(d => (!activeOnly || d.active_path) && (!servingOnly || (d.handles_tickets && d.active_path))
+                && (!ids || ids.includes(d.id)))
+            .forEach(d => select.appendChild(staffOption(String(d.id), d.path, d.id === selected)));
+    }
+
+    async function showDepartments() {
+        try {
+            await loadOrgDepartments();
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        renderDepartments();
+    }
+    ADMIN_SECTION_LOADERS.departments = showDepartments;
+
+    function renderDepartments() {
+        departmentOptions(document.getElementById('deptCreateParent'), { empty: '(Raíz)' });
+        const list = document.getElementById('deptList');
+        list.replaceChildren();
+        // Sin «Qué atiende» no participa en la clasificación de correos (sus correos quedan en «Por clasificar»)
+        const withoutProfile = orgDepartments.filter(d => d.handles_tickets && d.active_path && !d.has_profile);
+        const profileNotice = document.getElementById('deptProfileNotice');
+        profileNotice.hidden = !withoutProfile.length;
+        profileNotice.textContent = withoutProfile.length === 1
+            ? '1 departamento que atiende tickets no tiene ficha («Qué atiende»): no participa en la clasificación de correos. Complétela con «Ficha».'
+            : `${withoutProfile.length} departamentos que atienden tickets no tienen ficha («Qué atiende»): no participan en la clasificación de correos. Complételas con «Ficha».`;
+        if (!orgDepartments.length) {
+            list.appendChild(emptyState({ title: 'Todavía no hay departamentos', text: 'Agréguelos uno por uno o importe el organigrama.' }));
+            return;
+        }
+        orgDepartments.forEach(d => {
+            const li = makeEl('li', `org-row${d.active_path ? '' : ' is-off'}`);
+            const text = makeEl('div', 'org-row-text');
+            const title = makeEl('span', 'org-row-title', d.path);
+            if (d.handles_tickets) title.appendChild(makeEl('span', 'ui-tag is-info org-serving', 'Atiende tickets'));
+            if (d.handles_tickets && d.active_path && !d.has_profile) {
+                title.appendChild(makeEl('span', 'ui-tag is-warn org-serving', 'Sin ficha · no participa en la clasificación'));
+            }
+            text.appendChild(title);
+            const sub = [];
+            if (d.handles_tickets) {
+                sub.push(d.coordinator_name ? `Coordinador: ${d.coordinator_name}` : 'Sin coordinador');
+                sub.push(`${d.technicians} técnico(s)`);
+                if (d.next_department_path) sub.push(`Siguiente nivel: ${d.next_department_path}`);
+            }
+            if (!d.is_active) sub.push('Desactivado');
+            else if (!d.active_path) sub.push('Desactivado por su departamento padre');
+            if (d.aliases.length) sub.push(`Alias: ${d.aliases.join('; ')}`);
+            if (sub.length) text.appendChild(makeEl('span', 'org-row-sub', sub.join(' · ')));
+            const actions = makeEl('div', 'org-row-actions');
+            const buttons = [['handles', d.handles_tickets ? 'No atiende tickets' : 'Atiende tickets']];
+            if (d.handles_tickets) buttons.push(['profile', 'Ficha'], ['next', 'Siguiente nivel']);
+            buttons.push(['rename', 'Renombrar'], ['move', 'Mover'], ['alias', 'Agregar alias'],
+                ['toggle', d.is_active ? 'Desactivar' : 'Activar']);
+            buttons.forEach(([action, label]) => {
+                const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', label);
+                button.type = 'button';
+                button.dataset.deptAction = action;
+                button.dataset.deptId = String(d.id);
+                actions.appendChild(button);
+            });
+            li.append(text, actions);
+            list.appendChild(li);
+        });
+    }
+
+    async function patchDepartment(id, body) {
+        try {
+            await apiFetch(`/admin/departments/${id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error del servidor (por ejemplo, que tiene personal)
+        }
+        showDepartments();
+    }
+
+    // Un solo listener para todas las filas
+    document.getElementById('deptList').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-dept-action]');
+        if (!button) return;
+        const dept = orgDepartments.find(d => d.id === Number(button.dataset.deptId));
+        if (!dept) return;
+        const action = button.dataset.deptAction;
+        if (action === 'rename') {
+            const name = window.prompt('Nombre nuevo del departamento', dept.name);
+            if (name && name.trim()) patchDepartment(dept.id, { name: name.trim() });
+        } else if (action === 'alias') {
+            const alias = window.prompt('Nombre alternativo (ruta completa, por ejemplo «Gerencias / Soporte Nivel 2»)');
+            if (alias && alias.trim()) patchDepartment(dept.id, { add_alias: alias.trim() });
+        } else if (action === 'toggle') {
+            patchDepartment(dept.id, { is_active: !dept.is_active });
+        } else if (action === 'handles') {
+            patchDepartment(dept.id, { handles_tickets: !dept.handles_tickets });
+        } else if (action === 'move') {
+            movingDepartment = dept;
+            document.getElementById('deptMoveTarget').textContent = dept.path;
+            const select = document.getElementById('deptMoveParent');
+            // Ni él mismo ni lo que cuelga de él (el servidor también lo revisa)
+            const inside = orgDepartments.filter(d => d.path === dept.path || d.path.startsWith(`${dept.path} / `)).map(d => d.id);
+            departmentOptions(select, { empty: '(Raíz)', activeOnly: false, selected: dept.parent_id,
+                ids: orgDepartments.filter(d => !inside.includes(d.id)).map(d => d.id) });
+            document.getElementById('deptMoveDialog').showModal();
+        } else if (action === 'profile') {
+            openProfileDialog(dept);
+        } else if (action === 'next') {
+            nextLevelDepartment = dept;
+            document.getElementById('deptNextTarget').textContent = dept.path;
+            // Ni él mismo; el servidor también rechaza los ciclos
+            departmentOptions(document.getElementById('deptNextSelect'), {
+                empty: 'Ninguno', servingOnly: true, selected: dept.next_department_id,
+                ids: orgDepartments.filter(d => d.id !== dept.id).map(d => d.id),
+            });
+            document.getElementById('deptNextDialog').showModal();
+        }
+    });
+
+    // Ficha del departamento: la IA la lee con cada correo (solo el administrador; el servidor también lo exige)
+    const deptProfileDialog = document.getElementById('deptProfileDialog');
+    const deptProfileError = document.getElementById('deptProfileError');
+    let profileDepartment = null;
+
+    async function openProfileDialog(dept) {
+        let profile;
+        try {
+            profile = await apiFetch(`/admin/departments/${dept.id}/profile`, { silent: true });
+        } catch (err) {
+            showError(err.message);
+            return;
+        }
+        profileDepartment = dept;
+        document.getElementById('deptProfileTarget').textContent = profile.path;
+        document.getElementById('deptProfileHandles').value = profile.handles;
+        document.getElementById('deptProfileExamples').value = profile.examples;
+        document.getElementById('deptProfileNot').value = profile.not_handles;
+        deptProfileError.hidden = true;
+        deptProfileDialog.showModal();
+        document.getElementById('deptProfileHandles').focus();
+    }
+
+    document.getElementById('deptProfileCancel').addEventListener('click', () => deptProfileDialog.close());
+    document.getElementById('deptProfileForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!profileDepartment) return;
+        deptProfileError.hidden = true;
+        try {
+            await apiFetch(`/admin/departments/${profileDepartment.id}/profile`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({
+                    handles: document.getElementById('deptProfileHandles').value,
+                    examples: document.getElementById('deptProfileExamples').value,
+                    not_handles: document.getElementById('deptProfileNot').value,
+                }),
+            });
+        } catch (err) {
+            deptProfileError.textContent = err.message || 'No se pudo guardar la ficha';
+            deptProfileError.hidden = false;
+            return;
+        }
+        deptProfileDialog.close();
+        showSuccess('Ficha guardada: aplica desde el siguiente correo');
+        // La etiqueta «Sin ficha» y el aviso cambian con «Qué atiende»
+        showDepartments();
+    });
+
+    // Probar clasificación: no crea borradores ni tickets
+    const classifyTestDialog = document.getElementById('classifyTestDialog');
+    const classifyTestError = document.getElementById('classifyTestError');
+    const classifyTestResult = document.getElementById('classifyTestResult');
+    const classifyTestSubmit = document.getElementById('classifyTestSubmit');
+
+    function similarityText(value) {
+        return value === null || value === undefined ? 'sin similitud' : `similitud ${value.toFixed(3)}`;
+    }
+
+    function renderClassification(data) {
+        classifyTestResult.replaceChildren();
+        const verdict = makeEl('p', `classify-verdict ${data.passes ? 'is-direct' : 'is-pending'}`,
+            data.passes ? `Iría directo a ${data.llm_department_path}` : 'Iría a «Por clasificar»');
+        classifyTestResult.appendChild(verdict);
+        const list = makeEl('dl');
+        const rows = [
+            ['Elección de la IA', data.llm_department_path || 'Ninguno'],
+            ['Motivo', data.reason || '—'],
+            ['1.ª opción', data.options[0] ? `${data.options[0].path} (${similarityText(data.options[0].similarity)})` : '—'],
+            ['2.ª opción', data.options[1] ? `${data.options[1].path} (${similarityText(data.options[1].similarity)})` : '—'],
+            ['IA y similitud', data.agrees ? 'Coinciden' : 'No coinciden'],
+            ['Seguridad (margen)', data.margin === null || data.margin === undefined
+                ? 'sin dato' : `${data.margin.toFixed(3)} · umbral ${data.threshold.toFixed(3)}`],
+        ];
+        rows.forEach(([term, value]) => list.append(makeEl('dt', '', term), makeEl('dd', '', value)));
+        classifyTestResult.appendChild(list);
+        if (data.notes.length) {
+            const notes = makeEl('ul', 'classify-notes');
+            data.notes.forEach(note => notes.appendChild(makeEl('li', '', note)));
+            classifyTestResult.appendChild(notes);
+        }
+        classifyTestResult.hidden = false;
+    }
+
+    document.getElementById('classifyTestOpen').addEventListener('click', () => {
+        classifyTestError.hidden = true;
+        classifyTestResult.hidden = true;
+        classifyTestDialog.showModal();
+        document.getElementById('classifyTestBody').focus();
+    });
+    document.getElementById('classifyTestClose').addEventListener('click', () => classifyTestDialog.close());
+    document.getElementById('classifyTestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        classifyTestError.hidden = true;
+        classifyTestSubmit.disabled = true;
+        classifyTestSubmit.textContent = 'Probando…';
+        try {
+            const data = await apiFetch('/admin/classification/test', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({
+                    subject: document.getElementById('classifyTestSubject').value,
+                    body: document.getElementById('classifyTestBody').value,
+                }),
+            });
+            renderClassification(data);
+        } catch (err) {
+            classifyTestResult.hidden = true;
+            classifyTestError.textContent = err.message || 'No se pudo probar la clasificación';
+            classifyTestError.hidden = false;
+        } finally {
+            classifyTestSubmit.disabled = false;
+            classifyTestSubmit.textContent = 'Probar';
+        }
+    });
+
+    let nextLevelDepartment = null;
+    document.getElementById('deptNextCancel').addEventListener('click', () => document.getElementById('deptNextDialog').close());
+    document.getElementById('deptNextForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('deptNextDialog').close();
+        if (!nextLevelDepartment) return;
+        patchDepartment(nextLevelDepartment.id,
+            { next_department_id: Number(document.getElementById('deptNextSelect').value) || 0 });
+    });
+
+    let movingDepartment = null;
+    document.getElementById('deptMoveCancel').addEventListener('click', () => document.getElementById('deptMoveDialog').close());
+    document.getElementById('deptMoveForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('deptMoveDialog').close();
+        if (!movingDepartment) return;
+        patchDepartment(movingDepartment.id, { parent_id: Number(document.getElementById('deptMoveParent').value) || 0 });
+    });
+
+    document.getElementById('deptCreateForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('deptCreateName');
+        const parent = document.getElementById('deptCreateParent');
+        const handles = document.getElementById('deptCreateHandles');
+        try {
+            await apiFetch('/admin/departments', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.value.trim(), parent_id: Number(parent.value) || null,
+                    handles_tickets: handles.checked }),
+            });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        name.value = '';
+        handles.checked = false;
+        showDepartments();
+    });
+
+    // ----- Administración › Activación: interruptor, lista de verificación y personal sin departamento -----
+    const switchList = document.getElementById('switchList');
+    const unplacedList = document.getElementById('unplacedList');
+
+    async function showActivation() {
+        let switches;
+        let alerts;
+        try {
+            [switches, alerts] = await Promise.all([
+                apiFetch('/admin/activation', { silent: true }),
+                apiFetch('/admin/staff-alerts', { silent: true }),
+            ]);
+        } catch (err) {
+            switchList.replaceChildren(errorState(err, showActivation));
+            return;
+        }
+        renderSwitches(switches);
+        renderUnplaced(unplacedList, alerts.unplaced);
+    }
+    ADMIN_SECTION_LOADERS.activation = showActivation;
+
+    function renderSwitches(switches) {
+        switchList.replaceChildren();
+        switches.forEach(sw => {
+            const card = makeEl('section', 'org-switch');
+            const head = makeEl('div', 'org-switch-head');
+            head.appendChild(makeEl('h3', 'org-subtitle', sw.label));
+            head.appendChild(makeEl('span', `ui-tag ${sw.enabled ? 'is-ok' : 'is-warn'}`, sw.enabled ? 'Encendido' : 'Apagado'));
+            card.appendChild(head);
+            const list = makeEl('ul', 'org-checklist');
+            sw.checklist.forEach(item => {
+                const li = makeEl('li', item.ok ? 'is-ok' : 'is-pending');
+                li.appendChild(makeEl('span', '', `${item.ok ? '✓' : '•'} ${item.label}`));
+                if (item.detail) li.appendChild(makeEl('span', 'org-row-sub', ` · ${item.detail}`));
+                if (!item.ok && item.link) {
+                    const link = makeEl('a', 'org-checklist-link', 'Configurar');
+                    link.href = `#/${item.link}`;
+                    li.appendChild(link);
+                }
+                list.appendChild(li);
+            });
+            card.appendChild(list);
+            if (sw.updated_by_name) {
+                card.appendChild(makeEl('p', 'org-row-sub',
+                    `Último cambio: ${sw.updated_by_name} · ${formatDateTime(sw.updated_at)}`));
+            }
+            const button = makeEl('button', `ui-btn ${sw.enabled ? 'ui-btn-secondary' : 'ui-btn-primary'}`,
+                sw.enabled ? 'Apagar' : 'Encender');
+            button.type = 'button';
+            button.dataset.switchKey = sw.key;
+            button.dataset.enable = sw.enabled ? 'false' : 'true';
+            // Encender exige la lista completa (también lo revisa el servidor); apagar siempre se puede
+            button.disabled = !sw.enabled && !sw.ready;
+            card.appendChild(button);
+            switchList.appendChild(card);
+        });
+    }
+
+    // Personal sin departamento con su botón Asignar (Activación y Panel)
+    function renderUnplaced(list, people) {
+        list.replaceChildren();
+        if (!people.length) {
+            list.appendChild(makeEl('li', 'org-row org-row-sub', 'Todo el personal tiene departamento.'));
+            return;
+        }
+        people.forEach(person => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', person.name));
+            const where = person.department_name ? `Departamento sin uso: ${person.department_name}` : 'Sin departamento';
+            text.appendChild(makeEl('span', 'org-row-sub', `${ROLE_MAP[person.role] || person.role} · ${where}`));
+            const actions = makeEl('div', 'org-row-actions');
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Asignar');
+            button.type = 'button';
+            button.dataset.placeId = String(person.id);
+            button.dataset.placeName = person.name;
+            button.dataset.placeRole = person.role;
+            actions.appendChild(button);
+            li.append(text, actions);
+            list.appendChild(li);
+        });
+    }
+
+    switchList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-switch-key]');
+        if (!button) return;
+        const enable = button.dataset.enable === 'true';
+        if (!enable && !confirm('Al apagarlo, todo vuelve a funcionar como antes. ¿Continuar?')) return;
+        button.disabled = true;
+        try {
+            await apiFetch(`/admin/activation/${button.dataset.switchKey}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enable }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error (por ejemplo, la lista sin completar)
+        }
+        showSuccess(enable ? 'Tickets por departamento encendido' : 'Tickets por departamento apagado');
+        showActivation();
+    });
+
+    unplacedList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-place-id]');
+        if (!button) return;
+        const person = { id: Number(button.dataset.placeId), name: button.dataset.placeName, role: button.dataset.placeRole };
+        if (await openPlacementDialog(person)) showActivation();
+    });
+
+    // ----- Administración › Tickets sin departamento: el administrador los clasifica -----
+    const unclassifiedList = document.getElementById('unclassifiedList');
+
+    async function showUnclassified() {
+        let tickets;
+        try {
+            [tickets] = await Promise.all([
+                apiFetch('/admin/tickets/unclassified', { silent: true }), loadOrgDepartments(),
+            ]);
+        } catch (err) {
+            unclassifiedList.replaceChildren(errorState(err, showUnclassified));
+            return;
+        }
+        unclassifiedList.replaceChildren();
+        if (!tickets.length) {
+            unclassifiedList.appendChild(emptyState({ title: 'No hay tickets sin departamento', text: 'Todos los tickets abiertos tienen departamento.' }));
+            return;
+        }
+        tickets.forEach(ticket => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `#${ticket.id} · ${ticket.title}`));
+            text.appendChild(makeEl('span', 'org-row-sub', [
+                ticket.requester_name, STATE_MAP[ticket.status] || ticket.status,
+                ticket.assigned_name ? `Responsable: ${ticket.assigned_name}` : 'Sin responsable',
+                formatDateTime(ticket.created_at),
+            ].join(' · ')));
+            const actions = makeEl('div', 'org-row-actions');
+            const select = makeEl('select', 'ui-input unclassified-dept');
+            select.setAttribute('aria-label', `Departamento del ticket #${ticket.id}`);
+            departmentOptions(select, { servingOnly: true });
+            const button = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Clasificar');
+            button.type = 'button';
+            button.dataset.classifyId = String(ticket.id);
+            actions.append(select, button);
+            li.append(text, actions);
+            unclassifiedList.appendChild(li);
+        });
+    }
+    ADMIN_SECTION_LOADERS.unclassified = showUnclassified;
+
+    unclassifiedList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-classify-id]');
+        if (!button) return;
+        const select = button.closest('li').querySelector('.unclassified-dept');
+        if (!select.value) {
+            showError('Elija el departamento');
+            return;
+        }
+        button.disabled = true;
+        try {
+            await apiFetch(`/admin/tickets/${button.dataset.classifyId}/department`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ department_id: Number(select.value) }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        showSuccess(`Ticket #${button.dataset.classifyId} clasificado`);
+        showUnclassified();
+        pollNavCounts(false);
+    });
+
+    // ----- Administración › Por clasificar: correos que la IA no envió directo a un coordinador -----
+    const draftsUnclassifiedList = document.getElementById('draftsUnclassifiedList');
+    const thresholdInput = document.getElementById('thresholdInput');
+    const minSimilarityInput = document.getElementById('minSimilarityInput');
+
+    // De dónde sale cada opción de «Por clasificar»
+    const OPTION_ROLES = {
+        both: 'IA y similitud', ai: 'Elegido por la IA', similarity: 'Más parecido (similitud)', second: '2.º más parecido',
+    };
+
+    function similarityLabel(value) {
+        return value === null || value === undefined ? 'sin similitud' : `similitud ${value.toFixed(3)}`;
+    }
+
+    async function showDraftsUnclassified() {
+        let data;
+        try {
+            [data] = await Promise.all([
+                apiFetch('/admin/drafts/pending-classification', { silent: true }), loadOrgDepartments(),
+            ]);
+        } catch (err) {
+            draftsUnclassifiedList.replaceChildren(errorState(err, showDraftsUnclassified));
+            return;
+        }
+        document.getElementById('draftsUnclassifiedOff').hidden = data.routing_enforced;
+        if (document.activeElement !== thresholdInput) thresholdInput.value = data.threshold.toFixed(3);
+        if (document.activeElement !== minSimilarityInput) minSimilarityInput.value = data.min_similarity.toFixed(3);
+        draftsUnclassifiedList.replaceChildren();
+        if (!data.items.length) {
+            draftsUnclassifiedList.appendChild(emptyState({ title: 'No hay correos por clasificar', text: 'La IA envió todos los correos a un coordinador.' }));
+            return;
+        }
+        data.items.forEach(item => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `Borrador #${item.draft_id} · ${item.subject}`));
+            text.appendChild(makeEl('span', 'org-row-sub', `${item.requester_name} · ${formatDateTime(item.created_at)}`
+                + (item.pending_reason ? ` · ${item.pending_reason}` : '')));
+            if (item.summary) text.appendChild(makeEl('span', 'org-row-sub', `Resumen: ${item.summary}`));
+            if (item.excerpt) text.appendChild(makeEl('span', 'org-row-sub', `«${item.excerpt}»`));
+            if (item.ai_reason) {
+                const margin = item.ai_margin === null || item.ai_margin === undefined ? '' : ` · margen ${item.ai_margin.toFixed(3)}`;
+                text.appendChild(makeEl('span', 'org-row-sub', `IA: ${item.ai_department_path || 'Ninguno'}${margin} — ${item.ai_reason}`));
+            }
+            if (item.disagreement) text.appendChild(makeEl('span', 'ui-tag is-warn drafts-disagreement', item.disagreement));
+            const actions = makeEl('div', 'org-row-actions');
+            // Un clic: las dos opciones más probables, cada una con de dónde sale. Si la IA y la similitud no
+            // coinciden, ninguna se destaca
+            item.options.forEach(option => {
+                const label = `${OPTION_ROLES[option.role] || 'Opción'}: ${option.path} (${option.has_coordinator
+                    ? similarityLabel(option.similarity) : 'sin coordinador activo'})`;
+                const primary = option.role === 'both' || (option.role === 'ai' && !item.disagreement);
+                const button = makeEl('button', `ui-btn ui-btn-sm ${primary ? 'ui-btn-primary' : 'ui-btn-secondary'}`, label);
+                button.type = 'button';
+                button.dataset.chooseDraft = String(item.draft_id);
+                button.dataset.chooseDept = String(option.department_id);
+                if (!option.has_coordinator) {
+                    button.disabled = true;
+                    button.title = 'Sin coordinador activo';
+                }
+                actions.appendChild(button);
+            });
+            // Otro departamento (o, sin sugerencia de la IA, el único camino). Siempre empieza vacío: sin
+            // autocomplete el navegador no restaura la selección de otra fila al recargar
+            const select = makeEl('select', 'ui-input drafts-unclassified-dept');
+            select.setAttribute('autocomplete', 'off');
+            select.setAttribute('aria-label', `${item.options.length ? 'Otro departamento' : 'Departamento'} para el borrador #${item.draft_id}`);
+            departmentOptions(select, { servingOnly: true, empty: item.options.length ? 'Otro departamento…' : 'Seleccionar…' });
+            select.value = '';
+            const other = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm', 'Enviar');
+            other.type = 'button';
+            other.disabled = true;
+            other.dataset.chooseDraft = String(item.draft_id);
+            other.dataset.chooseOther = 'true';
+            actions.append(select, other);
+            li.append(text, actions);
+            draftsUnclassifiedList.appendChild(li);
+        });
+    }
+    ADMIN_SECTION_LOADERS['drafts-unclassified'] = showDraftsUnclassified;
+
+    // ----- Administración › Precisión de la IA -----
+    const precisionRange = document.getElementById('precisionRange');
+    const precisionDates = document.getElementById('precisionDates');
+    const precisionFrom = document.getElementById('precisionFrom');
+    const precisionTo = document.getElementById('precisionTo');
+    let precisionSeq = 0;
+
+    // "2026-11-13" → "13/11/2026" (sin pasar por la zona horaria: es un día de la oficina)
+    function dayText(value) {
+        const [year, month, day] = String(value).split('-');
+        return `${day}/${month}/${year}`;
+    }
+
+    function pctText(value) {
+        return typeof value === 'number' ? `${value.toLocaleString('es-CR')} %` : '—';
+    }
+
+    async function showPrecision() {
+        const params = new URLSearchParams();
+        if (precisionRange.value === 'custom') {
+            if (!precisionFrom.value || !precisionTo.value) return;
+            params.set('from', precisionFrom.value);
+            params.set('to', precisionTo.value);
+        } else {
+            const from = new Date();
+            from.setDate(from.getDate() - Number(precisionRange.value));
+            params.set('from', localDateString(from));
+            params.set('to', localDateString(new Date()));
+        }
+        const seq = ++precisionSeq;
+        let data;
+        try {
+            data = await apiFetch(`/admin/classification/precision?${params}`, { silent: true });
+        } catch (err) {
+            if (seq === precisionSeq) showError(err.message || 'No se pudo cargar el reporte');
+            return;
+        }
+        if (seq !== precisionSeq) return;
+        renderPrecision(data);
+    }
+    ADMIN_SECTION_LOADERS.precision = showPrecision;
+
+    function renderPrecision(data) {
+        document.getElementById('precisionOff').hidden = data.routing_enforced;
+        const t = data.totals;
+        document.getElementById('precisionSummary').textContent = data.received
+            ? `Del ${dayText(data.date_from)} al ${dayText(data.date_to)}: ${data.received} correo(s) clasificados. `
+              + `${t.direct} fueron directo: ${t.hits} de ${t.confirmed} confirmados en el departamento de la IA `
+              + `(${pctText(t.accuracy)} de acierto), ${t.pending} pendiente(s) y ${t.bounced} con rebotes `
+              + `(${t.transfers} transferencia(s)). ${data.pending.arrived} fueron a «Por clasificar».`
+            : `Del ${dayText(data.date_from)} al ${dayText(data.date_to)}: no llegaron correos clasificados.`;
+        if (data.without_ai) {
+            // Cuáles: así no se confunden con los que sí cuentan
+            const ids = (data.without_ai_ids || []).map(id => `#${id}`);
+            const list = ids.length > 1 ? `${ids.slice(0, -1).join(', ')} y ${ids[ids.length - 1]}` : ids.join('');
+            document.getElementById('precisionSummary').textContent += ids.length === 1
+                ? ` No se cuenta el borrador ${list} (sin datos de la IA, como los DEMO, que se cargan ya clasificados).`
+                : ` No se cuentan los borradores ${list} (sin datos de la IA, como los DEMO, que se cargan ya clasificados).`;
+        }
+
+        // Pocos correos: los números son de referencia, no para ajustar
+        const few = document.getElementById('precisionFew');
+        few.hidden = !data.few_cases;
+        few.textContent = data.few_cases
+            ? `Con ${data.received} correo(s) en el periodo, los números todavía no alcanzan para ajustar el umbral, `
+              + `la similitud mínima o las fichas (hacen falta al menos ${data.min_cases}). Úselos solo como referencia.`
+            : '';
+
+        const body = document.getElementById('precisionBody');
+        body.replaceChildren();
+        if (!data.departments.length) {
+            const row = document.createElement('tr');
+            const cell = makeEl('td', '', 'Ningún correo fue directo a un coordinador en este periodo.');
+            cell.colSpan = 7;
+            row.appendChild(cell);
+            body.appendChild(row);
+        }
+        data.departments.forEach(d => {
+            const row = document.createElement('tr');
+            row.append(makeEl('td', '', d.path), makeEl('td', '', String(d.direct)),
+                makeEl('td', '', String(d.confirmed)), makeEl('td', '', String(d.hits)),
+                makeEl('td', '', pctText(d.accuracy)), makeEl('td', '', String(d.pending)),
+                makeEl('td', '', d.bounced ? `${d.bounced} (${d.transfers} transferencia(s))` : '0'));
+            body.appendChild(row);
+        });
+        labelTableCells(document.getElementById('precisionTable'));
+
+        const p = data.pending;
+        document.getElementById('precisionPending').textContent = p.arrived
+            ? `Llegaron ${p.arrived}: ${p.decided} los decidió el administrador y ${p.still_waiting} siguen esperando. `
+              + (p.with_suggestion
+                  ? `La elección coincidió con la 1.ª opción de la IA en ${p.matched} de ${p.with_suggestion} (${pctText(p.matched_pct)}).`
+                  : 'Ninguno decidido tenía sugerencia de la IA.')
+            : 'Ningún correo fue a «Por clasificar» en este periodo.';
+        const reasons = document.getElementById('precisionReasons');
+        reasons.replaceChildren();
+        data.reasons.forEach(r => {
+            const li = makeEl('li', 'org-row');
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `${r.label}: ${r.count} (${pctText(r.pct)})`));
+            // Con pocos correos no se recomienda ajustar nada (lo dice el aviso de arriba)
+            if (!data.few_cases) text.appendChild(makeEl('span', 'org-row-sub', `Qué ajustar: ${r.adjust}`));
+            li.appendChild(text);
+            reasons.appendChild(li);
+        });
+
+        const corrections = document.getElementById('precisionCorrectionsBody');
+        corrections.replaceChildren();
+        if (!data.corrections.length) {
+            const row = document.createElement('tr');
+            const cell = makeEl('td', '', 'Ningún borrador fue corregido en este periodo.');
+            cell.colSpan = 8;
+            row.appendChild(cell);
+            corrections.appendChild(row);
+        }
+        data.corrections.forEach(c => {
+            const row = document.createElement('tr');
+            const first = makeEl('td', 'precision-draft');
+            first.appendChild(makeEl('span', '', `Borrador #${c.draft_id} · ${c.subject}`));
+            if (c.ticket_id) {
+                // Confirmado: enlace al ticket que salió del borrador
+                const link = makeEl('button', 'ticket-bar-link precision-ticket', `Ticket #${c.ticket_id}`);
+                link.type = 'button';
+                link.dataset.ticketId = String(c.ticket_id);
+                first.appendChild(link);
+            } else {
+                first.appendChild(makeEl('span', 'org-row-sub', DRAFT_STATUS_LABELS[c.draft_status] || 'Pendiente'));
+            }
+            row.append(first, makeEl('td', '', c.ai_department || 'Ninguno'), makeEl('td', '', c.origin_label),
+                makeEl('td', '', c.from_department || '—'), makeEl('td', '', c.to_department || '—'),
+                makeEl('td', '', c.reason), makeEl('td', '', `${c.by_name} · ${formatDateTime(c.at)}`),
+                precisionOutcome(c));
+            corrections.appendChild(row);
+        });
+        labelTableCells(document.getElementById('precisionCorrections'));
+    }
+
+    // ¿Terminó donde dijo la IA?
+    function precisionOutcome(c) {
+        const cell = makeEl('td');
+        if (c.outcome === 'ai_right') cell.appendChild(makeEl('span', 'ui-tag is-ok', 'La IA tenía razón'));
+        else if (c.outcome === 'ai_wrong') cell.appendChild(makeEl('span', 'ui-tag is-warn', 'La IA se equivocó'));
+        else cell.appendChild(makeEl('span', 'ui-tag', c.current_department ? `Pendiente · hoy en ${c.current_department}` : 'Pendiente'));
+        return cell;
+    }
+
+    precisionRange.addEventListener('change', () => {
+        precisionDates.hidden = precisionRange.value !== 'custom';
+        if (precisionRange.value !== 'custom') showPrecision();
+    });
+    [precisionFrom, precisionTo].forEach(input => input.addEventListener('change', () => {
+        if (precisionFrom.value && precisionTo.value && precisionFrom.value > precisionTo.value) {
+            showError('La fecha "Desde" no puede ser posterior a "Hasta".');
+            return;
+        }
+        showPrecision();
+    }));
+    document.getElementById('precisionCorrectionsBody').addEventListener('click', (e) => {
+        const link = e.target.closest('.precision-ticket');
+        if (link) openTicketById(Number(link.dataset.ticketId));
+    });
+
+    // «Enviar» solo con un departamento elegido (un solo listener para todas las filas)
+    draftsUnclassifiedList.addEventListener('change', (e) => {
+        const select = e.target.closest('.drafts-unclassified-dept');
+        if (!select) return;
+        const send = select.closest('li').querySelector('button[data-choose-other]');
+        if (send) send.disabled = !select.value;
+    });
+
+    draftsUnclassifiedList.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-choose-draft]');
+        if (!button) return;
+        let departmentId = Number(button.dataset.chooseDept);
+        if (button.dataset.chooseOther) {
+            departmentId = Number(button.closest('li').querySelector('.drafts-unclassified-dept').value);
+            if (!departmentId) {
+                showError('Elija el departamento');
+                return;
+            }
+        }
+        button.disabled = true;
+        let result;
+        try {
+            result = await apiFetch(`/admin/drafts/${button.dataset.chooseDraft}/department`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ department_id: departmentId }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            showError(err.message);
+            return;
+        }
+        showSuccess(`Borrador #${result.draft_id} enviado a ${result.department_name}`);
+        showDraftsUnclassified();
+        pollNavCounts(false);
+    });
+
+    document.getElementById('thresholdForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const data = await apiFetch('/admin/classification/threshold', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ threshold: Number(thresholdInput.value) }),
+            });
+            thresholdInput.value = data.threshold.toFixed(3);
+            showSuccess('Umbral guardado: aplica desde el siguiente correo');
+        } catch (err) {
+            showError(err.message);
+        }
+    });
+
+    document.getElementById('minSimilarityForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const data = await apiFetch('/admin/classification/min-similarity', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, silent: true,
+                body: JSON.stringify({ min_similarity: Number(minSimilarityInput.value) }),
+            });
+            minSimilarityInput.value = data.min_similarity.toFixed(3);
+            showSuccess('Similitud mínima guardada: aplica desde el siguiente correo');
+        } catch (err) {
+            showError(err.message);
+        }
+    });
+
+    // ----- Administración › Panel: una fila por departamento que atiende tickets -----
+    const panelBody = document.getElementById('panelBody');
+    const panelUnplaced = document.getElementById('panelUnplaced');
+
+    async function showPanel() {
+        let data;
+        try {
+            data = await apiFetch('/admin/overview', { silent: true });
+        } catch (err) {
+            panelBody.replaceChildren();
+            document.getElementById('panelStatus').replaceChildren(errorState(err, showPanel));
+            return;
+        }
+        const status = document.getElementById('panelStatus');
+        status.replaceChildren(document.createTextNode(
+            `Tickets por departamento: ${data.routing_enforced ? 'encendido' : 'apagado (todo funciona como antes)'}. `));
+        const activation = makeEl('a', 'org-checklist-link', 'Activación');
+        activation.href = '#/admin/activacion';
+        status.appendChild(activation);
+        panelBody.replaceChildren();
+        if (!data.departments.length) {
+            const row = document.createElement('tr');
+            const cell = makeEl('td', '', 'Ningún departamento atiende tickets todavía. Márquelos en Departamentos.');
+            cell.colSpan = 6;
+            row.appendChild(cell);
+            panelBody.appendChild(row);
+        }
+        data.departments.forEach(dept => {
+            const row = document.createElement('tr');
+            row.appendChild(makeEl('td', '', dept.path));
+            row.appendChild(makeEl('td', dept.coordinator_name ? '' : 'panel-missing', dept.coordinator_name || 'Sin coordinador'));
+            row.appendChild(makeEl('td', dept.technicians ? '' : 'panel-missing', String(dept.technicians)));
+            // Fase 2: tickets abiertos y vencidos del departamento
+            row.appendChild(makeEl('td', '', typeof dept.open === 'number' ? String(dept.open) : '—'));
+            row.appendChild(makeEl('td', '', typeof dept.overdue === 'number' ? String(dept.overdue) : '—'));
+            const links = makeEl('td', 'panel-links');
+            [['Personal', 'admin/turnos'], ['Departamento', 'admin/departamentos']].forEach(([label, route]) => {
+                const link = makeEl('a', 'org-checklist-link', label);
+                link.href = `#/${route}`;
+                links.appendChild(link);
+            });
+            row.appendChild(links);
+            panelBody.appendChild(row);
+        });
+        labelTableCells(document.getElementById('panelTable'));
+        document.getElementById('panelUnplacedBox').hidden = !data.unplaced.length;
+        renderUnplaced(panelUnplaced, data.unplaced);
+    }
+    ADMIN_SECTION_LOADERS.panel = showPanel;
+
+    panelUnplaced.addEventListener('click', async (e) => {
+        const button = e.target.closest('button[data-place-id]');
+        if (!button) return;
+        const person = { id: Number(button.dataset.placeId), name: button.dataset.placeName, role: button.dataset.placeRole };
+        if (await openPlacementDialog(person)) showPanel();
+    });
+
+    // Aviso del personal sin departamento con el interruptor encendido (lo dice /auth/me)
+    function renderPlacementNotice() {
+        document.getElementById('placementNotice').hidden = !(currentUser && currentUser.placement_missing);
+    }
+
+    // ----- Departamento de una persona del personal: solo el administrador -----
+    const placementDialog = document.getElementById('placementDialog');
+    const placementDept = document.getElementById('placementDept');
+    const placementError = document.getElementById('placementError');
+    let placementPerson = null;
+    let placementDone = null;
+
+    async function openPlacementDialog(person) {
+        let current;
+        try {
+            [current] = await Promise.all([
+                apiFetch(`/admin/users/${person.id}/placement`, { silent: true }),
+                loadOrgDepartments(),
+            ]);
+        } catch (err) {
+            showError(err.message);
+            return false;
+        }
+        return new Promise(resolve => {
+            placementPerson = person;
+            placementDone = resolve;
+            document.getElementById('placementTarget').textContent =
+                `${person.name || 'Sin nombre'} · ${ROLE_MAP[person.role] || person.role} · ${current.department_name || 'Sin departamento'}`;
+            departmentOptions(placementDept, { servingOnly: true, selected: current.placed ? current.department_id : null });
+            placementError.hidden = true;
+            placementDialog.showModal();
+            placementDept.focus();
+        });
+    }
+
+    function closePlacementDialog(done) {
+        if (placementDialog.open) placementDialog.close();
+        const resolve = placementDone;
+        placementDone = null;
+        placementPerson = null;
+        if (resolve) resolve(done);
+    }
+
+    document.getElementById('placementCancel').addEventListener('click', () => closePlacementDialog(false));
+    placementDialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closePlacementDialog(false);
+    });
+    document.getElementById('placementForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!placementPerson) return;
+        placementError.hidden = true;
+        const body = { department_id: Number(placementDept.value) || null };
+        try {
+            await apiFetch(`/admin/users/${placementPerson.id}/placement`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), silent: true,
+            });
+        } catch (err) {
+            // Mensaje del servidor (getErrorMessage en apiFetch): por ejemplo, que ya tiene coordinador
+            placementError.textContent = err.message || 'No se pudo guardar el departamento';
+            placementError.hidden = false;
+            return;
+        }
+        showSuccess('Departamento actualizado');
+        closePlacementDialog(true);
+    });
+
+    // Importación del organigrama: vista previa (nada se guarda) y confirmación con las fusiones elegidas
+    let importPaths = [];
+    let importSuggestions = [];
+    const deptImportPreview = document.getElementById('deptImportPreview');
+    const IMPORT_STATUS = { new: 'Nuevo', exists: 'Ya existe', duplicate: 'Repetido', error: 'Error' };
+
+    document.getElementById('deptImportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = document.getElementById('deptImportFile').files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        let data;
+        try {
+            data = await apiFetch('/admin/departments/import/preview', { method: 'POST', body: form });
+        } catch (err) {
+            return; // apiFetch ya mostró el error
+        }
+        importPaths = data.rows.filter(r => r.status === 'new' || r.status === 'exists').map(r => r.path);
+        importSuggestions = data.suggestions;
+        deptImportPreview.replaceChildren();
+        const c = data.counts;
+        deptImportPreview.appendChild(makeEl('p', 'admin-text',
+            `${c.new} nuevos · ${c.exists} ya existen · ${c.duplicate} repetidos · ${c.error} con error`));
+        const table = makeEl('ul', 'org-list org-preview-rows');
+        data.rows.forEach(r => {
+            const li = makeEl('li', `org-row is-${r.status}`);
+            const text = makeEl('div', 'org-row-text');
+            text.appendChild(makeEl('span', 'org-row-title', `${r.line}. ${r.path || r.original || '(vacía)'}`));
+            text.appendChild(makeEl('span', 'org-row-sub', [IMPORT_STATUS[r.status], ...r.notes].join(' · ')));
+            li.appendChild(text);
+            table.appendChild(li);
+        });
+        deptImportPreview.appendChild(table);
+        if (importSuggestions.length) {
+            deptImportPreview.appendChild(makeEl('h3', 'org-subtitle',
+                'Posibles equivalencias: marque las que se fusionan y elija el nombre oficial (el otro queda como alias)'));
+            const merges = makeEl('ul', 'org-list');
+            importSuggestions.forEach((sug, i) => {
+                const li = makeEl('li', 'org-row org-merge-row');
+                const label = makeEl('label', 'org-merge');
+                const check = document.createElement('input');
+                check.type = 'checkbox';
+                check.className = 'org-merge-check';
+                check.dataset.index = String(i);
+                label.append(check, makeEl('span', '', `Fusionar · ${sug.reason}`));
+                li.appendChild(label);
+                // Nombre oficial: por defecto el propuesto (con tildes); se puede cambiar salvo que ya exista con otro padre
+                const choices = makeEl('div', 'org-merge-choices');
+                [sug.into, sug.merge].forEach((path, j) => {
+                    const option = makeEl('label', 'org-check');
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = `orgOfficial${i}`;
+                    radio.value = path;
+                    radio.checked = j === 0;
+                    radio.disabled = !sug.choosable && j === 1;
+                    option.append(radio, makeEl('span', '', `Oficial: ${path}`));
+                    choices.appendChild(option);
+                });
+                if (!sug.choosable) choices.appendChild(makeEl('span', 'org-row-sub', 'Ya existe con otro departamento padre: se conserva su nombre.'));
+                li.appendChild(choices);
+                merges.appendChild(li);
+            });
+            deptImportPreview.appendChild(merges);
+        }
+        const confirm = makeEl('button', 'ui-btn ui-btn-primary org-import-confirm', 'Confirmar importación');
+        confirm.type = 'button';
+        deptImportPreview.appendChild(confirm);
+        deptImportPreview.hidden = false;
+    });
+
+    deptImportPreview.addEventListener('click', async (e) => {
+        const button = e.target.closest('.org-import-confirm');
+        if (!button) return;
+        const merges = [...deptImportPreview.querySelectorAll('.org-merge-check:checked')].map(check => {
+            const i = Number(check.dataset.index);
+            const sug = importSuggestions[i];
+            const chosen = deptImportPreview.querySelector(`input[name="orgOfficial${i}"]:checked`);
+            const official = chosen ? chosen.value : sug.into;
+            return { merge: official === sug.into ? sug.merge : sug.into, into: official };
+        });
+        button.disabled = true;
+        let result;
+        try {
+            result = await apiFetch('/admin/departments/import/confirm', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: importPaths, merges }),
+            });
+        } catch (err) {
+            button.disabled = false;
+            return; // apiFetch ya mostró el error
+        }
+        deptImportPreview.hidden = true;
+        document.getElementById('deptImportForm').reset();
+        showSuccess(`Importación lista: ${result.created} departamento(s) nuevo(s), ${result.aliases} alias`);
+        showDepartments();
+    });
 
     // Verificación en el navegador: después de elegir una opción del menú debe verse una sola vista
     // y, dentro de Cuentas o Administración, una sola sección. Si no, queda el error en la consola.
@@ -9616,8 +11119,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function canChangeRole(user) {
         if (!currentUser || user.id === currentUser.id) return false;
-        // Admin: directo. Coordinador: solicitud con doble aprobación, solo para técnicos (como hasta ahora)
-        return currentUser.role === 'admin' || (currentUser.role === 'coordinator' && user.role === 'technician');
+        // Admin: directo, técnico ↔ coordinador. Coordinador: solicitud con doble aprobación, solo para técnicos
+        if (currentUser.role === 'admin') return ROLE_CHANGE_ROLES.includes(user.role);
+        return currentUser.role === 'coordinator' && user.role === 'technician';
     }
 
     // Las mismas reglas de hoy (MANAGE_RULES); el servidor también las revisa. En esta tabla nadie ve
@@ -9632,6 +11136,9 @@ document.addEventListener('DOMContentLoaded', () => {
             items.push({ action: 'availability', label: 'Vacaciones y ausencias' });
         }
         if (canChangeRole(user)) items.push({ action: 'change-role', label: 'Cambiar rol…' });
+        if (currentUser.role === 'admin' && ROLE_CHANGE_ROLES.includes(user.role)) {
+            items.push({ action: 'placement', label: 'Departamento…' });
+        }
         if (user.is_active && canManage(user, 'reset')) items.push({ action: 'reset-access', label: 'Forzar restablecimiento' });
         if (user.login_locked && canManage(user, 'unlock')) items.push({ action: 'unlock', label: 'Desbloquear' });
         if (canManage(user, 'sessions')) items.push({ action: 'close-sessions', label: 'Cerrar sesiones' });
@@ -9766,14 +11273,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const info = makeEl('div', 'team-selected-info');
         info.appendChild(makeEl('h2', 'team-selected-name', name));
         info.appendChild(makeEl('p', 'team-selected-detail', `${ROLE_MAP[user.role] || user.role} · ${teamStateText(user)} · ${user.email}`));
-        const numbers = makeEl('p', 'team-selected-numbers');
-        numbers.appendChild(makeEl('b', '', String(user.tickets_assigned_open)));
-        numbers.appendChild(document.createTextNode(' tickets abiertos asignados'));
-        info.appendChild(numbers);
+        if (ROLE_CHANGE_ROLES.includes(user.role)) {
+            info.appendChild(makeEl('p', 'team-selected-detail', `Departamento: ${user.department_name || 'Sin departamento'}`));
+        }
+        // Otro coordinador visto por un coordinador: el servidor no manda sus tickets
+        const seesTickets = typeof user.tickets_assigned_open === 'number';
+        if (seesTickets) {
+            const numbers = makeEl('p', 'team-selected-numbers');
+            numbers.appendChild(makeEl('b', '', String(user.tickets_assigned_open)));
+            numbers.appendChild(document.createTextNode(' tickets abiertos asignados'));
+            info.appendChild(numbers);
+        }
         box.appendChild(info);
 
         const actions = makeEl('div', 'team-selected-actions');
-        if (user.role !== 'admin') {
+        if (user.role !== 'admin' && seesTickets) {
             const tickets = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm team-view-tickets', 'Ver sus tickets');
             tickets.type = 'button';
             actions.appendChild(tickets);
@@ -9903,6 +11417,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (await openRoleDialog(user)) loadTeam();
             return;
         }
+        if (entry.dataset.action === 'placement') {
+            if (await openPlacementDialog(user)) loadTeam();
+            return;
+        }
         if (entry.dataset.action === 'close-sessions'
             && !confirm(`Se cerrarán todas las sesiones de ${user.name || 'esta cuenta'} en todos sus dispositivos. ¿Continuar?`)) {
             return;
@@ -9959,17 +11477,40 @@ document.addEventListener('DOMContentLoaded', () => {
     let roleUser = null;
     let roleDone = null;
 
-    function openRoleDialog(user) {
+    const roleDeptGroup = document.getElementById('roleDeptGroup');
+    const roleDept = document.getElementById('roleDept');
+
+    // Administrador: el rol y el departamento cambian juntos
+    function syncRolePlacement() {
+        roleDeptGroup.hidden = currentUser.role !== 'admin';
+    }
+    roleSelect.addEventListener('change', syncRolePlacement);
+
+    async function openRoleDialog(user, preselected = null) {
+        if (currentUser.role === 'admin') {
+            try {
+                await loadOrgDepartments();
+            } catch (err) {
+                showError(err.message);
+                return false;
+            }
+        }
         return new Promise(resolve => {
             roleUser = user;
             roleDone = resolve;
             const isCoordinator = currentUser.role === 'coordinator';
             document.getElementById('roleTarget').textContent = `${user.name || 'Sin nombre'} · ${ROLE_MAP[user.role] || user.role}`;
             roleSelect.replaceChildren();
+            // El coordinador no solicita ascensos a coordinador (el servidor lo rechaza)
             const options = isCoordinator
-                ? [['coordinator', 'Coordinador'], ['requester', 'Solicitante']]
+                ? [['requester', 'Contacto']]
+                // Administrador: solo el otro rol del personal, sin motivo
                 : ROLE_OPTIONS.filter(([value]) => value !== user.role);
-            options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, false)));
+            options.forEach(([value, label]) => roleSelect.appendChild(staffOption(value, label, value === preselected)));
+            if (!isCoordinator) {
+                departmentOptions(roleDept, { servingOnly: true });
+            }
+            syncRolePlacement();
             document.getElementById('roleReasonGroup').hidden = !isCoordinator;
             roleReason.value = '';
             document.getElementById('roleSubmit').textContent = isCoordinator ? 'Enviar solicitud' : 'Cambiar rol';
@@ -10018,10 +11559,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     silent: true
                 });
             } else {
+                // Rol y departamento juntos (el nivel solo si pasa a técnico)
+                const body = { role: roleSelect.value, department_id: Number(roleDept.value) || null };
                 await apiFetch(`/admin/users/${roleUser.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ role: roleSelect.value }),
+                    body: JSON.stringify(body),
                     silent: true
                 });
             }
@@ -10051,7 +11594,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Crear a nombre de un cliente y reasignar: el coordinador (el administrador no entra al flujo de tickets)
     function canCreateTicket() {
-        return Boolean(currentUser && OPERATION_ROLES.includes(currentUser.role));
+        return Boolean(currentUser && (OPERATION_ROLES.includes(currentUser.role) || staffCreatesTickets()));
     }
 
     function canAssign() {
@@ -10450,7 +11993,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let bellLoaded = false;
 
     // Los de borradores no tienen ticket: se identifican por el borrador
-    const noticeKey = (item) => (item.kind === 'draft_assigned' ? `draft:${item.draft_id}` : `${item.ticket_id}:${item.kind}`);
+    // Asignado (sin interruptor) o transferido a su departamento (con interruptor)
+    const isDraftNotice = (item) => item.kind === 'draft_assigned' || item.kind === 'draft_transferred';
+    const noticeKey = (item) => (isDraftNotice(item) ? `${item.kind}:${item.draft_id}` : `${item.ticket_id}:${item.kind}`);
 
     // "2 h 05 min", "45 min", "3 d 4 h"
     function durationText(seconds) {
@@ -10469,6 +12014,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function noticeText(item) {
         if (item.kind === 'draft_assigned') return `Nuevo borrador asignado · ${item.title}`;
+        // Bandeja: transferido a su departamento o resuelto (sin correo)
+        if (item.text) return item.text;
         const ticket = `El ticket #${item.ticket_id} · ${item.title}`;
         if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · ${item.title}`;
         if (item.kind === 'overdue') return `${ticket} venció hace ${durationText(-secondsUntil(item.due_at))}`;
@@ -10477,6 +12024,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function noticeToastText(item) {
         if (item.kind === 'draft_assigned') return `Nuevo borrador asignado · ${item.title}`;
+        if (item.text) return item.text;
         if (item.kind === 'report') return `Reporte de vencimiento del ticket #${item.ticket_id} · pendiente de causa`;
         if (item.kind === 'overdue') return `El ticket #${item.ticket_id} acaba de vencer`;
         return `El ticket #${item.ticket_id} vence en ${durationText(secondsUntil(item.due_at))}`;
@@ -10502,7 +12050,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bellLoaded) {
             data.items.filter(item => !item.read && !bellKnown.has(noticeKey(item))).forEach(item => {
                 toast(noticeToastText(item), {
-                    action: item.kind === 'draft_assigned' ? 'Ver borrador'
+                    action: isDraftNotice(item) ? 'Ver borrador'
                         : (item.kind === 'report' || item.kind === 'overdue' ? 'Ver reporte' : 'Ver ticket'),
                     duration: 8000,
                     onClose: (reason) => { if (reason === 'action') openNotice(item); },
@@ -10523,7 +12071,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         bellItems.forEach(item => {
-            const calm = item.kind === 'due_50' || item.kind === 'draft_assigned';
+            const calm = item.kind === 'due_50' || isDraftNotice(item);
             const li = makeEl('li', `bell-item${item.read ? '' : ' is-unread'}${calm ? '' : ' is-urgent'}`);
             const open = makeEl('button', 'bell-open');
             open.type = 'button';
@@ -10572,12 +12120,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Vencido o reporte: al Reporte de vencimiento; 50 % y 80 %: al ticket
     function openNotice(item) {
-        markNoticesRead(item.kind === 'draft_assigned' ? { draft_id: item.draft_id } : { ticket_id: item.ticket_id });
+        markNoticesRead(isDraftNotice(item) ? { draft_id: item.draft_id } : { ticket_id: item.ticket_id });
         closeBellPanel();
         closeSideNav();
-        if (item.kind === 'draft_assigned') openDraftById(item.draft_id);
+        if (isDraftNotice(item)) openDraftById(item.draft_id);
         else if (item.kind === 'overdue' || item.kind === 'report') openOverdueReport(item.ticket_id);
-        else openTicketById(item.ticket_id);
+        else if (item.kind === 'ticket_resolved') {
+            // Enlace a la documentación de la solución
+            openTicketById(item.ticket_id).then(() => {
+                const solution = document.getElementById('ticketSolution');
+                if (solution) solution.scrollIntoView({ block: 'start' });
+            });
+        } else openTicketById(item.ticket_id);
     }
 
     navBell.addEventListener('click', () => {

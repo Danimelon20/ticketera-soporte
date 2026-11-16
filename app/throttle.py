@@ -36,6 +36,8 @@ def register_failure(db: Session, email: str, user: models.User | None = None) -
         row.locked_until = None
     row.failures += 1
     row.updated_at = now
+    if user is not None:
+        audit.record(db, None, "login_failed", target=user)
     locked = row.failures >= MAX_FAILURES
     if locked:
         row.failures = 0

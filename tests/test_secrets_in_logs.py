@@ -3,25 +3,20 @@ import uuid
 
 from app import config
 from conftest import code_from
+from org_helpers import placement_for
 
 
 def test_no_code_or_password_in_logs(client, make_user, sent, monkeypatch, caplog):
     # Con el correo encendido (simulado) los códigos nunca se escriben en el log
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     caplog.set_level(logging.DEBUG)
     secrets = []
-
-    email = f"cliente-{uuid.uuid4().hex}@example.com"
-    client.post("/api/auth/register", json={"email": email, "password": "clave-cliente-123"})
-    code = code_from(sent[-1][2])
-    secrets += ["clave-cliente-123", code]
-    assert client.post("/api/auth/register/verify", json={"email": email, "code": code}).status_code == 200
 
     admin = make_user("admin")
     staff_email = f"personal-{uuid.uuid4().hex}@test.com"
     client.post(
         "/api/staff-invitations",
-        json={"email": staff_email, "name": "Persona Nueva", "role": "technician"},
+        json={"email": staff_email, "name": "Persona Nueva", "role": "technician", **placement_for("technician")},
         headers=admin["headers"],
     )
     code = code_from(sent[-1][2])
@@ -61,7 +56,7 @@ def test_generated_password_not_logged_in_development(client, make_user, sent, c
     staff_email = f"personal-{uuid.uuid4().hex}@test.com"
     client.post(
         "/api/staff-invitations",
-        json={"email": staff_email, "name": "Persona Nueva", "role": "coordinator"},
+        json={"email": staff_email, "name": "Persona Nueva", "role": "coordinator", **placement_for("coordinator")},
         headers=admin["headers"],
     )
     code = code_from(sent[-1][2])

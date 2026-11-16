@@ -162,16 +162,13 @@ def test_same_requester_same_problem_merges(client, make_user, make_ticket, grou
     assert [item["id"] for item in queue["items"]] == [first["id"]]
 
 
-def test_requester_sees_only_merged_into(client, make_user, make_ticket, grouping_on):
+def test_staff_sees_merged_into_and_merged_from(client, make_user, make_ticket, grouping_on):
     tag = new_tag()
     requester = make_user("requester")
     coordinator = make_user("coordinator")
     first = make_ticket(requester, title=f"Impresora atascada {tag}")
     second = make_ticket(requester, title=f"La impresora sigue atascada {tag}")
 
-    own = client.get(f"/api/tickets/{second['id']}", headers=requester["headers"]).json()
-    assert own["merged_into"] == first["id"]
-    assert "grouping" not in own
     staff = client.get(f"/api/tickets/{first['id']}", headers=coordinator["headers"]).json()
     assert staff["grouping"]["merged_from"][0]["ticket_id"] == second["id"]
     assert staff["grouping"]["merged_from"][0]["can_separate"] is True
@@ -219,7 +216,7 @@ def test_merge_copies_attachments_and_separate_restores(client, make_user, make_
     monkeypatch.setattr(config, "GROUPING_ENABLED", False)
     first = make_ticket(requester, title=f"Pantalla azul {tag}")
     second = make_ticket(requester, title=f"Otra vez pantalla azul {tag}")
-    upload(client, second["id"], requester)
+    upload(client, second["id"], coordinator)
     monkeypatch.setattr(config, "GROUPING_ENABLED", True)
 
     assert grouping.after_ticket_created(second["id"]) == "merged"
@@ -342,20 +339,6 @@ def test_three_clients_link_mark_incident_and_inherit_assignment(client, make_us
     assert [r["ticket_id"] for r in detail["grouping"]["related"]] == [second["id"], third["id"], fourth["id"]]
 
 
-def test_requester_never_sees_other_client_ticket(client, make_user, make_ticket, grouping_on):
-    tag = new_tag()
-    first_client = make_user("requester")
-    second_client = make_user("requester")
-    principal = make_ticket(first_client, title=f"Wifi caído en recepción {tag}")
-    related = make_ticket(second_client, title=f"No hay wifi {tag}")
-    assert active_link(related["id"]) is not None
-    own = client.get(f"/api/tickets/{related['id']}", headers=second_client["headers"])
-    assert own.status_code == 200
-    assert "grouping" not in own.json()
-    assert not [h for h in own.json()["history"] if h["field"] in ("linked", "unlinked")]
-    assert f"#{principal['id']}" not in own.text and "recepción" not in own.text
-
-
 def test_different_problems_from_other_clients_are_not_linked(make_user, make_ticket, grouping_on):
     first_client = make_user("requester")
     second_client = make_user("requester")
@@ -364,7 +347,7 @@ def test_different_problems_from_other_clients_are_not_linked(make_user, make_ti
     assert active_link(other["id"]) is None
 
 
-def test_unlink_recalculates_incident_and_returns_to_queue(client, make_user, make_ticket, grouping_on, monkeypatch):
+def test_unlink_recalculates_incident_and_keeps_the_technician(client, make_user, make_ticket, grouping_on, monkeypatch):
     monkeypatch.setattr(config, "GROUPING_INCIDENT_MIN", 2)
     tag = new_tag()
     coordinator = make_user("coordinator")
@@ -381,7 +364,11 @@ def test_unlink_recalculates_incident_and_returns_to_queue(client, make_user, ma
     response = client.post(f"/api/links/{link.id}/undo", headers=coordinator["headers"])
     assert response.status_code == 204, response.text
     separated = get(models.Ticket, second["id"])
-    assert separated.assigned_to is None and separated.status == "new"
+    # Sigue asignado a su técnico y en su bandeja (antes desaparecía de "Mis tickets")
+    assert separated.assigned_to == technician["id"] and separated.status == "new"
+    queue = client.get("/api/queue", params={"view": "mine_open"}, headers=technician["headers"])
+    assert queue.status_code == 200, queue.text
+    assert second["id"] in [item["id"] for item in queue.json()["items"]]
     assert active_link(second["id"]) is None
     assert active_link(third["id"]) is not None
     assert rows(models.TicketIncident, models.TicketIncident.principal_ticket_id == principal["id"]) == []
@@ -527,9 +514,10 @@ def test_deadline_passed_leaves_ticket_normal(make_user, make_ticket, grouping_o
     make_ticket(requester, title=f"Outlook no envía {tag}")
     second = make_ticket(requester, title=f"Outlook no envía nada {tag}")
     monkeypatch.setattr(config, "GROUPING_ENABLED", True)
-    # El reloj ya pasó el plazo cuando toca preguntarle a la IA (grouping y similarity usan el mismo time)
-    ticks = [1000.0]
-    monkeypatch.setattr(grouping.time, "monotonic", lambda: ticks.pop(0) if ticks else 2000.0)
+    # Plazo de 0 s: vence en el mismo instante en que empieza la revisión. La similitud está simulada, así que el
+    # plazo se revisa al preguntarle a la IA; time.monotonic nunca retrocede, así que similarity.remaining siempre
+    # lo ve vencido. Sin reemplazar el reloj del proceso (otros hilos lo usan)
+    monkeypatch.setattr(config, "GROUPING_TIMEOUT_SECONDS", 0)
     assert grouping.after_ticket_created(second["id"]) is None
     assert get(models.Ticket, second["id"]).status == "new"
     assert grouping_on["chat_calls"] == []
@@ -560,7 +548,7 @@ def test_separate_forbidden_for_requester_and_unassigned_technician(client, make
     technician = make_user("technician")
     # El administrador tampoco separa: no entra al flujo de tickets
     first, second, merge = make_merge(client, make_user, make_ticket, requester)
-    for actor in (requester, technician, make_user("admin")):
+    for actor in (technician, make_user("admin")):
         response = client.post(f"/api/merges/{merge.id}/undo", headers=actor["headers"])
         assert response.status_code == 403
         assert response.json()["detail"] == grouping.NO_PERMISSION
@@ -591,20 +579,6 @@ def test_separate_allowed(client, make_user, make_ticket, grouping_on, role):
     assert response.status_code == 204, response.text
     assert active_merge(second["id"]) is None
 
-
-def test_separate_link_forbidden_for_requester(client, make_user, make_ticket, grouping_on):
-    tag = new_tag()
-    first_client = make_user("requester")
-    second_client = make_user("requester")
-    make_ticket(first_client, title=f"Wifi caído {tag}")
-    related = make_ticket(second_client, title=f"No hay wifi {tag}")
-    link = active_link(related["id"])
-    response = client.post(f"/api/links/{link.id}/undo", headers=second_client["headers"])
-    assert response.status_code == 403
-    assert active_link(related["id"]) is not None
-
-
-# ----- Registros -----
 
 def test_detection_log_has_no_text(make_user, make_ticket, grouping_on, caplog):
     caplog.set_level(logging.INFO)

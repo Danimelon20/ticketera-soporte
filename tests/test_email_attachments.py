@@ -196,21 +196,19 @@ def test_confirm_moves_files_to_first_message(client, make_user, requester, monk
     assert draft["attachment_notes"] == ["No se adjuntó «x.exe»: no es un tipo de archivo permitido."]
     preview = client.get(f"/api/drafts/attachments/{draft['attachments'][0]['id']}?preview=1", headers=coordinator["headers"])
     assert preview.status_code == 200 and preview.content == PDF
-    assert client.get(f"/api/drafts/attachments/{draft['attachments'][0]['id']}", headers=requester["headers"]).status_code == 403
 
     response = confirm(client, draft_id, coordinator)
     assert response.status_code == 200, response.text
     ticket_id = response.json()["ticket_id"]
     assert on_disk(files[0][1])
 
-    detail = client.get(f"/api/tickets/{ticket_id}", headers=requester["headers"]).json()
+    detail = client.get(f"/api/tickets/{ticket_id}", headers=coordinator["headers"]).json()
     first = detail["comments"][0]
     assert first["user_id"] == requester["id"] and first["content"] == ""
     assert [a["original_name"] for a in first["attachments"]] == ["factura.pdf"]
-    download = client.get(f"/api/attachments/{first['attachments'][0]['id']}", headers=requester["headers"])
+    download = client.get(f"/api/attachments/{first['attachments'][0]['id']}", headers=coordinator["headers"])
     assert download.status_code == 200 and download.content == PDF
-    # La nota de lo rechazado es interna: el solicitante no la ve, el personal sí
-    assert not any("x.exe" in c["content"] for c in detail["comments"])
+    # La nota de lo rechazado es interna: la ve el personal, marcada como interna
     staff = client.get(f"/api/tickets/{ticket_id}", headers=coordinator["headers"]).json()
     assert any(c["internal"] and "x.exe" in c["content"] for c in staff["comments"])
 
@@ -248,7 +246,7 @@ def test_stale_drafts_are_purged(requester):
 
 # ---------- Respuestas a un ticket y tickets directos ----------
 
-def test_reply_to_ticket_adds_files_to_comment(client, requester, make_ticket, sent):
+def test_reply_to_ticket_adds_files_to_comment(client, requester, make_ticket, make_user, sent):
     ticket = make_ticket(requester)
     db = SessionLocal()
     try:
@@ -262,14 +260,14 @@ def test_reply_to_ticket_adds_files_to_comment(client, requester, make_ticket, s
     # Solo con el adjunto, sin texto: también se guarda
     assert process(email(requester["email"], body="", subject=subject,
                          files=[("foto.png", png(100), "image/png")])) == "comment_added"
-    detail = client.get(f"/api/tickets/{ticket['id']}", headers=requester["headers"]).json()
+    detail = client.get(f"/api/tickets/{ticket['id']}", headers=make_user("coordinator")["headers"]).json()
     comments = [c for c in detail["comments"] if c["attachments"]]
     assert [(c["content"], c["attachments"][0]["original_name"]) for c in comments] == [
         ("Le mando la factura", "factura.pdf"), ("", "foto.png"),
     ]
 
 
-def test_template_ticket_gets_files_in_first_message(client, requester, monkeypatch):
+def test_template_ticket_gets_files_in_first_message(client, requester, make_user, monkeypatch):
     from app import auto_assign
     monkeypatch.setattr(config, "AI_ANALYSIS_ENABLED", False)
     monkeypatch.setattr(auto_assign, "assign_new", lambda ticket_id: None)
@@ -279,8 +277,9 @@ def test_template_ticket_gets_files_in_first_message(client, requester, monkeypa
     )
     assert process(email(requester["email"], body=body, subject="[Soporte] Planillas",
                          files=[("captura.png", png(100), "image/png")])) == "created"
-    tickets = client.get("/api/tickets", headers=requester["headers"]).json()
-    detail = client.get(f"/api/tickets/{tickets[0]['id']}", headers=requester["headers"]).json()
+    with SessionLocal() as db:
+        ticket_id = db.query(models.Ticket.id).filter(models.Ticket.created_by == requester["id"]).one()[0]
+    detail = client.get(f"/api/tickets/{ticket_id}", headers=make_user("coordinator")["headers"]).json()
     first = detail["comments"][0]
     assert first["user_id"] == requester["id"]
     assert [a["original_name"] for a in first["attachments"]] == ["captura.png"]
@@ -292,7 +291,7 @@ def test_template_ticket_gets_files_in_first_message(client, requester, monkeypa
 def followed_ticket(make_user, make_ticket, requester):
     ticket = make_ticket(requester)
     coordinator = make_user("coordinator", name="Coordinadora")
-    # Otro seguidor que ve el ticket (un técnico no asignado ya no lo ve ni recibe sus avisos)
+    # Seguidor del personal que quedó de antes: ya no recibe avisos (solo el solicitante)
     follower = make_user("coordinator", name="Coordinador Seguidor")
     db = SessionLocal()
     try:
@@ -324,9 +323,8 @@ def test_reply_with_files_goes_to_requester(client, followed_ticket, requester, 
     [(mail, files)] = sent_to(sent, requester["email"])
     assert [(name, data) for name, data, _ in files] == [("factura.pdf", PDF), ("foto.png", png(100))]
     assert "Adjuntó 2 archivo(s)." in mail[2]
-    [(other, other_files)] = sent_to(sent, follower["email"])
-    assert other_files is None
-    assert "Adjuntó 2 archivo(s)." in other[2]
+    # El seguimiento por correo es solo del solicitante: la fila antigua del coordinador no envía nada
+    assert sent_to(sent, follower["email"]) == []
 
     db = SessionLocal()
     try:
@@ -341,14 +339,15 @@ def test_reply_with_files_goes_to_requester(client, followed_ticket, requester, 
         db.close()
 
 
-def test_more_than_20_mb_sends_portal_link(client, followed_ticket, requester, sent):
+def test_more_than_20_mb_asks_to_reply_for_them(client, followed_ticket, requester, sent):
     ticket, coordinator, _ = followed_ticket
     big = [(f"grande{i}.png", png(attachments.MAX_BYTES)) for i in range(3)]
     assert reply(client, ticket["id"], coordinator, big).status_code == 200
     [(mail, files)] = sent_to(sent, requester["email"])
     assert files is None
-    assert "Los archivos adjuntos están disponibles en el portal de soporte." in mail[2]
-    assert f"http://soporte.test/#ticket/{ticket['id']}" in mail[2]
+    # Ya no hay portal donde verlos: se le pide que los solicite respondiendo
+    assert "responda este correo para pedirlos" in mail[2]
+    assert "#ticket/" not in mail[2]
 
 
 def test_internal_note_with_files_sends_nothing(client, followed_ticket, sent):
@@ -372,7 +371,7 @@ class FakeResponse:
 def graph_calls(monkeypatch):
     # Este módulo reemplaza mailer.send_email con el fake de "sent": aquí se prueba el de verdad
     monkeypatch.undo()
-    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "graph")
     monkeypatch.setattr(config, "SUPPORT_MAILBOX", MAILBOX)
     calls = []
 
@@ -443,7 +442,7 @@ def test_upload_to_session_sends_chunks(monkeypatch):
 
 def test_email_disabled_logs_only_the_count(monkeypatch, caplog):
     monkeypatch.undo()
-    monkeypatch.setattr(config, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(config, "MAIL_TRANSPORT", "log")
     caplog.set_level(logging.INFO)
     assert mailer.send_email("cliente@ejemplo.com", "Asunto", "Hola",
                              attachments=[("Cédula secreta.pdf", PDF, "application/pdf")]) is False

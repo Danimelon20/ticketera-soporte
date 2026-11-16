@@ -13,12 +13,15 @@ APP_ENV_VARS = (
     "EMAIL_POLL_SECONDS", "APP_URL", "CHATBOT_ENABLED", "LLM_BASE_URL", "LLM_MODEL", "AI_ANALYSIS_ENABLED",
     "OFFICE_DAYS", "OFFICE_START", "OFFICE_END", "OFFICE_TZ", "OFFICE_HOLIDAYS",
     "DAILY_SUMMARY_ENABLED", "DAILY_SUMMARY_HOUR", "ALERTS_ENABLED", "ALERT_WARN_PERCENT", "ALERTS_CHECK_SECONDS",
-    "AUTO_ASSIGN_ENABLED", "AUTO_ASSIGN_LOAD_MODE", "AUTO_ASSIGN_CHECK_SECONDS",
+    "AUTO_ASSIGN_ENABLED", "AUTO_ASSIGN_LOAD_MODE", "AUTO_ASSIGN_CHECK_SECONDS", "DUE_DATES_CHECK_SECONDS",
     "GROUPING_ENABLED", "EMBEDDING_MODEL", "GROUPING_MERGE_THRESHOLD", "GROUPING_INCIDENT_THRESHOLD",
     "GROUPING_INCIDENT_MIN", "GROUPING_INCIDENT_HOURS", "GROUPING_TIMEOUT_SECONDS",
     "ATTACHMENTS_DIR", "HACIENDA_CHECK", "HACIENDA_STRICT", "SESSION_IDLE_MINUTES", "SESSION_MAX_HOURS",
     "DATABASE_URL",
     "MS_LOGIN_ENABLED", "MS_LOGIN_TENANT_ID", "MS_LOGIN_CLIENT_ID", "MS_LOGIN_CLIENT_SECRET", "MS_LOGIN_REDIRECT_URI",
+    "INTERNAL_DOMAINS",
+    "APP_ENV", "MAIL_TRANSPORT", "MAILBOX_POLL_ENABLED", "SMTP_HOST", "SMTP_PORT", "SMTP_TIMEOUT_SECONDS",
+    "MAIL_FROM", "SMTP_ALLOWED_HOSTS",
 )
 for _name in APP_ENV_VARS:
     os.environ.pop(_name, None)
@@ -32,6 +35,9 @@ TEST_ENV = {
     "AI_ANALYSIS_ENABLED": "false",
     "GROUPING_ENABLED": "false",
     "AUTO_ASSIGN_ENABLED": "false",
+    # Sin la revisión periódica de vencimientos: cambiaría tickets de otras pruebas a mitad de la suite
+    # (test_due_default la llama directamente)
+    "DUE_DATES_CHECK_SECONDS": "0",
     "ALERTS_ENABLED": "false",
     "DAILY_SUMMARY_ENABLED": "false",
     # Inicio de sesión con Microsoft apagado: las pruebas que lo usan lo encienden con monkeypatch
@@ -190,7 +196,11 @@ def make_user(client):
 
 @pytest.fixture
 def make_ticket(client):
-    """Fábrica: crea un ticket a nombre del usuario indicado (headers)."""
+    """Fábrica: crea un ticket a nombre del usuario indicado.
+
+    Un contacto (rol requester) ya no inicia sesión: su ticket se crea con la misma función que usa el coordinador
+    «a nombre de» (create_for_owner) y después corren las tareas en segundo plano, como al responder la API. El
+    personal lo crea por la API con sus headers."""
     def _make(actor, title="Ticket de prueba", priority_id=1, category_id=1):
         payload = {
             "title": title,
@@ -199,18 +209,53 @@ def make_ticket(client):
             "priority_id": priority_id,
             "contact_phone": "8888-1234",
         }
+        if actor.get("role") == "requester":
+            return _owner_ticket(actor, payload)
         response = client.post("/api/tickets", json=payload, headers=actor["headers"])
         assert response.status_code == 200, response.text
         return response.json()
     return _make
 
 
+def _owner_ticket(actor, payload):
+    from fastapi import BackgroundTasks
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.tickets import create_for_owner
+    from app.schemas import TicketCreate, TicketRead
+
+    tasks = BackgroundTasks()
+    db = SessionLocal()
+    try:
+        owner = db.get(models.User, actor["id"])
+        ticket = create_for_owner(db, TicketCreate(**payload), owner, tasks)
+        data = TicketRead.model_validate(ticket).model_dump(mode="json")
+    finally:
+        db.close()
+    for task in tasks.tasks:
+        task.func(*task.args, **task.kwargs)
+    return data
+
+
+@pytest.fixture(autouse=True)
+def email_senders(monkeypatch):
+    """Los correos de prueba no pasan por Exchange (no traen sus marcas de autenticidad) y las cuentas de prueba
+    son @test.com: por defecto solo se mira el dominio y test.com es de la empresa. Las pruebas de app/email_auth.py
+    y de remitentes de afuera lo cambian."""
+    from app import config
+
+    monkeypatch.setattr(config, "EMAIL_SENDER_CHECK", "domain")
+    monkeypatch.setattr(config, "INTERNAL_DOMAINS", ["test.com"])
+
+
 @pytest.fixture(autouse=True)
 def no_real_network():
-    """Falla la prueba que intente salir a la red. EMAIL_ENABLED solo se enciende con monkeypatch en la prueba."""
+    """Falla la prueba que intente salir a la red. El correo solo se enciende con monkeypatch en la prueba."""
     from app import config
 
     assert config.EMAIL_ENABLED is False, "EMAIL_ENABLED llegó encendido a la prueba"
+    assert config.MAIL_TRANSPORT == "log", "MAIL_TRANSPORT llegó distinto de log a la prueba"
+    assert config.MAILBOX_POLL_ENABLED is False, "MAILBOX_POLL_ENABLED llegó encendido a la prueba"
     start = len(REAL_NETWORK_ATTEMPTS)
     yield
     attempts = REAL_NETWORK_ATTEMPTS[start:]
@@ -307,3 +352,77 @@ def code_from(body: str) -> str:
     match = re.search(r"\b(\d{6})\b", body)
     assert match, "El correo no trae un código de 6 dígitos"
     return match.group(1)
+
+
+class only_active_admins:
+    """Mientras dura el bloque, solo las cuentas keep_ids quedan como administradoras activas.
+
+    La base de pruebas es compartida y otras pruebas dejan administradores; al salir se reactivan."""
+
+    def __init__(self, *keep_ids: int):
+        self.keep_ids = keep_ids
+        self.others: list[int] = []
+
+    def __enter__(self):
+        from app.database import SessionLocal
+        from app import models
+
+        db = SessionLocal()
+        try:
+            query = db.query(models.User).filter(models.User.role == "admin", models.User.is_active.is_(True))
+            if self.keep_ids:
+                query = query.filter(models.User.id.notin_(self.keep_ids))
+            self.others = [u.id for u in query]
+            db.query(models.User).filter(models.User.id.in_(self.others)).update(
+                {"is_active": False}, synchronize_session=False
+            )
+            db.commit()
+        finally:
+            db.close()
+        return self
+
+    def __exit__(self, *exc):
+        from app.database import SessionLocal
+        from app import models
+
+        db = SessionLocal()
+        try:
+            db.query(models.User).filter(models.User.id.in_(self.others)).update(
+                {"is_active": True}, synchronize_session=False
+            )
+            db.commit()
+        finally:
+            db.close()
+        return False
+
+
+def _set_switch(key: str, value: str) -> None:
+    from app.database import SessionLocal
+    from app import routing
+
+    db = SessionLocal()
+    try:
+        routing.set_setting(db, key, value)
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def routing_switch(client):
+    """La base de las pruebas es nueva, así que routing_enforced arranca encendido (test_activation lo revisa).
+    Las pruebas corren con el interruptor apagado, que es el comportamiento de siempre; las de los
+    departamentos lo encienden con routing_on."""
+    from app import routing
+
+    _set_switch(routing.ROUTING_ENFORCED, "false")
+    yield
+
+
+@pytest.fixture
+def routing_on(routing_switch):
+    from app import routing
+
+    _set_switch(routing.ROUTING_ENFORCED, "true")
+    yield
+    _set_switch(routing.ROUTING_ENFORCED, "false")

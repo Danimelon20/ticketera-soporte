@@ -24,7 +24,8 @@ def test_complete_email_without_errors():
     assert result["category"] == "Software"
     assert result["priority"] == "Alta"
     assert result["phone"] == "88881234"
-    assert result["id_number"] == "102340567"
+    # La línea «Cédula:» ya no se lee
+    assert result["id_number"] is None
     assert result["description"] == "No abre el sistema de planillas.\nPasa desde ayer."
 
 
@@ -52,10 +53,11 @@ def test_missing_priority_defaults_to_media():
     assert result["errors"] == []
 
 
-def test_invalid_phone():
+def test_invalid_phone_is_ignored():
+    # El teléfono es opcional: mal escrito no detiene el ticket
     result = _parse("Categoría: Red\nTeléfono: 123\nDescripción: Sin internet")
     assert result["phone"] is None
-    assert "El teléfono debe tener 8 dígitos" in result["errors"]
+    assert result["errors"] == []
 
 
 def test_title_prefixes_and_default():

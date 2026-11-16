@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
 
-from . import assignment_notice, audit, availability, config, email_analysis, models, schedules
+from . import assignment_notice, audit, availability, config, email_analysis, models, routing, schedules
 from .database import SessionLocal
 from .email_processing import _RunNow
 from .notifications import notify_followers
@@ -41,13 +41,17 @@ def _row(db: Session, ticket_id: int) -> models.TicketAutoAssignment | None:
 
 
 def candidates(db: Session, now: datetime) -> list[models.User]:
-    """Técnicos activos, Disponibles y en turno en este momento (sin horario: nunca)."""
+    """Técnicos activos, Disponibles y en turno en este momento (sin horario: nunca).
+    Con el interruptor de departamentos encendido, sin departamento que atienda tickets: nunca."""
     technicians = (
         db.query(models.User)
         .filter(models.User.role == "technician", models.User.is_active.is_(True))
         .order_by(models.User.id)
         .all()
     )
+    if routing.enforced(db):
+        unplaced = {u.id for u in routing.unplaced_staff(db)}
+        technicians = [u for u in technicians if u.id not in unplaced]
     by_user = schedules.for_users(db, [u.id for u in technicians])
     return [
         u for u in technicians
@@ -71,6 +75,9 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     for ticket in tickets:
         level = email_analysis.effective_level(ticket.ai_analysis) if ticket.ai_analysis else None
         result[ticket.assigned_to] += (level if level is not None else NO_LEVEL) if by_levels else 1
+    # Con tickets por departamento los técnicos ya no revisan borradores: no cuentan
+    if routing.enforced(db):
+        return result
     drafts = (
         db.query(models.DraftAssignment.user_id, models.EmailDraft.ai_level)
         .join(models.EmailDraft, models.EmailDraft.id == models.DraftAssignment.draft_id)
@@ -86,9 +93,22 @@ def loads(db: Session, user_ids: list[int]) -> dict[int, int]:
     return result
 
 
-def choose(db: Session, now: datetime) -> models.User | None:
+def _scoped(db: Session, users: list[models.User], ticket: models.Ticket | None) -> list[models.User]:
+    """Tickets por departamento: solo técnicos del departamento del ticket (sin nivel: elige la carga). Sin
+    departamento, nadie (el administrador lo clasifica primero). Apagado: todos los candidatos, como antes."""
+    if ticket is None or not routing.enforced(db):
+        return users
+    dept = routing.ticket_department(db, ticket.id)
+    if dept is None:
+        return []
+    creator = db.get(models.User, ticket.created_by)
+    creator_id = creator.id if creator is not None and creator.role == "technician" else None
+    return routing.eligible_in_department(db, users, dept.id, creator_id)
+
+
+def choose(db: Session, now: datetime, ticket: models.Ticket | None = None) -> models.User | None:
     """Menor carga; empate: la asignación automática más antigua (o ninguna) y luego el id."""
-    users = candidates(db, now)
+    users = _scoped(db, candidates(db, now), ticket)
     if not users:
         return None
     ids = [u.id for u in users]
@@ -107,7 +127,7 @@ def _assign(db: Session, ticket: models.Ticket, row: models.TicketAutoAssignment
     if row is None:
         row = models.TicketAutoAssignment(ticket_id=ticket.id, status="waiting", created_at=now)
         db.add(row)
-    user = choose(db, now)
+    user = choose(db, now, ticket)
     agent_id = audit.agent_id(db)
     if user is None or agent_id is None:
         return False
@@ -291,6 +311,7 @@ def assign_draft(draft_id: int, now: datetime | None = None) -> str:
     """Al quedar un borrador pendiente de revisión. Nunca lanza excepciones.
 
     Con la asignación automática apagada no se asigna: queda "Sin revisor" y lo reparte un coordinador.
+    Con tickets por departamento, los borradores no se asignan a técnicos: van al coordinador o a «Por clasificar».
     """
     if not config.AUTO_ASSIGN_ENABLED:
         return "disabled"
@@ -298,6 +319,8 @@ def assign_draft(draft_id: int, now: datetime | None = None) -> str:
     with AUTO_ASSIGN_LOCK:
         db = SessionLocal()
         try:
+            if routing.enforced(db):
+                return "skipped"
             draft = db.get(models.EmailDraft, draft_id)
             if draft is None or draft.status not in DRAFT_PENDING_STATUSES:
                 return "skipped"
@@ -318,7 +341,8 @@ def assign_draft(draft_id: int, now: datetime | None = None) -> str:
 
 
 def run_pending_drafts(now: datetime | None = None) -> int:
-    """Borradores sin revisor (en espera o sin fila), del más antiguo al más nuevo. Devuelve cuántos asignó."""
+    """Borradores sin revisor (en espera o sin fila), del más antiguo al más nuevo. Devuelve cuántos asignó.
+    Con tickets por departamento no asigna borradores a técnicos."""
     if not config.AUTO_ASSIGN_ENABLED:
         return 0
     now = now or _now()
@@ -326,6 +350,8 @@ def run_pending_drafts(now: datetime | None = None) -> int:
     with AUTO_ASSIGN_LOCK:
         db = SessionLocal()
         try:
+            if routing.enforced(db):
+                return 0
             assigned += _drafts_baseline(db, now)
             db.commit()
             # Los que ya no esperan a una persona salen de la espera

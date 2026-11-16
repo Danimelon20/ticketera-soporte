@@ -47,11 +47,6 @@ class UserCreate(BaseModel):
     role: Literal["requester", "technician", "coordinator"]
 
 
-class RegisterRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=150)
-    password: str = Field(min_length=8)
-
-
 class SignupStarted(BaseModel):
     email_hint: str
 
@@ -69,6 +64,8 @@ class StaffInvitationCreate(BaseModel):
     email: str = Field(min_length=3, max_length=150)
     name: str = Field(min_length=1, max_length=100)
     role: Literal["technician", "coordinator"]
+    # Obligatorio (se valida en la ruta para dar el mensaje): departamento que atiende tickets
+    department_id: Optional[int] = None
 
     @field_validator("name")
     @classmethod
@@ -85,8 +82,10 @@ class StaffInvitationRead(BaseModel):
     role: str
     created_at: datetime
     expires_at: datetime
-    status: Literal["available", "expired", "used"]
+    # registered: no se usó, pero el correo ya tiene cuenta (no se reenvía)
+    status: Literal["available", "expired", "used", "registered"]
     email_sent: Optional[bool] = None
+    department_name: Optional[str] = None
 
 
 class ActivationResult(BaseModel):
@@ -95,11 +94,9 @@ class ActivationResult(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    """Un solo formulario: el rol sale de la cuenta. Un "portal" de una página vieja se ignora."""
     email: str
     password: str
-    # Opción de la pantalla de inicio: "admin", "staff" o "requester". Se valida en la ruta
-    # para que falte o no, la respuesta sea el mismo 401 genérico.
-    portal: Optional[str] = None
 
 
 class UserRead(BaseModel):
@@ -175,32 +172,14 @@ class MeRead(BaseModel):
     schedule_summary: Optional[str] = None
     # Vacaciones e incapacidades vigentes y futuras (las registra la persona o quien gestiona su cuenta)
     periods: list[AvailabilityPeriodRead] = []
+    # Técnicos y coordinadores: departamento (ruta)
+    department_name: Optional[str] = None
+    # Con el interruptor encendido y sin departamento: aviso "Contacte al administrador" (no recibe tickets)
+    placement_missing: bool = False
+    # Personal: tickets por departamento encendido (la página muestra crear, transferir y la cola del admin)
+    routing_enforced: bool = False
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class ProfileUpdate(BaseModel):
-    name: str = Field(max_length=100)
-    phone: str
-    id_number: str
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v):
-        v = " ".join(v.split())
-        if not v:
-            raise ValueError("Escriba su nombre completo")
-        return v
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v):
-        return normalize_phone(v)
-
-    @field_validator("id_number")
-    @classmethod
-    def validate_id_number(cls, v):
-        return normalize_id_number(v)
 
 
 class PasswordChange(BaseModel):
@@ -244,14 +223,77 @@ class AccountChangePage(BaseModel):
     pages: int
 
 
+# ----- Registro de cambios por persona (solo administrador). Datos personales siempre enmascarados -----
+class PersonHit(BaseModel):
+    id: int
+    name: str
+    role: str
+    email: str
+
+
+class PersonHeader(BaseModel):
+    id: int
+    name: str
+    role: str
+    email: str
+    state: Literal["active", "locked", "inactive"]
+    # Personal
+    schedule_today: Optional[str] = None
+    on_shift: Optional[bool] = None
+    availability: Optional[str] = None
+    last_access: Optional[datetime] = None
+    microsoft: Optional[bool] = None
+    # Cliente
+    phone: Optional[str] = None
+    reported: Optional[bool] = None
+    identity: Optional[str] = None
+
+
+class ActivitySummary(BaseModel):
+    start: datetime
+    end: datetime
+    assigned: int
+    resolved: int
+    reassigned_given: int
+    reassigned_received: int
+    overdue: int
+    drafts_confirmed: int
+    drafts_discarded: int
+    logins: int
+
+
+class ActivityItem(BaseModel):
+    at: datetime
+    group: str
+    kind: str
+    text: str
+    ticket_id: Optional[int] = None
+
+
+class PersonActivityPage(BaseModel):
+    person: PersonHeader
+    summary: Optional[ActivitySummary] = None
+    items: list[ActivityItem]
+    next_cursor: Optional[str] = None
+
+
 class TicketCreate(BaseModel):
     # Nombre y cédula salen del perfil del dueño del ticket; el teléfono es opcional
     title: str
     description: str
-    category_id: int
-    priority_id: int
+    # Obligatorias en el formulario de siempre (se revisan en la ruta); el del personal usa valores por defecto
+    category_id: Optional[int] = None
+    priority_id: Optional[int] = None
     contact_phone: Optional[str] = None
     requester_id: Optional[int] = None
+    # Con tickets por departamento, el personal crea en nombre de quien reporta
+    department_id: Optional[int] = None
+    reporter_name: Optional[str] = Field(default=None, max_length=100)
+    reporter_email: Optional[str] = Field(default=None, max_length=150)
+    # Área de quien reporta: cualquier departamento del organigrama
+    reporter_area_id: Optional[int] = None
+    reporter_phone: Optional[str] = Field(default=None, max_length=30)
+    channel: Optional[Literal["email", "phone", "in_person"]] = None
 
     @field_validator("contact_phone")
     @classmethod
@@ -268,6 +310,8 @@ class TicketUpdate(BaseModel):
     category_id: Optional[int] = None
     # Asignar a un técnico no disponible solo con confirmación explícita
     confirm_unavailable: bool = False
+    # Con el interruptor encendido: obligatoria al pasar a Resuelto
+    solution: Optional[str] = Field(default=None, max_length=5000)
 
 
 class CancellationRead(BaseModel):
@@ -301,8 +345,6 @@ class TicketRead(BaseModel):
     # Nombre de quien lo atiende: el solicitante no tiene acceso a la lista de cuentas
     assigned_name: Optional[str] = None
     source: str = "web"
-    # Avance para el portal: 1 Recibida, 2 Asignada, 3 En atención, 4 Resuelta
-    progress_step: int = 1
     # Último cambio o comentario público
     last_activity_at: Optional[datetime] = None
     # Solo para el personal y si está cancelado
@@ -359,9 +401,12 @@ class AILevelUpdate(BaseModel):
 
 
 class RequesterFlags(BaseModel):
-    """Solo para el personal: resultado de Hacienda (sin el nombre) y si la cuenta está reportada."""
-    identity: str
+    """Solo para el personal: resultado de Hacienda (sin el nombre; None sin cédula, como quien reporta por correo)
+    y si la cuenta está reportada."""
+    identity: Optional[str] = None
     reported: bool = False
+    # Cuenta de cliente archivada al quitar el portal
+    archived: bool = False
 
 
 class GroupItem(BaseModel):
@@ -391,12 +436,31 @@ class IncidentRead(BaseModel):
     clients: int
 
 
+class TicketReporterRead(BaseModel):
+    name: str
+    email: Optional[str] = None
+    area_name: Optional[str] = None
+    phone: Optional[str] = None
+    channel: str
+    channel_label: str
+
+
+class TicketSolutionRead(BaseModel):
+    text: str
+    resolved_by_name: str
+    resolved_at: datetime
+
+
+class EscalationTarget(BaseModel):
+    id: int
+    path: str
+
+
 class TicketDetail(TicketRead):
     history: list[HistoryRead] = []
     comments: list[CommentRead] = []
     contact_phone: Optional[str] = None
     contact_id_number: Optional[str] = None
-    following: bool = False
     ai_analysis: Optional[AIAnalysisRead] = None
     people: list[PersonRead] = []
     requester_flags: Optional[RequesterFlags] = None
@@ -409,6 +473,17 @@ class TicketDetail(TicketRead):
     grouping: Optional[GroupingRead] = None
     # Técnico que lo tuvo asignado antes, o administrador con "Ver conversación": solo lectura
     read_only: bool = False
+    # Solo el personal: departamento que atiende (None: "Sin departamento"), quién reportó y la solución
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    reporter: Optional[TicketReporterRead] = None
+    solution: Optional[TicketSolutionRead] = None
+    # Interruptor de tickets por departamento encendido (la pantalla pide la solución al resolver)
+    routing_enforced: bool = False
+    # Con el interruptor y departamento: técnicos activos del departamento (los únicos para reasignar)
+    assignable_ids: Optional[list[int]] = None
+    # Siguiente nivel del departamento (botón "Escalar"): solo con el interruptor y el ticket abierto
+    escalate_to: Optional[EscalationTarget] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -488,14 +563,12 @@ class DirectoryUser(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
+    # Sin pestaña: un "portal" de una página vieja se ignora
     email: str = Field(max_length=150)
-    # Opción de la pantalla de inicio; se valida en la ruta para responder siempre igual
-    portal: Optional[str] = None
 
 
 class PasswordResetConfirm(BaseModel):
     email: str = Field(max_length=150)
-    portal: Optional[str] = None
     code: str
     # Solo el solicitante elige su contraseña; al personal se le genera una
     new_password: Optional[str] = Field(default=None, max_length=200)
@@ -551,8 +624,11 @@ class RejectRequest(BaseModel):
 
 
 class AdminUserUpdate(BaseModel):
-    role: Literal["requester", "technician", "coordinator", "admin"] | None = None
+    # Sin "admin": el administrador solo se crea con python -m app.create_admin (422 si se pide)
+    role: Literal["requester", "technician", "coordinator"] | None = None
     is_active: bool | None = None
+    # Con el cambio técnico ↔ coordinador: el departamento nuevo
+    department_id: Optional[int] = None
 
 
 class ChatTurn(BaseModel):
@@ -599,12 +675,51 @@ class DraftRead(BaseModel):
     assigned_name: Optional[str] = None
     can_review: bool = False
     can_reassign: bool = False
+    # Tickets por departamento: departamento elegido por la IA o el administrador; «Por clasificar» si todavía no
+    department_name: Optional[str] = None
+    classification: Optional[Literal["routed", "pending", "classified"]] = None
+    # Transferir a otro departamento (el coordinador del departamento) y la última transferencia que lo trajo
+    can_transfer: bool = False
+    transfer_note: Optional[str] = None
 
 
 class DraftAssign(BaseModel):
     """El coordinador elige otro técnico para revisar el borrador."""
     user_id: int
     confirm_unavailable: bool = False
+
+
+class DraftTransferOption(BaseModel):
+    """Destino para transferir un borrador: los que no se pueden elegir traen el motivo."""
+    id: int
+    path: str
+    enabled: bool
+    disabled_reason: Optional[str] = None
+
+
+class DraftTransferRequest(BaseModel):
+    department_id: int
+    # Motivo obligatorio: al menos 15 caracteres (igual que transferir tickets)
+    reason: str = Field(min_length=15, max_length=300)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value):
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+
+class DraftTransferResult(BaseModel):
+    draft_id: int
+    department_name: str
+
+
+class DraftTechnician(BaseModel):
+    """Técnico del departamento para confirmar un borrador: carga de la asignación automática y disponibilidad."""
+    id: int
+    name: str
+    load: int
+    availability: str
+    availability_text: str
 
 
 class DraftConfirm(BaseModel):
@@ -615,6 +730,9 @@ class DraftConfirm(BaseModel):
     # Vacíos o enmascarados (con *): se usan los guardados. Se validan en la ruta.
     contact_phone: Optional[str] = None
     contact_id_number: Optional[str] = None
+    # Tickets por departamento: técnico activo del departamento del borrador (obligatorio; se valida en la ruta)
+    assigned_to: Optional[int] = None
+    confirm_unavailable: bool = False
 
     @field_validator("title", "description")
     @classmethod
@@ -691,9 +809,12 @@ class NavCounts(BaseModel):
     reports_open: Optional[int] = None
     invitations_pending: Optional[int] = None
     approvals_pending: Optional[int] = None
+    active_admins: Optional[int] = None
+    unclassified: Optional[int] = None
+    # Borradores en «Por clasificar» (administrador, con tickets por departamento)
+    drafts_unclassified: Optional[int] = None
     mine_open: Optional[int] = None
     mine_due_soon: Optional[int] = None
-    following_open: Optional[int] = None
     mine_resolved_today: Optional[int] = None
     cancelled: Optional[int] = None
     shift: Optional[NavShift] = None
@@ -713,6 +834,8 @@ class QueueItem(BaseModel):
     id: int
     title: str
     requester_name: str
+    # Departamento que atiende; None: "Sin departamento"
+    department_name: Optional[str] = None
     level: Optional[int] = None
     source: str
     status: str
@@ -759,6 +882,8 @@ class AdminAccountRow(BaseModel):
     invitation_hours_left: Optional[int] = None
     # Solo con el filtro por horario: el turno de ese día ("08:00–17:00")
     schedule_day: Optional[str] = None
+    # Personal: "Ruta · N2"; None sin departamento
+    department_name: Optional[str] = None
 
 
 class AdminAccountAlerts(BaseModel):
@@ -797,7 +922,10 @@ class TeamMember(BaseModel):
     email: str
     role: str
     is_active: bool
-    tickets_assigned_open: int = 0
+    # Técnicos y coordinadores: "Ruta · N2"; None sin departamento
+    department_name: Optional[str] = None
+    # None: otro coordinador visto por un coordinador (no ve sus tickets)
+    tickets_assigned_open: Optional[int] = 0
     login_locked: bool = False
     availability: Optional[str] = None
     return_date: Optional[date] = None
@@ -825,21 +953,34 @@ class AccountListRow(BaseModel):
     invitation_hours_left: Optional[int] = None
     # Solo con el filtro por horario: el turno de ese día ("08:00–17:00")
     schedule_day: Optional[str] = None
+    # Personal: "Ruta · N2"; None sin departamento
+    department_name: Optional[str] = None
+    # Contacto: cuenta de cliente archivada al quitar el portal (scripts.admin_tools archive-clients)
+    archived: bool = False
 
 
 class AccountCounts(BaseModel):
     all: int = 0
     staff: int = 0
+    # Contactos: quien reporta por correo y los clientes archivados (rol requester)
     clients: int = 0
+    archived: int = 0
     locked: int = 0
     reported: int = 0
     unverified: int = 0
     invitations: int = 0
 
 
+class AccountDepartmentOption(BaseModel):
+    id: int
+    path: str
+
+
 class AccountListPage(BaseModel):
     items: list[AccountListRow]
     counts: AccountCounts
+    # Opciones del filtro por departamento: los que atienden tickets y los que tienen personal en la lista
+    departments: list[AccountDepartmentOption] = []
 
 
 class AccountRecentTicket(BaseModel):
@@ -858,6 +999,8 @@ class AccountSummary(BaseModel):
     is_active: bool
     identity: Optional[str] = None
     reported: bool = False
+    # Contacto: cuenta de cliente archivada al quitar el portal
+    archived: bool = False
     availability: Optional[str] = None
     return_date: Optional[date] = None
     schedule: Optional[list[ScheduleDay]] = None
@@ -878,10 +1021,13 @@ class OverdueNotice(BaseModel):
     ticket_id: Optional[int] = None
     draft_id: Optional[int] = None
     title: str
-    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned"]
+    kind: Literal["due_50", "due_80", "overdue", "report", "draft_assigned", "draft_transferred",
+                  "ticket_transferred", "ticket_resolved"]
     created_at: datetime
     due_at: Optional[datetime] = None
     read: bool
+    # Avisos de la bandeja (transferido, resuelto): la frase completa
+    text: Optional[str] = None
     needs_review: bool = False
     suggestion: Optional[NoticeSuggestion] = None
 
@@ -953,3 +1099,390 @@ class OverdueReport(BaseModel):
     timeline: list[OverdueTimelineEvent]
     cause: Optional[OverdueCauseRead] = None
     can_record_cause: bool = False
+
+
+# ===== Departamentos (organigrama) =====
+
+class DepartmentRead(BaseModel):
+    id: int
+    name: str
+    parent_id: Optional[int] = None
+    path: str
+    is_active: bool
+    # Activo él y todos sus padres
+    active_path: bool = True
+    handles_tickets: bool = False
+    aliases: list[str] = []
+    technicians: int = 0
+    coordinator_id: Optional[int] = None
+    coordinator_name: Optional[str] = None
+    # Siguiente nivel (Escalar transfiere a ese departamento)
+    next_department_id: Optional[int] = None
+    next_department_path: Optional[str] = None
+    # Ficha con «Qué atiende»: sin ella no participa en la clasificación de correos
+    has_profile: bool = False
+
+
+class DepartmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: Optional[int] = None
+    handles_tickets: bool = False
+
+
+class DepartmentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    # 0: sin padre (raíz)
+    parent_id: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
+    handles_tickets: Optional[bool] = None
+    add_alias: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    remove_alias: Optional[str] = Field(default=None, max_length=300)
+    # Siguiente nivel; 0: quitarlo
+    next_department_id: Optional[int] = Field(default=None, ge=0)
+
+
+class DepartmentImportRow(BaseModel):
+    line: int
+    original: str
+    path: Optional[str] = None
+    status: Literal["new", "exists", "duplicate", "error"]
+    notes: list[str] = []
+
+
+class DepartmentMerge(BaseModel):
+    # "into" queda como nombre oficial y "merge" como alias
+    merge: str = Field(max_length=1000)
+    into: str = Field(max_length=1000)
+    reason: Optional[str] = None
+    # False: uno ya existe con otro padre y se conserva (no se puede invertir)
+    choosable: bool = True
+
+
+class DepartmentImportPreview(BaseModel):
+    rows: list[DepartmentImportRow]
+    suggestions: list[DepartmentMerge]
+    counts: dict[str, int]
+
+
+class DepartmentImportConfirm(BaseModel):
+    paths: list[str] = Field(max_length=2000)
+    merges: list[DepartmentMerge] = Field(default_factory=list, max_length=2000)
+
+
+class DepartmentImportResult(BaseModel):
+    created: int
+    aliases: int
+
+
+class DepartmentProfileRead(BaseModel):
+    department_id: int
+    path: str
+    handles: str = ""
+    # Uno por línea
+    examples: str = ""
+    not_handles: str = ""
+    updated_at: Optional[datetime] = None
+
+
+class DepartmentProfileUpdate(BaseModel):
+    handles: str = Field(default="", max_length=1000)
+    examples: str = Field(default="", max_length=7000)
+    not_handles: str = Field(default="", max_length=1000)
+
+
+class ClassificationTestRequest(BaseModel):
+    subject: str = Field(default="", max_length=300)
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class ClassificationOption(BaseModel):
+    department_id: int
+    path: str
+    similarity: Optional[float] = None
+
+
+class ClassificationTestResult(BaseModel):
+    # Lo que la IA eligió (None: ninguno o no respondió) y su motivo
+    llm_department_id: Optional[int] = None
+    llm_department_path: Optional[str] = None
+    reason: Optional[str] = None
+    # Las dos opciones más probables, con su similitud si hay embeddings
+    options: list[ClassificationOption] = []
+    margin: Optional[float] = None
+    threshold: float
+    top_similarity: Optional[float] = None
+    min_similarity: float = 0.4
+    agrees: bool
+    passes: bool
+    notes: list[str] = []
+
+
+class PendingDraftOption(BaseModel):
+    department_id: int
+    path: str
+    similarity: Optional[float] = None
+    # Sin coordinador activo no se puede elegir (el servidor responde 409)
+    has_coordinator: bool = True
+    # Por qué está aquí: ai (lo eligió la IA), similarity (el más parecido a los ejemplos), both (las dos
+    # coinciden) o second (el 2.º más parecido)
+    role: Literal["ai", "similarity", "both", "second"] = "second"
+
+
+class PendingDraft(BaseModel):
+    """Borrador en «Por clasificar»: solo lo necesario para elegir el departamento (enmascarado)."""
+    draft_id: int
+    created_at: datetime
+    requester_name: str
+    subject: str
+    excerpt: str
+    summary: Optional[str] = None
+    pending_reason: Optional[str] = None
+    ai_department_path: Optional[str] = None
+    ai_reason: Optional[str] = None
+    ai_margin: Optional[float] = None
+    options: list[PendingDraftOption] = []
+    # La IA y la similitud eligieron departamentos distintos (texto para el administrador)
+    disagreement: Optional[str] = None
+
+
+class PendingDrafts(BaseModel):
+    threshold: float
+    min_similarity: float = 0.4
+    routing_enforced: bool
+    items: list[PendingDraft] = []
+
+
+class DraftDepartmentChoice(BaseModel):
+    department_id: int
+
+
+class DraftDepartmentChosen(BaseModel):
+    draft_id: int
+    department_name: str
+    matched_first: Optional[bool] = None
+
+
+class PrecisionTotals(BaseModel):
+    """Directo al coordinador: confirmados y aciertos (confirmado en el departamento que eligió la IA), % de acierto
+    (aciertos / confirmados), pendientes (sin confirmar o descartados, fuera del %) y rebotes (borradores con
+    transferencias y total de transferencias)."""
+    direct: int
+    confirmed: int
+    hits: int
+    pending: int
+    bounced: int
+    transfers: int
+    accuracy: Optional[float] = None
+
+
+class PrecisionDepartment(PrecisionTotals):
+    """Lo mismo, por el departamento que eligió la IA."""
+    department_id: Optional[int] = None
+    path: str
+
+
+class PrecisionPending(BaseModel):
+    """«Por clasificar»: cuántos llegaron y cuántas veces el administrador eligió la 1.ª opción de la IA."""
+    arrived: int
+    decided: int
+    still_waiting: int
+    with_suggestion: int
+    matched: int
+    matched_pct: Optional[float] = None
+
+
+class PrecisionReason(BaseModel):
+    key: str
+    label: str
+    adjust: str
+    count: int
+    pct: Optional[float] = None
+
+
+class PrecisionCorrection(BaseModel):
+    draft_id: int
+    ticket_id: Optional[int] = None
+    draft_status: Optional[str] = None
+    subject: str
+    ai_department: Optional[str] = None
+    origin: str
+    origin_label: str
+    from_department: Optional[str] = None
+    to_department: Optional[str] = None
+    reason: str
+    by_name: str
+    at: datetime
+    # ai_right: se confirmó donde dijo la IA; ai_wrong: en otro; pending: todavía no se confirmó
+    outcome: Literal["ai_right", "ai_wrong", "pending"]
+    current_department: Optional[str] = None
+
+
+class PrecisionReport(BaseModel):
+    date_from: date
+    date_to: date
+    routing_enforced: bool
+    received: int
+    # «Directo» sin lo que eligió la IA (borradores DEMO cargados ya clasificados): no cuentan
+    without_ai: int = 0
+    without_ai_ids: list[int] = []
+    # Pocos correos: los números no alcanzan para ajustar el umbral, la similitud mínima o las fichas
+    few_cases: bool = False
+    min_cases: int = 20
+    totals: PrecisionTotals
+    departments: list[PrecisionDepartment] = []
+    pending: PrecisionPending
+    reasons: list[PrecisionReason] = []
+    corrections: list[PrecisionCorrection] = []
+
+
+class ThresholdUpdate(BaseModel):
+    threshold: float = Field(ge=0, le=1)
+
+
+class ThresholdRead(BaseModel):
+    threshold: float
+
+
+class MinSimilarityUpdate(BaseModel):
+    min_similarity: float = Field(ge=0, le=1)
+
+
+class MinSimilarityRead(BaseModel):
+    min_similarity: float
+
+
+class PlacementUpdate(BaseModel):
+    department_id: Optional[int] = None
+
+
+class PlacementRead(BaseModel):
+    user_id: int
+    role: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    placed: bool
+
+
+class UnplacedPerson(BaseModel):
+    id: int
+    name: str
+    role: str
+    # Departamento que ya no sirve (desactivado o que no atiende tickets); None si no tiene
+    department_name: Optional[str] = None
+
+
+class StaffAlerts(BaseModel):
+    unplaced: list[UnplacedPerson]
+
+
+
+class ChecklistItem(BaseModel):
+    key: str
+    label: str
+    ok: bool
+    detail: Optional[str] = None
+    # Sección del menú donde se corrige (ruta)
+    link: Optional[str] = None
+    # Advertencia: se muestra, pero no impide encender
+    warning: bool = False
+
+
+class SwitchRead(BaseModel):
+    key: str
+    label: str
+    enabled: bool
+    checklist: list[ChecklistItem]
+    # Se puede encender: toda la lista está lista
+    ready: bool
+    updated_at: Optional[datetime] = None
+    updated_by_name: Optional[str] = None
+
+
+class SwitchUpdate(BaseModel):
+    enabled: bool
+
+
+class OverviewDepartment(BaseModel):
+    id: int
+    path: str
+    coordinator_name: Optional[str] = None
+    technicians: int = 0
+    # Tickets abiertos y vencidos del departamento
+    open: Optional[int] = None
+    overdue: Optional[int] = None
+
+
+class AdminOverview(BaseModel):
+    """Panel del administrador: una fila por departamento que atiende tickets."""
+    departments: list[OverviewDepartment]
+    routing_enforced: bool
+    unplaced: list[UnplacedPerson]
+
+
+class UnclassifiedTicket(BaseModel):
+    id: int
+    title: str
+    status: str
+    created_at: datetime
+    requester_name: str
+    assigned_name: Optional[str] = None
+
+
+class TicketDepartmentUpdate(BaseModel):
+    department_id: int
+
+
+
+class StaffTicketCreated(BaseModel):
+    """Confirmación inmediata al crear un ticket desde el personal: número y técnico (o pendiente)."""
+    id: int
+    title: str
+    department_name: str
+    assigned_to: Optional[int] = None
+    assigned_name: Optional[str] = None
+
+
+class DepartmentOption(BaseModel):
+    id: int
+    path: str
+
+
+class PriorityOption(BaseModel):
+    id: int
+    name: str
+    level: int
+    # Plazo que fija: "16 horas hábiles", "1 día hábil"
+    due_text: str
+
+
+class CategoryOption(BaseModel):
+    id: int
+    name: str
+
+
+class DepartmentOptions(BaseModel):
+    """Listas del formulario del personal: departamentos que atienden, el organigrama completo (áreas),
+    prioridades con su plazo y categorías."""
+    serving: list[DepartmentOption]
+    areas: list[DepartmentOption]
+    priorities: list[PriorityOption] = []
+    categories: list[CategoryOption] = []
+
+
+
+class TicketTransfer(BaseModel):
+    department_id: int
+    # Motivo obligatorio: al menos 15 caracteres
+    reason: str = Field(min_length=15, max_length=300)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value):
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+
+class TicketTransferResult(BaseModel):
+    department_name: str
+    assigned_to: Optional[int] = None
+    # Quien transfirió todavía puede ver el ticket (si no, la página vuelve a la lista)
+    still_visible: bool

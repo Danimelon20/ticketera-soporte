@@ -117,7 +117,7 @@ def test_stream_only_think_is_unavailable(ollama_stream):
 def test_stream_endpoint(client, make_user, ollama_stream, monkeypatch):
     monkeypatch.setattr(config, "CHATBOT_ENABLED", True)
     chat_router.reset_rate_limit()
-    user = make_user("requester")
+    user = make_user("technician")
     ollama_stream["lines"] = [chunk("Su ticket "), chunk("está en proceso."), done_line()]
     response = client.post("/api/chat/stream", json={"message": "¿Cómo va?", "history": []}, headers=user["headers"])
     assert response.status_code == 200
@@ -130,7 +130,7 @@ def test_stream_endpoint_unavailable(client, make_user, ollama_stream, monkeypat
     chat_router.reset_rate_limit()
     ollama_stream["status"] = 404
     response = client.post("/api/chat/stream", json={"message": "hola", "history": []},
-                           headers=make_user("requester")["headers"])
+                           headers=make_user("technician")["headers"])
     assert response.status_code == 503
 
 

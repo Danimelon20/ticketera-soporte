@@ -69,6 +69,10 @@ def _create(client, actor, title="No abre el sistema", description="El sistema d
     }
     if requester_id is not None:
         payload["requester_id"] = requester_id
+    if actor.get("role") == "requester":
+        # Un contacto ya no inicia sesión: su ticket «web» sale del mismo camino que usa el coordinador
+        from conftest import _owner_ticket
+        return _owner_ticket(actor, payload)["id"]
     response = client.post("/api/tickets", json=payload, headers=actor["headers"])
     assert response.status_code == 200, response.text
     return response.json()["id"]
@@ -126,7 +130,7 @@ def test_model_failure_still_creates_ticket(client, make_user, sent, llm):
     requester = make_user("requester")
     ticket_id = _create(client, requester)
 
-    detail = client.get(f"/api/tickets/{ticket_id}", headers=requester["headers"])
+    detail = client.get(f"/api/tickets/{ticket_id}", headers=make_user("coordinator")["headers"])
     assert detail.status_code == 200
     assert _row(ticket_id) is None
     assert sent == []

@@ -9,7 +9,7 @@ Cómo se entra, según el rol:
 |---|---|---|
 | Técnico y coordinador | **Personal** | Con su cuenta Microsoft (si `MS_LOGIN_ENABLED=true`) o con correo y contraseña |
 | Administrador | **Administración** | Con su cuenta Microsoft; si no se puede, **Acceso de emergencia** (contraseña y código por correo) |
-| Cliente | **Cliente** | Correo y contraseña |
+| Quien reporta (contacto) | — | **No inicia sesión**: escribe al correo de soporte desde su correo de la empresa |
 
 Para todos: **Mi cuenta** (perfil, correo y, si aplica, contraseña) y el **asistente** (botón abajo a la derecha,
 si está encendido). El asistente solo responde: no cambia tickets.
@@ -26,22 +26,22 @@ si está encendido). El asistente solo responde: no cambia tickets.
 - En **Mi cuenta › Disponibilidad y horario**: su turno y sus vacaciones o ausencias.
 
 **Qué puede hacer**
-- En sus tickets: cambiar el estado, comentar (también notas internas que el cliente no ve), adjuntar archivos,
+- En sus tickets: cambiar el estado, comentar (también notas internas que quien reporta no recibe), adjuntar archivos,
   ajustar el nivel que sugirió la IA y **Separar** una agrupación de un ticket suyo.
-- En sus borradores: completar los datos, **confirmar** (el ticket queda a su nombre), **Pedir más detalles** al
-  cliente o descartarlo.
+- En sus borradores: completar los datos, **confirmar** (el ticket queda a su nombre), **Pedir más detalles** a
+  quien reportó o descartarlo.
 - Registrar sus propias vacaciones o ausencias.
-- **Reportar cuenta** de un cliente desde un ticket o borrador (por ejemplo, datos que parecen falsos).
+- **Reportar cuenta** de un contacto desde un ticket o borrador (por ejemplo, datos que parecen falsos).
 
 **Qué no puede**: abrir tickets de otros técnicos, ver los que no tienen responsable, crear tickets ni
 cancelarlos.
 
 **Caso típico: un ticket nuevo asignado**
 1. Le llega el ticket a **Mis tickets** (la asignación automática eligió al técnico disponible con menos carga).
-2. Lo abre: lee la descripción, el nivel y el tiempo meta. Ve el teléfono del cliente para llamarlo.
-3. Lo pasa a **En proceso** y deja un comentario al cliente con lo que va a hacer.
+2. Lo abre: lee la descripción, el nivel y el tiempo meta. Ve el teléfono de quien reporta (si lo dio) para llamarlo.
+3. Lo pasa a **En proceso** y deja un comentario a quien reportó con lo que va a hacer (le llega por correo).
 4. Si necesita algo interno (por ejemplo, para el coordinador), lo escribe como nota interna.
-5. Cuando lo resuelve, comenta la solución y lo marca **Resuelto**. El cliente recibe el aviso.
+5. Cuando lo resuelve, comenta la solución y lo marca **Resuelto**. Quien reportó recibe el aviso por correo.
 6. Si la campana le avisa que va al 80 % del tiempo y no llegará, comenta el motivo: el coordinador lo ve.
 
 ---
@@ -50,19 +50,19 @@ cancelarlos.
 
 **Qué ve**
 - **Inicio**: lo urgente del día (vencidos, por vencer, reportes de vencimiento, incidentes y borradores).
-- **Tickets**: Todos, Sin asignar, Vencidos, Incidentes y Clientes.
+- **Tickets**: Todos, Sin asignar, Vencidos, Incidentes y Contactos.
 - **Borradores**: Todos y Sin revisor (los que llegaron sin nadie en turno).
 - **Equipo**: Turnos, Carga y Disponibilidad de los técnicos.
 - Todos los tickets, con los datos de contacto completos.
 
 **Qué puede hacer**
-- **Nuevo ticket**, también a nombre de un cliente (con su perfil completo).
+- **Nuevo ticket**, también a nombre de un contacto.
 - Asignar y reasignar tickets y borradores; cancelar y reabrir tickets.
 - Registrar la **causa del vencimiento** de un ticket vencido (y ver su reporte).
 - Ver y **Separar** fusiones de tickets y posibles incidentes.
 - Cargar horarios, vacaciones e incapacidades de los técnicos.
 - Pedir al administrador cambios de rol, nombre o cédula (quedan en **Aprobaciones**).
-- **Reportar cuenta** de un cliente.
+- **Reportar cuenta** de un contacto.
 - **Enviar resumen ahora** (el resumen diario por correo, desde Inicio).
 
 **Qué no puede**: gestionar cuentas (desactivar, restablecer, desbloquear), invitar personal ni revisar los
@@ -73,7 +73,7 @@ reportes de cuentas. Eso lo hace el administrador.
 2. Abre el reporte: ve cuándo se creó, cuándo vencía, quién lo tenía y si hubo respuesta.
 3. Registra la causa (por ejemplo, "Responsable no disponible" porque el técnico está de vacaciones).
 4. Reasigna el ticket a un técnico disponible (en **Equipo › Carga** ve quién tiene menos trabajo).
-5. Deja un comentario al cliente explicando el nuevo plazo.
+5. Deja un comentario a quien reportó explicando el nuevo plazo.
 
 **Caso típico: un borrador sin revisor**
 1. En **Borradores › Sin revisor** está el correo que llegó fuera de horario.
@@ -118,25 +118,30 @@ servidor con `scripts.admin_tools` (ver el README).
    encendido).
 3. En **Equipo y turnos** se carga su horario para que reciba asignaciones.
 
+**Caso típico: un contacto pasa a ser personal**
+Se invita con su mismo correo, como a cualquiera. Mientras no active la invitación sigue siendo contacto; al
+activarla se convierte en técnico o coordinador en la misma cuenta, y los tickets que reportó siguen siendo
+suyos. Un cliente archivado o un contacto desactivado no se puede invitar.
+
 ---
 
-## Cliente
+## Quien reporta por correo (contacto)
 
-**Qué ve**
-- **Mis solicitudes**: solo sus tickets, con el estado, los comentarios del equipo y los adjuntos.
-- Si escribió dos veces por el mismo problema, el aviso de que su mensaje se agregó a la solicitud que ya tenía.
+La Ticketera es solo para uso interno: no hay portal de clientes ni se crean cuentas. Quien tiene un problema
+escribe al correo de soporte desde su correo de la empresa (`INTERNAL_DOMAINS`), o el personal registra el caso
+en la página. La primera vez se crea su **contacto**: una ficha sin contraseña ni acceso.
 
-**Qué puede hacer**
-- Crear su cuenta en la pestaña **Cliente** (correo, contraseña y un código que llega al correo).
-- Completar su perfil: nombre, cédula y teléfono. Desde su primer ticket, el nombre y la cédula quedan fijos.
-- **Nueva solicitud** desde la página, o escribir al correo de soporte (con la plantilla o con sus palabras).
-- Comentar y adjuntar archivos en sus solicitudes.
+**Qué recibe por correo**
+- «Recibimos su correo» y, al confirmarse, el número de su ticket.
+- Las respuestas del equipo y el aviso de **Resuelto** con la solución documentada.
+- Si escribió dos veces por el mismo problema, el aviso de que su mensaje se agregó a su ticket.
 
-**Qué no puede**: ver tickets de otras personas ni las notas internas del equipo.
+**Qué puede hacer**: responder esos correos para agregar información o adjuntos. No se le pide cédula; el
+teléfono es opcional.
 
-**Caso típico: pedir ayuda**
-1. Entra con su correo y contraseña. La primera vez completa su perfil.
-2. **Nueva solicitud**: un título corto, qué pasa, desde cuándo y qué ya intentó.
-3. Le llega un correo con el número de su solicitud.
-4. Sigue el avance en **Mis solicitudes** y responde ahí si el técnico le pregunta algo.
-5. Cuando el técnico la marca como resuelta, recibe el aviso.
+**Qué no puede**: iniciar sesión (recibe el mismo mensaje que una contraseña incorrecta), ver tickets ni notas
+internas.
+
+**Cuentas de cliente archivadas**: las cuentas de cliente de antes de quitar el portal quedan como contactos
+archivados (**Cuentas › Archivados**). Sus tickets, comentarios, historial y reportes se conservan y el personal
+los sigue viendo. Si tenían un ticket abierto, se atiende como siempre y siguen recibiendo sus correos.

@@ -107,7 +107,7 @@ def test_unknown_challenge(client, sent):
     assert response.json()["detail"] == "Error: Intente Nuevamente"
 
 
-@pytest.mark.parametrize("role", ["requester", "technician", "coordinator"])
+@pytest.mark.parametrize("role", ["technician", "coordinator"])
 def test_other_roles_get_token_directly(client, make_user, sent, role):
     response = _login(client, make_user(role))
     assert response.status_code == 200

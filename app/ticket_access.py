@@ -5,13 +5,19 @@
 - Solicitante: los que creó.
 - Administrador: ninguno. Solo con "Ver conversación" (con motivo, queda en el Registro de cambios), que da
   una lectura puntual del detalle y, durante una hora, los adjuntos de ese ticket.
+
+Con el interruptor de tickets por departamento encendido (routing.enforced):
+- Coordinador: solo los tickets de su departamento (sin departamento propio, ninguno).
+- Administrador: todos, completos (reasigna, transfiere, cambia el estado y cierra).
+- Técnico y solicitante: igual que siempre.
 """
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Query, Session
 
-from . import models
+from . import models, routing
 
 FULL = "full"
 READ = "read"
@@ -34,11 +40,20 @@ def _past_assignments(db: Session, user_id: int):
     )
 
 
+def _coordinator_department(db: Session, user: models.User) -> int | None:
+    row = routing.coordinator_row(db, user.id)
+    return row.department_id if row is not None else None
+
+
 def access(db: Session, user: models.User, ticket: models.Ticket) -> str | None:
+    if user.role in ("coordinator", "admin") and routing.enforced(db):
+        if user.role == "admin":
+            return FULL
+        dept_id = _coordinator_department(db, user)
+        ticket_dept = routing.ticket_department_ids(db, [ticket.id]).get(ticket.id)
+        return FULL if dept_id is not None and ticket_dept == dept_id else None
     if user.role == "coordinator":
         return FULL
-    if user.role == "requester":
-        return FULL if ticket.created_by == user.id else None
     if user.role == "technician":
         if ticket.assigned_to == user.id:
             return FULL
@@ -48,11 +63,18 @@ def access(db: Session, user: models.User, ticket: models.Ticket) -> str | None:
 
 
 def filter_visible(db: Session, user: models.User, query: Query) -> Query:
-    """Mismo alcance que access(), para listas (el administrador no recibe ninguno)."""
+    """Mismo alcance que access(), para listas (el administrador no recibe ninguno, salvo con el interruptor)."""
+    if user.role in ("coordinator", "admin") and routing.enforced(db):
+        if user.role == "admin":
+            return query
+        dept_id = _coordinator_department(db, user)
+        if dept_id is None:
+            return query.filter(False)
+        return query.filter(models.Ticket.id.in_(
+            db.query(models.TicketDepartment.ticket_id).filter(models.TicketDepartment.department_id == dept_id)
+        ))
     if user.role == "coordinator":
         return query
-    if user.role == "requester":
-        return query.filter(models.Ticket.created_by == user.id)
     if user.role == "technician":
         return query.filter(
             (models.Ticket.assigned_to == user.id) | models.Ticket.id.in_(_past_assignments(db, user.id))
@@ -60,10 +82,17 @@ def filter_visible(db: Session, user: models.User, query: Query) -> Query:
     return query.filter(False)
 
 
-def visible_user_ids(db: Session, ticket: models.Ticket, user_ids: list[int]) -> set[int]:
-    """De esas personas, las que pueden ver el ticket (para avisos a seguidores)."""
-    users = db.query(models.User).filter(models.User.id.in_(user_ids)).all() if user_ids else []
-    return {u.id for u in users if access(db, u, ticket) is not None}
+OTHER_COORDINATOR = "No puede ver los tickets de otro coordinador"
+
+
+def check_assignee_filter(db: Session, user: models.User, assigned_to: int | None) -> None:
+    """Filtro por responsable (Equipo › Turnos, "Ver sus tickets"): el coordinador no filtra por otro
+    coordinador. 403 si lo intenta."""
+    if user.role != "coordinator" or not assigned_to or assigned_to == user.id:
+        return
+    target = db.get(models.User, assigned_to)
+    if target is not None and target.role == "coordinator":
+        raise HTTPException(status_code=403, detail=OTHER_COORDINATOR)
 
 
 def conversation_label(ticket_id: int) -> str:

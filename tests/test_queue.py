@@ -172,18 +172,11 @@ def test_queue_response_has_no_personal_data(make_user, client):
     assert set(item) == {
         "id", "title", "requester_name", "level", "source", "status", "assigned_to", "assigned_name",
         "reported", "auto_assigned", "cancelled", "due_at", "due_state", "remaining_seconds", "consumed_pct", "assignee_note",
-        "incident", "overdue_cause",
+        "incident", "overdue_cause", "department_name",
     }
     text = response.text
     for secret in ("8888", "102340567", requester["email"], requester["phone"], requester["id_number"], "Llamar"):
         assert secret not in text
-
-
-def test_requester_cannot_use_queue_or_suggestion(make_user, client):
-    requester = make_user("requester")
-    ticket_id = _ticket(requester)
-    assert client.get("/api/queue", headers=requester["headers"]).status_code == 403
-    assert client.get(f"/api/tickets/{ticket_id}/suggestion", headers=requester["headers"]).status_code == 403
 
 
 def _always_on_shift(user_id):

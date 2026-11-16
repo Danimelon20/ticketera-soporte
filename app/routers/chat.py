@@ -14,7 +14,7 @@ from ..security import get_current_user
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
-CHAT_ROLES = ("requester", "technician", "coordinator", "admin")
+CHAT_ROLES = ("technician", "coordinator", "admin")
 UNAVAILABLE = "El asistente no está disponible en este momento"
 RATE_LIMIT = 20
 RATE_WINDOW_SECONDS = 10 * 60

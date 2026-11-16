@@ -45,11 +45,6 @@ def test_staff_can_report_requester(client, make_user, make_ticket, role):
     assert response.json()["reason_label"] == "Cédula ajena"
 
 
-def test_requester_cannot_report(client, make_user):
-    target = make_user("requester")
-    assert _report(client, make_user("requester"), target["id"]).status_code == 403
-
-
 @pytest.mark.parametrize("role", ["technician", "coordinator", "admin"])
 def test_only_requester_accounts_can_be_reported(client, make_user, role):
     assert _report(client, make_user("coordinator"), make_user(role)["id"]).status_code == 400
@@ -168,11 +163,7 @@ def test_reported_account_is_not_blocked(client, make_user, make_ticket):
     requester = make_user("requester")
     report = _report(client, coordinator, requester["id"]).json()
     _resolve(client, make_user("admin"), report["id"], "confirm")
-    assert client.get("/api/auth/me", headers=requester["headers"]).status_code == 200
-    login = client.post(
-        "/api/auth/login", json={"email": requester["email"], "password": "clave-segura-123", "portal": "requester"}
-    )
-    assert login.status_code == 200
+    # Confirmar el reporte no desactiva la cuenta (un contacto nunca inicia sesión de todos modos)
     assert _directory_row(client, coordinator, requester)["is_active"] is True
 
 
@@ -204,26 +195,6 @@ def test_requester_never_sees_reports(client, make_user, make_ticket, sent):
     _resolve(client, make_user("admin"), report["id"], "confirm")
     # Ningún correo, ni al solicitante ni a nadie
     assert len(sent) == before
-
-    responses = [
-        client.get(f"/api/tickets/{ticket['id']}", headers=requester["headers"]),
-        client.get("/api/tickets", headers=requester["headers"]),
-        client.get("/api/auth/me", headers=requester["headers"]),
-    ]
-    for response in responses:
-        assert response.status_code == 200
-        assert "requester_flags" not in response.text
-        assert "reported" not in response.text.lower()
-        assert "Parece una cuenta falsa" not in response.text
-    assert client.get("/api/account-reports", headers=requester["headers"]).status_code == 403
-
-    db = SessionLocal()
-    try:
-        context = chatbot.build_context(db, db.get(models.User, requester["id"]))
-    finally:
-        db.close()
-    assert "report" not in context.lower()
-    assert "Parece una cuenta falsa" not in context
 
 
 def test_technician_cannot_report_unknown_requester(client, make_user):
@@ -280,7 +251,7 @@ def test_draft_shows_identity_and_reported(client, make_user):
     _report(client, technician, requester["id"])
     drafts = client.get("/api/drafts", headers=make_user("coordinator")["headers"]).json()
     item = next(d for d in drafts if d["id"] == draft_id)
-    assert item["requester_flags"] == {"identity": "not_found", "reported": True}
+    assert item["requester_flags"] == {"identity": "not_found", "reported": True, "archived": False}
 
 
 def test_requester_never_sees_identity_label_or_hacienda_name(client, make_user, make_ticket, monkeypatch):

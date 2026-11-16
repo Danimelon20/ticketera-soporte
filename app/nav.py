@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
-from . import account_reports, alerts, auto_assign, availability, cancellations, config, grouping, models, schedules, ticket_access
+from . import account_reports, alerts, auto_assign, availability, cancellations, config, draft_classification, grouping, models, routing, schedules, ticket_access
 from .daily_summary import OPEN_STATUSES, _due_at, _level, _local
 
 STAFF_ROLES = ("technician", "coordinator", "admin")
@@ -15,9 +15,9 @@ RESOLVED_STATUSES = ("resolved", "closed")
 PAGE_SIZE = 25
 QUEUE_VIEWS = (
     "all", "open", "unassigned", "due_soon", "overdue", "resolved_today",
-    "mine_open", "mine_due_soon", "following", "mine_resolved_today", "cancelled",
+    "mine_open", "mine_due_soon", "mine_resolved_today", "cancelled",
 )
-_OPEN_VIEWS = ("open", "unassigned", "due_soon", "overdue", "mine_open", "mine_due_soon", "following")
+_OPEN_VIEWS = ("open", "unassigned", "due_soon", "overdue", "mine_open", "mine_due_soon")
 
 
 def _now() -> datetime:
@@ -30,7 +30,7 @@ def _today_start(now: datetime) -> datetime:
     return local_midnight.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _open_tickets(db: Session, assigned_to: int | None = None) -> list[models.Ticket]:
+def _open_tickets(db: Session, assigned_to: int | None = None, viewer: models.User | None = None) -> list[models.Ticket]:
     query = (
         db.query(models.Ticket)
         .options(joinedload(models.Ticket.ai_analysis))
@@ -38,6 +38,9 @@ def _open_tickets(db: Session, assigned_to: int | None = None) -> list[models.Ti
     )
     if assigned_to is not None:
         query = query.filter(models.Ticket.assigned_to == assigned_to)
+    if viewer is not None:
+        # Con tickets por departamento, el coordinador solo cuenta los de su departamento
+        query = ticket_access.filter_visible(db, viewer, query)
     return query.all()
 
 
@@ -56,11 +59,13 @@ def _due_counts(tickets: list[models.Ticket], now: datetime) -> tuple[int, int]:
     return states.count(alerts.DUE_SOON), states.count(alerts.OVERDUE)
 
 
-def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None) -> int:
-    return len(_resolved_today_ids(db, now, assigned_to))
+def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None,
+                    viewer: models.User | None = None) -> int:
+    return len(_resolved_today_ids(db, now, assigned_to, viewer))
 
 
-def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = None) -> set[int]:
+def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = None,
+                        viewer: models.User | None = None) -> set[int]:
     """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados (sin cancelados ni fusionados)."""
     query = (
         db.query(models.History.ticket_id)
@@ -76,17 +81,29 @@ def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = No
     )
     if assigned_to is not None:
         query = query.filter(models.Ticket.assigned_to == assigned_to)
+    if viewer is not None:
+        query = ticket_access.filter_visible(db, viewer, query)
     return {row[0] for row in query.distinct().all()}
 
 
-def _unassigned(db: Session, now: datetime) -> int:
+def _unassigned(db: Session, now: datetime, viewer: models.User | None = None) -> int:
     # Sin los vencidos: esos se cuentan en Vencidos
-    return sum(1 for t in _not_overdue(_open_tickets(db), now) if t.assigned_to is None)
+    return sum(1 for t in _not_overdue(_open_tickets(db, viewer=viewer), now) if t.assigned_to is None)
 
 
-def _drafts_pending(db: Session, reviewer_id: int | None = None) -> int:
-    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor."""
+def _drafts_pending(db: Session, reviewer_id: int | None = None, viewer: models.User | None = None) -> int:
+    """Los mismos estados que muestra la pantalla de borradores; con reviewer_id, solo los de ese revisor.
+    Con tickets por departamento: solo los del departamento del coordinador (el técnico no tiene borradores)."""
     query = db.query(models.EmailDraft).filter(models.EmailDraft.status.in_(auto_assign.DRAFT_PENDING_STATUSES))
+    if routing.enforced(db):
+        row = routing.coordinator_row(db, viewer.id) if viewer is not None and viewer.role == "coordinator" else None
+        if row is None:
+            return 0
+        return query.join(models.DraftClassification,
+                          models.DraftClassification.draft_id == models.EmailDraft.id).filter(
+            models.DraftClassification.status.in_(("routed", "classified")),
+            models.DraftClassification.department_id == row.department_id,
+        ).count()
     if reviewer_id is not None:
         query = query.join(models.DraftAssignment, models.DraftAssignment.draft_id == models.EmailDraft.id).filter(
             models.DraftAssignment.user_id == reviewer_id
@@ -119,38 +136,34 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
             "approvals_pending": (
                 db.query(models.AccountRequest).filter(models.AccountRequest.status == "pending").count()
             ),
+            # Más de uno: aviso fijo en Administración (se corrige desde la terminal)
+            "active_admins": db.query(models.User).filter(
+                models.User.role == "admin", models.User.is_active.is_(True)
+            ).count(),
+            # Tickets abiertos sin departamento (los clasifica el administrador)
+            "unclassified": routing.unclassified_open_tickets(db).count(),
+            # Con tickets por departamento, el administrador también ve la operación de todos los departamentos
+            # y los borradores que la IA no envió a un coordinador («Por clasificar»)
+            **({**_ticket_counts(db, user, now), "drafts_unclassified": draft_classification.pending_query(db).count()}
+               if routing.enforced(db) else {}),
         }
     if user.role == "technician":
         mine = _open_tickets(db, assigned_to=user.id)
-        following = ticket_access.filter_visible(db, user, (
-            db.query(models.Ticket)
-            .options(joinedload(models.Ticket.ai_analysis))
-            .join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id)
-            .filter(models.TicketFollower.user_id == user.id, models.Ticket.status.in_(OPEN_STATUSES))
-        )).all()
         mine_due_soon, mine_overdue = _due_counts(mine, now)
         return {
             "mine_open": len(mine) - mine_overdue,
             "mine_due_soon": mine_due_soon,
             # Solo sus vencidos
             "overdue": mine_overdue,
-            "following_open": len(_not_overdue(following, now)),
             "mine_resolved_today": _resolved_today(db, now, assigned_to=user.id),
             # Solo los borradores que le asignaron
-            "drafts_pending": _drafts_pending(db, reviewer_id=user.id),
+            "drafts_pending": _drafts_pending(db, reviewer_id=user.id, viewer=user),
             "shift": _shift(db, user, now),
         }
 
-    tickets = _open_tickets(db)
-    due_soon, overdue = _due_counts(tickets, now)
     result = {
-        "unassigned": _unassigned(db, now),
-        "due_soon": due_soon,
-        "overdue": overdue,
-        # Los vencidos van aparte, en Vencidos
-        "open": len(tickets) - overdue,
-        "resolved_today": _resolved_today(db, now),
-        "drafts_pending": _drafts_pending(db),
+        **_ticket_counts(db, user, now),
+        "drafts_pending": _drafts_pending(db, viewer=user),
         # Aparte: los cancelados no cuentan como trabajo, pero no se esconden
         "cancelled": cancellations.count(db),
     }
@@ -160,11 +173,26 @@ def counts(db: Session, user: models.User, now: datetime | None = None) -> dict:
     return result
 
 
+def _ticket_counts(db: Session, user: models.User, now: datetime) -> dict:
+    """Operación: el coordinador (con el interruptor, solo su departamento) y el administrador (con el interruptor)."""
+    viewer = user if routing.enforced(db) else None
+    tickets = _open_tickets(db, viewer=viewer)
+    due_soon, overdue = _due_counts(tickets, now)
+    return {
+        "unassigned": _unassigned(db, now, viewer),
+        "due_soon": due_soon,
+        "overdue": overdue,
+        # Los vencidos van aparte, en Vencidos
+        "open": len(tickets) - overdue,
+        "resolved_today": _resolved_today(db, now, viewer=viewer),
+    }
+
+
 def system_status(db: Session, now: datetime | None = None) -> dict:
     """Solo activo/inactivo y conteos: nunca buzones, URLs, modelos ni horas configuradas."""
     now = now or _now()
     return {
-        "email": bool(config.EMAIL_ENABLED),
+        "email": config.MAIL_TRANSPORT != "log",
         "ai_analysis": bool(config.AI_ANALYSIS_ENABLED),
         "auto_assign": bool(config.AUTO_ASSIGN_ENABLED),
         "auto_assign_mode": auto_assign.load_mode() if config.AUTO_ASSIGN_ENABLED else None,
@@ -202,6 +230,7 @@ def queue(
     source: str | None = None,
     search: str | None = None,
     requester_id: int | None = None,
+    department_id: int | None = None,
     page: int = 1,
     now: datetime | None = None,
 ) -> dict:
@@ -225,10 +254,6 @@ def queue(
     if view == "overdue" and user.role == "technician":
         # El técnico solo ve sus vencidos
         query = query.filter(models.Ticket.assigned_to == user.id)
-    if view == "following":
-        query = query.join(models.TicketFollower, models.TicketFollower.ticket_id == models.Ticket.id).filter(
-            models.TicketFollower.user_id == user.id
-        )
     if view == "cancelled":
         query = query.filter(models.Ticket.id.in_(db.query(models.TicketCancellation.ticket_id)))
     if view in ("resolved_today", "mine_resolved_today"):
@@ -241,6 +266,11 @@ def queue(
     if requester_id is not None:
         # "Ver sus tickets" desde Cuentas
         query = query.filter(models.Ticket.created_by == requester_id)
+    if department_id is not None:
+        # Filtro por departamento que atiende (0: sin departamento)
+        classified = db.query(models.TicketDepartment.ticket_id)
+        query = query.filter(models.Ticket.id.notin_(classified)) if department_id == 0 else query.filter(
+            models.Ticket.id.in_(classified.filter(models.TicketDepartment.department_id == department_id)))
     if assigned_to is not None and user.role != "technician":
         # 0: sin asignar
         query = query.filter(
@@ -276,6 +306,13 @@ def queue(
     page_rows = rows[(page - 1) * PAGE_SIZE:page * PAGE_SIZE]
 
     tickets = [r[0] for r in page_rows]
+    by_dept = routing.departments_by_id(db)
+    ticket_depts = routing.ticket_department_ids(db, [t.id for t in tickets])
+    # Creado por el personal en nombre de alguien: la lista muestra a quien reportó
+    reporters = dict(
+        db.query(models.TicketReporter.ticket_id, models.TicketReporter.name)
+        .filter(models.TicketReporter.ticket_id.in_([t.id for t in tickets]))
+    ) if tickets else {}
     creator_ids = list({t.created_by for t in tickets})
     creators = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(creator_ids)).all()} if creator_ids else {}
     reported = account_reports.reported_ids(db, creator_ids)
@@ -298,7 +335,8 @@ def queue(
         items.append({
             "id": ticket.id,
             "title": ticket.title,
-            "requester_name": (creator.name or "Sin nombre") if creator else "Sin nombre",
+            "requester_name": reporters.get(ticket.id) or ((creator.name or "Sin nombre") if creator else "Sin nombre"),
+            "department_name": routing.path_label(by_dept.get(ticket_depts.get(ticket.id)), by_dept),
             "level": ticket_level,
             "source": ticket.source,
             "status": ticket.status,
@@ -329,7 +367,7 @@ def suggestion(db: Session, ticket: models.Ticket, now: datetime | None = None) 
     current = ticket.assigned_user
     if current is not None and availability.is_available(db, current, now):
         return None
-    user = auto_assign.choose(db, now)
+    user = auto_assign.choose(db, now, ticket)
     if user is None or user.id == ticket.assigned_to:
         return None
     return {"user_id": user.id, "name": user.name or "Sin nombre", "load": auto_assign.loads(db, [user.id])[user.id]}

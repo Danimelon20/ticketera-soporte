@@ -12,6 +12,8 @@ from conftest import REAL_NETWORK_ATTEMPTS, TEST_ENV, UNREACHABLE_OLLAMA
 def test_real_config_does_not_reach_tests():
     # Lo que leyó config.py al importarse, antes de cualquier monkeypatch
     assert config.EMAIL_ENABLED is False
+    assert config.MAIL_TRANSPORT == "log" and config.MAILBOX_POLL_ENABLED is False
+    assert config.APP_ENV == "" and config.SMTP_HOST == "mailpit"
     assert config.CHATBOT_ENABLED is False
     assert config.AI_ANALYSIS_ENABLED is False
     assert config.GROUPING_ENABLED is False

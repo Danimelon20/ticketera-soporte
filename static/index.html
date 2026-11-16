@@ -8,7 +8,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <!-- Estilos por capas, en este orden: tokens → base → layout → componentes → páginas → utilidades -->
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/pages-auth.css">
+    <link rel="stylesheet" href="css/pages-tickets.css">
+    <link rel="stylesheet" href="css/pages-admin.css">
+    <link rel="stylesheet" href="css/utilities.css">
 </head>
 <body>
     <section id="verifyScreen" hidden>
@@ -44,7 +52,6 @@
             <button type="button" id="resendCode" class="verify-link" disabled>Reenviar código en 60 s</button>
             <p id="resendNotice" class="verify-notice" aria-live="polite"></p>
             <button type="button" id="backToLogin" class="verify-link">Volver al inicio de sesión</button>
-            <button type="button" id="signupHaveAccount" class="verify-link" hidden>Ya tengo cuenta: iniciar sesión</button>
         </div>
     </section>
     <section id="authScreen" class="auth-screen">
@@ -70,17 +77,11 @@
                 <div id="loginPanel" class="auth-form-panel">
                     <div class="auth-head">
                         <h1 id="loginTitle" class="auth-title">Iniciar sesión</h1>
-                        <p class="auth-subtitle">Elija cómo entra al sistema.</p>
+                        <p class="auth-subtitle">Entre con su cuenta: el sistema lo lleva a la pantalla de su rol.</p>
                     </div>
-                    <!-- Cada opción solo deja entrar a sus roles (lo verifica el servidor) -->
-                    <div id="loginTabs" class="login-tabs" role="tablist" aria-label="Tipo de acceso">
-                        <button type="button" class="login-tab" role="tab" id="loginTabRequester" data-portal="requester" aria-controls="loginForm" aria-selected="false" tabindex="-1">Cliente</button>
-                        <button type="button" class="login-tab" role="tab" id="loginTabStaff" data-portal="staff" aria-controls="loginForm" aria-selected="true">Personal</button>
-                        <button type="button" class="login-tab" role="tab" id="loginTabAdmin" data-portal="admin" aria-controls="loginForm" aria-selected="false" tabindex="-1">Administración</button>
-                    </div>
-                    <!-- Personal y Administración con MS_LOGIN_ENABLED: cuenta Microsoft (botón con la marca oficial) -->
+                    <!-- Con MS_LOGIN_ENABLED: cuenta Microsoft (botón con la marca oficial). Debajo, correo y contraseña -->
                     <div id="microsoftLogin" class="ms-login" hidden>
-                        <a id="microsoftLoginBtn" class="ms-signin" href="/auth/microsoft/login?portal=staff">
+                        <a id="microsoftLoginBtn" class="ms-signin" href="/auth/microsoft/login">
                             <svg class="ms-signin-logo" xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 21 21" aria-hidden="true" focusable="false">
                                 <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
                                 <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
@@ -89,9 +90,9 @@
                             </svg>
                             <span>Entrar con Microsoft</span>
                         </a>
-                        <button type="button" id="emergencyAccessLink" class="auth-link auth-link-btn auth-link-small ms-emergency" hidden>Acceso de emergencia</button>
+                        <p class="ms-login-or" aria-hidden="true">o con correo y contraseña</p>
                     </div>
-                    <form id="loginForm" class="auth-form" role="tabpanel" aria-labelledby="loginTabStaff">
+                    <form id="loginForm" class="auth-form" aria-labelledby="loginTitle">
                         <div class="form-group">
                             <label for="loginEmail">Correo</label>
                             <input type="email" id="loginEmail" name="email" autocomplete="username" placeholder="usted@correo.com" required>
@@ -103,36 +104,12 @@
                             </div>
                             <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
                         </div>
-                        <p id="loginAdminNotice" class="auth-notice auth-info" hidden>Por seguridad, le enviaremos un código a su correo después de la contraseña.</p>
                         <button type="submit" class="btn-submit">Entrar</button>
                     </form>
-                    <div id="confirmEmailNotice" class="auth-notice" hidden>
-                        <p>Su cuenta todavía no está confirmada.</p>
-                        <button type="button" id="confirmEmailBtn" class="btn-secondary">Enviar el código otra vez</button>
-                    </div>
-                    <p id="loginExtra" class="login-extra" hidden>
-                        <span id="loginExtraText"></span>
-                        <a id="loginExtraLink" href="#crear-cuenta" class="auth-link auth-link-inline"></a>
+                    <p class="login-extra">
+                        <span>¿Recibió una invitación?</span>
+                        <a href="#activar-cuenta" class="auth-link auth-link-inline">Activar mi cuenta</a>
                     </p>
-                </div>
-                <div id="signupPanel" class="auth-form-panel" hidden>
-                    <h1 class="auth-title">Crear cuenta de cliente</h1>
-                    <p class="help-text">Le enviaremos un código de 6 dígitos para confirmar su correo.</p>
-                    <form id="signupForm">
-                        <div class="form-group" style="margin-bottom: 16px;">
-                            <label for="signupEmail">Correo</label>
-                            <input type="email" id="signupEmail" name="email" autocomplete="email" required>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 24px;">
-                            <label for="signupPassword">Contraseña</label>
-                            <input type="password" id="signupPassword" name="password" minlength="8" autocomplete="new-password" required>
-                            <small class="help-text">Mínimo 8 caracteres</small>
-                        </div>
-                        <button type="submit" class="btn-submit">Crear cuenta</button>
-                    </form>
-                    <nav class="auth-links">
-                        <a href="#" class="auth-link">Volver al inicio de sesión</a>
-                    </nav>
                 </div>
                 <div id="forgotPanel" class="auth-form-panel" hidden>
                     <h1 id="forgotTitle" class="auth-title">Olvidé mi contraseña</h1>
@@ -154,17 +131,6 @@
                         <div class="form-group" style="margin-bottom: 16px;">
                             <label for="forgotCode">Código</label>
                             <input type="text" id="forgotCode" name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
-                        </div>
-                        <div id="forgotPasswordFields">
-                            <div class="form-group" style="margin-bottom: 16px;">
-                                <label for="forgotNewPassword">Contraseña nueva</label>
-                                <input type="password" id="forgotNewPassword" minlength="8" autocomplete="new-password">
-                                <small class="help-text">Mínimo 8 caracteres</small>
-                            </div>
-                            <div class="form-group" style="margin-bottom: 24px;">
-                                <label for="forgotConfirmPassword">Confirmar contraseña nueva</label>
-                                <input type="password" id="forgotConfirmPassword" minlength="8" autocomplete="new-password">
-                            </div>
                         </div>
                         <button type="submit" class="btn-submit">Restablecer contraseña</button>
                         <button type="button" id="forgotResend" class="btn-secondary auth-secondary">Reenviar código</button>
@@ -230,7 +196,6 @@
   </button>
   <nav class="topbar-nav" aria-label="Secciones">
     <button type="button" id="navTickets" class="topbar-tab active">Tickets</button>
-    <button type="button" id="navAssistant" class="topbar-tab" hidden>Asistente</button>
     <button type="button" id="navUsers" class="topbar-tab">Usuarios</button>
     <button type="button" id="navDrafts" class="topbar-tab" hidden>Borradores <span id="draftsBadge" class="tab-badge" hidden></span></button>
     <button type="button" id="navDirectory" class="topbar-tab" hidden>Directorio</button>
@@ -282,6 +247,10 @@
                 <span aria-hidden="true">·</span>
                 <button type="button" id="navLogout" class="nav-foot-link">Cerrar sesión</button>
             </div>
+            <button type="button" id="navCollapse" class="nav-collapse" aria-controls="sideNav" aria-expanded="true" data-tooltip="Expandir menú">
+                <svg class="nav-collapse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>
+                <span class="nav-collapse-label">Contraer menú</span>
+            </button>
         </div>
     </aside>
     <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
@@ -308,6 +277,10 @@
                 </div>
             </div>
         </header>
+        <!-- Administrador: más de un administrador activo (solo se corrige desde la terminal) -->
+        <p id="manyAdminsNotice" class="ui-notice is-warn many-admins-notice" role="status" hidden></p>
+        <!-- Personal sin departamento con el interruptor encendido: puede entrar, pero no recibe tickets -->
+        <p id="placementNotice" class="placement-notice" role="status" hidden>Su cuenta no tiene departamento asignado. Contacte al administrador</p>
         <div class="split">
             <section id="queuePanel" class="queue-panel" aria-labelledby="queueHeading">
                 <header class="queue-head">
@@ -339,17 +312,23 @@
                         <label for="queueLevel" class="sr-only">Nivel</label>
                         <select id="queueLevel" class="queue-chip">
                             <option value="">+ Nivel</option>
-                            <option value="4">Nivel 4 · Crítico</option>
-                            <option value="3">Nivel 3 · Incidente</option>
-                            <option value="2">Nivel 2 · Solicitud estándar</option>
-                            <option value="1">Nivel 1 · Consulta</option>
-                            <option value="0">Nivel 0 · No es soporte</option>
+                            <option value="4">Urgente</option>
+                            <option value="3">Alta</option>
+                            <option value="2">Media</option>
+                            <option value="1">Baja</option>
+                            <option value="0">No es soporte</option>
                             <option value="none">Sin nivel</option>
                         </select>
                         <label for="queueAssignee" class="sr-only">Responsable</label>
                         <select id="queueAssignee" class="queue-chip">
                             <option value="">+ Responsable</option>
                             <option value="0">Sin asignar</option>
+                        </select>
+                        <!-- Administrador con tickets por departamento: filtro por departamento que atiende -->
+                        <label for="queueDepartment" class="sr-only">Departamento</label>
+                        <select id="queueDepartment" class="queue-chip" hidden>
+                            <option value="">+ Departamento</option>
+                            <option value="0">Sin departamento</option>
                         </select>
                         <label for="queueSource" class="sr-only">Canal</label>
                         <select id="queueSource" class="queue-chip">
@@ -409,14 +388,6 @@
                     </div>
                 </section>
             </section>
-            <section id="portalPanel" class="portal-panel" aria-labelledby="portalTitle">
-                <header class="portal-head">
-                    <h1 id="portalTitle" class="portal-title">Mis solicitudes</h1>
-                    <span id="portalTotal" class="portal-total"></span>
-                </header>
-                <ul id="portalList" class="portal-list"></ul>
-                <div id="portalEmpty" class="portal-empty" hidden></div>
-            </section>
             <section id="listPanel" aria-label="Lista de tickets">
                 <div class="list-filters">
                     <div class="search-wrapper">
@@ -470,7 +441,7 @@
                     <p id="asideShiftTime" class="queue-aside-big"></p>
                     <p id="asideShiftLoad" class="queue-aside-text"></p>
                 </section>
-                <section class="ui-card queue-aside-card" aria-labelledby="asideDraftsTitle">
+                <section id="asideDraftsCard" class="ui-card queue-aside-card" aria-labelledby="asideDraftsTitle">
                     <h2 id="asideDraftsTitle" class="ui-kicker">Mis borradores</h2>
                     <ul id="asideDrafts" class="queue-aside-list"></ul>
                     <p class="queue-aside-note">Al confirmar un borrador, el ticket queda a su cargo.</p>
@@ -555,7 +526,23 @@
             <div id="invitesHost" class="invites-host"></div>
             <details class="ui-card users-details">
                 <summary class="users-summary">Usuarios existentes</summary>
-                <ul id="usersList" class="users-list"></ul>
+                <div class="users-filters">
+                    <label class="users-filter">
+                        <span>Rol</span>
+                        <select id="usersRoleFilter">
+                            <option value="staff">Todo el personal</option>
+                            <option value="technician">Técnico</option>
+                            <option value="coordinator">Coordinador</option>
+                            <option value="admin">Administrador</option>
+                        </select>
+                    </label>
+                    <label class="users-filter users-filter-search">
+                        <span>Nombre o correo</span>
+                        <input type="search" id="usersSearch" autocomplete="off" placeholder="Buscar…">
+                    </label>
+                </div>
+                <ul id="usersList" class="users-list" aria-live="polite"></ul>
+                <p id="usersEmpty" class="view-note" hidden>Nadie coincide con el filtro.</p>
             </details>
         </section>
 
@@ -601,8 +588,7 @@
                 <button type="button" id="accountLogout" class="ui-btn ui-btn-secondary account-logout">Cerrar sesión</button>
             </aside>
             <div class="account-main">
-            <h1 id="profileTitle" class="view-title">Complete su perfil</h1>
-            <p id="profileIntro" class="view-note">Antes de crear tickets necesitamos su nombre completo, cédula y teléfono.</p>
+            <h1 id="profileTitle" class="view-title">Mi cuenta</h1>
             <section id="accountStaffProfile" class="account-section" data-account-tab="perfil" aria-labelledby="accountStaffProfileTitle" hidden>
                 <h2 id="accountStaffProfileTitle" class="account-title">Perfil</h2>
                 <p class="account-current">Así lo ve el resto del equipo.</p>
@@ -611,30 +597,6 @@
                     <dt>Rol</dt><dd id="accountStaffRole"></dd>
                 </dl>
             </section>
-            <section id="accountPersonal" class="account-section" data-account-tab="perfil" aria-labelledby="accountPersonalTitle">
-            <h2 id="accountPersonalTitle" class="account-title">Datos personales</h2>
-            <form id="profileForm" class="profile-form">
-                <div class="form-group">
-                    <label for="profileName">Nombre completo</label>
-                    <input type="text" id="profileName" maxlength="100" autocomplete="name" required>
-                </div>
-                <div class="form-group">
-                    <label for="profileIdNumber">Cédula</label>
-                    <input type="text" id="profileIdNumber" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
-                    <small class="help-text">9 dígitos, o 11 o 12 si es DIMEX</small>
-                </div>
-                <div class="form-group">
-                    <label for="profilePhone">Teléfono</label>
-                    <input type="tel" id="profilePhone" placeholder="8888-1234" maxlength="16" inputmode="numeric" autocomplete="tel" required>
-                </div>
-                <p id="profileLockedNote" class="help-text" hidden>El nombre y la cédula quedaron fijos al crear su primer ticket. Si hay un error, contacte a soporte.</p>
-                <div class="profile-actions">
-                    <button type="submit" class="btn-submit">Guardar</button>
-                    <button type="button" id="profileCancel" class="btn-secondary" hidden>Cancelar</button>
-                </div>
-            </form>
-            </section>
-
             <section id="accountPhone" class="account-section" data-account-tab="perfil" aria-labelledby="accountPhoneTitle" hidden>
                 <h2 id="accountPhoneTitle" class="account-title">Teléfono</h2>
                 <form id="accountPhoneForm" class="profile-form">
@@ -756,7 +718,7 @@
                 <label for="directoryRole" class="sr-only">Filtrar por rol</label>
                 <select id="directoryRole">
                     <option value="">Todos</option>
-                    <option value="requester">Solicitantes</option>
+                    <option value="requester">Contactos</option>
                     <option value="technician">Técnicos</option>
                     <option value="coordinator">Coordinadores</option>
                     <option value="admin">Administradores</option>
@@ -897,7 +859,6 @@
                             <select id="draftsFilter" class="ui-input">
                                 <option value="all">Todos</option>
                                 <option value="mine">Mis borradores</option>
-                                <option value="none">Sin revisor</option>
                             </select>
                         </div>
                     </div>
@@ -920,6 +881,8 @@
                             <button type="button" id="draftReportBtn" class="ticket-bar-link">Reportar cuenta</button>
                         </div>
                         <p id="draftReason" class="ui-notice is-warn draft-reason" hidden></p>
+                        <p id="draftDepartment" class="help-text draft-department" hidden></p>
+                        <p id="draftTransferNote" class="ui-notice draft-transfer-note" hidden></p>
                         <div id="draftReassignField" class="ui-field draft-reassign" hidden>
                             <label for="draftReassign">Reasignar a</label>
                             <select id="draftReassign" class="ui-input"></select>
@@ -951,22 +914,22 @@
                                 <label for="draftDescription">Descripción</label>
                                 <textarea id="draftDescription" class="ui-input" rows="5" required></textarea>
                             </div>
-                            <div class="new-ticket-row">
-                                <div class="ui-field">
-                                    <label for="draftPhone">Teléfono</label>
-                                    <input type="tel" id="draftPhone" class="ui-input" placeholder="8888-1234" maxlength="16" inputmode="numeric" required>
-                                </div>
-                                <div class="ui-field">
-                                    <label for="draftIdNumber">Cédula</label>
-                                    <input type="text" id="draftIdNumber" class="ui-input" placeholder="1-0234-0567" maxlength="15" inputmode="numeric" required>
-                                </div>
+                            <div class="ui-field">
+                                <label for="draftPhone">Teléfono (opcional)</label>
+                                <input type="tel" id="draftPhone" class="ui-input" placeholder="8888-1234" maxlength="16" inputmode="numeric">
+                            </div>
+                            <div id="draftTechnicianField" class="ui-field" hidden>
+                                <label for="draftTechnician">Técnico que lo atenderá</label>
+                                <select id="draftTechnician" class="ui-input" autocomplete="off"></select>
+                                <p class="help-text">Técnicos activos de su departamento, con su carga actual y su disponibilidad.</p>
                             </div>
                             <p id="draftNotYours" class="ui-notice draft-not-yours" hidden>Solo su revisor o un coordinador puede crear el ticket o descartar este borrador.</p>
                             <div id="draftActions" class="draft-actions">
-                                <button type="submit" id="draftConfirmBtn" class="ui-btn ui-btn-primary">Crear ticket</button>
-                                <button type="button" id="draftDetailsBtn" class="ui-btn ui-btn-secondary">Pedir más detalles</button>
                                 <button type="button" id="draftDiscardBtn" class="ui-btn ui-btn-quiet-danger">Descartar</button>
-                                <span id="draftDetailsHint" class="draft-actions-hint">"Pedir más detalles" le escribe al remitente y deja el correo aquí hasta que responda.</span>
+                                <button type="button" id="draftDetailsBtn" class="ui-btn ui-btn-secondary">Pedir más detalles</button>
+                                <button type="button" id="draftTransferBtn" class="ui-btn ui-btn-secondary" hidden>Transferir</button>
+                                <button type="submit" id="draftConfirmBtn" class="ui-btn ui-btn-primary">Crear ticket</button>
+                                <span id="draftDetailsHint" class="draft-actions-hint">"Pedir más detalles" le escribe al remitente y elimina este borrador; si responde, llega como un correo nuevo.</span>
                             </div>
                         </form>
                     </div>
@@ -985,7 +948,8 @@
                 <div id="aaQuick" class="aa-quick" role="group" aria-label="Filtros rápidos">
                     <button type="button" class="aa-quick-btn" data-filter="all" aria-pressed="true">Todas <span class="aa-quick-count" data-count="all"></span></button>
                     <button type="button" class="aa-quick-btn" data-filter="staff" aria-pressed="false">Personal <span class="aa-quick-count" data-count="staff"></span></button>
-                    <button type="button" class="aa-quick-btn" data-filter="clients" aria-pressed="false">Clientes <span class="aa-quick-count" data-count="clients"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="clients" aria-pressed="false">Contactos <span class="aa-quick-count" data-count="clients"></span></button>
+                    <button type="button" class="aa-quick-btn" data-filter="archived" aria-pressed="false">Archivados <span class="aa-quick-count" data-count="archived"></span></button>
                     <button type="button" class="aa-quick-btn" data-filter="locked" aria-pressed="false">Bloqueadas <span class="aa-quick-count" data-count="locked" data-tone="warn"></span></button>
                     <button type="button" class="aa-quick-btn" data-filter="reported" aria-pressed="false">Reportadas <span class="aa-quick-count" data-count="reported" data-tone="alert"></span></button>
                     <button type="button" class="aa-quick-btn" data-filter="unverified" aria-pressed="false">Sin verificar <span class="aa-quick-count" data-count="unverified"></span></button>
@@ -995,6 +959,11 @@
                     <label class="aa-schedule-toggle">
                         <input type="checkbox" id="aaScheduleOn"> Filtrar por horario
                     </label>
+                    <label for="aaDepartment" class="sr-only">Filtrar por departamento</label>
+                    <select id="aaDepartment" class="ui-input aa-department" autocomplete="off">
+                        <option value="">Todos los departamentos</option>
+                        <option value="none">Sin departamento</option>
+                    </select>
                 </div>
                 <div id="aaScheduleFields" class="aa-schedule-fields" hidden>
                     <label for="aaDay">Día</label>
@@ -1074,6 +1043,146 @@
                     <h2>Alertas</h2>
                     <p id="alertsStatus" class="admin-text"></p>
                 </article>
+                <article class="admin-card admin-card-wide" data-admin-section="panel">
+                    <div class="admin-card-head"><h2>Departamentos que atienden tickets</h2></div>
+                    <p id="panelStatus" class="admin-text"></p>
+                    <div class="panel-table-wrap">
+                        <table id="panelTable" class="ui-table panel-table">
+                            <thead>
+                                <tr><th>Departamento</th><th>Coordinador</th><th>Técnicos</th><th>Abiertos</th><th>Vencidos</th><th>Ir a</th></tr>
+                            </thead>
+                            <tbody id="panelBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="admin-text panel-note">Abiertos incluye los vencidos. Los tickets sin departamento no cuentan aquí: están en «Sin departamento».</p>
+                    <div id="panelUnplacedBox" hidden>
+                        <h3 class="org-subtitle">Personal sin departamento</h3>
+                        <ul id="panelUnplaced" class="org-list"></ul>
+                    </div>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="drafts-unclassified">
+                    <div class="admin-card-head"><h2>Correos por clasificar</h2></div>
+                    <p class="admin-text">Correos de soporte que la IA no envió directo a un coordinador: no estuvo segura, el departamento no tiene coordinador activo o llegaron antes de la clasificación. Elija el departamento con un clic; el borrador pasa a su coordinador.</p>
+                    <p id="draftsUnclassifiedOff" class="ui-notice is-warn" hidden>Tickets por departamento está apagado: los borradores siguen como antes (Administración › Activación).</p>
+                    <form id="thresholdForm" class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="thresholdInput">Umbral (margen de similitud, de 0 a 1)</label>
+                            <input type="number" id="thresholdInput" class="ui-input" min="0" max="1" step="0.005" required aria-describedby="thresholdHint">
+                        </div>
+                        <button type="submit" class="ui-btn ui-btn-secondary">Guardar umbral</button>
+                    </form>
+                    <p id="thresholdHint" class="admin-text">Un correo va directo al coordinador solo si la IA y la similitud con los ejemplos de las fichas eligen el mismo departamento y el margen entre la 1.ª y la 2.ª opción alcanza el umbral. Más alto: más correos pasan por aquí. El cambio queda en el Registro de cambios y aplica desde el siguiente correo.</p>
+                    <form id="minSimilarityForm" class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="minSimilarityInput">Similitud mínima (de la 1.ª opción, de 0 a 1)</label>
+                            <input type="number" id="minSimilarityInput" class="ui-input" min="0" max="1" step="0.005" required aria-describedby="minSimilarityHint">
+                        </div>
+                        <button type="submit" class="ui-btn ui-btn-secondary">Guardar similitud mínima</button>
+                    </form>
+                    <p id="minSimilarityHint" class="admin-text">Además del margen, la 1.ª opción tiene que parecerse lo suficiente a su ficha: un correo que no se parece a ninguna (por ejemplo, el menú del almuerzo) pasa por aquí aunque el margen sea grande. Mídalo con scripts.eval_classifier (columna «Similitud 1.º»). El cambio queda en el Registro de cambios y aplica desde el siguiente correo.</p>
+                    <ul id="draftsUnclassifiedList" class="org-list"></ul>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="precision">
+                    <div class="admin-card-head"><h2>Precisión de la IA</h2></div>
+                    <p class="admin-text">Qué tan bien elige la IA el departamento de los correos de soporte. Se cuentan los correos que llegaron en el periodo. Sirve para saber qué ajustar: el umbral, la similitud mínima o las fichas.</p>
+                    <p id="precisionOff" class="ui-notice is-warn" hidden>Tickets por departamento está apagado: los correos nuevos no se clasifican (Administración › Activación).</p>
+                    <div class="person-filter-row precision-filters">
+                        <div class="ui-field">
+                            <label for="precisionRange">Periodo</label>
+                            <select id="precisionRange" class="ui-input" autocomplete="off">
+                                <option value="7">Últimos 7 días</option>
+                                <option value="30" selected>Últimos 30 días</option>
+                                <option value="90">Últimos 90 días</option>
+                                <option value="custom">Entre fechas</option>
+                            </select>
+                        </div>
+                        <div id="precisionDates" class="person-dates" hidden>
+                            <div class="ui-field">
+                                <label for="precisionFrom">Desde</label>
+                                <input type="date" id="precisionFrom" class="ui-input">
+                            </div>
+                            <div class="ui-field">
+                                <label for="precisionTo">Hasta</label>
+                                <input type="date" id="precisionTo" class="ui-input">
+                            </div>
+                        </div>
+                    </div>
+                    <p id="precisionSummary" class="admin-text precision-summary" aria-live="polite"></p>
+                    <p id="precisionFew" class="ui-notice is-warn" hidden></p>
+
+                    <h3 class="org-subtitle">Directo al coordinador, por departamento que eligió la IA</h3>
+                    <div class="panel-table-wrap">
+                        <table id="precisionTable" class="ui-table panel-table">
+                            <thead>
+                                <tr><th>Departamento</th><th>Recibidos directo</th><th>Confirmados</th><th>Aciertos</th><th>% de acierto</th><th>Pendientes</th><th>Rebotes</th></tr>
+                            </thead>
+                            <tbody id="precisionBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="help-text">Acierto: el borrador se confirmó como ticket en el departamento que eligió la IA (% sobre los confirmados). Pendientes: todavía sin confirmar o descartados; no entran en el %. Rebotes: borradores que se transfirieron y el total de transferencias; una transferencia por error de una persona no cuenta contra la IA.</p>
+
+                    <h3 class="org-subtitle">Por clasificar</h3>
+                    <p id="precisionPending" class="admin-text"></p>
+                    <ul id="precisionReasons" class="org-list precision-reasons"></ul>
+
+                    <h3 class="org-subtitle">Borradores corregidos</h3>
+                    <p class="help-text">Para mejorar las fichas: qué eligió la IA, a dónde fue, por qué y dónde terminó.</p>
+                    <div class="panel-table-wrap">
+                        <table id="precisionCorrections" class="ui-table panel-table">
+                            <thead>
+                                <tr><th>Borrador</th><th>Eligió la IA</th><th>Origen</th><th>De</th><th>A</th><th>Motivo</th><th>Quién y cuándo</th><th>Resultado</th></tr>
+                            </thead>
+                            <tbody id="precisionCorrectionsBody"></tbody>
+                        </table>
+                    </div>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="unclassified">
+                    <div class="admin-card-head"><h2>Tickets sin departamento</h2></div>
+                    <p class="admin-text">Tickets abiertos de antes de los departamentos y los creados sin departamento. Elija el departamento que los atiende; si no tienen responsable, entran a la asignación automática de ese departamento.</p>
+                    <ul id="unclassifiedList" class="org-list"></ul>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="departments">
+                    <div class="admin-card-head">
+                        <h2>Departamentos</h2>
+                        <button type="button" id="classifyTestOpen" class="ui-btn ui-btn-secondary ui-btn-sm">Probar clasificación</button>
+                    </div>
+                    <p class="admin-text">El organigrama de la empresa. Marque «Atiende tickets» solo en los departamentos que reciben tickets: cada uno tiene un coordinador y sus técnicos. La casilla no se hereda a los subdepartamentos.</p>
+                    <p class="admin-text">La «Ficha» de cada departamento que atiende tickets le dice a la IA qué correos le corresponden. La IA la lee con cada correo: un cambio aplica en el siguiente correo.</p>
+                    <form id="deptCreateForm" class="org-inline-form">
+                        <div class="ui-field">
+                            <label for="deptCreateName">Nombre</label>
+                            <input type="text" id="deptCreateName" class="ui-input" maxlength="120" required>
+                        </div>
+                        <div class="ui-field">
+                            <label for="deptCreateParent">Dentro de</label>
+                            <select id="deptCreateParent" class="ui-input"></select>
+                        </div>
+                        <label class="org-check"><input type="checkbox" id="deptCreateHandles"> Atiende tickets</label>
+                        <button type="submit" class="ui-btn ui-btn-primary">Agregar</button>
+                    </form>
+                    <details class="org-import">
+                        <summary>Importar el organigrama desde CSV</summary>
+                        <p class="admin-text">Una columna «ruta» con la ruta completa separada por « / » (por ejemplo «Gerencias / Operaciones / Fibra Óptica / Mantenimiento»). Primero verá una vista previa: nada se guarda hasta confirmar. El archivo no se guarda en el servidor. Los departamentos importados quedan sin «Atiende tickets».</p>
+                        <form id="deptImportForm" class="org-inline-form">
+                            <div class="ui-field">
+                                <label for="deptImportFile">Archivo CSV</label>
+                                <input type="file" id="deptImportFile" class="ui-input" accept=".csv,text/csv" required>
+                            </div>
+                            <button type="submit" class="ui-btn ui-btn-secondary">Vista previa</button>
+                        </form>
+                        <div id="deptImportPreview" class="org-preview" hidden></div>
+                    </details>
+                    <p id="deptProfileNotice" class="ui-notice is-warn" hidden></p>
+                    <ul id="deptList" class="org-list"></ul>
+                </article>
+                <article class="admin-card admin-card-wide" data-admin-section="activation">
+                    <div class="admin-card-head"><h2>Tickets por departamento</h2></div>
+                    <p class="admin-text">Encendido: cada departamento que atiende tickets trabaja con su coordinador y sus técnicos, y el personal sin departamento no recibe tickets. Apagado: todo funciona como antes. Para encenderlo, la lista tiene que estar completa.</p>
+                    <div id="switchList" class="org-switches"></div>
+                    <h3 class="org-subtitle">Personal sin departamento</h3>
+                    <p class="admin-text">No tienen departamento, o el suyo está desactivado o ya no atiende tickets. Con el interruptor encendido no reciben tickets.</p>
+                    <ul id="unplacedList" class="org-list"></ul>
+                </article>
                 <article class="admin-card admin-card-wide" data-admin-section="approvals">
                     <div class="admin-card-head">
                         <h2>Solicitudes pendientes</h2>
@@ -1082,29 +1191,74 @@
                     <p id="pendingRequestsEmpty" class="admin-text" hidden>No hay solicitudes pendientes.</p>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="changes">
-                    <div class="admin-card-head">
-                        <h2>Registro de cambios</h2>
+                    <!-- Registro de cambios por persona: solo lectura y con los datos personales enmascarados -->
+                    <div id="peopleHome" class="people-home">
+                        <div class="people-search ui-field">
+                            <label for="peopleSearch">Buscar una persona</label>
+                            <div class="people-combo">
+                                <input type="search" id="peopleSearch" class="ui-input" role="combobox" aria-autocomplete="list"
+                                    aria-expanded="false" aria-controls="peopleSuggestions" autocomplete="off" maxlength="150"
+                                    placeholder="Nombre o correo" aria-describedby="peopleSearchHint">
+                                <ul id="peopleSuggestions" class="people-suggestions" role="listbox" aria-label="Personas" hidden></ul>
+                            </div>
+                            <span id="peopleSearchHint" class="ui-help">Técnicos, coordinadores y clientes. Abra su ficha para ver lo que hicieron o lo que cambió en su cuenta.</span>
+                        </div>
+                        <section class="people-block" aria-labelledby="convAccessTitle">
+                            <h2 id="convAccessTitle" class="people-block-title">Accesos a conversaciones</h2>
+                            <p class="admin-text changes-note">Cada vez que el administrador abre una conversación queda aquí, con su motivo. Así el acceso existe para casos justificados y siempre se puede revisar.</p>
+                            <ul id="convAccessList" class="changes-list"></ul>
+                            <p id="convAccessEmpty" class="admin-text" hidden>Ningún administrador ha abierto una conversación.</p>
+                            <button type="button" id="convAccessMore" class="ui-btn ui-btn-secondary ui-btn-sm people-more" hidden>Ver más</button>
+                        </section>
+                        <section class="people-block" aria-labelledby="recentChangesTitle">
+                            <h2 id="recentChangesTitle" class="people-block-title">Actividad reciente</h2>
+                            <p class="admin-text">Los últimos 20 cambios. Los ingresos de cada persona están en su ficha.</p>
+                            <ul id="changesList" class="changes-list"></ul>
+                            <p id="changesEmpty" class="admin-text" hidden>Todavía no hay cambios.</p>
+                        </section>
                     </div>
-                    <div id="changesQuick" class="aa-quick changes-quick" role="group" aria-label="Filtros rápidos">
-                        <button type="button" class="aa-quick-btn" data-action="" aria-pressed="true">Todo</button>
-                        <button type="button" class="aa-quick-btn" data-action="conversation_viewed" aria-pressed="false">Accesos a conversaciones</button>
-                        <button type="button" class="aa-quick-btn" data-action="attachment_downloaded" aria-pressed="false">Adjuntos descargados</button>
-                    </div>
-                    <div class="directory-filters">
-                        <label for="changesAccount" class="sr-only">Filtrar por cuenta</label>
-                        <input type="search" id="changesAccount" placeholder="Cuenta: nombre o correo" maxlength="150">
-                        <label for="changesAction" class="sr-only">Filtrar por acción</label>
-                        <select id="changesAction">
-                            <option value="">Todas las acciones</option>
-                        </select>
-                    </div>
-                    <ul id="changesList" class="changes-list"></ul>
-                    <p id="changesEmpty" class="admin-text" hidden>No hay cambios con esos filtros.</p>
-                    <p class="admin-text changes-note">Cada vez que el administrador abre una conversación queda aquí, con su motivo. Así el acceso existe para casos justificados y siempre se puede revisar.</p>
-                    <div class="changes-pager">
-                        <button type="button" id="changesPrev" class="btn-secondary">Anterior</button>
-                        <span id="changesPage" aria-live="polite"></span>
-                        <button type="button" id="changesNext" class="btn-secondary">Siguiente</button>
+                    <div id="personView" class="person-view" hidden>
+                        <button type="button" id="personBack" class="link-btn person-back">← Volver al registro</button>
+                        <header class="person-head">
+                            <h2 id="personName" class="sr-only"></h2>
+                            <p id="personMeta" class="person-meta"></p>
+                            <dl id="personFacts" class="person-facts"></dl>
+                        </header>
+                        <section id="personSummary" class="person-summary" aria-labelledby="personSummaryTitle" hidden>
+                            <h3 id="personSummaryTitle" class="ui-kicker">Resumen del periodo</h3>
+                            <div id="personStats" class="person-stats"></div>
+                        </section>
+                        <div class="person-filters">
+                            <div id="personGroups" class="aa-quick" role="group" aria-label="Tipo de acción"></div>
+                            <div class="person-filter-row">
+                                <div class="ui-field">
+                                    <label for="personRange">Periodo</label>
+                                    <select id="personRange" class="ui-input">
+                                        <option value="7">Últimos 7 días</option>
+                                        <option value="30" selected>Últimos 30 días</option>
+                                        <option value="90">Últimos 90 días</option>
+                                        <option value="custom">Entre fechas</option>
+                                    </select>
+                                </div>
+                                <div id="personDates" class="person-dates" hidden>
+                                    <div class="ui-field">
+                                        <label for="personFrom">Desde</label>
+                                        <input type="date" id="personFrom" class="ui-input">
+                                    </div>
+                                    <div class="ui-field">
+                                        <label for="personTo">Hasta</label>
+                                        <input type="date" id="personTo" class="ui-input">
+                                    </div>
+                                </div>
+                                <div id="personTicketField" class="ui-field">
+                                    <label for="personTicket">Ticket</label>
+                                    <input type="number" id="personTicket" class="ui-input" min="1" inputmode="numeric" placeholder="Número">
+                                </div>
+                            </div>
+                        </div>
+                        <ol id="personTimeline" class="person-timeline" aria-live="polite"></ol>
+                        <p id="personEmpty" class="admin-text" hidden>No hay actividad con esos filtros.</p>
+                        <button type="button" id="personMore" class="ui-btn ui-btn-secondary people-more" hidden>Ver más</button>
                     </div>
                 </article>
                 <article class="admin-card admin-card-wide" data-admin-section="health">
@@ -1121,13 +1275,6 @@
             <img id="statusLogo" class="staff-logo" src="img/american-data.svg" alt="American Data Networks" height="26">
         </footer>
     </main>
-
-    <footer id="portalFooter" class="portal-footer" hidden>
-        <span>Centro de Soporte</span>
-        <img id="portalLogo" class="status-logo" src="img/american-data.svg" alt="American Data" height="20">
-    </footer>
-
-
     <div id="errorMessage" class="error" role="alert"></div>
     <div id="successMessage" class="success"></div>
     <!-- Avisos breves abajo (toast); cada aviso puede llevar un botón, por ejemplo "Deshacer" -->
@@ -1187,6 +1334,238 @@
     </dialog>
 
     <!-- El administrador abre un ticket solo con un motivo: queda en el Registro de cambios -->
+    <!-- Tickets por departamento: técnico, coordinador y administrador crean con el mismo formulario -->
+    <dialog id="staffTicketDialog" class="app-dialog staff-ticket-dialog" aria-labelledby="staffTicketTitle">
+        <form id="staffTicketForm" class="profile-form">
+            <h2 id="staffTicketTitle" class="modal-title">Nuevo ticket</h2>
+            <p class="help-text">En nombre de quien reportó el problema. Se asigna solo entre los técnicos del departamento.</p>
+            <fieldset class="staff-ticket-group">
+                <legend>Quién reporta</legend>
+                <div class="form-group">
+                    <label for="stReporterName">Nombre</label>
+                    <input type="text" id="stReporterName" maxlength="100" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="stReporterEmail">Correo (opcional)</label>
+                    <input type="email" id="stReporterEmail" maxlength="150" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="stReporterArea">Área</label>
+                    <select id="stReporterArea" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="stReporterPhone">Teléfono o extensión (opcional)</label>
+                    <input type="text" id="stReporterPhone" maxlength="30" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="stChannel">Canal</label>
+                    <select id="stChannel" required>
+                        <option value="">Seleccionar</option>
+                        <option value="email">Correo</option>
+                        <option value="phone">Teléfono</option>
+                        <option value="in_person">En persona</option>
+                    </select>
+                </div>
+            </fieldset>
+            <div class="form-group">
+                <label for="stTitle">Título</label>
+                <input type="text" id="stTitle" maxlength="200" required>
+            </div>
+            <div class="form-group">
+                <label for="stDescription">Descripción</label>
+                <textarea id="stDescription" rows="4" maxlength="5000" required></textarea>
+            </div>
+            <div class="form-group">
+                <label for="stPriority">Prioridad</label>
+                <select id="stPriority" required aria-describedby="stPriorityDue"></select>
+                <small id="stPriorityDue" class="help-text" aria-live="polite">Define el vencimiento del ticket.</small>
+            </div>
+            <div class="form-group">
+                <label for="stCategory">Categoría (opcional)</label>
+                <select id="stCategory"></select>
+            </div>
+            <div class="form-group">
+                <label for="stDepartment">Departamento que atiende</label>
+                <select id="stDepartment" required></select>
+            </div>
+            <p id="staffTicketError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="staffTicketCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" id="staffTicketSubmit" class="btn-submit">Crear ticket</button>
+            </div>
+        </form>
+        <!-- Confirmación inmediata: número y técnico asignado (o pendiente). No queda visible después -->
+        <div id="staffTicketDone" class="profile-form" hidden>
+            <h2 class="modal-title">Ticket creado</h2>
+            <p id="staffTicketDoneNumber" class="staff-ticket-number"></p>
+            <p id="staffTicketDoneAssignee" class="help-text"></p>
+            <div class="dialog-actions">
+                <button type="button" id="staffTicketClose" class="btn-submit">Listo</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Transferir un ticket a otro departamento, con motivo obligatorio -->
+    <dialog id="transferDialog" class="app-dialog" aria-labelledby="transferDialogTitle">
+        <form id="transferForm" class="profile-form">
+            <h2 id="transferDialogTitle" class="modal-title">Transferir a otro departamento</h2>
+            <p id="transferTicket" class="help-text"></p>
+            <div class="form-group">
+                <label for="transferTarget">Departamento destino</label>
+                <select id="transferTarget" required></select>
+            </div>
+            <div class="form-group">
+                <label for="transferReason">Motivo (mínimo 15 caracteres)</label>
+                <textarea id="transferReason" rows="3" minlength="15" maxlength="300" required></textarea>
+                <small class="help-text">El vencimiento sigue corriendo. Si el técnico asignado no es del destino, sale de su bandeja.</small>
+            </div>
+            <p id="transferError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="transferCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Transferir</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Transferir un borrador a otro departamento (coordinador, con tickets por departamento) -->
+    <dialog id="draftTransferDialog" class="app-dialog" aria-labelledby="draftTransferTitle">
+        <form id="draftTransferForm" class="profile-form">
+            <h2 id="draftTransferTitle" class="modal-title">Transferir el borrador a otro departamento</h2>
+            <p id="draftTransferDraft" class="help-text"></p>
+            <div class="form-group">
+                <label for="draftTransferTarget">Departamento destino</label>
+                <select id="draftTransferTarget" autocomplete="off" required></select>
+            </div>
+            <div class="form-group">
+                <label for="draftTransferReason">Motivo (mínimo 15 caracteres)</label>
+                <textarea id="draftTransferReason" rows="3" minlength="15" maxlength="300" required></textarea>
+                <small class="help-text">El borrador llega completo al coordinador del destino, con un aviso en su campana. Usted deja de verlo. Queda registrado como corrección de la IA.</small>
+            </div>
+            <p id="draftTransferError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="draftTransferCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Transferir</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Al marcar Resuelto con tickets por departamento: la solución es obligatoria -->
+    <dialog id="solutionDialog" class="app-dialog" aria-labelledby="solutionDialogTitle">
+        <form id="solutionForm" class="profile-form">
+            <h2 id="solutionDialogTitle" class="modal-title">Documentar la solución</h2>
+            <p id="solutionTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="solutionText">Qué se hizo para resolverlo (obligatorio)</label>
+                <textarea id="solutionText" rows="5" minlength="10" maxlength="5000" required></textarea>
+                <small class="help-text">No se envía ningún correo: quien creó el ticket recibe un aviso en su campana para avisarle a quien reportó.</small>
+            </div>
+            <p id="solutionError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="solutionCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Marcar como Resuelto</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Departamento de una persona del personal: solo el administrador -->
+    <dialog id="placementDialog" class="app-dialog" aria-labelledby="placementDialogTitle">
+        <form id="placementForm" class="profile-form">
+            <h2 id="placementDialogTitle" class="modal-title">Departamento</h2>
+            <p id="placementTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="placementDept">Departamento</label>
+                <select id="placementDept" required></select>
+                <small class="help-text">Solo departamentos que atienden tickets.</small>
+            </div>
+            <p id="placementError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="placementCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="deptMoveDialog" class="app-dialog" aria-labelledby="deptMoveDialogTitle">
+        <form id="deptMoveForm" class="profile-form">
+            <h2 id="deptMoveDialogTitle" class="modal-title">Mover departamento</h2>
+            <p id="deptMoveTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptMoveParent">Nuevo departamento padre</label>
+                <select id="deptMoveParent"></select>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" id="deptMoveCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Mover</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Ficha de un departamento: instrucción que la IA lee con cada correo (solo el administrador) -->
+    <dialog id="deptProfileDialog" class="app-dialog classify-dialog" aria-labelledby="deptProfileDialogTitle">
+        <form id="deptProfileForm" class="profile-form">
+            <h2 id="deptProfileDialogTitle" class="modal-title">Ficha del departamento</h2>
+            <p id="deptProfileTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptProfileHandles">Qué atiende</label>
+                <textarea id="deptProfileHandles" rows="3" maxlength="1000"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="deptProfileExamples">Ejemplos de correos (uno por línea, máximo 20)</label>
+                <textarea id="deptProfileExamples" rows="6" maxlength="7000" aria-describedby="deptProfileExamplesHint"></textarea>
+                <small id="deptProfileExamplesHint" class="help-text">Frases como las escribiría un empleado. Sin ejemplos, los correos de este departamento siempre pasan por «Por clasificar».</small>
+            </div>
+            <div class="form-group">
+                <label for="deptProfileNot">Qué NO atiende y a dónde va</label>
+                <textarea id="deptProfileNot" rows="3" maxlength="1000" placeholder="Por ejemplo: Impresoras y monitores → Soporte N1"></textarea>
+            </div>
+            <small class="help-text">No escriba cédulas, teléfonos ni correos: se ocultan antes de enviarlos a la IA.</small>
+            <p id="deptProfileError" class="dialog-error" role="alert" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="deptProfileCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Probar clasificación: qué departamento elegiría la IA para un correo de ejemplo (no crea nada) -->
+    <dialog id="classifyTestDialog" class="app-dialog classify-dialog" aria-labelledby="classifyTestDialogTitle">
+        <form id="classifyTestForm" class="profile-form">
+            <h2 id="classifyTestDialogTitle" class="modal-title">Probar clasificación</h2>
+            <p class="help-text">Pegue un correo de ejemplo. Se usa la ficha actual de cada departamento; no se crea ningún borrador ni ticket.</p>
+            <div class="form-group">
+                <label for="classifyTestSubject">Asunto</label>
+                <input type="text" id="classifyTestSubject" maxlength="300">
+            </div>
+            <div class="form-group">
+                <label for="classifyTestBody">Correo</label>
+                <textarea id="classifyTestBody" rows="6" maxlength="5000" required></textarea>
+            </div>
+            <p id="classifyTestError" class="dialog-error" role="alert" hidden></p>
+            <div id="classifyTestResult" class="classify-result" aria-live="polite" hidden></div>
+            <div class="dialog-actions">
+                <button type="button" id="classifyTestClose" class="btn-secondary">Cerrar</button>
+                <button type="submit" id="classifyTestSubmit" class="btn-submit">Probar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Siguiente nivel de un departamento que atiende tickets: Escalar transfiere a ese departamento -->
+    <dialog id="deptNextDialog" class="app-dialog" aria-labelledby="deptNextDialogTitle">
+        <form id="deptNextForm" class="profile-form">
+            <h2 id="deptNextDialogTitle" class="modal-title">Siguiente nivel</h2>
+            <p id="deptNextTarget" class="help-text"></p>
+            <div class="form-group">
+                <label for="deptNextSelect">Al escalar, el ticket pasa a</label>
+                <select id="deptNextSelect"></select>
+                <small class="help-text">Solo departamentos que atienden tickets. Por ejemplo Soporte N1 → Soporte N2 → Ingeniería N3.</small>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" id="deptNextCancel" class="btn-secondary">Cancelar</button>
+                <button type="submit" class="btn-submit">Guardar</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog id="conversationDialog" class="app-dialog" aria-labelledby="conversationDialogTitle">
         <form id="conversationForm" class="profile-form">
             <h2 id="conversationDialogTitle" class="modal-title">Ver conversación</h2>
@@ -1262,6 +1641,12 @@
             <div class="form-group">
                 <label for="roleSelect">Rol nuevo</label>
                 <select id="roleSelect"></select>
+            </div>
+            <!-- Administrador: el rol y el departamento cambian juntos -->
+            <div id="roleDeptGroup" class="form-group" hidden>
+                <label for="roleDept">Departamento</label>
+                <select id="roleDept"></select>
+                <small id="roleDeptHint" class="help-text">Solo departamentos que atienden tickets. Si pasa a coordinador, el departamento no puede tener otro coordinador.</small>
             </div>
             <div id="roleReasonGroup" class="form-group" hidden>
                 <label for="roleReason">Motivo (obligatorio)</label>

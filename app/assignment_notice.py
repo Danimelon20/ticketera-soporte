@@ -41,7 +41,7 @@ def build(ticket: models.Ticket, assignee: models.User) -> tuple[str, str]:
 def deliver(to: str, subject: str, body: str, ticket_id: int) -> bool:
     """Envía un aviso ya armado (puede correr después de cerrar la sesión de la base)."""
     sent = mailer.send_email(to, subject, body)
-    if not config.EMAIL_ENABLED:
+    if config.MAIL_TRANSPORT == "log":
         # Sin correo real: solo número y destinatario enmascarado, nunca el contenido
         logging.warning("[SOLO DESARROLLO] Aviso de asignación del ticket #%s para %s", ticket_id, mask_email(to))
     return sent

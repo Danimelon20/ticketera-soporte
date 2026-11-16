@@ -15,7 +15,7 @@ import msal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import audit, config, mailer, models
+from . import accounts, audit, config, mailer, models, routing
 from .security import hash_token, mask_email, unusable_password_hash
 
 # MSAL agrega openid y profile por su cuenta; offline_access se excluye. Nunca permisos de correo
@@ -35,7 +35,6 @@ REJECT_REASONS = {
     "not_staff": "Correo que no es del personal",
     "requester": "Cuenta de cliente",
     "inactive": "Cuenta desactivada",
-    "wrong_portal": "Opción de inicio equivocada",
     "already_linked": "Ya enlazada a otra cuenta Microsoft",
     "invitation": "Invitación no válida",
     "invitation_email": "Correo distinto al de la invitación",
@@ -155,19 +154,23 @@ def _link(db: Session, user: models.User, oid: str) -> None:
     audit.record(db, user.id, "microsoft_linked", target=user)
 
 
-def resolve_user(db: Session, identity: Identity, allowed_roles: tuple) -> models.User:
+# Quién entra con Microsoft (un solo botón): el personal y el administrador; nunca solicitantes ni el Agente
+MICROSOFT_ROLES = ("technician", "coordinator", "admin")
+
+
+def resolve_user(db: Session, identity: Identity) -> models.User:
     """Cuenta del personal que ya existe y está activa. Primer ingreso: se enlaza por correo. No hace commit."""
     portal, email = identity.portal, identity.email
     link = db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.oid == identity.oid).first()
     user = db.get(models.User, link.user_id) if link is not None else _find_by_email(db, email)
-    if user is None or user.role == "agent":
+    # Un contacto (rol requester) recibe lo mismo que un correo sin cuenta: no se revela que existe
+    if user is None or user.role in ("agent", "requester"):
         raise LoginRejected("not_staff", portal=portal, email=email)
-    if user.role == "requester":
-        raise LoginRejected("requester", portal=portal, user=user)
     if not user.is_active:
         raise LoginRejected("inactive", portal=portal, user=user)
-    if user.role not in allowed_roles:
-        raise LoginRejected("wrong_portal", portal=portal, user=user)
+    # Un solo botón: técnicos, coordinadores y el administrador (solicitantes y el Agente ya se rechazaron)
+    if user.role not in MICROSOFT_ROLES:
+        raise LoginRejected("not_staff", portal=portal, email=email)
     if link is None:
         if db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.user_id == user.id).first():
             raise LoginRejected("already_linked", portal=portal, user=user)
@@ -182,19 +185,14 @@ def activate(db: Session, identity: Identity) -> models.User:
         raise LoginRejected("invitation", portal="staff", email=identity.email)
     if identity.email != invitation.email.strip().lower():
         raise LoginRejected("invitation_email", portal="staff", email=identity.email)
-    if _find_by_email(db, identity.email) is not None:
+    # Un contacto (quien reportó por correo) se convierte; otra cuenta o un cliente archivado, no
+    existing = _find_by_email(db, identity.email)
+    if existing is not None and not accounts.is_invitable_contact(db, existing):
         raise LoginRejected("invitation", portal="staff", email=identity.email)
     if db.query(models.UserMicrosoftLink).filter(models.UserMicrosoftLink.oid == identity.oid).first():
         raise LoginRejected("already_linked", portal="staff", email=identity.email)
 
-    user = models.User(
-        name=invitation.name, email=invitation.email, role=invitation.role, password_hash=unusable_password_hash(),
-    )
-    db.add(user)
-    db.flush()
-    invitation.used_by = user.id
-    invitation.used_at = _now()
-    audit.record(db, user.id, "invitation_used", target=user, new=audit.role_name(user.role))
+    user = accounts.staff_from_invitation(db, invitation, existing, unusable_password_hash())
     _link(db, user, identity.oid)
     return user
 

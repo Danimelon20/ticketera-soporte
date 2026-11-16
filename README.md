@@ -1,7 +1,8 @@
 # Ticketera de Soporte
 
-Sistema web para recibir, asignar y dar seguimiento a las solicitudes de soporte técnico.
-Los clientes piden ayuda desde la página o por correo; el Agente virtual convierte los correos en
+Sistema web interno para recibir, asignar y dar seguimiento a las solicitudes de soporte técnico.
+Los empleados piden ayuda por correo o el personal registra el caso en la página (no hay portal de clientes);
+el Agente virtual convierte los correos en
 tickets o borradores, la IA local sugiere el nivel y el tiempo meta, y el sistema asigna cada ticket
 al técnico disponible con menos carga. Coordinadores y técnicos atienden, avisan de los vencimientos y
 dejan registro de todo; el administrador cuida las cuentas y la seguridad.
@@ -20,9 +21,10 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
 7. [Tickets por correo](#tickets-por-correo)
 8. [Datos de prueba](#datos-de-prueba)
 9. [Pruebas automáticas](#pruebas-automáticas)
-10. [Seguridad](#seguridad)
-11. [Problemas comunes](#problemas-comunes)
-12. [Tecnologías y decisiones](#tecnologías-y-decisiones)
+10. [Probar correos con Mailpit](#probar-correos-con-mailpit)
+11. [Seguridad](#seguridad)
+12. [Problemas comunes](#problemas-comunes)
+13. [Tecnologías y decisiones](#tecnologías-y-decisiones)
 
 ## Requisitos
 
@@ -63,15 +65,25 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
 
    El primero es para el asistente y el análisis de correos; el segundo, para la agrupación de tickets similares.
 
-5. Cree el primer administrador. Pide nombre, correo y contraseña (mínimo 8 caracteres):
+5. Cree el administrador. Pide nombre, correo y contraseña (mínimo 12 caracteres):
 
    ```bash
    docker compose exec -it app python -m app.create_admin
    ```
 
-   El rol de administrador **nunca** se obtiene registrándose ni con una invitación: solo con este comando.
+   El rol de administrador **nunca** se obtiene registrándose, con una invitación ni desde ninguna pantalla:
+   solo con este comando. Solo puede haber **un** administrador activo; si ya hay uno, el comando se niega.
+   Desde la terminal (`python -m scripts.admin_tools ...`):
 
-6. Entre a **http://localhost:8000**, pestaña **Administración**. Después de la contraseña se pide un código
+   - `list-admins`: lista los administradores con su correo completo y avisa si hay más de uno activo.
+   - `demote --email <correo> [--to coordinator|technician]` o `deactivate`: para dejar uno solo.
+   - `reset-password --email <correo>`: el administrador perdió el acceso. Genera una contraseña nueva (se
+     muestra una vez), quita el bloqueo por intentos y cierra sus sesiones. El código de 6 dígitos sigue
+     llegando a su correo.
+   - `reactivate --email <correo>`: solo si no hay otro administrador activo.
+
+6. Entre a **http://localhost:8000** con su correo y contraseña (un solo formulario para todos los roles: el
+   sistema lo lleva a la pantalla de su rol). Después de la contraseña se pide un código
    de 6 dígitos que llega al correo. Mientras `EMAIL_ENABLED=false`, el código no se envía y aparece en el
    registro del servidor:
 
@@ -81,8 +93,17 @@ Diseño: [docs/diseno.md](docs/diseno.md) · Bitácora con asistentes de IA: [do
 
    La documentación interactiva de la API está en http://localhost:8000/docs.
 
-7. Desde **Administración › Invitaciones**, invite al personal (técnicos y coordinadores). Los clientes crean su
-   propia cuenta en la pestaña **Cliente** de la pantalla de inicio.
+7. Desde **Administración › Invitaciones**, invite al personal (técnicos y coordinadores). Nadie más inicia
+   sesión: quien reporta un problema por correo queda como **contacto** (sin contraseña ni acceso). Un contacto
+   se puede invitar con su mismo correo: al activar la invitación pasa a ser personal y conserva sus tickets
+   (un cliente archivado no se puede invitar).
+8. Si la base viene de antes de quitar el portal, archive las cuentas de cliente. Primero en modo de prueba
+   (**solo muestra** qué cambiaría) y después con `--apply` (el que cambia; no borra nada):
+
+   ```bash
+   docker compose exec app python -m scripts.admin_tools archive-clients
+   docker compose exec app python -m scripts.admin_tools archive-clients --apply
+   ```
 
 ## Variables del archivo .env
 
@@ -92,7 +113,9 @@ este documento, en un ticket ni en un chat los valores reales de su `.env`.
 
 | Variable | Para qué sirve | Desarrollo | PC con correo |
 |---|---|---|---|
-| `EMAIL_ENABLED` | Lee el buzón y envía correos (respuestas, avisos, códigos). Con `false` solo lo anota en el registro | `false` | `true` |
+| `EMAIL_ENABLED` | Lee el buzón y envía correos (respuestas, avisos, códigos). Con `false` solo lo anota en el registro. Es el valor por defecto de las dos siguientes | `false` | `true` |
+| `MAIL_TRANSPORT` | Cómo se envían los correos: `graph` (Microsoft), `smtp` (Mailpit en pruebas) o `log` (solo se anotan). Sin definir: `graph` si `EMAIL_ENABLED=true`, si no `log` | sin definir | sin definir |
+| `MAILBOX_POLL_ENABLED` | Si se lee el buzón de soporte. Sin definir: igual que `EMAIL_ENABLED` | sin definir | sin definir |
 | `MS_TENANT_ID` | Id. de directorio (inquilino) del registro de la app en Microsoft Entra ID, para el buzón | el del ejemplo | el id. de su organización |
 | `MS_CLIENT_ID` | Id. de aplicación (cliente) del mismo registro, para el buzón | el del ejemplo | el id. del registro |
 | `SUPPORT_MAILBOX` | Buzón de soporte que lee el Agente virtual y desde el que responde | el del ejemplo | el buzón de soporte |
@@ -103,7 +126,9 @@ este documento, en un ticket ni en un chat los valores reales de su `.env`.
 | `MS_LOGIN_CLIENT_ID` | Id. de aplicación para el inicio de sesión (el mismo registro) | vacío | el mismo id. de aplicación |
 | `MS_LOGIN_CLIENT_SECRET` | Secreto de cliente propio del inicio de sesión. **Vence**: anote la fecha | vacío | el secreto vigente |
 | `MS_LOGIN_REDIRECT_URI` | Dirección de vuelta registrada en Azure | `http://localhost:8000/auth/microsoft/callback` | la registrada en Azure |
-| `HACIENDA_CHECK` | Verifica la cédula con la API pública de Hacienda | `false` (sin internet) o `true` | `true` |
+| `INTERNAL_DOMAINS` | Dominios de la empresa (con sus subdominios), separados por coma: solo ellos pueden reportar por correo | vacío | `data.cr` |
+| `EMAIL_SENDER_CHECK` | Autenticidad del remitente: `auth` exige las marcas de Exchange Online (interno o DMARC/compauth); `domain` solo mira el dominio | `auth` | `auth` |
+| `HACIENDA_CHECK` | Verifica la cédula con la API pública de Hacienda (solo quedan cédulas de clientes archivados) | `false` (sin internet) o `true` | `true` |
 | `HACIENDA_STRICT` | Rechaza las cédulas que Hacienda no encuentra | `false` | `false` |
 | `CHATBOT_ENABLED` | Asistente de la página con el modelo local | `false` | `true` |
 | `LLM_BASE_URL` | Dirección de Ollama dentro de Docker Compose | `http://ollama:11434` | `http://ollama:11434` |
@@ -124,17 +149,17 @@ este documento, en un ticket ni en un chat los valores reales de su `.env`.
 | `SESSION_IDLE_MINUTES` | Minutos sin uso tras los que vence una sesión | `240` | `240` |
 | `SESSION_MAX_HOURS` | Horas máximas de una sesión aunque se use | `12` | `12` |
 | `ATTACHMENTS_DIR` | Carpeta de los adjuntos (debe quedar dentro de `data/`) | `data/attachments` | `data/attachments` |
-| `GROUPING_ENABLED` | Agrupación de tickets similares (fusión del mismo cliente y posibles incidentes) | `false` | `true` |
+| `GROUPING_ENABLED` | Agrupación de tickets similares (fusión de la misma persona y posibles incidentes) | `false` | `true` |
 | `EMBEDDING_MODEL` | Modelo de la agrupación (debe estar descargado) | `qwen3-embedding:0.6b` | `qwen3-embedding:0.6b` |
-| `GROUPING_MERGE_THRESHOLD` | Similitud mínima para fusionar tickets del mismo cliente | `0.80` | `0.80` |
-| `GROUPING_INCIDENT_THRESHOLD` | Similitud mínima para ligar tickets de clientes distintos | `0.85` | `0.85` |
+| `GROUPING_MERGE_THRESHOLD` | Similitud mínima para fusionar tickets de la misma persona | `0.80` | `0.80` |
+| `GROUPING_INCIDENT_THRESHOLD` | Similitud mínima para ligar tickets de personas distintas | `0.85` | `0.85` |
 | `GROUPING_INCIDENT_MIN` | Tickets relacionados para marcar "Posible incidente" | `3` | `3` |
 | `GROUPING_INCIDENT_HOURS` | Ventana de horas para contar el incidente | `2` | `2` |
 | `GROUPING_TIMEOUT_SECONDS` | Tiempo máximo de la búsqueda por ticket | `15` | `15` |
 
 Variable que la app lee pero que **no está en `.env.example`**: `APP_URL`, el enlace a la página que va en los
 correos (por defecto `http://localhost:8000`). En la PC con correo, agréguela a su `.env` con la dirección con la
-que el personal y los clientes entran a la página.
+que el personal entra a la página.
 
 ## Operación diaria
 
@@ -228,7 +253,7 @@ el inicio de sesión del personal nunca toca la sesión del buzón.
   `MS_LOGIN_REDIRECT_URI`. Después: `docker compose up -d --force-recreate`.
 - Solo entra el personal que ya tiene cuenta activa (técnico, coordinador o administrador). La primera vez se
   enlaza por correo; después, por la cuenta Microsoft. El personal nuevo sigue entrando por invitación
-  ("Activar con Microsoft"). Los clientes siguen con correo y contraseña.
+  ("Activar con Microsoft"). Los contactos (quien reporta por correo) nunca inician sesión.
 - Con `MS_LOGIN_ENABLED=true`, técnicos y coordinadores ya no usan contraseña.
 
 **Renovar el secreto antes de que venza.** Anote la fecha de vencimiento al crearlo. Unos días antes:
@@ -240,9 +265,10 @@ el inicio de sesión del personal nunca toca la sesión del buzón.
 
 El buzón no usa este secreto: renovarlo no lo afecta.
 
-**Acceso de emergencia del administrador.** Si Microsoft no responde o el secreto venció, en la pestaña
-**Administración** use el enlace **Acceso de emergencia**: correo, contraseña y el código por correo, como antes.
-Cada uso queda en el Registro de cambios y avisa por correo a los demás administradores.
+**Acceso de emergencia del administrador.** Si Microsoft no responde o el secreto venció, el administrador entra
+con correo y contraseña en el mismo formulario (debajo del botón de Microsoft) y el código por correo, como antes.
+Cada uso queda en el Registro de cambios. Técnicos y coordinadores no pueden entrar con contraseña mientras
+`MS_LOGIN_ENABLED=true`.
 
 **El día que la página use HTTPS:** la URI de redirección pasa a `https://<su dominio>/auth/microsoft/callback`,
 hay que registrarla igual en Azure y actualizar `MS_LOGIN_REDIRECT_URI`. Azure solo acepta `http` para
@@ -250,21 +276,28 @@ hay que registrarla igual en Azure y actualizar `MS_LOGIN_REDIRECT_URI`. Azure s
 
 ## Tickets por correo
 
-El Agente virtual revisa la carpeta `MAIL_FOLDER` del buzón y procesa los correos no leídos de clientes
-registrados. Un correo con esta plantilla crea el ticket directamente:
+El Agente virtual revisa la carpeta `MAIL_FOLDER` del buzón y procesa los correos no leídos del personal de
+la empresa: remitentes de `INTERNAL_DOMAINS`. La primera vez se crea su **contacto** (sin contraseña ni acceso).
+Un correo con esta plantilla crea el ticket directamente:
 
 ```
 Asunto: [Soporte] <título corto del problema>
 Categoría: <Hardware, Software, Red o Accesos>
 Prioridad: <Baja, Media, Alta o Urgente; si falta queda Media>
-Teléfono: <8 dígitos>
-Cédula: <9 dígitos, o 11 o 12 si es DIMEX>
+Teléfono: <8 dígitos; opcional>
 Descripción: <qué pasa, desde cuándo y qué intentó>
 ```
 
 Un correo escrito con sus propias palabras (sin la plantilla) se convierte en un **borrador** que la IA analiza
-y que confirma una persona del equipo. Si faltan datos, el Agente responde pidiéndolos. Los correos de
-remitentes no registrados reciben una invitación a crear su cuenta.
+y que confirma una persona del equipo. Ya no se piden teléfono ni cédula. Los remitentes de otros dominios
+reciben «Este buzón es solo para el personal de la empresa». Quien reportó recibe por correo las respuestas del
+equipo y el aviso de **Resuelto** con la solución; puede responder esos correos para agregar información.
+
+**Autenticidad del remitente.** El «De:» de un correo se puede falsificar. Con `EMAIL_SENDER_CHECK=auth` (por
+defecto) solo se acepta un correo que Exchange Online marcó como interno (`X-MS-Exchange-Organization-AuthAs:
+Internal`) o que pasó DMARC o la autenticación compuesta de Microsoft (`compauth`) para el dominio del «De:»
+(primera cabecera `Authentication-Results`). Lo demás no se procesa ni se responde. `EMAIL_SENDER_CHECK=domain`
+solo revisa el dominio: úselo únicamente si el buzón no está en Exchange Online.
 
 ## Datos de prueba
 
@@ -278,8 +311,9 @@ docker compose exec app python -m scripts.demo_data verificar
 docker compose exec app python -m scripts.demo_data limpiar
 ```
 
-- **cargar**: 3 técnicos (uno de vacaciones), 1 coordinador, clientes, tickets agrupados, vencimientos,
-  borradores y un intento de suplantación. Al final imprime cada cuenta, su contraseña y qué probar con ella.
+- **cargar**: 3 técnicos (uno de vacaciones), 1 coordinador, contactos (empleados que reportan por correo),
+  tickets agrupados, vencimientos, borradores y un cliente archivado de antes de quitar el portal (con su
+  intento de suplantación). Al final imprime cada cuenta, su contraseña y qué probar con ella.
 - **verificar**: revisa cada escenario por la API iniciando sesión con cada cuenta DEMO e imprime
   `N de M correctos`. Con `MS_LOGIN_ENABLED=true` avisa y no sigue (el personal DEMO no puede entrar con
   contraseña). No cambia nada.
@@ -313,12 +347,40 @@ Las pruebas usan una base temporal (nunca `data/tickets.db`) y nunca se conectan
 esas llamadas se simulan y cualquier intento de salir a la red hace fallar la prueba. La suite completa tarda
 varios minutos.
 
+## Probar correos con Mailpit
+
+El entorno de pruebas (`docker-compose.pruebas.yml`, puerto 8001) trae Mailpit: un buzón falso que recibe los
+correos de la ticketera (invitaciones, códigos, avisos) y no los reenvía a nadie. En `.env.pruebas`:
+
+```
+MAIL_TRANSPORT=smtp
+MAILBOX_POLL_ENABLED=false
+SMTP_HOST=mailpit
+SMTP_PORT=1025
+APP_URL=http://127.0.0.1:8001
+```
+
+`APP_ENV=pruebas` no va ahí: lo fija `docker-compose.pruebas.yml` con `environment:`, que gana sobre
+`env_file`, para que la protección no dependa de no olvidar una línea. Use `127.0.0.1` y no `localhost`: las
+cookies de `localhost` se comparten entre puertos y chocarían con la instancia real del puerto 8000.
+
+```bash
+docker compose -f docker-compose.pruebas.yml up -d --build
+docker compose -f docker-compose.pruebas.yml exec app python -m scripts.check_mailpit
+```
+
+Los correos se ven en http://127.0.0.1:8025 (solo desde esta máquina; el puerto SMTP no se publica y la
+instancia real no puede llegar a Mailpit). Con `APP_ENV=pruebas` la app **no arranca** si usa `graph`, si lee
+el buzón o si `SMTP_HOST` no está en `SMTP_ALLOWED_HOSTS` (por defecto `mailpit`); el error lo explica en
+`docker compose -f docker-compose.pruebas.yml logs --tail 30 app`. Al arrancar, el log muestra la
+configuración efectiva, por ejemplo `Correo: transporte=smtp (mailpit:1025), lectura del buzón=no, entorno=pruebas`.
+
 ## Seguridad
 
 - **Nunca se sube a GitHub:** `.env`, la carpeta `data/` (base, adjuntos, registro y `ms_token_cache.json`) ni
   archivos `.db`. Ya están en `.gitignore`; revise `git status` antes de cada commit.
 - **Solo una máquina con `EMAIL_ENABLED=true`:** si dos PCs leen el mismo buzón, los correos se procesan dos veces
-  y los clientes reciben respuestas repetidas. En desarrollo, siempre `false`.
+  y quien reporta recibe respuestas repetidas. En desarrollo, siempre `false`.
 - **Cédula y teléfono** son datos personales (Ley 8968): en el Registro de cambios y en los reportes quedan
   enmascarados (últimos 4 dígitos), no van a los registros del servidor ni a la IA, y solo los ve completos quien
   tiene permiso.

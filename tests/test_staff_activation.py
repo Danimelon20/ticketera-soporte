@@ -6,6 +6,7 @@ import pytest
 from app import models
 from app.database import SessionLocal
 from conftest import code_from
+from org_helpers import placement_for
 
 CODE_INVALID = "El código no es válido o venció. Puede pedir uno nuevo."
 
@@ -17,7 +18,8 @@ def _email():
 def _invite(client, actor, role="technician", email=None, name="Nueva Persona"):
     email = email or _email()
     response = client.post(
-        "/api/staff-invitations", json={"email": email, "name": name, "role": role}, headers=actor["headers"]
+        "/api/staff-invitations", json={"email": email, "name": name, "role": role, **placement_for(role)},
+        headers=actor["headers"]
     )
     return email, response
 
@@ -145,15 +147,16 @@ def test_coordinator_cannot_invite(client, make_user, sent):
         assert response.json()["detail"] == "Solo el administrador puede invitar personal"
 
 
-@pytest.mark.parametrize("role", ["requester", "technician"])
+@pytest.mark.parametrize("role", ["technician"])
 def test_others_cannot_invite(client, make_user, sent, role):
     _email_x, response = _invite(client, make_user(role))
     assert response.status_code == 403
 
 
 def test_existing_account_cannot_be_invited(client, make_user, sent):
-    requester = make_user("requester")
-    _email_x, response = _invite(client, make_user("admin"), email=requester["email"])
+    # Un contacto sí se puede invitar (tests/test_invite_contact.py); una cuenta del personal no
+    technician = make_user("technician")
+    _email_x, response = _invite(client, make_user("admin"), email=technician["email"])
     assert response.status_code == 409
 
 
@@ -202,9 +205,7 @@ def test_resend_from_activation_page(client, make_user, sent):
 def test_nobody_gets_staff_role_without_invitation(client, sent):
     email = _email()
     assert _activate(client, email, "123456").status_code == 400
-    client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123", "role": "technician"})
-    data = client.post(
-        "/api/auth/register/verify", json={"email": email, "code": code_from(sent[-1][2])}
-    ).json()
-    assert data["user"]["role"] == "requester"
+    # Tampoco con el registro, que ya no existe
+    assert client.post("/api/auth/register", json={"email": email, "password": "clave-segura-123",
+                                                  "role": "technician"}).status_code in (404, 405)
     assert client.post("/api/invites", json={"role": "technician"}).status_code in (404, 405)

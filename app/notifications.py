@@ -1,7 +1,7 @@
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
-from . import audit, config, mailer, models
+from . import audit, mailer, models
 from .database import SessionLocal
 
 STATUS_LABELS = {
@@ -16,10 +16,7 @@ def display_name(user: models.User) -> str:
     return user.name or user.email
 
 
-FOLLOW_NOTICE = (
-    "Recibes este correo porque das seguimiento a este ticket. "
-    "Puedes desactivarlo desde la página del ticket."
-)
+FOLLOW_NOTICE = "Recibe este correo porque reportó este problema. Puede responderlo para agregar información."
 
 
 def notify_followers(
@@ -44,20 +41,20 @@ def notify_followers(
             models.User.id != actor.id,
             models.User.id.notin_(exclude_ids),
             models.User.is_active.is_(True),
+            # Solo solicitantes: las filas antiguas del personal ("Dar seguimiento") ya no envían correo
+            models.User.role == "requester",
         )
         .all()
     )
-    # Solo quien puede ver el ticket: nunca el administrador ni un técnico al que ya no le corresponde
-    from . import ticket_access
-    visible = ticket_access.visible_user_ids(db, ticket, [u.id for u in followers])
-    followers = [u for u in followers if u.id in visible]
+    # Solo quien reportó el ticket: los contactos ya no inician sesión, así que «puede verlo» es «es suyo».
+    # Nunca el contacto de otro ticket (por ejemplo, de un incidente ligado)
+    followers = [u for u in followers if u.id == ticket.created_by]
     for user in followers:
         with_files = bool(files) and user.id == ticket.created_by
-        # Más de 20 MB no sale por correo: va el enlace al ticket en el portal
+        # Más de 20 MB no sale por correo: se le pide que los solicite (ya no hay portal donde verlos)
         linked = with_files and sum(len(data) for _, data, _ in files) > mailer.MAX_ATTACHMENTS_BYTES
         portal_lines = [
-            "Los archivos adjuntos están disponibles en el portal de soporte.",
-            ticket_link(ticket.id),
+            "Los archivos adjuntos pesan más de 20 MB y no caben en el correo: responda este correo para pedirlos.",
         ] if linked else []
         body = "\n".join(
             [f"Hola {display_name(user)}.", ""]
@@ -66,7 +63,6 @@ def notify_followers(
             + [
                 "",
                 f"Título: {ticket.title}",
-                f"Puedes ver el ticket en {config.APP_URL}",
                 "",
                 FOLLOW_NOTICE,
             ]
@@ -79,17 +75,13 @@ def notify_followers(
             background_tasks.add_task(mailer.send_email, user.email, subject, body)
 
 
-def ticket_link(ticket_id: int) -> str:
-    return f"{config.APP_URL}/#ticket/{ticket_id}"
-
-
 def send_with_files(to: str, subject: str, body: str, files: list, ticket_id: int, actor_id: int, count: int) -> None:
     """Correo al solicitante con los adjuntos (o con el enlace, si files viene vacío). Si salió, queda en el registro."""
     if not mailer.send_email(to, subject, body, attachments=files or None):
         return
     db = SessionLocal()
     try:
-        value = f"{count} adjunto(s)" if files else f"enlace al portal ({count} adjunto(s))"
+        value = f"{count} adjunto(s)" if files else f"aviso de adjuntos de más de 20 MB ({count} adjunto(s))"
         audit.record(db, actor_id, "email_attachments_sent", target_label=f"Ticket #{ticket_id}", new=value)
         db.commit()
     finally:

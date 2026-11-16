@@ -190,10 +190,10 @@ def test_all_or_nothing(client, setup):
 
 def test_only_attachments_without_text(client, setup):
     ticket_id = setup["ticket"]["id"]
-    response = upload(client, ticket_id, setup["requester"], [("captura.png", PNG)], content="")
+    response = upload(client, ticket_id, setup["coordinator"], [("captura.png", PNG)], content="")
     assert response.status_code == 200
     assert response.json()["content"] == ""
-    response = upload(client, ticket_id, setup["requester"], [], content="  ")
+    response = upload(client, ticket_id, setup["coordinator"], [], content="  ")
     assert response.status_code == 400
 
 
@@ -214,36 +214,6 @@ def test_stored_with_random_name_and_hash(client, setup):
 
 
 # ---------- Permisos ----------
-
-def test_requester_never_sees_internal_note_attachments(client, setup):
-    ticket_id = setup["ticket"]["id"]
-    note = upload(client, ticket_id, setup["coordinator"], [("interno.png", PNG)], content="Solo equipo", internal=True)
-    assert note.status_code == 200
-    attachment_id = note.json()["attachments"][0]["id"]
-
-    detail = client.get(f"/api/tickets/{ticket_id}", headers=setup["requester"]["headers"]).json()
-    ids = [a["id"] for c in detail["comments"] for a in c["attachments"]]
-    assert attachment_id not in ids
-    assert client.get(f"/api/attachments/{attachment_id}", headers=setup["requester"]["headers"]).status_code == 404
-    assert client.get(f"/api/attachments/{attachment_id}?preview=1", headers=setup["requester"]["headers"]).status_code == 404
-
-    for staff in ("technician", "coordinator"):
-        assert client.get(f"/api/attachments/{attachment_id}", headers=setup[staff]["headers"]).status_code == 200
-    staff_detail = client.get(f"/api/tickets/{ticket_id}", headers=setup["technician"]["headers"]).json()
-    assert attachment_id in [a["id"] for c in staff_detail["comments"] for a in c["attachments"]]
-
-
-def test_requester_cannot_add_internal_note_with_attachments(client, setup):
-    response = upload(client, setup["ticket"]["id"], setup["requester"], [("x.png", PNG)], internal=True)
-    assert response.status_code == 403
-
-
-def test_requester_only_sees_own_ticket_attachments(client, setup):
-    public = upload(client, setup["ticket"]["id"], setup["requester"], [("mio.png", PNG)])
-    attachment_id = public.json()["attachments"][0]["id"]
-    assert client.get(f"/api/attachments/{attachment_id}", headers=setup["requester"]["headers"]).status_code == 200
-    assert client.get(f"/api/attachments/{attachment_id}", headers=setup["other"]["headers"]).status_code == 403
-    assert upload(client, setup["ticket"]["id"], setup["other"], [("ajeno.png", PNG)]).status_code == 403
 
 
 def test_missing_attachment_and_no_session(client, setup):

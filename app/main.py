@@ -9,7 +9,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine, SessionLocal, get_db
-from . import auto_assign, chatbot, config, entra_login, models
+from . import (
+    accounts, auto_assign, chatbot, config, draft_classification, email_analysis, entra_login, mailer, models,
+    org_setup, people_activity,
+)
 from .email_poller import poll_forever
 from .daily_summary import summary_forever
 from .alerts import alerts_forever
@@ -29,6 +32,7 @@ from .routers.overdue import router as overdue_router
 from .routers.attachments import router as attachments_router
 from .routers.grouping import router as grouping_router
 from .routers.microsoft_auth import router as microsoft_auth_router
+from .routers.org import router as org_router, staff_router as org_staff_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -56,6 +60,8 @@ def init_db():
     # Primero la carpeta donde vive la base de datos, después las tablas
     os.makedirs("data", exist_ok=True)
     models.Base.metadata.create_all(bind=engine)
+    # create_all no crea índices en tablas que ya existen: los del registro por persona van aparte
+    people_activity.ensure_indexes(engine)
 
     db = SessionLocal()
     try:
@@ -89,6 +95,8 @@ def init_db():
             )
             db.add(agente)
             db.commit()
+        # Departamentos: interruptor routing_enforced (apagado si la base ya tenía datos)
+        org_setup.ensure_structure(db)
     finally:
         db.close()
 
@@ -102,18 +110,44 @@ def start_warm_up() -> threading.Thread | None:
     return thread
 
 
+def fill_due_dates() -> int:
+    """Ningún ticket abierto sin vencimiento (respaldo). Nunca lanza excepciones."""
+    try:
+        with SessionLocal() as db:
+            return email_analysis.fill_missing_due_dates(db)
+    except Exception:
+        logging.exception("Falló la revisión de tickets sin vencimiento")
+        return 0
+
+
+async def due_dates_forever() -> None:
+    while True:
+        await asyncio.sleep(config.DUE_DATES_CHECK_SECONDS)
+        await asyncio.to_thread(fill_due_dates)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Antes que nada: con una configuración de correo peligrosa la app no arranca
+    mailer.check_mail_config()
+    logging.info(mailer.describe_mail_config())
     init_db()
+    with SessionLocal() as db:
+        accounts.warn_if_many_admins(db)
+    fill_due_dates()
+    # Con tickets por departamento: los borradores pendientes sin clasificación pasan a «Por clasificar»
+    with SessionLocal() as db:
+        draft_classification.install_pending(db)
+    due_task = asyncio.create_task(due_dates_forever()) if config.DUE_DATES_CHECK_SECONDS > 0 else None
     start_warm_up()
 
     poller = None
-    if config.EMAIL_ENABLED:
+    if config.MAILBOX_POLL_ENABLED:
         if config.MS_TENANT_ID and config.MS_CLIENT_ID and config.SUPPORT_MAILBOX:
             poller = asyncio.create_task(poll_forever())
             logging.info("Revisando la carpeta %s cada %s segundos", config.MAIL_FOLDER, config.EMAIL_POLL_SECONDS)
         else:
-            logging.warning("EMAIL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
+            logging.warning("MAILBOX_POLL_ENABLED=true pero faltan datos de Microsoft 365 en .env")
 
     if config.MS_LOGIN_ENABLED and not (
         config.MS_LOGIN_TENANT_ID and config.MS_LOGIN_CLIENT_ID and config.MS_LOGIN_CLIENT_SECRET
@@ -123,19 +157,19 @@ async def lifespan(app: FastAPI):
 
     summary = None
     if config.DAILY_SUMMARY_ENABLED:
-        if config.EMAIL_ENABLED:
+        if config.MAIL_TRANSPORT != "log":
             summary = asyncio.create_task(summary_forever())
             logging.info("Resumen diario activo a partir de las %s:00", config.DAILY_SUMMARY_HOUR)
         else:
-            logging.warning("DAILY_SUMMARY_ENABLED=true pero EMAIL_ENABLED=false: no se enviará el resumen")
+            logging.warning("DAILY_SUMMARY_ENABLED=true pero MAIL_TRANSPORT=log: no se enviará el resumen")
 
     alerts_task = None
     if config.ALERTS_ENABLED:
-        if config.EMAIL_ENABLED:
+        if config.MAIL_TRANSPORT != "log":
             alerts_task = asyncio.create_task(alerts_forever())
             logging.info("Alertas por correo activas cada %s segundos", config.ALERTS_CHECK_SECONDS)
         else:
-            logging.warning("ALERTS_ENABLED=true pero EMAIL_ENABLED=false: no se enviarán alertas")
+            logging.warning("ALERTS_ENABLED=true pero MAIL_TRANSPORT=log: no se enviarán alertas")
 
     # La asignación automática no depende del correo ni de las alertas
     assign_task = None
@@ -148,7 +182,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    for task in (poller, summary, alerts_task, assign_task):
+    for task in (poller, summary, alerts_task, assign_task, due_task):
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -179,6 +213,8 @@ app.include_router(overdue_router)
 app.include_router(attachments_router)
 app.include_router(grouping_router)
 app.include_router(microsoft_auth_router)
+app.include_router(org_router)
+app.include_router(org_staff_router)
 
 
 # Debe ir al final: si va antes, captura las rutas de la API

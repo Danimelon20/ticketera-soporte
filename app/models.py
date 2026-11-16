@@ -429,14 +429,32 @@ ACCOUNT_CHANGE_ACTIONS = (
     # "Ver conversación" del administrador (target_label: "Ticket #N"; new_value: el motivo, enmascarado)
     "conversation_viewed",
     # Hechos desde el servidor (scripts.admin_tools): en el registro aparecen como "Servidor"
-    "server_account_deactivated", "server_account_activated", "server_role_changed",
+    "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
+    # Cliente archivado con admin_tools archive-clients. Las filas del comando archive-requester (ya quitado)
+    # guardan old_value: el correo original en claro; new_value: archivado-<id>@archivo.invalid
+    "server_account_archived",
+    # Administrador creado con app.create_admin y contraseña restablecida con admin_tools reset-password
+    "server_admin_created", "server_password_reset",
+    # Departamentos del organigrama (target_label: la ruta; old/new: lo que cambió)
+    "department_created", "department_changed", "departments_imported",
+    # Ficha de un departamento para la clasificación de correos (target_label: la ruta; new: qué cambió)
+    "department_profile_changed",
+    # Departamento de un técnico o coordinador (old/new: la ruta)
+    "placement_changed",
+    # Interruptor de Administración › Activación (target_label: la clave; old/new: Apagado/Encendido)
+    "setting_changed",
     # Inicio de sesión del personal con Microsoft (rechazos: target_label con el correo enmascarado,
     # new_value con el motivo). emergency_access: el administrador entró con contraseña y código
     "microsoft_linked", "microsoft_login", "microsoft_login_rejected", "emergency_access",
     # Intento de usar una cédula de otra cuenta (new_value: cédula enmascarada y origen)
     "id_number_conflict",
+    # Ingreso con contraseña (y código, si el rol lo pide) e intento fallido de una cuenta existente
+    "login", "login_failed",
 )
-SERVER_ACTIONS = ("server_account_deactivated", "server_account_activated", "server_role_changed")
+SERVER_ACTIONS = (
+    "server_account_deactivated", "server_account_activated", "server_role_changed", "server_account_deleted",
+    "server_account_archived", "server_admin_created", "server_password_reset",
+)
 
 
 class AccountChange(Base):
@@ -810,7 +828,7 @@ class TicketLink(Base):
     similarity = Column(Float, nullable=True)
     ai_reason = Column(String(300), nullable=True)
     automatic = Column(Boolean, nullable=False, default=True)
-    # El responsable se le puso por el principal: al separar vuelve a la cola sin responsable
+    # El responsable se le puso por el principal (al separar lo conserva: sigue en la bandeja del técnico)
     assigned_by_link = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False)
     undone_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -890,3 +908,267 @@ class AutoReportIdOwner(Base):
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     __table_args__ = (UniqueConstraint("report_id", "owner_user_id", name="uq_auto_report_id_owner"),)
+
+
+# ===== Departamentos (organigrama) =====
+
+class Department(Base):
+    """Organigrama con jerarquía padre/hijo. Solo los marcados con handles_tickets reciben tickets, coordinador
+    y técnicos (la casilla no se hereda a los subdepartamentos). Tabla nueva: no altera tablas existentes."""
+    __tablename__ = "departments"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False)
+    parent_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    # "Atiende tickets"
+    handles_tickets = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (UniqueConstraint("parent_id", "name", name="uq_department_parent_name"),)
+
+    aliases = relationship("DepartmentAlias", cascade="all, delete-orphan")
+
+
+class DepartmentAlias(Base):
+    """Nombre alternativo de un departamento (importaciones del organigrama)."""
+    __tablename__ = "department_aliases"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), index=True, nullable=False)
+    # Ruta completa tal como venía (única) y normalizada (sin tildes, minúsculas, abreviaturas) para buscarla
+    alias = Column(String(300), unique=True, nullable=False)
+    normalized = Column(String(300), index=True, nullable=False)
+
+
+class DepartmentEscalation(Base):
+    """Siguiente nivel de un departamento que atiende tickets (Soporte N1 → Soporte N2 → Ingeniería N3): Escalar
+    transfiere el ticket a ese departamento. Tabla nueva: no altera tablas existentes."""
+    __tablename__ = "department_escalations"
+
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
+    next_department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DepartmentProfile(Base):
+    """Ficha de un departamento que atiende tickets: qué atiende, ejemplos de correos (uno por línea) y qué no
+    atiende (y a dónde va). La IA la lee con cada correo: es instrucción, no entrenamiento. Tabla nueva."""
+    __tablename__ = "department_profiles"
+
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
+    handles = Column(Text, nullable=False, default="")
+    examples = Column(Text, nullable=False, default="")
+    not_handles = Column(Text, nullable=False, default="")
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# Estado de la clasificación de un borrador (validado en Python)
+# routed: la IA lo envió al coordinador del departamento; pending: «Por clasificar» (lo decide el administrador);
+# classified: el administrador eligió el departamento
+DRAFT_CLASSIFICATION_STATUSES = ("routed", "pending", "classified")
+# Por qué quedó en «Por clasificar»
+DRAFT_PENDING_REASONS = {
+    "below_threshold": "La IA no estuvo segura",
+    "no_coordinator": "El departamento elegido no tiene coordinador activo",
+    "ai_error": "La IA no pudo analizar el correo",
+    "installed": "Llegó antes de la clasificación por departamento",
+    "no_profiles": "Ningún departamento tiene ficha («Qué atiende»)",
+    "low_similarity": "El correo no se parece a ninguna ficha",
+}
+
+
+class DraftClassification(Base):
+    """Departamento de un borrador según la IA (con las fichas) o el administrador. Tabla nueva: no altera
+    email_drafts. La 1.ª y 2.ª opción quedan guardadas para «Por clasificar» y para medir la precisión."""
+    __tablename__ = "draft_classifications"
+
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), primary_key=True)
+    status = Column(String(20), nullable=False)
+    # Departamento actual (nulo mientras está «Por clasificar»)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=True)
+    pending_reason = Column(String(30), nullable=True)
+    # Lo que dijo la IA
+    ai_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    ai_reason = Column(String(600), nullable=True)
+    ai_margin = Column(Float, nullable=True)
+    ai_agrees = Column(Boolean, nullable=False, default=False)
+    option1_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    option2_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    option1_similarity = Column(Float, nullable=True)
+    option2_similarity = Column(Float, nullable=True)
+    threshold = Column(Float, nullable=True)
+    # El administrador desde «Por clasificar»: si coincidió con la 1.ª opción (para calibrar el umbral)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    matched_first = Column(Boolean, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DepartmentExampleEmbedding(Base):
+    """Vector de un ejemplo de la ficha (enmascarado) para no recalcularlo. Se identifica por el texto y el modelo:
+    al cambiar la ficha, los vectores de ejemplos que ya no están se borran. Tabla nueva."""
+    __tablename__ = "department_example_embeddings"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), index=True, nullable=False)
+    text_hash = Column(String(64), nullable=False)
+    vector = Column(Text, nullable=False)  # JSON
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (UniqueConstraint("department_id", "text_hash", name="uq_department_example"),)
+
+
+class DepartmentCoordinator(Base):
+    """Coordinador de un departamento que atiende tickets: uno por departamento y un departamento por coordinador
+    (las dos columnas son únicas)."""
+    __tablename__ = "department_coordinators"
+
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class StaffPlacement(Base):
+    """Departamento de un técnico. Un técnico pertenece a un solo departamento. La columna tier (nivel N1–N3 de
+    una versión anterior) queda sin usarse: los niveles de soporte son departamentos."""
+    __tablename__ = "staff_placements"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=False)
+    tier = Column(Integer, nullable=False, default=1)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (CheckConstraint("tier BETWEEN 1 AND 3", name="chk_placement_tier"),)
+
+
+class StaffInvitationPlacement(Base):
+    """Departamento elegido al invitar: se aplica al activar la cuenta (tier queda sin usarse)."""
+    __tablename__ = "staff_invitation_placements"
+
+    id = Column(Integer, primary_key=True)
+    invitation_id = Column(Integer, ForeignKey("staff_invitations.id", ondelete="CASCADE"), unique=True,
+                           nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    tier = Column(Integer, nullable=True)
+
+
+class AppSetting(Base):
+    """Ajustes que cambia el administrador desde la página (clave y valor en texto). Ahí vive routing_enforced."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(50), unique=True, nullable=False)
+    value = Column(String(200), nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# ===== Tickets por departamento (tablas aparte: no se agregan columnas a tickets) =====
+
+TICKET_CHANNELS = {"email": "correo", "phone": "teléfono", "in_person": "en persona"}
+
+
+class TicketDepartment(Base):
+    """Departamento que atiende el ticket. Sin fila: "Sin departamento" (tickets anteriores y los del portal)."""
+    __tablename__ = "ticket_departments"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class TicketReporter(Base):
+    """Quién reportó el problema cuando el ticket lo crea el personal en su nombre, y por qué canal."""
+    __tablename__ = "ticket_reporters"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    email = Column(String(150), nullable=True)
+    # Área de quien reporta: cualquier departamento del organigrama (atienda tickets o no)
+    area_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    phone = Column(String(30), nullable=True)
+    # email, phone o in_person (validado en Python)
+    channel = Column(String(20), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class TicketSolution(Base):
+    """Documentación de la solución: obligatoria al marcar el ticket como Resuelto (interruptor encendido)."""
+    __tablename__ = "ticket_solutions"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    text = Column(Text, nullable=False)
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    resolved_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DepartmentTransfer(Base):
+    """Transferencia de un ticket a otro departamento, con su motivo. El vencimiento nunca se reinicia."""
+    __tablename__ = "department_transfers"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    from_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    to_department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    reason = Column(String(300), nullable=False)
+    transferred_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    transferred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class ArchivedAccount(Base):
+    """Cuenta de cliente archivada al quitar el portal (scripts.admin_tools archive-clients --apply). Solo marca:
+    la cuenta, sus tickets, comentarios, historial y reportes se conservan y el personal los sigue viendo. El
+    acceso ya está cerrado por el rol (un contacto nunca inicia sesión). Tabla nueva."""
+    __tablename__ = "archived_accounts"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    archived_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# Origen del departamento de un borrador antes de transferirlo: la IA, el administrador o otra transferencia
+DRAFT_TRANSFER_ORIGINS = {"ai": "La IA", "admin": "El administrador", "transfer": "Otra transferencia"}
+
+
+class DraftTransfer(Base):
+    """Un coordinador transfirió un borrador de su departamento a otro, con motivo. Es una corrección de la IA
+    (para el reporte de precisión): qué eligió la IA, de dónde salió el departamento, a dónde fue, quién y cuándo.
+    También es el aviso en la campana del coordinador del destino (notify_user_id, seen_at). Tabla nueva."""
+    __tablename__ = "draft_transfers"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), index=True, nullable=False)
+    # Lo que eligió la IA al llegar el correo (nulo si no eligió ninguno)
+    ai_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    # ai, admin o transfer (validado en Python)
+    origin = Column(String(20), nullable=False)
+    from_department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    to_department_id = Column(Integer, ForeignKey("departments.id"), index=True, nullable=False)
+    reason = Column(String(300), nullable=False)
+    transferred_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    transferred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    notify_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    seen_at = Column(DateTime, nullable=True)
+
+
+INBOX_KINDS = ("ticket_transferred", "ticket_resolved")
+
+
+class InboxNotification(Base):
+    """Aviso en la campana de una persona (sin correo): ticket transferido a su departamento o resuelto."""
+    __tablename__ = "inbox_notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    # ticket_transferred o ticket_resolved (validado en Python)
+    kind = Column(String(30), nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False)
+    text = Column(String(500), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    seen_at = Column(DateTime, nullable=True)

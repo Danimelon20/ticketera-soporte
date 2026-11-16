@@ -2,10 +2,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import audit, availability, identity, models, suspicion
-from ..schemas import MeRead, ProfileUpdate, RequesterRead, StaffRead, UserRead
+from .. import availability, models
+from ..schemas import RequesterRead, StaffRead, UserRead
 from ..security import get_current_user
-from .auth import me_read
 
 router = APIRouter(prefix="/api", tags=["users"])
 
@@ -51,47 +50,3 @@ def get_requesters(q: Optional[str] = None, db: Session = Depends(get_db), curre
         )
     
     return query.order_by(models.User.name).limit(20).all()
-
-
-@router.put("/profile", response_model=MeRead)
-def update_profile(data: ProfileUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    if current_user.role != "requester":
-        raise HTTPException(status_code=403, detail="Solo los clientes completan este perfil")
-
-    name_changed = data.name != " ".join((current_user.name or "").split())
-    identity_changed = name_changed or data.id_number != current_user.id_number
-    if identity_changed and identity.is_locked(db, current_user):
-        # Guarda la fecha de bloqueo si recién se calculó (cuentas con tickets anteriores)
-        db.commit()
-        raise HTTPException(status_code=403, detail=identity.LOCKED)
-    if name_changed and len(data.name.split()) < 2:
-        raise HTTPException(status_code=422, detail="Escriba su nombre completo (nombre y apellidos)")
-    if data.id_number != current_user.id_number:
-        error = identity.check_id_number(db, current_user, data.id_number)
-        if error:
-            if error == identity.ID_IN_USE:
-                suspicion.id_number_conflict(db, current_user, data.id_number, "profile", actor_id=current_user.id)
-                db.commit()
-            raise HTTPException(status_code=400, detail=error)
-
-    if data.phone != current_user.phone:
-        audit.record(
-            db, current_user.id, "phone_changed", target=current_user,
-            old=audit.masked_digits(current_user.phone), new=audit.masked_digits(data.phone),
-        )
-    current_user.phone = data.phone
-    if identity_changed:
-        if name_changed:
-            audit.record(db, current_user.id, "name_changed", target=current_user, old=current_user.name or None, new=data.name)
-        if data.id_number != current_user.id_number:
-            audit.record(
-                db, current_user.id, "id_number_changed", target=current_user,
-                old=audit.masked_digits(current_user.id_number), new=audit.masked_digits(data.id_number),
-            )
-        current_user.name = data.name
-        current_user.id_number = data.id_number
-        if identity.save_hacienda_result(db, current_user, data.name, data.id_number) == "mismatch":
-            suspicion.name_mismatch(db, current_user, "profile")
-    db.commit()
-    db.refresh(current_user)
-    return me_read(db, current_user)
