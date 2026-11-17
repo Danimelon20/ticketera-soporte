@@ -14,6 +14,7 @@ del contacto nunca van: las listas con títulos las agrega el servidor debajo de
 """
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -128,6 +129,8 @@ class Query:
     description: str
     examples: tuple
     run: object
+    # Palabras (sin tildes, en minúscula) que tiene que traer la pregunta para que se ofrezca esta consulta
+    cue: str = ""
     uses_period: bool = False
     # Para el técnico (solo lo suyo), si cambia
     own_description: str | None = None
@@ -139,12 +142,14 @@ CATALOG = (
           "Cifras de tickets abiertos: total, nuevos, en proceso, sin asignar.",
           ("¿Cuántos tickets hay abiertos?", "Resume el estado del equipo", "¿Cuántos están sin asignar?"),
           _open_tickets_query,
+          cue=r"ticket|caso|solicitud|equipo|pendiente|abiert|asignad|tengo|estado",
           own_description="Cifras y lista de TUS tickets abiertos (solo los asignados a ti).",
           own_examples=("¿Cuántos tickets tengo?", "Resume mis tickets abiertos", "¿Qué tickets tengo asignados?")),
     Query("open_by_department", ("admin", "coordinator"),
           "Tickets abiertos repartidos por departamento o área.",
           ("Tickets abiertos por departamento", "¿Qué departamento tiene más tickets?", "Reparto por área"),
-          _open_by_department),
+          _open_by_department,
+          cue=r"departament|depto|area|reparto"),
 )
 BY_ID = {q.id: q for q in CATALOG}
 PERIODS: tuple[str, ...] = ()
@@ -154,13 +159,45 @@ def allowed_for(user: models.User) -> list[Query]:
     return [q for q in CATALOG if user.role in q.roles]
 
 
-def options_for(user: models.User) -> list[dict]:
-    """Lo que ve la IA para elegir: id, descripción y ejemplos. Nada de datos."""
+# Preguntas de cómo hacer algo o qué significa algo: ayuda, aunque nombren tickets
+_HOW_TO_RE = re.compile(r"^(que significa|que es|que hago|que reviso|pasos|por que|como (?!estamos|vamos|va\b|van\b))")
+
+
+def _plain(text: str) -> str:
+    """Minúsculas, sin tildes ni signos de apertura: para buscar palabras."""
+    text = unicodedata.normalize("NFD", text.lower())
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    return " ".join(text.replace("¿", " ").replace("¡", " ").split())
+
+
+def candidates(user: models.User, message: str) -> list[Query]:
+    """Filtro por palabras, en el servidor y antes de la IA: solo se ofrecen las consultas permitidas al rol
+    cuyas palabras trae la pregunta. Sin ninguna, la pregunta va directo a la ayuda general (sin datos)."""
+    plain = _plain(message)
+    if _HOW_TO_RE.search(plain):
+        return []
+    return [q for q in allowed_for(user) if re.search(q.cue, plain)]
+
+
+def options_for(user: models.User, message: str | None = None) -> list[dict]:
+    """Lo que ve la IA para elegir: id, descripción y ejemplos. Nada de datos. Con message, solo las que pasan
+    el filtro por palabras."""
     own = user.role == "technician"
+    queries = allowed_for(user) if message is None else candidates(user, message)
     return [{"id": q.id,
              "description": (q.own_description if own and q.own_description else q.description),
              "examples": list(q.own_examples if own and q.own_examples else q.examples)}
-            for q in allowed_for(user)]
+            for q in queries]
+
+
+def choose(user: models.User, message: str) -> tuple[str, str | None]:
+    """(id, periodo) para la pregunta. Si el filtro no deja ninguna consulta, ayuda sin llamar a la IA.
+    Lanza chatbot.ChatbotUnavailable."""
+    options = options_for(user, message)
+    if not options:
+        return chatbot.HELP, None
+    periods = PERIODS if any(BY_ID[o["id"]].uses_period for o in options) else ()
+    return chatbot.select_query(message, options, periods)
 
 
 def resolve(user: models.User, query_id: str) -> Query | None:

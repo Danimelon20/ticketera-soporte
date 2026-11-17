@@ -65,13 +65,12 @@ def _prepare(data: ChatRequest, db: Session, current_user) -> Prepared:
     logging.info("Chat: usuario %s, %s caracteres", current_user.id, len(data.message))
 
     try:
-        query_id, period = chatbot.select_query(
-            data.message, assistant_queries.options_for(current_user), assistant_queries.PERIODS)
+        query_id, period = assistant_queries.choose(current_user, data.message)
     except chatbot.ChatbotUnavailable:
         raise HTTPException(status_code=503, detail=UNAVAILABLE)
     logging.info("Asistente: consulta elegida %s", query_id)
     if query_id == chatbot.HELP:
-        context = chatbot.build_context(db, current_user)
+        context = chatbot.build_context(db, current_user, assistant_queries.suggestions(current_user))
         return Prepared("help", system_prompt=chatbot.build_system_prompt(current_user, context))
     query = assistant_queries.resolve(current_user, query_id)
     if query is None:

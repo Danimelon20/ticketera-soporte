@@ -35,6 +35,9 @@ def llm(monkeypatch):
             if reply is None:
                 raise chatbot.ChatbotUnavailable()
             return reply(payload) if callable(reply) else reply
+        if task == "chat":
+            # Ayuda general: no lleva datos
+            return "Respuesta de ayuda."
         raise AssertionError(f"tarea inesperada {task}")
 
     monkeypatch.setattr(config, "CHATBOT_ENABLED", True)
@@ -176,25 +179,57 @@ def test_selection_down_is_503(client, make_user, llm, monkeypatch):
         raise chatbot.ChatbotUnavailable()
 
     monkeypatch.setattr(chatbot, "post_chat", broken)
-    response = client.post("/api/chat", json={"message": "¿Cuántos?"}, headers=make_user("admin")["headers"])
+    response = client.post("/api/chat", json={"message": "¿Cuántos tickets hay?"}, headers=make_user("admin")["headers"])
     assert response.status_code == 503
 
 
 # ---------- Permisos en el servidor ----------
 
-def test_query_not_allowed_for_role_is_no_match(client, make_user, llm):
+def test_query_not_allowed_for_role_is_not_run(client, make_user, llm):
+    """Si la IA devuelve un id que no se le ofreció (o no permitido al rol), no hay datos: ayuda general."""
     technician = make_user("technician")
     llm["query"] = "open_by_department"
-    reply = _ask(client, technician, "Tickets por departamento")
-    assert reply.startswith(aq.NO_MATCH_TEXT)
+    assert _ask(client, technician, "Tickets por departamento") == "Respuesta de ayuda."
     # No se pidió redacción: no hubo datos
     assert [p for p in llm["payloads"] if p["options"]["num_predict"] == chatbot.NUM_PREDICT["answer"]] == []
+    # Segunda defensa en el servidor
+    with SessionLocal() as db:
+        assert aq.resolve(db.get(models.User, technician["id"]), "open_by_department") is None
 
 
 def test_selection_only_offers_allowed_ids(client, make_user, llm):
-    _ask(client, make_user("technician"))
+    _ask(client, make_user("technician"), "Tickets por departamento")
     schema = llm["payloads"][0]["format"]
-    assert schema["properties"]["query"]["enum"] == [chatbot.HELP, chatbot.NO_MATCH, "open_tickets"]
+    assert schema["properties"]["query"]["enum"] == [chatbot.HELP, "open_tickets"]
+
+
+@pytest.mark.parametrize("role, message, offered", [
+    ("admin", "¿Cuántos tickets hay abiertos?", ["open_tickets"]),
+    ("admin", "¿Cuántos tickets están sin asignar?", ["open_tickets"]),
+    ("admin", "¿Cómo estamos de tickets?", ["open_tickets"]),
+    ("coordinator", "Resume el estado del equipo", ["open_tickets"]),
+    ("admin", "Tickets abiertos por departamento", ["open_tickets", "open_by_department"]),
+    ("coordinator", "¿Qué ÁREA tiene más?", ["open_by_department"]),
+    ("technician", "¿Tengo tickets pendientes?", ["open_tickets"]),
+    ("technician", "Tickets por departamento", ["open_tickets"]),
+    # Cómo hacer algo o qué significa algo: ayuda, aunque nombre tickets
+    ("coordinator", "¿Cómo reasigno un ticket?", []),
+    ("technician", "¿Qué significa En proceso?", []),
+    ("admin", "Pasos para diagnosticar una red lenta", []),
+    # Sin palabras de datos
+    ("admin", "Cuéntame un chiste", []),
+    ("admin", "¿Cuántas personas trabajan en la empresa?", []),
+])
+def test_keyword_filter(make_user, role, message, offered):
+    user = make_user(role)
+    with SessionLocal() as db:
+        assert [q.id for q in aq.candidates(db.get(models.User, user["id"]), message)] == offered
+
+
+def test_without_candidates_the_ai_does_not_choose(client, make_user, llm):
+    """Sin consultas posibles, la pregunta va directo a la ayuda general: no hay llamada de elección."""
+    _ask(client, make_user("admin"), "Cuéntame un chiste")
+    assert [p for p in llm["payloads"] if "format" in p] == []
 
 
 def test_admin_without_switch_gets_totals_only(client, make_user, make_ticket, llm):
@@ -209,10 +244,11 @@ def test_admin_without_switch_gets_totals_only(client, make_user, make_ticket, l
     assert "Router de la bodega" not in reply and "#" not in reply
 
 
-def test_no_match_suggests_questions(client, make_user, llm):
-    llm["query"] = chatbot.NO_MATCH
-    reply = _ask(client, make_user("coordinator"), "¿Cuál es la capital de Francia?")
-    assert reply.startswith(aq.NO_MATCH_TEXT) and "• ¿Cuántos tickets hay abiertos?" in reply
+def test_help_suggests_data_questions(client, make_user, llm):
+    """«ayuda» y «ninguna» son una sola opción: la ayuda general sabe qué preguntas de datos sugerir."""
+    assert _ask(client, make_user("coordinator"), "¿Cuál es la capital de Francia?") == "Respuesta de ayuda."
+    system = llm["payloads"][-1]["messages"][0]["content"]
+    assert chatbot.HELP_NOTE in system and "«¿Cuántos tickets hay abiertos?»" in system
 
 
 # ---------- Privacidad: lo que llega a la IA ----------
@@ -224,10 +260,13 @@ def test_ai_never_gets_titles_or_personal_data(client, make_user, make_ticket, l
     set_department(ticket["id"], dept)
     client.patch(f"/api/tickets/{ticket['id']}", json={"assigned_to": technician["id"]}, headers=coordinator["headers"])
     llm["reply"] = "Listo."
-    for user, query in ((technician, "open_tickets"), (coordinator, "open_tickets"),
-                        (coordinator, "open_by_department"), (make_user("admin"), "open_by_department")):
+    for user, query, message in (
+            (technician, "open_tickets", "¿Cuántos tickets tengo?"),
+            (coordinator, "open_tickets", "¿Cuántos tickets hay abiertos?"),
+            (coordinator, "open_by_department", "Tickets por departamento"),
+            (make_user("admin"), "open_by_department", "Tickets por departamento")):
         llm["query"] = query
-        _ask(client, user, "Dame los datos")
+        _ask(client, user, message)
     with SessionLocal() as db:
         person = db.get(models.User, contact["id"])
         secrets = [person.email, person.name, "8888-1234", "88881234", "8877-6655", "Marta", "Quesada"]
@@ -246,7 +285,7 @@ def test_stream_marks_data_answers(client, make_user, make_ticket, llm, routing_
     dept, coordinator, _technician = team(make_user)
     set_department(make_ticket(make_user("requester"))["id"], dept)
     llm["reply"] = "Tienes 1 ticket abierto."
-    response = client.post("/api/chat/stream", json={"message": "¿Cuántos?", "history": []},
+    response = client.post("/api/chat/stream", json={"message": "¿Cuántos tickets hay?", "history": []},
                            headers=coordinator["headers"])
     assert response.status_code == 200
     assert response.headers["x-chat-kind"] == "data"

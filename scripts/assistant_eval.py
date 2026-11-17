@@ -19,7 +19,8 @@ from app.database import SessionLocal
 
 A, C, T = "admin", "coordinator", "technician"
 ALL = (A, C, T)
-HELP, NONE = chatbot.HELP, chatbot.NO_MATCH
+# «ninguna» ya no existe: lo que no es de datos va a la ayuda general
+HELP = NONE = chatbot.HELP
 
 # (roles, pregunta, consulta esperada). Para un rol que no puede usar la consulta, se espera «ninguna».
 QUESTIONS = [
@@ -98,7 +99,7 @@ def main(argv=None) -> int:
                 user = users[role]
                 want = expected if expected in (HELP, NONE) or aq.resolve(user, expected) else NONE
                 started = time.monotonic()
-                chosen, period = chatbot.select_query(question, aq.options_for(user), aq.PERIODS)
+                chosen, period = aq.choose(user, question)
                 total += 1
                 ok = chosen == want
                 hits += ok

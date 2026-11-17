@@ -53,10 +53,13 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def build_context(db: Session, user: models.User) -> str:
+def build_context(db: Session, user: models.User, suggestions=()) -> str:
     """Prompt de ayuda general: sin datos de tickets. Los números llegan solo por las consultas del catálogo
-    (app/assistant_queries.py), calculadas en el servidor."""
-    return HELP_NOTE
+    (app/assistant_queries.py), calculadas en el servidor. suggestions: preguntas que el rol sí puede hacer."""
+    if not suggestions:
+        return HELP_NOTE
+    listed = "; ".join(f"«{s}»" for s in suggestions)
+    return f"{HELP_NOTE} Preguntas de datos que sí sabes responder: {listed}."
 
 
 # Siempre idénticas y al principio: Ollama reutiliza lo ya leído de un prompt que empieza igual
@@ -273,27 +276,24 @@ def stream_llm(system_prompt: str, history: list, message: str):
 # ---------- Consultas del catálogo: la IA elige y redacta; el servidor calcula ----------
 
 HELP = "ayuda"
-NO_MATCH = "ninguna"
 SELECT_RULES = (
     "Clasifica la pregunta de un usuario de la Ticketera de Soporte. Elige UNA opción por su id. "
     "Las opciones de datos son SOLO para preguntas que piden cifras o listas de tickets de la ticketera. "
-    "Si pregunta cómo hacer algo, qué significa algo o cómo resolver un problema técnico, elige ayuda. "
-    "Si pide cifras de otra cosa, o no tiene que ver con soporte, elige ninguna."
+    "Pedir un resumen de los tickets o del estado del equipo también es de datos. "
+    "Para todo lo demás (cómo hacer algo, qué significa algo, soporte técnico u otros temas) elige ayuda."
 )
-HELP_OPTION = (f"- {HELP}: cómo usar la ticketera, qué significa algo o pasos de soporte técnico (sin cifras). "
-               "Ejemplos: «¿Cómo invito a un técnico?»; «¿Cómo cambio mi contraseña?»; «¿Qué significa En proceso?»; "
-               "«Pasos para diagnosticar una red lenta»; «La impresora no imprime, ¿qué reviso?»")
-NO_MATCH_OPTION = (f"- {NO_MATCH}: cualquier otra cosa, o cifras que no son de tickets. Ejemplos: «Cuéntame un chiste»; "
-                   "«¿Cuál es la capital de Francia?»; «¿Cuántas personas trabajan en la empresa?»; "
-                   "«¿Cuánto cuesta una licencia?»")
+# Una sola opción para lo que no es de datos: la ayuda general ya se niega a lo que no es soporte
+HELP_OPTION = (f"- {HELP}: todo lo que no pide cifras de tickets. Ejemplos: «¿Cómo invito a un técnico?»; "
+               "«¿Qué significa En proceso?»; «Pasos para diagnosticar una red lenta»; «Cuéntame un chiste»; "
+               "«¿Cuántas personas trabajan en la empresa?»")
 
 
 def select_query(message: str, options: list[dict], periods: tuple[str, ...] = ()) -> tuple[str, str | None]:
     """(id elegido, periodo). options: [{"id", "description", "examples"}] solo de las consultas que el rol puede
     usar. La salida está restringida a esos ids (enum): la IA nunca escribe una consulta. Lanza ChatbotUnavailable."""
-    # ayuda y ninguna primero: el modelo pequeño tiende a quedarse con la primera opción de datos
-    ids = [HELP, NO_MATCH] + [o["id"] for o in options]
-    lines = [SELECT_RULES, "", "Opciones:", HELP_OPTION, NO_MATCH_OPTION]
+    # ayuda primero: el modelo pequeño tiende a quedarse con la primera opción de datos
+    ids = [HELP] + [o["id"] for o in options]
+    lines = [SELECT_RULES, "", "Opciones:", HELP_OPTION]
     for option in options:
         examples = "; ".join(f"«{e}»" for e in option["examples"])
         lines.append(f"- {option['id']}: {option['description']} Ejemplos: {examples}")
@@ -307,10 +307,10 @@ def select_query(message: str, options: list[dict], periods: tuple[str, ...] = (
     try:
         data = json.loads(content)
     except ValueError:
-        return NO_MATCH, None
+        return HELP, None
     query = data.get("query") if isinstance(data, dict) else None
     period = data.get("period") if isinstance(data, dict) else None
-    return (query if query in ids else NO_MATCH), (period if period in periods else None)
+    return (query if query in ids else HELP), (period if period in periods else None)
 
 
 ANSWER_RULES = (
