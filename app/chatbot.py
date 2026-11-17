@@ -291,12 +291,14 @@ HELP_OPTION = (f"- {HELP}: todo lo que no pide cifras de tickets. Ejemplos: «¿
 def select_query(message: str, options: list[dict], periods: tuple[str, ...] = ()) -> tuple[str, str | None]:
     """(id elegido, periodo). options: [{"id", "description", "examples"}] solo de las consultas que el rol puede
     usar. La salida está restringida a esos ids (enum): la IA nunca escribe una consulta. Lanza ChatbotUnavailable."""
-    # ayuda primero: el modelo pequeño tiende a quedarse con la primera opción de datos
-    ids = [HELP] + [o["id"] for o in options]
-    lines = [SELECT_RULES, "", "Opciones:", HELP_OPTION]
+    # Las de datos primero y ayuda al final: el filtro por palabras (assistant_queries.candidates) ya dejó solo
+    # las que la pregunta nombra, y el modelo pequeño tiende a quedarse con la primera opción
+    ids = [o["id"] for o in options] + [HELP]
+    lines = [SELECT_RULES, "", "Opciones:"]
     for option in options:
         examples = "; ".join(f"«{e}»" for e in option["examples"])
         lines.append(f"- {option['id']}: {option['description']} Ejemplos: {examples}")
+    lines.append(HELP_OPTION)
     schema = {"type": "object", "properties": {"query": {"type": "string", "enum": ids}}, "required": ["query"]}
     if periods:
         lines.append("Si la pregunta habla de un periodo, elige también period.")

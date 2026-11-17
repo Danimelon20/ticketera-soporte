@@ -21,7 +21,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from . import alerts, chatbot, models, nav, routing
-from .daily_summary import _local
+from .daily_summary import _due_at, _local
+from .overdue_report import duration_text
 from .notifications import STATUS_LABELS
 
 LIST_MAX = 15
@@ -122,6 +123,77 @@ def _open_by_department(db: Session, user: models.User, sc: Scope, now: datetime
     return Result("open_by_department", "Tickets abiertos por departamento", facts, text, [str(total)])
 
 
+DUE_LIST_MAX = 10
+
+
+def _department_labels(db: Session, tickets: list[models.Ticket]) -> dict[int, str]:
+    by_ticket = routing.ticket_department_ids(db, [t.id for t in tickets])
+    by_id = routing.departments_by_id(db)
+    return {t.id: (routing.path_label(by_id.get(by_ticket.get(t.id)), by_id) if by_ticket.get(t.id) is not None
+                   else None) or NO_DEPARTMENT for t in tickets}
+
+
+def _due_query(state: str, db: Session, user: models.User, sc: Scope, now: datetime) -> Result:
+    """Vencidos (state=OVERDUE) o por vencer (DUE_SOON), con el mismo cálculo que el menú y las alertas.
+    Facts: total, por departamento y hasta 10 con #id, departamento, técnico y tiempo; nunca títulos.
+    El administrador sin el interruptor recibe solo los totales por departamento."""
+    overdue = state == alerts.OVERDUE
+    found = []
+    for t in _open_tickets(db, user):
+        ticket_state, percent = alerts.due_state(t, now)
+        if ticket_state == state:
+            found.append((t, percent))
+    if overdue:
+        # El más vencido primero
+        found.sort(key=lambda item: (_due_at(item[0]), item[0].id))
+    else:
+        found.sort(key=lambda item: (-(item[1] or 0), _due_at(item[0]), item[0].id))
+    total = len(found)
+    labels = _department_labels(db, [t for t, _ in found])
+    by_dept: dict[str, int] = {}
+    for t, _ in found:
+        by_dept[labels[t.id]] = by_dept.get(labels[t.id], 0) + 1
+    own = sc.kind == "own"
+    name = "vencidos" if overdue else "por vencer"
+    facts = [f"{'Tus tickets' if own else 'Tickets'} {name}: {total}"]
+    if not own and by_dept:
+        facts.append("Por departamento:")
+        facts += [f"- {d}: {c}" for d, c in sorted(by_dept.items(), key=lambda kv: (-kv[1], kv[0]))]
+    shown = [] if sc.totals_only else found[:DUE_LIST_MAX]
+    if shown:
+        facts.append(f"Los {len(shown)} más urgentes:")
+    for t, percent in shown:
+        if overdue:
+            when = f"vencido hace {duration_text(int((now - _due_at(t)).total_seconds()))}"
+        else:
+            when = f"{percent} % del tiempo consumido"
+        who = "" if own else f" · técnico: {t.assigned_user.name if t.assigned_user else 'sin asignar'}"
+        facts.append(f"- #{t.id} · {labels[t.id]}{who} · {when}")
+    if sc.kind == "department":
+        facts.append("Solo de tu departamento.")
+    text = (f"{'Tienes' if own else 'Hay'} {total} ticket(s) {name}."
+            + (f" Por departamento: {'; '.join(f'{d}: {c}' for d, c in by_dept.items())}." if not own and by_dept else ""))
+    listing = []
+    if shown:
+        listing = [f"Tickets {name}:"] + [
+            f"#{t.id} · {chatbot._redact(t.title)} · {labels[t.id]}"
+            f"{'' if own else ' · ' + (t.assigned_user.name if t.assigned_user else 'sin asignar')}"
+            for t, _ in shown]
+        if total > len(shown):
+            listing.append(f"…y {total - len(shown)} más en la vista {'Vencidos' if overdue else 'Por vencer'}.")
+    query_id = "overdue" if overdue else "due_soon"
+    label = "Tickets vencidos" if overdue else "Tickets por vencer"
+    return Result(query_id, label, facts, text, [str(total)], listing)
+
+
+def _overdue(db, user, sc, now, period):
+    return _due_query(alerts.OVERDUE, db, user, sc, now)
+
+
+def _due_soon(db, user, sc, now, period):
+    return _due_query(alerts.DUE_SOON, db, user, sc, now)
+
+
 @dataclass
 class Query:
     id: str
@@ -131,6 +203,8 @@ class Query:
     run: object
     # Palabras (sin tildes, en minúscula) que tiene que traer la pregunta para que se ofrezca esta consulta
     cue: str = ""
+    # La consulta general (abiertos) no se ofrece si la pregunta trae palabras de una específica
+    generic: bool = False
     uses_period: bool = False
     # Para el técnico (solo lo suyo), si cambia
     own_description: str | None = None
@@ -143,6 +217,7 @@ CATALOG = (
           ("¿Cuántos tickets hay abiertos?", "Resume el estado del equipo", "¿Cuántos están sin asignar?"),
           _open_tickets_query,
           cue=r"ticket|caso|solicitud|equipo|pendiente|abiert|asignad|tengo|estado",
+          generic=True,
           own_description="Cifras y lista de TUS tickets abiertos (solo los asignados a ti).",
           own_examples=("¿Cuántos tickets tengo?", "Resume mis tickets abiertos", "¿Qué tickets tengo asignados?")),
     Query("open_by_department", ("admin", "coordinator"),
@@ -150,6 +225,20 @@ CATALOG = (
           ("Tickets abiertos por departamento", "¿Qué departamento tiene más tickets?", "Reparto por área"),
           _open_by_department,
           cue=r"departament|depto|area|reparto"),
+    Query("overdue", ("admin", "coordinator", "technician"),
+          "Tickets vencidos (con la fecha límite ya pasada): cuántos y cuáles.",
+          ("¿Qué tickets están vencidos?", "¿Hay tickets atrasados?", "¿Cuántos vencidos hay?"),
+          _overdue,
+          cue=r"vencid|atrasad|retrasad|fuera de tiempo",
+          own_description="TUS tickets vencidos (con la fecha límite ya pasada).",
+          own_examples=("¿Tengo tickets vencidos?", "¿Cuáles de mis tickets están atrasados?")),
+    Query("due_soon", ("admin", "coordinator", "technician"),
+          "Tickets por vencer (cerca de su fecha límite, todavía no vencidos): cuántos y cuáles.",
+          ("¿Cuáles están por vencer?", "¿Qué tickets vencen pronto?", "¿Cuántos por vencer hay?"),
+          _due_soon,
+          cue=r"por vencer|vence|a punto de",
+          own_description="TUS tickets por vencer (cerca de su fecha límite).",
+          own_examples=("¿Qué tickets míos vencen pronto?", "¿Tengo tickets por vencer?")),
 )
 BY_ID = {q.id: q for q in CATALOG}
 PERIODS: tuple[str, ...] = ()
@@ -176,7 +265,10 @@ def candidates(user: models.User, message: str) -> list[Query]:
     plain = _plain(message)
     if _HOW_TO_RE.search(plain):
         return []
-    return [q for q in allowed_for(user) if re.search(q.cue, plain)]
+    # Con palabras de una consulta específica (aunque el rol no la tenga), la general no se ofrece:
+    # el modelo pequeño se quedaba con «abiertos» al preguntar por vencidos
+    specific = any(re.search(q.cue, plain) for q in CATALOG if not q.generic)
+    return [q for q in allowed_for(user) if re.search(q.cue, plain) and not (q.generic and specific)]
 
 
 def options_for(user: models.User, message: str | None = None) -> list[dict]:

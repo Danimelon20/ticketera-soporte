@@ -189,7 +189,7 @@ def test_query_not_allowed_for_role_is_not_run(client, make_user, llm):
     """Si la IA devuelve un id que no se le ofreció (o no permitido al rol), no hay datos: ayuda general."""
     technician = make_user("technician")
     llm["query"] = "open_by_department"
-    assert _ask(client, technician, "Tickets por departamento") == "Respuesta de ayuda."
+    assert _ask(client, technician, "¿Cuántos tickets tengo?") == "Respuesta de ayuda."
     # No se pidió redacción: no hubo datos
     assert [p for p in llm["payloads"] if p["options"]["num_predict"] == chatbot.NUM_PREDICT["answer"]] == []
     # Segunda defensa en el servidor
@@ -198,9 +198,10 @@ def test_query_not_allowed_for_role_is_not_run(client, make_user, llm):
 
 
 def test_selection_only_offers_allowed_ids(client, make_user, llm):
-    _ask(client, make_user("technician"), "Tickets por departamento")
+    llm["query"] = "overdue"
+    _ask(client, make_user("technician"), "¿Qué tickets están vencidos?")
     schema = llm["payloads"][0]["format"]
-    assert schema["properties"]["query"]["enum"] == [chatbot.HELP, "open_tickets"]
+    assert schema["properties"]["query"]["enum"] == ["overdue", chatbot.HELP]
 
 
 @pytest.mark.parametrize("role, message, offered", [
@@ -208,10 +209,15 @@ def test_selection_only_offers_allowed_ids(client, make_user, llm):
     ("admin", "¿Cuántos tickets están sin asignar?", ["open_tickets"]),
     ("admin", "¿Cómo estamos de tickets?", ["open_tickets"]),
     ("coordinator", "Resume el estado del equipo", ["open_tickets"]),
-    ("admin", "Tickets abiertos por departamento", ["open_tickets", "open_by_department"]),
+    ("admin", "Tickets abiertos por departamento", ["open_by_department"]),
     ("coordinator", "¿Qué ÁREA tiene más?", ["open_by_department"]),
     ("technician", "¿Tengo tickets pendientes?", ["open_tickets"]),
-    ("technician", "Tickets por departamento", ["open_tickets"]),
+    # El técnico no tiene «por departamento»: tampoco se le ofrecen sus abiertos (va a la ayuda)
+    ("technician", "Tickets por departamento", []),
+    ("admin", "¿Qué tickets están vencidos?", ["overdue"]),
+    ("coordinator", "¿Hay casos atrasados?", ["overdue"]),
+    ("admin", "¿Cuáles vencen pronto?", ["due_soon"]),
+    ("technician", "¿Tengo tickets por vencer?", ["due_soon"]),
     # Cómo hacer algo o qué significa algo: ayuda, aunque nombre tickets
     ("coordinator", "¿Cómo reasigno un ticket?", []),
     ("technician", "¿Qué significa En proceso?", []),
@@ -307,3 +313,100 @@ def test_assistant_eval_reports_choice_and_verification(client, make_user, llm, 
     # La redacción simulada inventa un número: cae al texto del servidor y dice cuál
     assert "texto del servidor: número 100000 no está en los datos" in out
     assert "Caídas al texto del servidor:" in out
+
+
+# ---------- Fase 2: vencidos y por vencer ----------
+
+def _set_due(ticket_id, due_at, created_at):
+    with SessionLocal() as db:
+        ticket = db.get(models.Ticket, ticket_id)
+        ticket.created_at = created_at
+        analysis = db.query(models.TicketAIAnalysis).filter(models.TicketAIAnalysis.ticket_id == ticket_id).first()
+        if analysis is None:
+            analysis = models.TicketAIAnalysis(ticket_id=ticket_id, status="done", ai_level=3)
+            db.add(analysis)
+        analysis.due_at = due_at
+        db.commit()
+
+
+@pytest.fixture
+def due_team(client, make_user, make_ticket, routing_on):
+    """Departamento con 2 vencidos (uno asignado), 1 por vencer y 1 a tiempo; y 1 vencido en otro departamento."""
+    from datetime import timedelta
+
+    now = aq._now()
+    dept, coordinator, technician = team(make_user)
+    other = department(unique("Otro equipo"))
+    contact = make_user("requester")
+    ids = {}
+    for key, title, due, dept_id in (
+            ("late1", "Servidor caído", now - timedelta(days=2), dept),
+            ("late2", "Correo sin enviar", now - timedelta(days=1), dept),
+            ("soon", "VPN intermitente", now + timedelta(minutes=30), dept),
+            ("fine", "Cambio de mouse", now + timedelta(days=60), dept),
+            ("other", "Ajeno vencido", now - timedelta(days=3), other)):
+        ticket = make_ticket(contact, title=title)
+        set_department(ticket["id"], dept_id)
+        _set_due(ticket["id"], due, now - timedelta(days=30))
+        ids[key] = ticket["id"]
+    client.patch(f"/api/tickets/{ids['late2']}", json={"assigned_to": technician["id"]},
+                 headers=coordinator["headers"])
+    return {"coordinator": coordinator, "technician": technician, "ids": ids}
+
+
+def test_overdue_for_coordinator(client, due_team, llm):
+    coordinator, ids = due_team["coordinator"], due_team["ids"]
+    result = _result(coordinator, "overdue")
+    assert _total(result) == 2
+    nav = client.get("/api/nav/counts", headers=coordinator["headers"]).json()
+    assert _total(result) == nav["overdue"]
+    # El más vencido primero; nunca el de otro departamento; sin títulos para la IA
+    ticket_lines = [f for f in result.facts if f.startswith("- #")]
+    assert ticket_lines[0].startswith(f"- #{ids['late1']} ") and ticket_lines[1].startswith(f"- #{ids['late2']} ")
+    assert "vencido hace 2 d" in ticket_lines[0] and "técnico: sin asignar" in ticket_lines[0]
+    assert due_team["technician"]["name"] in ticket_lines[1]
+    facts = "\n".join(result.facts)
+    assert f"#{ids['other']}" not in facts and "Servidor caído" not in facts
+    # La lista con títulos la agrega el servidor
+    assert any(line.startswith(f"#{ids['late1']} · Servidor caído") for line in result.listing)
+
+
+def test_due_soon_for_coordinator(client, due_team, llm):
+    coordinator, ids = due_team["coordinator"], due_team["ids"]
+    result = _result(coordinator, "due_soon")
+    assert _total(result) == 1
+    nav = client.get("/api/nav/counts", headers=coordinator["headers"]).json()
+    assert _total(result) == nav["due_soon"]
+    assert any(f.startswith(f"- #{ids['soon']} ") and "% del tiempo consumido" in f for f in result.facts)
+    llm["query"], llm["reply"] = "due_soon", "Hay 1 ticket por vencer."
+    reply = _ask(client, coordinator, "¿Cuáles están por vencer?")
+    assert reply.startswith("Hay 1 ticket por vencer.") and f"#{ids['soon']} · VPN intermitente" in reply
+
+
+def test_technician_sees_only_own_overdue(client, due_team, llm):
+    technician, ids = due_team["technician"], due_team["ids"]
+    result = _result(technician, "overdue")
+    assert _total(result) == 1
+    assert [f for f in result.facts if f.startswith("- #")][0].startswith(f"- #{ids['late2']} ")
+    nav = client.get("/api/nav/counts", headers=technician["headers"]).json()
+    assert _total(result) == nav["overdue"]
+
+
+def test_admin_overdue_without_switch_is_totals_only(client, make_user, make_ticket, llm):
+    from datetime import timedelta
+
+    admin = make_user("admin")
+    now = aq._now()
+    ticket = make_ticket(make_user("requester"), title="Bodega sin red")
+    _set_due(ticket["id"], now - timedelta(days=1), now - timedelta(days=10))
+    result = _result(admin, "overdue")
+    assert _total(result) >= 1 and result.listing == []
+    facts = "\n".join(result.facts)
+    assert "#" not in facts and "Bodega" not in facts and aq.TOTALS_ONLY_NOTE in facts
+
+
+def test_overdue_wrong_ticket_number_falls_back(client, due_team, llm):
+    coordinator = due_team["coordinator"]
+    llm["query"], llm["reply"] = "overdue", "Hay 2 vencidos; el peor es el #999999."
+    reply = _ask(client, coordinator, "¿Qué tickets están vencidos?")
+    assert "999999" not in reply and reply.startswith(_result(coordinator, "overdue").text)
