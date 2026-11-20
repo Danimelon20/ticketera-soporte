@@ -248,6 +248,16 @@ def test_selection_only_offers_allowed_ids(client, make_user, llm):
     ("coordinator", "¿Hay casos desatendidos?", ["open_tickets"]),
     # Resumen o estado por departamento
     ("coordinator", "¿Cómo están los departamentos?", ["open_by_department"]),
+    # Fase 3: carga y ausencias (específicas: quitan la general)
+    ("admin", "¿Quién tiene más carga?", ["technician_load"]),
+    ("coordinator", "¿Cuántos tickets tiene cada técnico?", ["technician_load"]),
+    ("technician", "¿Cuánta carga tengo?", ["technician_load"]),
+    ("admin", "¿Quién no está hoy?", ["staff_away"]),
+    ("coordinator", "¿Quién está de vacaciones?", ["staff_away"]),
+    # El técnico no tiene ausencias del personal: ayuda, nunca sus abiertos
+    ("technician", "¿Quién está de vacaciones?", []),
+    # La carga es de abiertos ahora: resueltos no
+    ("coordinator", "¿Qué técnico resolvió más tickets?", []),
 ])
 def test_keyword_filter(make_user, role, message, offered):
     user = make_user(role)
@@ -433,3 +443,102 @@ def test_overdue_wrong_ticket_number_falls_back(client, due_team, llm):
     llm["query"], llm["reply"] = "overdue", "Hay 2 vencidos; el peor es el #999999."
     reply = _ask(client, coordinator, "¿Qué tickets están vencidos?")
     assert "999999" not in reply and reply.startswith(_result(coordinator, "overdue").text)
+
+
+# ---------- Fase 3: carga y ausencias ----------
+
+@pytest.fixture
+def load_team(client, make_user, make_ticket, routing_on):
+    """Departamento con 2 técnicos (uno con 2 abiertos y 1 resuelto, otro de vacaciones con 1 abierto) y un
+    técnico de otro departamento con 1 abierto."""
+    from datetime import timedelta
+
+    from org_helpers import place
+
+    dept, coordinator, busy = team(make_user)
+    away = make_user("technician", unique("Técnico vacaciones"))
+    place(away["id"], dept)
+    other_dept = department(unique("Otro equipo"))
+    outsider = make_user("technician", unique("Técnico ajeno"))
+    place(outsider["id"], other_dept)
+    contact = make_user("requester")
+
+    def ticket(dept_id, assignee, status=None):
+        created = make_ticket(contact)
+        set_department(created["id"], dept_id)
+        with SessionLocal() as db:
+            row = db.get(models.Ticket, created["id"])
+            row.assigned_to = assignee["id"]
+            if status:
+                row.status = status
+            db.commit()
+
+    ticket(dept, busy)
+    ticket(dept, busy)
+    ticket(dept, busy, status="resolved")
+    ticket(dept, away)
+    ticket(other_dept, outsider)
+    today = aq._now().date()
+    with SessionLocal() as db:
+        db.add(models.AvailabilityPeriod(user_id=away["id"], kind="vacation", start_date=today - timedelta(days=1),
+                                         end_date=today + timedelta(days=3), created_at=aq._now()))
+        db.commit()
+    return {"coordinator": coordinator, "busy": busy, "away": away, "outsider": outsider,
+            "return": (today + timedelta(days=4)).strftime("%d/%m/%Y")}
+
+
+def test_coordinator_load_matches_team_page(client, load_team, llm):
+    coordinator, busy, away = load_team["coordinator"], load_team["busy"], load_team["away"]
+    result = _result(coordinator, "technician_load")
+    team_page = {m["id"]: m for m in client.get("/api/team", headers=coordinator["headers"]).json()}
+    # La misma carga que Equipo › Carga (por niveles o por cantidad, según LOAD_MODE); el resuelto no cuenta
+    load = team_page[busy["id"]]["load"]
+    assert _total(result) == load
+    facts = "\n".join(result.facts)
+    assert f"Más carga: {busy['name']} ({load})" in facts
+    assert f"- {busy['name']}: 2 abierto(s), carga {load} · Disponible" in facts
+    assert f"- {away['name']}: 1 abierto(s), carga {team_page[away['id']]['load']} · Vacaciones (regresa " \
+           f"{load_team['return']})" in facts
+    # Nunca técnicos de otro departamento
+    assert load_team["outsider"]["name"] not in facts
+
+
+def test_admin_load_without_load_numbers(client, make_user, load_team, llm):
+    """El administrador no ve la carga en Equipo: el asistente le da los abiertos de cada técnico, sin carga."""
+    admin = make_user("admin")
+    result = _result(admin, "technician_load")
+    facts = "\n".join(result.facts)
+    assert "carga 2" not in facts and "asignación automática" not in facts
+    assert f"- {load_team['busy']['name']}: 2 abierto(s) · Disponible" in facts
+    # Con el interruptor encendido el administrador ve todos los departamentos
+    assert load_team["outsider"]["name"] in facts
+
+
+def test_technician_sees_only_own_load(client, load_team, llm):
+    busy = load_team["busy"]
+    result = _result(busy, "technician_load")
+    assert _total(result) == 2 and result.label == "Tu carga"
+    facts = "\n".join(result.facts)
+    assert load_team["away"]["name"] not in facts and "Tu estado: Disponible" in facts
+
+
+def test_staff_away_for_coordinator(client, load_team, llm):
+    coordinator, away = load_team["coordinator"], load_team["away"]
+    result = _result(coordinator, "staff_away")
+    assert _total(result) == 1
+    team_page = {m["id"]: m for m in client.get("/api/team", headers=coordinator["headers"]).json()}
+    assert team_page[away["id"]]["availability"] == "vacation"
+    facts = "\n".join(result.facts)
+    assert f"- {away['name']} (técnico) · Vacaciones (regresa {load_team['return']})" in facts
+    assert load_team["outsider"]["name"] not in facts
+    # La redacción con el nombre y la fecha de regreso pasa la verificación
+    llm["query"] = "staff_away"
+    llm["reply"] = f"Hay 1 persona de vacaciones: {away['name']}, regresa el {load_team['return']}."
+    reply = _ask(client, coordinator, "¿Quién está de vacaciones?")
+    assert reply.startswith(llm["reply"]) and "(Datos del servidor: Disponibilidad del personal," in reply
+
+
+def test_staff_away_not_for_technician(client, load_team, llm):
+    """Si la IA eligiera staff_away para un técnico, el servidor no la corre."""
+    with SessionLocal() as db:
+        assert aq.resolve(db.get(models.User, load_team["busy"]["id"]), "staff_away") is None

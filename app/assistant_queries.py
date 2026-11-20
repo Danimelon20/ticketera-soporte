@@ -18,9 +18,10 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import alerts, chatbot, models, nav, routing
+from . import alerts, auto_assign, availability, chatbot, models, nav, routing
 from .daily_summary import _due_at, _local
 from .overdue_report import duration_text
 from .notifications import STATUS_LABELS
@@ -194,6 +195,104 @@ def _due_soon(db, user, sc, now, period):
     return _due_query(alerts.DUE_SOON, db, user, sc, now)
 
 
+# ---------- Carga y ausencias: los mismos datos que Equipo (/api/team) ----------
+
+ROLE_NAMES = {"technician": "técnico", "coordinator": "coordinador"}
+
+
+def _staff(db: Session, user: models.User, sc: Scope, roles: tuple) -> list[models.User]:
+    """Personal activo que la persona puede ver: el técnico, solo él; el coordinador con el interruptor, su
+    departamento; los demás, todos."""
+    if sc.kind == "own":
+        return [user]
+    staff = (db.query(models.User)
+             .filter(models.User.role.in_(roles), models.User.is_active.is_(True))
+             .order_by(models.User.name).all())
+    if sc.kind == "department":
+        dept = routing.department_of(db, user)
+        placed = routing.placements(db)
+        staff = [u for u in staff if dept is not None and placed.get(u.id) == dept.id]
+    return staff
+
+
+def _name(user: models.User) -> str:
+    return user.name or "Sin nombre"
+
+
+def _technician_load(db: Session, user: models.User, sc: Scope, now: datetime, period) -> Result:
+    """Por técnico: tickets abiertos asignados y estado. El coordinador recibe además la carga de la asignación
+    automática (auto_assign.loads), igual que en Equipo › Carga; el administrador no la ve en la página, así que
+    aquí tampoco."""
+    techs = _staff(db, user, sc, ("technician",))
+    ids = [u.id for u in techs]
+    open_counts = dict(
+        db.query(models.Ticket.assigned_to, func.count(models.Ticket.id))
+        .filter(models.Ticket.assigned_to.in_(ids), models.Ticket.status.in_(auto_assign.OPEN_STATUSES))
+        .group_by(models.Ticket.assigned_to).all()
+    ) if ids else {}
+    statuses = availability.statuses_for(db, ids, now)
+    state = {uid: availability.describe(*statuses[uid]) for uid in ids}
+    label = "Carga por técnico"
+    if sc.kind == "own":
+        count = open_counts.get(user.id, 0)
+        facts = [f"Tus tickets abiertos asignados: {count}", f"Tu estado: {state[user.id]}"]
+        text = f"Tienes {count} ticket(s) abierto(s) asignado(s). Tu estado: {state[user.id]}."
+        return Result("technician_load", "Tu carga", facts, text, [str(count)])
+    with_load = user.role == "coordinator"
+    loads = auto_assign.loads(db, ids) if with_load else {}
+    metric = loads if with_load else {uid: open_counts.get(uid, 0) for uid in ids}
+    rows = sorted(techs, key=lambda u: (-metric.get(u.id, 0), _name(u)))
+    if not rows:
+        where = " en tu departamento" if sc.kind == "department" else ""
+        text = f"No hay técnicos activos{where}."
+        return Result("technician_load", label, [text], text, ["0"])
+    top = rows[0]
+    facts = [f"Técnicos activos: {len(rows)}",
+             f"Más carga: {_name(top)} ({metric[top.id]})",
+             "Por técnico, de más a menos carga:"]
+    if with_load:
+        facts.insert(1, "Carga: la misma de la asignación automática (tickets abiertos y borradores por revisar).")
+    for u in rows[:LIST_MAX]:
+        load = f", carga {loads[u.id]}" if with_load else ""
+        facts.append(f"- {_name(u)}: {open_counts.get(u.id, 0)} abierto(s){load} · {state[u.id]}")
+    if len(rows) > LIST_MAX:
+        facts.append(f"…y {len(rows) - LIST_MAX} técnico(s) más.")
+    if sc.kind == "department":
+        facts.append("Solo técnicos de tu departamento.")
+    unit = "de carga" if with_load else "ticket(s) abierto(s)"
+    text = (f"Más carga: {_name(top)}, con {metric[top.id]} {unit}. "
+            + "; ".join(f"{_name(u)}: {open_counts.get(u.id, 0)} abierto(s) ({state[u.id]})" for u in rows[:LIST_MAX])
+            + ".")
+    return Result("technician_load", label, facts, text, [str(metric[top.id])])
+
+
+def _staff_away(db: Session, user: models.User, sc: Scope, now: datetime, period) -> Result:
+    """Técnicos y coordinadores de vacaciones o con ausencia hoy (y cuándo regresan), fuera de su horario y
+    disponibles ahora. Mismo cálculo que Equipo (availability.statuses_for)."""
+    staff = _staff(db, user, sc, availability.ROLES)
+    statuses = availability.statuses_for(db, [u.id for u in staff], now)
+    off = sorted((u for u in staff if statuses[u.id][0] in ("vacation", "incapacity")),
+                 key=lambda u: (statuses[u.id][1], _name(u)))
+    away = [u for u in staff if statuses[u.id][0] == "away"]
+    present = [u for u in staff if statuses[u.id][0] == "available"]
+
+    def names(users):
+        shown = ", ".join(_name(u) for u in users[:LIST_MAX])
+        return shown + (f" y {len(users) - LIST_MAX} más" if len(users) > LIST_MAX else "")
+
+    facts = [f"De vacaciones o con ausencia hoy: {len(off)}"]
+    facts += [f"- {_name(u)} ({ROLE_NAMES[u.role]}) · {availability.describe(*statuses[u.id])}" for u in off[:LIST_MAX]]
+    facts.append(f"Fuera de su horario ahora: {len(away)}" + (f" ({names(away)})" if away else ""))
+    facts.append(f"Disponibles ahora: {len(present)}" + (f" ({names(present)})" if present else ""))
+    if sc.kind == "department":
+        facts.append("Solo personal de tu departamento.")
+    text = f"De vacaciones o con ausencia hoy: {len(off)}"
+    text += (": " + "; ".join(f"{_name(u)}, {availability.describe(*statuses[u.id])}" for u in off[:LIST_MAX])
+             if off else "") + "."
+    text += f" Fuera de su horario ahora: {len(away)}. Disponibles ahora: {len(present)}."
+    return Result("staff_away", "Disponibilidad del personal", facts, text, [str(len(off))])
+
+
 # Sinónimos y señales de «fuera del catálogo». Cada elemento es una expresión regular que se busca en la pregunta
 # ya normalizada (_plain: minúsculas, sin tildes ni ¿¡): se escriben sin tildes y con n en vez de ñ.
 # Sin asignar, en palabras informales: se suman al cue de open_tickets
@@ -282,6 +381,22 @@ CATALOG = (
           cue=r"por vencer|vence|a punto de",
           own_description="TUS tickets por vencer (cerca de su fecha límite). No cubre: ya vencidos.",
           own_examples=("¿Qué tickets míos vencen pronto?", "¿Tengo tickets por vencer?")),
+    Query("technician_load", ("admin", "coordinator", "technician"),
+          "Carga de cada técnico ahora: tickets abiertos asignados a cada uno y su estado (disponible, "
+          "vacaciones…); quién tiene más o menos. No cubre: resueltos, prioridad.",
+          ("¿Quién tiene más carga?", "Carga de trabajo por técnico", "¿Cuántos tickets tiene cada técnico?"),
+          _technician_load,
+          cue=r"carga|ocupad|ataread|saturad|tecnicos|(?:por|cada|que|cual) tecnico|quien tiene (?:mas|menos)",
+          about_open=True,
+          own_description="TU carga: tus tickets abiertos asignados y tu estado. No cubre: la carga de otros.",
+          own_examples=("¿Cuánta carga tengo?", "¿Estoy muy cargado?")),
+    Query("staff_away", ("admin", "coordinator"),
+          "Quién del personal está de vacaciones o ausente hoy y cuándo regresa; también quién está fuera de "
+          "horario o disponible ahora. No cubre: tickets ni carga.",
+          ("¿Quién está de vacaciones?", "¿Quién no está hoy?", "¿Quién está disponible?"),
+          _staff_away,
+          cue=r"vacacion|ausen|incapacid|permiso|disponib|no (?:esta|estan) hoy|no vin(?:o|ieron)"
+              r"|fuera de (?:su )?horario|de turno|regres|vuelve"),
 )
 BY_ID = {q.id: q for q in CATALOG}
 PERIODS: tuple[str, ...] = ()
