@@ -10,19 +10,25 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import SideNav from './SideNav.jsx';
+import BellPanel from './BellPanel.jsx';
 
-function mountSideNav(container, callbacks) {
+// Crea la raíz de React en el contenedor una sola vez y devuelve { update(estado) }: cada update vuelve a dibujar
+// el componente con el estado nuevo (React solo cambia lo que difiere)
+function mountIsland(Component, container, callbacks) {
     const root = createRoot(container);
     return {
         update(state) {
             root.render(
                 <StrictMode>
-                    <SideNav {...state} {...callbacks} />
+                    <Component {...state} {...callbacks} />
                 </StrictMode>,
             );
         },
     };
 }
 
-window.TicketeraIslands = { mountSideNav };
+window.TicketeraIslands = {
+    mountSideNav: (container, callbacks) => mountIsland(SideNav, container, callbacks),
+    mountBellPanel: (container, callbacks) => mountIsland(BellPanel, container, callbacks),
+};
 window.dispatchEvent(new Event('ticketera:islands-ready'));

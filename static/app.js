@@ -6625,7 +6625,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // app.js decide QUÉ hay en el menú (navModulesFor, por rol e interruptor), a dónde lleva cada sección y qué
     // grupos están abiertos; React solo lo dibuja. Se le pasa un estado simple (sin funciones) con update().
     let sideNavIsland = null;
-    let islandsWaiting = false;
+    // Quienes esperan la isla (el menú y la campana pueden pedirla a la vez); null: nadie espera
+    let islandsWaiting = null;
     const ISLANDS_TIMEOUT_MS = 10000;
     const ISLANDS_FAILED = 'No se pudo cargar el menú: recargue la página.';
 
@@ -6637,17 +6638,21 @@ document.addEventListener('DOMContentLoaded', () => {
             callback(window.TicketeraIslands);
             return;
         }
-        if (islandsWaiting) return;
-        islandsWaiting = true;
+        if (islandsWaiting) {
+            islandsWaiting.push(callback);
+            return;
+        }
+        islandsWaiting = [callback];
         const timer = setTimeout(() => {
             window.removeEventListener('ticketera:islands-ready', onReady);
-            islandsWaiting = false;
+            islandsWaiting = null;
             showError(ISLANDS_FAILED);
         }, ISLANDS_TIMEOUT_MS);
         function onReady() {
             clearTimeout(timer);
-            islandsWaiting = false;
-            callback(window.TicketeraIslands);
+            const waiting = islandsWaiting;
+            islandsWaiting = null;
+            waiting.forEach(cb => cb(window.TicketeraIslands));
         }
         window.addEventListener('ticketera:islands-ready', onReady, { once: true });
     }
@@ -7380,6 +7385,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // El técnico no crea tickets (igual que el botón de la barra superior), salvo con tickets por departamento
         document.getElementById('queueNewTicket').hidden = currentUser.role === 'technician' && !staffCreatesTickets();
         renderSideNav();
+        mountBellIsland();
         startNavPolling();
     }
 
@@ -11988,7 +11994,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const navBell = document.getElementById('navBell');
     const navBellCount = document.getElementById('navBellCount');
     const bellPanel = document.getElementById('bellPanel');
-    const bellList = document.getElementById('bellList');
     let bellItems = [];
     let bellKnown = new Set();  // Avisos ya vistos en esta sesión: solo los nuevos sacan un toast
     let bellLoaded = false;
@@ -12031,13 +12036,53 @@ document.addEventListener('DOMContentLoaded', () => {
         return `El ticket #${item.ticket_id} vence en ${durationText(secondsUntil(item.due_at))}`;
     }
 
+    // ----- Isla de React del panel (frontend/src/BellPanel.jsx) -----
+    // app.js decide qué avisos hay, arma su texto (durationText también la usan los toasts y el reporte de
+    // vencimiento), abre y cierra el panel y hace lo que pide cada clic; React solo dibuja el contenido
+    let bellIsland = null;
+
+    function bellState() {
+        return {
+            open: !bellPanel.hidden,
+            items: bellItems.map(item => ({
+                key: noticeKey(item),
+                text: noticeText(item),
+                read: Boolean(item.read),
+                // 50 % y borradores: avisos tranquilos; el resto, urgentes
+                urgent: !(item.kind === 'due_50' || isDraftNotice(item)),
+                needsReview: Boolean(item.needs_review),
+                suggestionName: item.suggestion ? item.suggestion.name : null,
+            })),
+        };
+    }
+
+    function refreshBell() {
+        if (bellIsland) bellIsland.update(bellState());
+    }
+
+    function mountBellIsland() {
+        if (bellIsland) {
+            refreshBell();
+            return;
+        }
+        withIslands(islands => {
+            if (bellIsland) return;
+            bellIsland = islands.mountBellPanel(bellPanel, {
+                onOpenNotice: handleNoticeOpen,
+                onReassign: handleNoticeReassign,
+                onReadAll: () => markNoticesRead({ all: true }),
+            });
+            refreshBell();
+        });
+    }
+
     function resetBell() {
         bellItems = [];
         bellKnown = new Set();
         bellLoaded = false;
-        bellList.replaceChildren();
         navBellCount.hidden = true;
         closeBellPanel();
+        refreshBell();
     }
 
     function renderBell(data) {
@@ -12060,50 +12105,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         data.items.forEach(item => bellKnown.add(noticeKey(item)));
         bellLoaded = true;
-        if (!bellPanel.hidden) renderBellList();
+        refreshBell();
     }
 
-    function renderBellList() {
-        bellList.replaceChildren();
-        document.getElementById('bellReadAll').disabled = !bellItems.some(item => !item.read);
-        if (!bellItems.length) {
-            const li = makeEl('li', 'bell-empty', 'No hay avisos de vencimiento.');
-            bellList.appendChild(li);
-            return;
-        }
-        bellItems.forEach(item => {
-            const calm = item.kind === 'due_50' || isDraftNotice(item);
-            const li = makeEl('li', `bell-item${item.read ? '' : ' is-unread'}${calm ? '' : ' is-urgent'}`);
-            const open = makeEl('button', 'bell-open');
-            open.type = 'button';
-            open.dataset.key = noticeKey(item);
-            open.appendChild(makeEl('span', 'bell-text', noticeText(item)));
-            if (item.needs_review) open.appendChild(makeEl('span', 'ui-tag is-warn bell-review', 'Pendiente de revisar'));
-            if (!item.read) open.appendChild(makeEl('span', 'sr-only', ' (sin leer)'));
-            li.appendChild(open);
-            if (item.suggestion) {
-                const reassign = makeEl('button', 'ui-btn ui-btn-secondary ui-btn-sm bell-reassign', `Reasignar a ${item.suggestion.name}`);
-                reassign.type = 'button';
-                reassign.dataset.ticketId = String(item.ticket_id);
-                reassign.dataset.userId = String(item.suggestion.user_id);
-                li.appendChild(reassign);
-            }
-            bellList.appendChild(li);
-        });
-    }
-
+    // El foco al primer botón lo pone la isla (useEffect) al recibir open: true
     function openBellPanel() {
-        renderBellList();
         bellPanel.hidden = false;
         navBell.setAttribute('aria-expanded', 'true');
-        const first = bellPanel.querySelector('button:not(:disabled)');
-        if (first) first.focus();
+        refreshBell();
     }
 
     function closeBellPanel(returnFocus = false) {
         if (bellPanel.hidden) return;
         bellPanel.hidden = true;
         navBell.setAttribute('aria-expanded', 'false');
+        refreshBell();
         if (returnFocus) navBell.focus();
     }
 
@@ -12139,24 +12155,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bellPanel.hidden) openBellPanel();
         else closeBellPanel();
     });
-    bellList.addEventListener('click', async (e) => {
-        const reassign = e.target.closest('.bell-reassign');
-        if (reassign) {
-            const ticketId = Number(reassign.dataset.ticketId);
-            markNoticesRead({ ticket_id: ticketId });
-            closeBellPanel();
-            closeSideNav();
-            await openTicketById(ticketId);
-            // El mismo flujo de reasignar, con Deshacer
-            if (selectedTicketId === ticketId && currentTicket) scheduleReassign(Number(reassign.dataset.userId));
-            return;
-        }
-        const open = e.target.closest('.bell-open');
-        if (!open) return;
-        const item = bellItems.find(i => noticeKey(i) === open.dataset.key);
+    // Clic en un aviso (lo avisa la isla)
+    function handleNoticeOpen(key) {
+        const item = bellItems.find(i => noticeKey(i) === key);
         if (item) openNotice(item);
-    });
-    document.getElementById('bellReadAll').addEventListener('click', () => markNoticesRead({ all: true }));
+    }
+
+    // «Reasignar a …» de un aviso al 80 % (lo avisa la isla): el mismo flujo de reasignar, con Deshacer
+    async function handleNoticeReassign(key) {
+        const item = bellItems.find(i => noticeKey(i) === key);
+        if (!item || !item.suggestion) return;
+        const ticketId = item.ticket_id;
+        markNoticesRead({ ticket_id: ticketId });
+        closeBellPanel();
+        closeSideNav();
+        await openTicketById(ticketId);
+        if (selectedTicketId === ticketId && currentTicket) scheduleReassign(item.suggestion.user_id);
+    }
+
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && !bellPanel.hidden) closeBellPanel(true);
     });

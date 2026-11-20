@@ -254,13 +254,8 @@
         </div>
     </aside>
     <div id="sideNavBackdrop" class="side-nav-backdrop" hidden></div>
-    <div id="bellPanel" class="bell-panel" role="dialog" aria-labelledby="bellTitle" hidden>
-        <div class="bell-head">
-            <h2 id="bellTitle" class="bell-title">Avisos</h2>
-            <button type="button" id="bellReadAll" class="link-btn bell-read-all">Marcar todas como leídas</button>
-        </div>
-        <ul id="bellList" class="bell-list"></ul>
-    </div>
+    <!-- El contenido (título, «Marcar todas como leídas» y la lista) lo dibuja la isla de React BellPanel -->
+    <div id="bellPanel" class="bell-panel" role="dialog" aria-labelledby="bellTitle" hidden></div>
 
     <main style="display: none;">
         <!-- Personal: ruta (Módulo › Sección), título, contexto y acciones de la página -->
