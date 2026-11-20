@@ -12,3 +12,8 @@ data-pruebas/
 # Organigrama real de la empresa: se importa desde la página, nunca se sube al repositorio
 *organigrama*.csv
 *Organigrama*.csv
+
+# Frontend (React + Vite): las librerías y el build se regeneran; package-lock.json sí va en git
+frontend/node_modules/
+frontend/dist/
+static/islands/

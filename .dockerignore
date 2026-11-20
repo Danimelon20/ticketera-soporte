@@ -9,3 +9,8 @@ __pycache__/
 venv/
 .env.pruebas
 data-pruebas/
+
+# Frontend: la etapa de Node instala con npm ci y construye adentro de la imagen
+frontend/node_modules/
+frontend/dist/
+static/islands/

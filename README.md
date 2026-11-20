@@ -193,6 +193,18 @@ docker compose up -d --force-recreate
 Si una actualización agrega o cambia columnas de una tabla existente, el mensaje del commit lo avisa: la base
 no se actualiza sola (las tablas nuevas sí se crean solas). En ese caso, haga un respaldo antes de seguir.
 
+**Página: JavaScript y React.** La página es `static/index.html` con `static/app.js`. Algunas partes (por ahora,
+el menú lateral) son **islas de React** en `frontend/`, construidas con Vite. La imagen de Docker las construye en
+una etapa con Node y copia solo el resultado (`static/islands/islands.js`), así que **el servidor no necesita Node**.
+Para construirlas sin Docker de la app (por ejemplo, para revisar un error de build):
+
+```bash
+docker run --rm -u $(id -u):$(id -g) -v "$PWD/frontend:/app" -w /app node:26-alpine sh -c "npm ci && npm run build"
+```
+
+La página, el JS y el CSS se sirven con `Cache-Control: no-cache`: después de una actualización, la siguiente carga
+trae los archivos nuevos sin tener que vaciar el caché del navegador.
+
 **Asistente.** Con `CHATBOT_ENABLED=true`, el botón abajo a la derecha da cifras calculadas por el servidor
 (abiertos, vencidos, por vencer, resueltos por periodo, carga, ausencias y, para el administrador, correos por
 clasificar y precisión de la IA) y ayuda general para lo demás. Qué responde a cada rol:

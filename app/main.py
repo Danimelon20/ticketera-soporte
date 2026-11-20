@@ -191,6 +191,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Página, JS y CSS (también la isla de React, static/islands/islands.js): el navegador guarda la copia, pero en cada
+# carga pregunta si cambió (ETag → 304 sin contenido). Así, después de un despliegue nunca se mezcla un index.html
+# viejo con un app.js o islands.js nuevo. Nombre fijo + revalidar: más simple que nombres con hash, a cambio de una
+# pregunta corta por archivo en cada carga. La API no se toca.
+REVALIDATE_SUFFIXES = (".html", ".js", ".css")
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if not path.startswith("/api/") and (path == "/" or path.endswith(REVALIDATE_SUFFIXES)):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 
 @app.get("/api/health")
 async def health():

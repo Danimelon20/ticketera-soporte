@@ -6278,32 +6278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let navCounts = {};
     let activeNavId = null;
 
-    // Íconos de los módulos del menú (trazos de 24 × 24, los mismos del prototipo)
-    const NAV_ICONS = {
-        home: 'M3 10.5L12 3l9 7.5V21h-6v-6H9v6H3z',
-        tickets: 'M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z',
-        mail: 'M4 4h16v16H4zM4 7l8 6 8-6',
-        accounts: 'M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M21 20v-1a4 4 0 0 0-3-3.87M16 4.13a3.5 3.5 0 0 1 0 6.75',
-        team: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
-    };
-
-    function navIcon(name) {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'nav-icon');
-        svg.setAttribute('width', '16');
-        svg.setAttribute('height', '16');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('fill', 'none');
-        svg.setAttribute('stroke', 'currentColor');
-        svg.setAttribute('stroke-width', '2');
-        svg.setAttribute('stroke-linecap', 'round');
-        svg.setAttribute('stroke-linejoin', 'round');
-        svg.setAttribute('aria-hidden', 'true');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', NAV_ICONS[name]);
-        svg.appendChild(path);
-        return svg;
-    }
+    // Los íconos de los grupos (nombre → trazo SVG) viven en la isla de React: frontend/src/navIcons.js
 
     // ===== Menú por módulos y rutas (#/módulo/sección) =====
     // Cada sección conserva el id de siempre (setSideNavActive), tiene su ruta, su contador de /nav/counts
@@ -6360,41 +6335,73 @@ document.addEventListener('DOMContentLoaded', () => {
             ];
         }
         if (role === 'admin') {
+            // Por tarea: lo diario arriba (Panel, Correos e IA) y lo que se configura una vez abajo
+            const ticketSections = [
+                // Tickets por departamento encendido: el administrador ve y gestiona los tickets de todos
+                ...(currentUser.routing_enforced ? [
+                    queueSection('open', 'Todos', 'tickets/todos', {
+                        title: 'Tickets de todos los departamentos', count: 'open', aliases: ['due_soon', 'resolved_today'],
+                        tabs: [
+                            ['open', 'Abiertos', 'open', ''],
+                            ['due_soon', 'Por vencer', 'due_soon', 'warn'],
+                            ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
+                        ],
+                        context: 'Abiertos · ordenados por vencimiento · filtre por departamento',
+                    }),
+                    queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
+                        count: 'unassigned', tone: 'warn', context: 'Tickets abiertos sin responsable',
+                    }),
+                    queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
+                        count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
+                    }),
+                ] : []),
+                // Solo lectura: la lista y el ticket principal (sin datos de contacto)
+                navSection('incidents', 'Incidentes', 'admin/incidentes', () => showListPage('incidents'), {
+                    title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla · solo lectura',
+                }),
+            ];
             return [
-                { id: 'admin', label: 'Administración', icon: 'accounts', sections: [
+                { id: 'admin-home', label: 'Inicio', icon: 'home', sections: [
                     // Portada del administrador: una fila por departamento que atiende tickets
                     navSection('panel', 'Panel', 'admin/panel', () => showAdminSection('panel'), {
                         context: 'Departamentos que atienden tickets y personal sin departamento',
                     }),
+                ] },
+                { id: 'admin-people', label: 'Personas y accesos', icon: 'accounts', sections: [
                     navSection('accounts', 'Cuentas', 'admin/cuentas', () => openAccounts(), {
                         context: 'Personal y clientes · datos de contacto enmascarados',
                     }),
                     navSection('invites', 'Invitaciones', 'admin/invitaciones', () => navUsers.click(), {
                         count: 'invitations_pending', context: 'Invite personal nuevo y revise las invitaciones que ya envió',
                     }),
+                    navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
+                        count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
+                    }),
                     navSection('reports', 'Reportes de cuentas', 'admin/reportes-cuentas', () => {
                         setReportsAccount(null);
                         showView('reports');
                     }, { count: 'reports_open', tone: 'alert', context: 'Cuentas de solicitante reportadas por el personal' }),
-                    navSection('approvals', 'Aprobaciones', 'admin/aprobaciones', () => showAdminSection('approvals'), {
-                        count: 'approvals_pending', context: 'Cambios de rol y de datos pedidos por los coordinadores',
-                    }),
-                    // Solo lectura: la lista y el ticket principal (sin datos de contacto)
-                    navSection('incidents', 'Incidentes', 'admin/incidentes', () => showListPage('incidents'), {
-                        title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla · solo lectura',
-                    }),
-                    navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
-                        context: 'Horarios de la semana, vacaciones y ausencias',
-                    }),
+                ] },
+                { id: 'admin-mail', label: 'Correos e IA', icon: 'mail', sections: [
                     navSection('drafts-unclassified', 'Por clasificar', 'admin/por-clasificar', () => showAdminSection('drafts-unclassified'), {
                         count: 'drafts_unclassified', tone: 'warn', context: 'Correos que la IA no envió directo a un coordinador',
-                    }),
-                    navSection('precision', 'Precisión de la IA', 'admin/precision-ia', () => showAdminSection('precision'), {
-                        context: 'Correos directo y corregidos por departamento, y por qué fueron a «Por clasificar»',
                     }),
                     navSection('unclassified', 'Sin departamento', 'admin/sin-departamento', () => showAdminSection('unclassified'), {
                         count: 'unclassified', tone: 'warn', context: 'Tickets abiertos que todavía no tienen departamento',
                     }),
+                    navSection('precision', 'Precisión de la IA', 'admin/precision-ia', () => showAdminSection('precision'), {
+                        context: 'Correos directo y corregidos por departamento, y por qué fueron a «Por clasificar»',
+                    }),
+                ] },
+                { id: 'admin-team', label: 'Equipo', icon: 'team', sections: [
+                    navSection('team', 'Equipo y turnos', 'admin/turnos', () => showAccountsSection('team'), {
+                        context: 'Horarios de la semana, vacaciones y ausencias',
+                    }),
+                ] },
+                // Sin el interruptor solo queda Incidentes: el enlace directo dice a dónde lleva
+                { id: 'admin-tickets', label: ticketSections.length === 1 ? 'Incidentes' : 'Tickets', icon: 'tickets',
+                    sections: ticketSections },
+                { id: 'admin-config', label: 'Organización y sistema', icon: 'settings', sections: [
                     navSection('departments', 'Departamentos', 'admin/departamentos', () => showAdminSection('departments'), {
                         context: 'Organigrama y departamentos que atienden tickets',
                     }),
@@ -6411,33 +6418,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         context: 'Servicios, copias de seguridad y registros del servidor',
                     }),
                 ] },
-                // Tickets por departamento encendido: el administrador ve y gestiona los tickets de todos
-                ...(currentUser.routing_enforced ? [{ id: 'admin-tickets', label: 'Tickets', icon: 'tickets', sections: [
-                    queueSection('open', 'Todos', 'tickets/todos', {
-                        title: 'Tickets de todos los departamentos', count: 'open', aliases: ['due_soon', 'resolved_today'],
-                        tabs: [
-                            ['open', 'Abiertos', 'open', ''],
-                            ['due_soon', 'Por vencer', 'due_soon', 'warn'],
-                            ['resolved_today', 'Resueltos hoy', 'resolved_today', ''],
-                        ],
-                        context: 'Abiertos · ordenados por vencimiento · filtre por departamento',
-                    }),
-                    queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
-                        count: 'unassigned', tone: 'warn', context: 'Tickets abiertos sin responsable',
-                    }),
-                    queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
-                        count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
-                    }),
-                ] }] : []),
             ];
         }
+        // Coordinador, por momento del trabajo: lo que espera una decisión suya, lo que ya está en curso y el equipo
         return [
             { id: 'home', label: 'Inicio', icon: 'home', sections: [
                 navSection('home', 'Inicio', 'inicio', () => showView('home'), {
                     title: homeTitleText, context: homeContextText, actions: () => [sendSummaryNowBtn],
                 }),
             ] },
-            { id: 'tickets', label: 'Tickets', icon: 'tickets', sections: [
+            { id: 'pending', label: 'Por atender', icon: 'mail', sections: [
+                draftsSection('drafts', 'Borradores', 'borradores/todos', 'all', {
+                    title: 'Borradores de correo', count: 'drafts_pending',
+                    context: currentUser.routing_enforced
+                        ? 'Correos de su departamento: al crear el ticket, usted elige el técnico'
+                        : 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
+                }),
+                queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
+                    count: 'unassigned', tone: 'warn', context: 'Tickets abiertos que todavía no tienen responsable',
+                }),
+            ] },
+            { id: 'followup', label: 'Seguimiento', icon: 'tickets', sections: [
                 queueSection('open', 'Todos', 'tickets/todos', {
                     title: 'Todos los tickets', count: 'open', aliases: ['due_soon', 'resolved_today', 'cancelled', 'all'],
                     tabs: [
@@ -6448,26 +6449,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     ],
                     context: 'Abiertos · ordenados por vencimiento',
                 }),
-                queueSection('unassigned', 'Sin asignar', 'tickets/sin-asignar', {
-                    count: 'unassigned', tone: 'warn', context: 'Tickets abiertos que todavía no tienen responsable',
-                }),
                 queueSection('overdue', 'Vencidos', 'tickets/vencidos', {
                     count: 'overdue', tone: 'alert', context: 'Tickets que pasaron su tiempo de respuesta',
                 }),
                 navSection('incidents', 'Incidentes', 'tickets/incidentes', () => showListPage('incidents'), {
                     title: 'Posibles incidentes', context: 'Varios clientes reportan la misma falla: se atienden desde el ticket principal',
-                }),
-                // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
-                navSection('clients', 'Contactos', 'tickets/clientes', () => openAccounts('clients'), {
-                    aliases: ['accounts'], context: 'Quien reporta por correo y los clientes archivados, en solo lectura',
-                }),
-            ] },
-            { id: 'drafts', label: 'Borradores', icon: 'mail', sections: [
-                draftsSection('drafts', 'Todos', 'borradores/todos', 'all', {
-                    title: 'Borradores de correo', count: 'drafts_pending',
-                    context: currentUser.routing_enforced
-                        ? 'Correos de su departamento: al crear el ticket, usted elige el técnico'
-                        : 'Cada borrador tiene un revisor: el técnico en turno con menos carga',
                 }),
             ] },
             { id: 'team', label: 'Equipo', icon: 'team', sections: [
@@ -6482,6 +6468,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }),
                 peopleSection,
             ], extraSections: [requestsSection] },
+            { id: 'lookup', label: 'Consultas', icon: 'book', sections: [
+                // Fichas de clientes en solo lectura (también desde "Ver ficha del cliente" en el ticket)
+                navSection('clients', 'Contactos', 'tickets/clientes', () => openAccounts('clients'), {
+                    aliases: ['accounts'], context: 'Quien reporta por correo y los clientes archivados, en solo lectura',
+                }),
+            ] },
         ];
     }
 
@@ -6629,14 +6621,71 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function applyNavOpenModules() {
-        sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
-            const sub = li.querySelector('.nav-sections');
-            if (!sub) return;
-            // Con un solo módulo (técnico) queda siempre abierto
-            const open = navModules.length === 1 || navOpenModules.has(li.dataset.module);
-            sub.hidden = !open;
-            li.querySelector('.nav-module').setAttribute('aria-expanded', open ? 'true' : 'false');
+    // ----- Isla de React del menú (frontend/src/SideNav.jsx) -----
+    // app.js decide QUÉ hay en el menú (navModulesFor, por rol e interruptor), a dónde lleva cada sección y qué
+    // grupos están abiertos; React solo lo dibuja. Se le pasa un estado simple (sin funciones) con update().
+    let sideNavIsland = null;
+    let islandsWaiting = false;
+    const ISLANDS_TIMEOUT_MS = 10000;
+    const ISLANDS_FAILED = 'No se pudo cargar el menú: recargue la página.';
+
+    // La isla es un <script type="module"> y corre después de app.js. Si ya cargó (lo normal cuando alguien inicia
+    // sesión un rato después de abrir la página), se usa de inmediato: el evento ya pasó y no volverá a llegar. Solo
+    // si todavía no existe se espera «ticketera:islands-ready», una vez y como máximo 10 s
+    function withIslands(callback) {
+        if (window.TicketeraIslands) {
+            callback(window.TicketeraIslands);
+            return;
+        }
+        if (islandsWaiting) return;
+        islandsWaiting = true;
+        const timer = setTimeout(() => {
+            window.removeEventListener('ticketera:islands-ready', onReady);
+            islandsWaiting = false;
+            showError(ISLANDS_FAILED);
+        }, ISLANDS_TIMEOUT_MS);
+        function onReady() {
+            clearTimeout(timer);
+            islandsWaiting = false;
+            callback(window.TicketeraIslands);
+        }
+        window.addEventListener('ticketera:islands-ready', onReady, { once: true });
+    }
+
+    function sideNavState() {
+        const section = activeSection;
+        // Una subpágina (Mis solicitudes) marca su sección en el menú
+        const activeId = section ? (section.parent ? section.parent.id : section.id) : activeNavId;
+        const module = section ? moduleOf(section) : null;
+        return {
+            modules: navModules.map(m => ({
+                id: m.id, label: m.label, icon: m.icon,
+                sections: m.sections.map(s => ({ id: s.id, label: s.label, count: s.count || null, tone: s.tone || null })),
+            })),
+            activeSectionId: activeId,
+            activeModuleId: module ? module.id : null,
+            openModuleIds: [...(navOpenModules || [])],
+            counts: { ...navCounts },
+        };
+    }
+
+    // Vuelve a dibujar el menú con el estado actual (si la isla todavía no está, se dibuja al montarla)
+    function refreshSideNav() {
+        if (sideNavIsland && isStaffShell()) sideNavIsland.update(sideNavState());
+    }
+
+    function mountSideNavIsland() {
+        if (sideNavIsland) {
+            refreshSideNav();
+            return;
+        }
+        withIslands(islands => {
+            if (sideNavIsland) return;
+            sideNavIsland = islands.mountSideNav(sideNavGroups, {
+                onModuleClick: handleNavModuleClick,
+                onSectionClick: handleNavSectionClick,
+            });
+            refreshSideNav();
         });
     }
 
@@ -6644,62 +6693,14 @@ document.addEventListener('DOMContentLoaded', () => {
         navModules = navModulesFor(currentUser.role);
         loadNavOpenModules();
         navItems = {};
-        sideNavGroups.replaceChildren();
-        const heading = makeEl('h2', 'nav-modules-title', 'Módulos');
-        heading.id = 'navModulesTitle';
-        const list = makeEl('ul', 'nav-modules');
-        list.setAttribute('aria-labelledby', heading.id);
-        navModules.forEach(module => {
-            const li = makeEl('li', 'nav-module-item');
-            li.dataset.module = module.id;
-            const single = module.sections.length === 1;
-            const button = makeEl('button', 'nav-module');
-            button.type = 'button';
-            button.dataset.moduleId = module.id;
-            if (single) button.dataset.navId = module.sections[0].id;
-            button.appendChild(navIcon(module.icon));
-            button.appendChild(makeEl('span', 'nav-item-label', module.label));
-            // Nombre visible como tooltip cuando el menú está contraído
-            button.dataset.tooltip = module.label;
-            li.appendChild(button);
-            if (single) {
-                navItems[module.sections[0].id] = module.sections[0];
-            } else {
-                const caret = makeEl('span', 'nav-module-caret', '▾');
-                caret.setAttribute('aria-hidden', 'true');
-                button.appendChild(caret);
-                button.setAttribute('aria-expanded', 'false');
-                const sub = makeEl('ul', 'nav-sections');
-                sub.id = `navSections-${module.id}`;
-                button.setAttribute('aria-controls', sub.id);
-                sub.hidden = true;
-                module.sections.forEach(section => {
-                    navItems[section.id] = section;
-                    const sectionLi = document.createElement('li');
-                    const item = makeEl('button', 'nav-item');
-                    item.type = 'button';
-                    item.dataset.navId = section.id;
-                    item.appendChild(makeEl('span', 'nav-item-label', section.label));
-                    if (section.count) {
-                        const count = makeEl('span', 'nav-count');
-                        count.dataset.count = section.count;
-                        if (section.tone) count.dataset.tone = section.tone;
-                        item.appendChild(count);
-                    }
-                    sectionLi.appendChild(item);
-                    sub.appendChild(sectionLi);
-                });
-                li.appendChild(sub);
-            }
-            list.appendChild(li);
-        });
-        sideNavGroups.append(heading, list);
+        navModules.forEach(module => module.sections.forEach(section => { navItems[section.id] = section; }));
         renderNavUser();
         // Solo marca la sección: la ruta la decide el inicio de sesión o el enlace
         const wasRouting = routing;
         routing = true;
         setSideNavActive(activeNavId);
         routing = wasRouting;
+        mountSideNavIsland();
         renderNavCounts();
     }
 
@@ -6717,16 +6718,13 @@ document.addEventListener('DOMContentLoaded', () => {
         activeSection = section;
         // Una subpágina marca su sección en el menú
         const activeId = section ? (section.parent ? section.parent.id : section.id) : id;
-        sideNav.querySelectorAll('[data-nav-id]').forEach(button => {
-            const active = button.dataset.navId === activeId;
-            button.classList.toggle('active', active);
-            if (active) button.setAttribute('aria-current', 'page');
-            else button.removeAttribute('aria-current');
-        });
+        // «Mi cuenta» del pie no es parte de la isla: se marca aquí. Lo de adentro de #sideNavGroups es de React
+        const navUserButton = document.getElementById('navUser');
+        const profileActive = navUserButton.dataset.navId === activeId;
+        navUserButton.classList.toggle('active', profileActive);
+        if (profileActive) navUserButton.setAttribute('aria-current', 'page');
+        else navUserButton.removeAttribute('aria-current');
         const module = section ? moduleOf(section) : null;
-        sideNavGroups.querySelectorAll('.nav-module-item').forEach(li => {
-            li.querySelector('.nav-module').classList.toggle('is-active', Boolean(module && li.dataset.module === module.id));
-        });
         // Sin preferencia guardada, solo el grupo de la página abierta; al llegar a una página, su grupo se abre
         // (sin cerrar los demás) para que se vea dónde está
         if (navOpenModules === null) navOpenModules = new Set();
@@ -6734,7 +6732,7 @@ document.addEventListener('DOMContentLoaded', () => {
             navOpenModules.add(module.id);
             saveNavOpenModules();
         }
-        applyNavOpenModules();
+        refreshSideNav();
         if (section) pushRoute(section.route);
         renderPageHead();
         renderQueueViews();
@@ -6754,12 +6752,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderNavCounts() {
-        sideNavGroups.querySelectorAll('.nav-count').forEach(el => {
-            const value = navCounts[el.dataset.count];
-            el.textContent = typeof value === 'number' ? String(value) : '';
-            el.classList.toggle('is-alert', el.dataset.tone === 'alert' && value > 0);
-            el.classList.toggle('is-warn', el.dataset.tone === 'warn' && value > 0);
-        });
+        // Los contadores del menú los dibuja la isla con navCounts
+        refreshSideNav();
         renderNavShift();
         renderManyAdmins();
         renderQueueViews();
@@ -7108,26 +7102,28 @@ document.addEventListener('DOMContentLoaded', () => {
         sideNavBackdrop.hidden = true;
     }
 
-    sideNavGroups.addEventListener('click', (e) => {
-        const button = e.target.closest('.nav-item, .nav-module');
-        if (!button) return;
-        const module = button.classList.contains('nav-module')
-            ? navModules.find(m => m.id === button.dataset.moduleId) : null;
-        // Un grupo con varias páginas se abre o se cierra sin cambiar de página. Con el menú contraído a íconos
-        // (las páginas no se ven) lleva a su primera página, como antes
+    // Clic en un grupo (lo avisa la isla). Un grupo con varias páginas se abre o se cierra sin cambiar de página. Con
+    // el menú contraído a íconos (las páginas no se ven) lleva a su primera página, como antes
+    function handleNavModuleClick(moduleId) {
+        const module = navModules.find(m => m.id === moduleId);
+        if (!module) return;
         const iconsOnly = document.body.classList.contains('nav-collapsed') && window.matchMedia('(min-width: 768px)').matches;
-        if (module && module.sections.length > 1 && navModules.length > 1 && !iconsOnly) {
+        if (module.sections.length > 1 && navModules.length > 1 && !iconsOnly) {
             if (navOpenModules.has(module.id)) navOpenModules.delete(module.id);
             else navOpenModules.add(module.id);
             saveNavOpenModules();
-            applyNavOpenModules();
+            refreshSideNav();
             return;
         }
-        // Un módulo de una sola página (o contraído) abre su primera sección; una sección, la suya
-        const section = module ? module.sections[0] : navItems[button.dataset.navId];
-        if (!section) return;
-        goRoute(section.route);
-    });
+        // Un grupo de una sola página (o contraído) abre su primera sección
+        goRoute(module.sections[0].route);
+    }
+
+    // Clic en una sección (lo avisa la isla)
+    function handleNavSectionClick(sectionId) {
+        const section = navItems[sectionId];
+        if (section) goRoute(section.route);
+    }
 
     document.getElementById('navUser').addEventListener('click', () => goRoute(PROFILE_SECTION.route));
 

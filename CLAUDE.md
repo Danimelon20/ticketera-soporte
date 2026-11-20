@@ -9,8 +9,9 @@ Roles: requester (contacto: quien reporta un problema por correo y las cuentas d
 - El código se copia dentro de la imagen: después de CUALQUIER cambio (también en tests/ o static/) ejecuta `docker compose -f docker-compose.pruebas.yml up --build -d` y espera 5 segundos antes de probar.
 - Pruebas: `docker compose -f docker-compose.pruebas.yml exec app pytest -q`
 - Si el contenedor no arranca: `docker compose -f docker-compose.pruebas.yml logs --tail 30 app`
-- Revisar JavaScript: `docker run --rm -v "$PWD/static:/s" node:20-alpine node --check /s/app.js`
-- Antes de terminar una tarea: reconstruye, corre pytest (todo debe pasar) y, si tocaste static/, corre la revisión de JavaScript.
+- Revisar JavaScript: `docker run --rm -v "$PWD/static:/s" node:26-alpine node --check /s/app.js`
+- Frontend (islas de React en frontend/, Vite): `docker run --rm -u $(id -u):$(id -g) -v "$PWD/frontend:/app" -w /app node:26-alpine sh -c "npm ci && npm run build"` (deja frontend/dist/islands.js). La imagen de Docker lo construye sola en su etapa de Node; el servidor no necesita Node.
+- Antes de terminar una tarea: reconstruye, corre pytest (todo debe pasar) y, si tocaste static/, corre la revisión de JavaScript; si tocaste frontend/, también el build de Vite.
 
 ## Reglas de código
 - Cambios mínimos y enfocados. No borres ni reescribas funciones, clases, rutas o estilos que no tienen que ver con la tarea.
