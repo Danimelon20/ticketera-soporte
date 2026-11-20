@@ -11,16 +11,19 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import SideNav from './SideNav.jsx';
 import BellPanel from './BellPanel.jsx';
+import ChatPanel from './ChatPanel.jsx';
 
 // Crea la raíz de React en el contenedor una sola vez y devuelve { update(estado) }: cada update vuelve a dibujar
-// el componente con el estado nuevo (React solo cambia lo que difiere)
+// el componente con el estado nuevo (React solo cambia lo que difiere).
+// resetKey (opcional) es la «key» del componente: si cambia, React descarta el componente con su estado propio y
+// crea uno nuevo, vacío (el asistente al cerrar sesión)
 function mountIsland(Component, container, callbacks) {
     const root = createRoot(container);
     return {
-        update(state) {
+        update({ resetKey, ...state }) {
             root.render(
                 <StrictMode>
-                    <Component {...state} {...callbacks} />
+                    <Component key={resetKey} {...state} {...callbacks} />
                 </StrictMode>,
             );
         },
@@ -30,5 +33,6 @@ function mountIsland(Component, container, callbacks) {
 window.TicketeraIslands = {
     mountSideNav: (container, callbacks) => mountIsland(SideNav, container, callbacks),
     mountBellPanel: (container, callbacks) => mountIsland(BellPanel, container, callbacks),
+    mountChatPanel: (container, callbacks) => mountIsland(ChatPanel, container, callbacks),
 };
 window.dispatchEvent(new Event('ticketera:islands-ready'));

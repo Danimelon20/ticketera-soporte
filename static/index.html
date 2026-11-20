@@ -1694,27 +1694,8 @@
             <path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/>
         </svg>
     </button>
-    <section id="chatPanel" class="chat-panel" role="dialog" aria-labelledby="chatTitle" hidden>
-        <header class="chat-header">
-            <div>
-                <h2 id="chatTitle" class="chat-title">Asistente</h2>
-                <p id="chatRole" class="chat-role"></p>
-                <button type="button" id="chatResetPosition" class="chat-reset">Restablecer posición</button>
-            </div>
-            <button type="button" id="chatClose" class="chat-close" aria-label="Cerrar asistente">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                    <path d="M6 6l12 12M18 6L6 18"/>
-                </svg>
-            </button>
-        </header>
-        <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
-        <div id="chatSuggestions" class="chat-suggestions"></div>
-        <form id="chatForm" class="chat-form">
-            <label for="chatInput" class="sr-only">Escribe tu pregunta</label>
-            <textarea id="chatInput" rows="2" maxlength="1000" placeholder="Escribe tu pregunta"></textarea>
-            <button type="submit" id="chatSend" class="chat-send">Enviar</button>
-        </form>
-    </section>
+    <!-- El contenido (cabecera, conversación, sugerencias y cuadro para escribir) lo dibuja la isla de React ChatPanel -->
+    <section id="chatPanel" class="chat-panel" role="dialog" aria-labelledby="chatTitle" hidden></section>
 
     <script src="app.js"></script>
     <!-- Islas de React (frontend/, construidas con Vite): el menú lateral. Corre después de app.js -->

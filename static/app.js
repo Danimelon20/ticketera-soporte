@@ -1131,175 +1131,102 @@ document.addEventListener('DOMContentLoaded', () => {
     chatToggle.addEventListener('pointerup', endFabDrag);
     chatToggle.addEventListener('pointercancel', endFabDrag);
     window.addEventListener('resize', () => applyFabPos(false));
-    const chatClose = document.getElementById('chatClose');
-    const chatRole = document.getElementById('chatRole');
-    const chatMessages = document.getElementById('chatMessages');
-    const chatSuggestions = document.getElementById('chatSuggestions');
-    const chatForm = document.getElementById('chatForm');
-    const chatInput = document.getElementById('chatInput');
-    const chatSend = document.getElementById('chatSend');
-
-    const CHAT_WELCOME = {
-        requester: 'Hola. Puedo contarte cómo van tus tickets o ayudarte a describir un problema.',
-        // Lo que el asistente sabe calcular (catálogo de app/assistant_queries.py); lo demás es ayuda general
-        technician: 'Hola. Puedo darte cifras de tus tickets (abiertos, vencidos, por vencer, resueltos y tu carga) o ayudarte con pasos de diagnóstico.',
-        coordinator: 'Hola. Puedo darte cifras del equipo: tickets abiertos y por departamento, vencidos, por vencer, resueltos, carga por técnico y quién está ausente.',
-        admin: 'Hola. Puedo darte cifras del equipo (abiertos, vencidos, resueltos, carga y ausencias), de los correos por clasificar y de la precisión de la IA.'
-    };
-    const CHAT_SUGGESTIONS = {
-        requester: ['¿Cómo va mi ticket?', '¿Qué significa En proceso?', 'Ayúdame a describir mi problema'],
-        technician: ['Resume mis tickets abiertos', '¿Tengo tickets vencidos?', '¿Cuántos tickets resolví esta semana?'],
-        coordinator: ['Resume el estado del equipo', '¿Quién tiene más carga?', '¿Quién está de vacaciones?'],
-        admin: ['Resume el estado del equipo', '¿Cuántos correos hay por clasificar?', '¿Qué tan precisa fue la IA esta semana?']
-    };
-    const CHAT_HISTORY_LIMIT = 10;
-    const CHAT_TURN_CHARS = 2000;
-
-    // Solo en memoria: se pierde al recargar o al cambiar de cuenta
-    let chatHistory = [];
-    let chatBusy = false;
-    // Cambia al cerrar sesión: una respuesta tardía no se pinta en la conversación de otra cuenta
+    // ----- Isla de React de la conversación (frontend/src/ChatPanel.jsx) -----
+    // React guarda los mensajes, el texto que se escribe y si espera respuesta (estado propio). app.js sigue a cargo
+    // del botón flotante, de abrir y cerrar el panel, del token y la sesión (fetchChat) y del texto de los errores
+    // (getErrorMessage). Al cerrar sesión cambia resetKey y React crea la conversación de nuevo, vacía
+    let chatIsland = null;
+    // Cambia al cerrar sesión: la isla descarta la conversación y cancela una respuesta en curso
     let chatSession = 0;
 
-    function addChatMessage(text, kind) {
-        const bubble = document.createElement('div');
-        bubble.className = `chat-msg ${kind}`;
-        bubble.textContent = text;
-        chatMessages.appendChild(bubble);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        return bubble;
+    function chatState() {
+        const role = currentUser ? currentUser.role : '';
+        return {
+            resetKey: `${chatSession}:${role}`,
+            open: !chatPanel.hidden,
+            role,
+            roleLabel: ROLE_MAP[role] || role,
+        };
     }
 
-    function renderChatStart() {
-        const role = currentUser ? currentUser.role : '';
-        chatMessages.replaceChildren();
-        chatSuggestions.replaceChildren();
-        addChatMessage(CHAT_WELCOME[role] || CHAT_WELCOME.requester, 'model');
-        (CHAT_SUGGESTIONS[role] || []).forEach(text => {
-            const pill = document.createElement('button');
-            pill.type = 'button';
-            pill.className = 'chat-suggestion';
-            pill.textContent = text;
-            chatSuggestions.appendChild(pill);
+    function refreshChat() {
+        if (chatIsland) chatIsland.update(chatState());
+    }
+
+    // fetch propio: los 429/503 se muestran dentro del chat (no en el aviso rojo). Con 401 cierra la sesión como
+    // siempre y devuelve null
+    async function fetchChat(body, signal) {
+        const response = await fetch(`${API_BASE}/chat/stream`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'text/plain, application/json',
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(body),
+            signal,
         });
-        chatSuggestions.hidden = false;
+        if (response.status === 401) {
+            const data = await response.json().catch(() => ({}));
+            handleUnauthorized(data.detail);
+            return null;
+        }
+        return response;
+    }
+
+    function resetFabPosition() {
+        // Mover el ícono no toca la conversación
+        fabPos = null;
+        saveFabPos(null);
+        applyFabPos(true);
+    }
+
+    function mountChatIsland() {
+        if (chatIsland) {
+            refreshChat();
+            return;
+        }
+        withIslands(islands => {
+            if (chatIsland) return;
+            chatIsland = islands.mountChatPanel(chatPanel, {
+                fetchChat,
+                errorMessage: getErrorMessage,
+                onClose: closeChat,
+                onResetPosition: resetFabPosition,
+            });
+            refreshChat();
+        });
     }
 
     function setupChat() {
         if (!currentUser) return;
-        chatRole.textContent = `Te ayuda según tu rol: ${ROLE_MAP[currentUser.role] || currentUser.role}`;
-        if (chatHistory.length === 0) renderChatStart();
         chatToggle.hidden = false;
         fabPos = readFabPos();
         applyFabPos(false);
+        mountChatIsland();
     }
 
     function resetChat() {
         chatSession += 1;
-        chatHistory = [];
-        chatBusy = false;
         chatPanel.hidden = true;
         chatToggle.hidden = true;
         chatToggle.setAttribute('aria-expanded', 'false');
-        chatMessages.replaceChildren();
-        chatSuggestions.replaceChildren();
-        chatInput.value = '';
-        setChatBusy(false);
+        refreshChat();
     }
 
-    function setChatBusy(busy) {
-        chatBusy = busy;
-        chatSend.disabled = busy;
-        chatSuggestions.querySelectorAll('button').forEach(b => { b.disabled = busy; });
-    }
-
+    // Al recibir open: true, la isla baja al final de la conversación y pone el cursor en el cuadro (useEffect)
     function openChat() {
         chatPanel.hidden = false;
         positionChatPanel();
         chatToggle.setAttribute('aria-expanded', 'true');
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        chatInput.focus();
+        refreshChat();
     }
 
     function closeChat() {
         chatPanel.hidden = true;
         chatToggle.setAttribute('aria-expanded', 'false');
+        refreshChat();
         chatToggle.focus();
-    }
-
-    async function sendChat(text) {
-        const message = text.trim().slice(0, 1000);
-        if (!message || chatBusy) return;
-        setChatBusy(true);
-        chatSuggestions.hidden = true;
-        addChatMessage(message, 'user');
-        const pending = addChatMessage('Pensando... (puede tardar hasta un minuto)', 'pending');
-        const history = chatHistory.slice(-CHAT_HISTORY_LIMIT);
-        const session = chatSession;
-
-        let bubble = null;
-        try {
-            // fetch propio: los 429/503 se muestran dentro del chat, no en el aviso rojo
-            const response = await fetch(`${API_BASE}/chat/stream`, {
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/plain, application/json',
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
-                },
-                body: JSON.stringify({ message, history })
-            });
-            if (response.status === 401) {
-                const data = await response.json().catch(() => ({}));
-                handleUnauthorized(data.detail);
-                return;
-            }
-            if (!response.ok) {
-                const data = await response.json().catch(() => ({}));
-                if (session !== chatSession) return;
-                pending.remove();
-                addChatMessage(getErrorMessage(data), 'notice');
-                return;
-            }
-            // Pregunta de datos: el servidor ya eligió la consulta; la respuesta llega completa (5 a 15 s)
-            if (response.headers.get('X-Chat-Kind') === 'data') {
-                pending.textContent = 'Consultando datos…';
-            }
-            // El texto aparece mientras el modelo lo escribe
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let reply = '';
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (session !== chatSession) {
-                    reader.cancel();
-                    return;
-                }
-                if (done) break;
-                reply += decoder.decode(value, { stream: true });
-                if (!bubble) {
-                    pending.remove();
-                    bubble = addChatMessage('', 'model');
-                }
-                bubble.textContent = reply;
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
-            reply += decoder.decode();
-            if (!bubble) {
-                pending.remove();
-                bubble = addChatMessage(reply, 'model');
-            }
-            bubble.textContent = reply;
-            chatHistory.push({ role: 'user', text: message.slice(0, CHAT_TURN_CHARS) });
-            chatHistory.push({ role: 'model', text: reply.slice(0, CHAT_TURN_CHARS) });
-            chatHistory = chatHistory.slice(-CHAT_HISTORY_LIMIT);
-        } catch (err) {
-            if (session !== chatSession) return;
-            pending.remove();
-            addChatMessage('No se pudo conectar con el servidor', 'notice');
-        } finally {
-            if (session === chatSession) setChatBusy(false);
-        }
     }
 
     // Enter y Espacio también llegan como clic (es un <button>); tras un arrastre no se abre
@@ -1309,37 +1236,8 @@ document.addEventListener('DOMContentLoaded', () => {
         else closeChat();
     });
 
-    chatClose.addEventListener('click', closeChat);
-
-    // Mover el ícono no toca la conversación
-    document.getElementById('chatResetPosition').addEventListener('click', () => {
-        fabPos = null;
-        saveFabPos(null);
-        applyFabPos(true);
-    });
-
     chatPanel.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeChat();
-    });
-
-    chatSuggestions.addEventListener('click', (e) => {
-        const pill = e.target.closest('.chat-suggestion');
-        if (pill) sendChat(pill.textContent);
-    });
-
-    chatForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const text = chatInput.value;
-        if (!text.trim() || chatBusy) return;
-        chatInput.value = '';
-        sendChat(text);
-    });
-
-    chatInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-            e.preventDefault();
-            chatForm.requestSubmit();
-        }
     });
 
     // Switch account / logout
