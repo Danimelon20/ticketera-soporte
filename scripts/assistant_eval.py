@@ -57,7 +57,7 @@ QUESTIONS = [
     ((A, C), "¿Qué solicitudes van fuera de plazo?", "overdue"),
     ((A, C), "¿Cuáles ya pasaron su fecha?", "overdue"),
     # Pide algo que el catálogo no tiene: ayuda, nunca los abiertos
-    ((A, C), "¿Qué departamento cerró más tickets este mes?", HELP),
+    ((A, C), "¿Qué departamento cerró más tickets este mes?", "resolved_period"),
     ((A, C), "¿Cuál área genera más casos?", HELP),
     ((A, C), "¿Qué departamento crea más solicitudes?", HELP),
     ((A, C), "¿Cuántos tickets urgentes hay?", HELP),
@@ -84,7 +84,7 @@ QUESTIONS = [
     ((A, C), "¿Hay alguien con incapacidad?", "staff_away"),
     ((A, C), "¿Cuándo regresa el personal de vacaciones?", "staff_away"),
     ((T,), "¿Quién está de vacaciones?", NONE),
-    ((A, C), "¿Qué técnico resolvió más tickets?", HELP),
+    ((A, C), "¿Qué técnico resolvió más tickets?", "resolved_period"),
     ((A,), "¿Cuántos correos hay por clasificar?", "drafts_unclassified"),
     ((A,), "¿Hay correos sin clasificar?", "drafts_unclassified"),
     ((A,), "¿Qué tan precisa fue la IA esta semana?", "ai_precision_week"),
@@ -95,6 +95,10 @@ QUESTIONS = [
     ((C,), "¿Cuántos correos hay por clasificar?", NONE),
     (ALL, "¿Cuántos tickets se resolvieron esta semana?", "resolved_period"),
     ((A, C), "Resueltos el mes pasado", "resolved_period"),
+    # Fase 5: redacciones propias
+    ((T,), "¿Cuántos tickets resolví ayer?", "resolved_period"),
+    ((A, C), "¿Cuántos casos cerramos en los últimos 30 días?", "resolved_period"),
+    ((A, C), "¿Cuántos tickets siguen sin resolver?", "open_tickets"),
 ]
 
 

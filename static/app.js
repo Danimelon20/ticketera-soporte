@@ -1141,15 +1141,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const CHAT_WELCOME = {
         requester: 'Hola. Puedo contarte cómo van tus tickets o ayudarte a describir un problema.',
-        technician: 'Hola. Puedo resumir tus tickets asignados y sugerir pasos de diagnóstico.',
-        coordinator: 'Hola. Puedo resumir el estado del equipo y señalar tickets atrasados.',
-        admin: 'Hola. Puedo resumir el estado del equipo y señalar tickets atrasados.'
+        // Lo que el asistente sabe calcular (catálogo de app/assistant_queries.py); lo demás es ayuda general
+        technician: 'Hola. Puedo darte cifras de tus tickets (abiertos, vencidos, por vencer, resueltos y tu carga) o ayudarte con pasos de diagnóstico.',
+        coordinator: 'Hola. Puedo darte cifras del equipo: tickets abiertos y por departamento, vencidos, por vencer, resueltos, carga por técnico y quién está ausente.',
+        admin: 'Hola. Puedo darte cifras del equipo (abiertos, vencidos, resueltos, carga y ausencias), de los correos por clasificar y de la precisión de la IA.'
     };
     const CHAT_SUGGESTIONS = {
         requester: ['¿Cómo va mi ticket?', '¿Qué significa En proceso?', 'Ayúdame a describir mi problema'],
-        technician: ['Resume mis tickets abiertos', '¿Qué atiendo primero?', 'Pasos para diagnosticar una red lenta'],
-        coordinator: ['Resume el estado del equipo', '¿Qué tickets llevan más tiempo abiertos?', '¿Quién tiene más carga?'],
-        admin: ['Resume el estado del equipo', '¿Qué tickets llevan más tiempo abiertos?', '¿Quién tiene más carga?']
+        technician: ['Resume mis tickets abiertos', '¿Tengo tickets vencidos?', '¿Cuántos tickets resolví esta semana?'],
+        coordinator: ['Resume el estado del equipo', '¿Quién tiene más carga?', '¿Quién está de vacaciones?'],
+        admin: ['Resume el estado del equipo', '¿Cuántos correos hay por clasificar?', '¿Qué tan precisa fue la IA esta semana?']
     };
     const CHAT_HISTORY_LIMIT = 10;
     const CHAT_TURN_CHARS = 2000;

@@ -67,18 +67,27 @@ def _resolved_today(db: Session, now: datetime, assigned_to: int | None = None,
 def _resolved_today_ids(db: Session, now: datetime, assigned_to: int | None = None,
                         viewer: models.User | None = None) -> set[int]:
     """Tickets que pasaron a Resuelto hoy (hora de la oficina) y siguen resueltos o cerrados (sin cancelados ni fusionados)."""
+    return resolved_ids_between(db, _today_start(now), None, assigned_to, viewer)
+
+
+def resolved_ids_between(db: Session, start: datetime, end: datetime | None, assigned_to: int | None = None,
+                         viewer: models.User | None = None) -> set[int]:
+    """Tickets que pasaron a Resuelto en [start, end) (sin end: hasta ahora) y siguen resueltos o cerrados (sin
+    cancelados ni fusionados). Lo usan el menú (hoy) y el asistente (otros periodos)."""
     query = (
         db.query(models.History.ticket_id)
         .join(models.Ticket, models.Ticket.id == models.History.ticket_id)
         .filter(
             models.History.field == "status",
             models.History.new_value == "resolved",
-            models.History.changed_at >= _today_start(now),
+            models.History.changed_at >= start,
             models.Ticket.status.in_(RESOLVED_STATUSES),
             models.Ticket.id.notin_(db.query(models.TicketCancellation.ticket_id)),
             models.Ticket.id.notin_(grouping.merged_source_ids(db)),
         )
     )
+    if end is not None:
+        query = query.filter(models.History.changed_at < end)
     if assigned_to is not None:
         query = query.filter(models.Ticket.assigned_to == assigned_to)
     if viewer is not None:

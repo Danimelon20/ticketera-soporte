@@ -234,8 +234,8 @@ def test_selection_only_offers_allowed_ids(client, make_user, llm):
     ("admin", "¿Cuántos tickets no se atendieron a tiempo?", ["overdue"]),
     ("coordinator", "¿Hay algo que nadie ha atendido?", ["open_tickets"]),
     # Pide algo fuera del catálogo: nunca los abiertos (la IA respondía con datos de otra cosa)
-    ("admin", "¿Qué departamento resolvió más tickets?", []),
-    ("coordinator", "¿Qué área cerró más casos este mes?", []),
+    ("admin", "¿Qué departamento resolvió más tickets?", ["resolved_period"]),
+    ("coordinator", "¿Qué área cerró más casos este mes?", ["resolved_period"]),
     ("admin", "¿Cuál departamento genera más tickets?", []),
     ("admin", "¿Qué departamento crea más solicitudes?", []),
     ("coordinator", "¿Quién reporta más tickets?", []),
@@ -256,8 +256,11 @@ def test_selection_only_offers_allowed_ids(client, make_user, llm):
     ("coordinator", "¿Quién está de vacaciones?", ["staff_away"]),
     # El técnico no tiene ausencias del personal: ayuda, nunca sus abiertos
     ("technician", "¿Quién está de vacaciones?", []),
-    # La carga es de abiertos ahora: resueltos no
-    ("coordinator", "¿Qué técnico resolvió más tickets?", []),
+    # La carga es de abiertos ahora: los resueltos van a su consulta
+    ("coordinator", "¿Qué técnico resolvió más tickets?", ["resolved_period"]),
+    # Fase 5: negado no pide resueltos
+    ("technician", "¿Cuántos tickets resolví esta semana?", ["resolved_period"]),
+    ("coordinator", "Casos no resueltos", ["open_tickets"]),
     # Fase 4: solo el administrador
     ("admin", "¿Cuántos correos hay por clasificar?", ["drafts_unclassified"]),
     ("admin", "¿Qué tan precisa fue la IA esta semana?", ["ai_precision_week"]),
@@ -346,7 +349,8 @@ def test_assistant_eval_reports_choice_and_verification(client, make_user, llm, 
     llm["query"], llm["reply"] = "open_tickets", "Hay 100000 tickets."
     assert assistant_eval.main([]) == 0
     out = capsys.readouterr().out
-    assert "Elección:" in out and "Meta: 90 %" in out and "Omitidas:" in out
+    # Las 5 fases existen: ninguna pregunta se omite
+    assert "Elección:" in out and "Meta: 90 %" in out and "Omitidas:" not in out
     # La redacción simulada inventa un número: cae al texto del servidor y dice cuál
     assert "texto del servidor: número 100000 no está en los datos" in out
     assert "Caídas al texto del servidor:" in out
@@ -617,3 +621,76 @@ def test_admin_queries_not_for_coordinator(make_user):
         coordinator = db.get(models.User, make_user("coordinator")["id"])
         assert aq.resolve(coordinator, "drafts_unclassified") is None
         assert aq.resolve(coordinator, "ai_precision_week") is None
+
+
+# ---------- Fase 5: resueltos por periodo ----------
+
+@pytest.mark.parametrize("message, period", [
+    ("¿Cuántos tickets se resolvieron hoy?", "today"),
+    ("Resueltos de ayer", "yesterday"),
+    ("¿Cuántos se resolvieron esta semana?", "this_week"),
+    ("Resueltos la semana pasada", "last_week"),
+    ("¿Cuántos cerramos este mes?", "this_month"),
+    ("Resueltos el mes pasado", "last_month"),
+    ("Resueltos en los últimos 30 días", "last_30_days"),
+    ("¿Cuántos se resolvieron?", "last_7_days"),
+])
+def test_period_is_detected_by_the_server(message, period):
+    assert aq.period_of(message) == period
+
+
+def test_period_ranges():
+    from datetime import date, datetime
+
+    # Miércoles 18/11/2026 a mediodía en la oficina (UTC-6)
+    now = datetime(2026, 11, 18, 18, 0)
+    assert aq.period_range("this_week", now)[2:] == (date(2026, 11, 16), date(2026, 11, 18))
+    assert aq.period_range("last_week", now)[2:] == (date(2026, 11, 9), date(2026, 11, 15))
+    assert aq.period_range("last_month", now)[2:] == (date(2026, 10, 1), date(2026, 10, 31))
+    assert aq.period_range("yesterday", now)[2:] == (date(2026, 11, 17), date(2026, 11, 17))
+
+
+def _resolve(client, ticket_id, actor, assignee):
+    """Por la API, como en la página: asignar, Nuevo → En proceso → Resuelto, con la solución documentada."""
+    for body in ({"assigned_to": assignee["id"]}, {"status": "in_progress"},
+                 {"status": "resolved", "solution": "Se reinició el equipo y quedó funcionando bien."}):
+        response = client.patch(f"/api/tickets/{ticket_id}", json=body, headers=actor["headers"])
+        assert response.status_code == 200, response.text
+
+
+def test_resolved_today_matches_menu(client, make_user, make_ticket, llm, routing_on):
+    dept, coordinator, technician = team(make_user)
+    other_dept, other_coordinator, other_technician = team(make_user)
+    contact = make_user("requester")
+    mine = make_ticket(contact)
+    set_department(mine["id"], dept)
+    _resolve(client, mine["id"], coordinator, technician)
+    other = make_ticket(contact)
+    set_department(other["id"], other_dept)
+    _resolve(client, other["id"], other_coordinator, other_technician)
+
+    with SessionLocal() as db:
+        result = aq.run(db, db.get(models.User, coordinator["id"]), aq.BY_ID["resolved_period"], "today")
+    nav = client.get("/api/nav/counts", headers=coordinator["headers"]).json()
+    assert _total(result) == nav["resolved_today"] == 1
+    facts = "\n".join(result.facts)
+    assert f"- {technician['name']}: 1" in facts and "Solo de tu departamento." in facts
+
+    with SessionLocal() as db:
+        own = aq.run(db, db.get(models.User, technician["id"]), aq.BY_ID["resolved_period"], "today")
+    tech_nav = client.get("/api/nav/counts", headers=technician["headers"]).json()
+    assert _total(own) == tech_nav["mine_resolved_today"] == 1
+    assert "Por técnico:" not in "\n".join(own.facts)
+
+
+def test_resolved_period_answer_uses_detected_period(client, make_user, make_ticket, llm, routing_on):
+    """La IA elige la consulta; el periodo lo pone el servidor a partir de la pregunta."""
+    dept, coordinator, technician = team(make_user)
+    ticket = make_ticket(make_user("requester"))
+    set_department(ticket["id"], dept)
+    _resolve(client, ticket["id"], coordinator, technician)
+    llm["query"], llm["reply"] = "resolved_period", "Hoy se resolvió 1 ticket."
+    reply = _ask(client, coordinator, "¿Cuántos tickets se resolvieron hoy?")
+    assert reply.startswith("Hoy se resolvió 1 ticket.") and "(Datos del servidor: Resueltos hoy," in reply
+    # Sin enum de periodo: el modelo pequeño no lo elige
+    assert "period" not in llm["payloads"][0]["format"]["properties"]

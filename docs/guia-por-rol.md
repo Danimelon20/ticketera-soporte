@@ -14,6 +14,24 @@ Cómo se entra, según el rol:
 Para todos: **Mi cuenta** (perfil, correo y, si aplica, contraseña) y el **asistente** (botón abajo a la derecha,
 si está encendido). El asistente solo responde: no cambia tickets.
 
+**Qué cifras sabe dar el asistente.** Las calcula el servidor con los mismos datos que la página (la IA solo
+elige la consulta y redacta). Al final de cada respuesta con datos dice de dónde salieron: «(Datos del servidor:
+…)». Lo demás (cómo hacer algo, qué significa algo, soporte técnico) es ayuda general, sin cifras.
+
+| Pregunta, por ejemplo | Técnico | Coordinador | Administrador |
+|---|---|---|---|
+| «¿Cuántos tickets hay abiertos?», «Resume el estado del equipo» | los suyos | su departamento* | todos |
+| «Tickets abiertos por departamento» | — | su departamento* | todos |
+| «¿Qué tickets están vencidos?», «¿Cuáles están por vencer?» | los suyos | su departamento* | todos |
+| «¿Cuántos tickets se resolvieron esta semana?» (hoy, ayer, la semana o el mes pasado, 7 o 30 días) | los suyos | su departamento* | todos |
+| «¿Quién tiene más carga?» | la suya | técnicos de su departamento*, con la carga | técnicos, con sus abiertos (sin la carga) |
+| «¿Quién está de vacaciones?», «¿Quién no está hoy?» | — | su departamento* | todos |
+| «¿Cuántos correos hay por clasificar?», «¿Qué tan precisa fue la IA esta semana?» | — | — | sí |
+
+\* Con **Tickets por departamento** encendido; apagado, el coordinador ve todo. Con el interruptor apagado, el
+administrador recibe solo totales (sin números de ticket ni títulos). A la IA nunca le llegan títulos, correos,
+teléfonos ni cédulas: las listas con títulos las agrega el servidor debajo de la respuesta.
+
 ---
 
 ## Técnico

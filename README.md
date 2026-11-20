@@ -193,6 +193,16 @@ docker compose up -d --force-recreate
 Si una actualización agrega o cambia columnas de una tabla existente, el mensaje del commit lo avisa: la base
 no se actualiza sola (las tablas nuevas sí se crean solas). En ese caso, haga un respaldo antes de seguir.
 
+**Asistente.** Con `CHATBOT_ENABLED=true`, el botón abajo a la derecha da cifras calculadas por el servidor
+(abiertos, vencidos, por vencer, resueltos por periodo, carga, ausencias y, para el administrador, correos por
+clasificar y precisión de la IA) y ayuda general para lo demás. Qué responde a cada rol:
+[docs/guia-por-rol.md](docs/guia-por-rol.md). Para medir qué tan bien elige la consulta el modelo, con el demo
+cargado en el entorno de pruebas:
+
+```bash
+docker compose -f docker-compose.pruebas.yml exec app python -m scripts.assistant_eval --solo-eleccion
+```
+
 ## Respaldo y restauración
 
 **Qué respaldar:** `data/tickets.db` (la base) y `data/attachments/` (los adjuntos). Contienen datos personales:

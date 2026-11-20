@@ -16,7 +16,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -360,6 +360,92 @@ def _ai_precision_week(db: Session, user: models.User, sc: Scope, now: datetime,
     return Result("ai_precision_week", "Precisión de la IA (7 días)", facts, text, required)
 
 
+# ---------- Resueltos por periodo: el mismo cálculo que «Resueltos hoy» del menú ----------
+
+PERIOD_LABELS = {
+    "today": "hoy", "yesterday": "ayer", "this_week": "esta semana", "last_week": "la semana pasada",
+    "this_month": "este mes", "last_month": "el mes pasado", "last_7_days": "los últimos 7 días",
+    "last_30_days": "los últimos 30 días",
+}
+DEFAULT_PERIOD = "last_7_days"
+# El periodo lo detecta el servidor por palabras (sin tildes, en minúscula), en este orden: «la semana pasada»
+# antes que «semana». El modelo pequeño no elige periodo; sin palabras de periodo, los últimos 7 días
+_PERIOD_WORDS = (
+    ("yesterday", r"\bayer\b"),
+    ("today", r"\bhoy\b"),
+    ("last_week", r"semana (?:pasada|anterior)"),
+    ("last_month", r"mes (?:pasado|anterior)"),
+    ("last_30_days", r"(?:30|treinta) dias|ultimo mes"),
+    ("last_7_days", r"(?:7|siete) dias|ultima semana"),
+    ("this_week", r"\bsemana\b"),
+    ("this_month", r"\bmes\b"),
+)
+
+
+def period_of(message: str) -> str:
+    plain = _plain(message)
+    return next((period for period, words in _PERIOD_WORDS if re.search(words, plain)), DEFAULT_PERIOD)
+
+
+def period_range(period: str, now: datetime) -> tuple[datetime, datetime | None, date, date]:
+    """(inicio, fin o None = hasta ahora, primer día, último día) en días de la oficina."""
+    today = availability._local_day(now)
+    monday = today - timedelta(days=today.weekday())
+    first = today.replace(day=1)
+    if period == "yesterday":
+        days = (today - timedelta(days=1), today)
+    elif period == "last_week":
+        days = (monday - timedelta(days=7), monday)
+    elif period == "this_week":
+        days = (monday, None)
+    elif period == "last_month":
+        days = ((first - timedelta(days=1)).replace(day=1), first)
+    elif period == "this_month":
+        days = (first, None)
+    elif period == "last_30_days":
+        days = (today - timedelta(days=29), None)
+    elif period == "last_7_days":
+        days = (today - timedelta(days=6), None)
+    else:
+        days = (today, None)
+    start = people_activity.local_day_start(days[0])
+    end = people_activity.local_day_start(days[1]) if days[1] else None
+    return start, end, days[0], (days[1] - timedelta(days=1)) if days[1] else today
+
+
+def _resolved_period(db: Session, user: models.User, sc: Scope, now: datetime, period) -> Result:
+    """Tickets que pasaron a Resuelto en el periodo y siguen resueltos o cerrados, con el alcance de la página.
+    Por departamento y por técnico (nombres del personal, nunca títulos)."""
+    period = period if period in PERIOD_LABELS else DEFAULT_PERIOD
+    start, end, first, last = period_range(period, now)
+    own = sc.kind == "own"
+    if own:
+        ids = nav.resolved_ids_between(db, start, end, assigned_to=user.id)
+    else:
+        ids = nav.resolved_ids_between(db, start, end, viewer=user if routing.enforced(db) else None)
+    tickets = db.query(models.Ticket).filter(models.Ticket.id.in_(ids)).all() if ids else []
+    total = len(tickets)
+    when = f"{PERIOD_LABELS[period]} (del {first:%d/%m/%Y} al {last:%d/%m/%Y})"
+    facts = [f"Periodo: {when}", f"{'Tus tickets' if own else 'Tickets'} resueltos: {total}"]
+    text = f"{'Resolviste' if own else 'Se resolvieron'} {total} ticket(s) {when}."
+    if not own and tickets:
+        labels = _department_labels(db, tickets)
+        by_dept: dict[str, int] = {}
+        by_tech: dict[str, int] = {}
+        for t in tickets:
+            by_dept[labels[t.id]] = by_dept.get(labels[t.id], 0) + 1
+            who = _name(t.assigned_user) if t.assigned_user else "sin asignar"
+            by_tech[who] = by_tech.get(who, 0) + 1
+        for title, counts in (("Por departamento:", by_dept), ("Por técnico:", by_tech)):
+            facts.append(title)
+            facts += [f"- {k}: {v}" for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:LIST_MAX]]
+        top_dept = max(by_dept.items(), key=lambda kv: (kv[1], kv[0]))
+        text += f" El departamento con más: {top_dept[0]} ({top_dept[1]})."
+    if sc.kind == "department":
+        facts.append("Solo de tu departamento.")
+    return Result("resolved_period", f"Resueltos {PERIOD_LABELS[period]}", facts, text, [str(total)])
+
+
 # Sinónimos y señales de «fuera del catálogo». Cada elemento es una expresión regular que se busca en la pregunta
 # ya normalizada (_plain: minúsculas, sin tildes ni ¿¡): se escriben sin tildes y con n en vez de ñ.
 # Sin asignar, en palabras informales: se suman al cue de open_tickets
@@ -375,13 +461,13 @@ OVERDUE_SYNONYMS: tuple[str, ...] = (
     r"caducad",
     r"\bno (?:\w+ ){1,2}a tiempo",   # no se atendieron a tiempo
 )
-# Pide algo que el catálogo no tiene: open_tickets y open_by_department no se ofrecen (la IA respondía con los
-# abiertos, datos de otra cosa). Participios y pretéritos, nunca el infinitivo: «por resolver» es abierto.
+# Pide algo que no son los abiertos de ahora (resueltos, quién crea o reporta, prioridad): las consultas de abiertos
+# (about_open) no se ofrecen; la IA respondía con ellas, datos de otra cosa. Los resueltos van a resolved_period. Participios y pretéritos, nunca el infinitivo: «por resolver» es abierto.
 # Con \b para no atrapar «general» ni «creo que». La negación («no resueltos») la descarta _NEGATION_RE.
 OUTSIDE_SIGNALS: tuple[str, ...] = (
     # Resueltos, cerrados, atendidos
     r"resuelt", r"resolvi", r"solucionad", r"finalizad",
-    r"cerrad", r"\bcerr(?:o|aron)\b",
+    r"cerrad", r"\bcerr(?:o|aron|amos)\b",
     r"(?<!des)atendid", r"\batend(?:io|ieron)\b",   # «desatendidos» son los que faltan
     # Quién genera, crea o reporta
     r"\bgenera(?:n|ron)?\b", r"\bcrea(?:n|ron|dos?|das?)?\b", r"\breporta(?:n|ron|dos?|das?)?\b",
@@ -404,6 +490,8 @@ class Query:
     cue: str = ""
     # La consulta general (abiertos) no se ofrece si la pregunta trae palabras de una específica
     generic: bool = False
+    # El cue no cuenta si va negado («no resueltos» pide abiertos, no resueltos)
+    negatable: bool = False
     # Datos de tickets abiertos ahora: no se ofrece si la pregunta pide algo fuera del catálogo (OUTSIDE_SIGNALS)
     about_open: bool = False
     uses_period: bool = False
@@ -476,8 +564,22 @@ CATALOG = (
           ("¿Qué tan precisa fue la IA esta semana?", "Precisión de la clasificación", "¿Cuánto acertó la IA?"),
           _ai_precision_week,
           cue=r"precis|acert|aciert|exactitud|clasificacion|que tan bien|se equivoc|la ia\b"),
+    Query("resolved_period", ("admin", "coordinator", "technician"),
+          "Tickets resueltos en un periodo (hoy, ayer, esta semana, la semana pasada, este mes, el mes pasado, "
+          "últimos 7 o 30 días): cuántos, por departamento y por técnico. No cubre: abiertos ahora, prioridad.",
+          ("¿Cuántos tickets se resolvieron esta semana?", "Resueltos el mes pasado",
+           "¿Qué departamento resolvió más tickets?"),
+          _resolved_period,
+          cue=r"resuelt|resolvi|solucionad|finalizad|cerrad|\bcerr(?:o|aron|amos)\b|(?<!des)atendid"
+              r"|\batend(?:io|ieron)\b",
+          negatable=True,
+          uses_period=True,
+          own_description="TUS tickets resueltos en un periodo (hoy, ayer, esta semana, el mes pasado…). "
+                          "No cubre: abiertos ahora.",
+          own_examples=("¿Cuántos tickets resolví esta semana?", "Mis resueltos de ayer")),
 )
 BY_ID = {q.id: q for q in CATALOG}
+# Vacío: la IA no elige periodo; lo detecta el servidor (period_of)
 PERIODS: tuple[str, ...] = ()
 
 
@@ -496,7 +598,16 @@ _NEGATION_RE = re.compile(r"\b(?:no|sin|nadie|nunca)\b(?: \w+){0,3} $")
 
 
 def _asks_outside(plain: str) -> bool:
-    return any(not _NEGATION_RE.search(plain[:m.start()]) for m in _OUTSIDE_RE.finditer(plain))
+    return _affirmed(_OUTSIDE_RE, plain)
+
+
+def _affirmed(pattern, plain: str) -> bool:
+    """Alguna coincidencia que no va negada («no resueltos», «sin cerrar»)."""
+    return any(not _NEGATION_RE.search(plain[:m.start()]) for m in re.finditer(pattern, plain))
+
+
+def _matches(query: "Query", plain: str) -> bool:
+    return _affirmed(query.cue, plain) if query.negatable else bool(re.search(query.cue, plain))
 
 
 def _plain(text: str) -> str:
@@ -514,11 +625,11 @@ def candidates(user: models.User, message: str) -> list[Query]:
         return []
     # Con palabras de una consulta específica (aunque el rol no la tenga), la general no se ofrece:
     # el modelo pequeño se quedaba con «abiertos» al preguntar por vencidos
-    specific = any(re.search(q.cue, plain) for q in CATALOG if not q.generic)
-    # Lo mismo cuando pide algo fuera del catálogo: los abiertos no son la respuesta (mejor ayuda)
+    specific = any(_matches(q, plain) for q in CATALOG if not q.generic)
+    # Lo mismo cuando pide algo fuera de los abiertos: los abiertos no son la respuesta
     outside = _asks_outside(plain)
     return [q for q in allowed_for(user)
-            if re.search(q.cue, plain) and not (q.generic and specific) and not (q.about_open and outside)]
+            if _matches(q, plain) and not (q.generic and specific) and not (q.about_open and outside)]
 
 
 def options_for(user: models.User, message: str | None = None) -> list[dict]:
@@ -539,7 +650,10 @@ def choose(user: models.User, message: str) -> tuple[str, str | None]:
     if not options:
         return chatbot.HELP, None
     periods = PERIODS if any(BY_ID[o["id"]].uses_period for o in options) else ()
-    return chatbot.select_query(message, options, periods)
+    chosen, period = chatbot.select_query(message, options, periods)
+    if chosen in BY_ID and BY_ID[chosen].uses_period:
+        period = period_of(message)
+    return chosen, period
 
 
 def resolve(user: models.User, query_id: str) -> Query | None:
