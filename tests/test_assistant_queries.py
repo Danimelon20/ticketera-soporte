@@ -258,6 +258,10 @@ def test_selection_only_offers_allowed_ids(client, make_user, llm):
     ("technician", "¿Quién está de vacaciones?", []),
     # La carga es de abiertos ahora: resueltos no
     ("coordinator", "¿Qué técnico resolvió más tickets?", []),
+    # Fase 4: solo el administrador
+    ("admin", "¿Cuántos correos hay por clasificar?", ["drafts_unclassified"]),
+    ("admin", "¿Qué tan precisa fue la IA esta semana?", ["ai_precision_week"]),
+    ("coordinator", "¿Hay correos sin clasificar?", []),
 ])
 def test_keyword_filter(make_user, role, message, offered):
     user = make_user(role)
@@ -542,3 +546,74 @@ def test_staff_away_not_for_technician(client, load_team, llm):
     """Si la IA eligiera staff_away para un técnico, el servidor no la corre."""
     with SessionLocal() as db:
         assert aq.resolve(db.get(models.User, load_team["busy"]["id"]), "staff_away") is None
+
+
+# ---------- Fase 4: correos por clasificar y precisión de la IA (solo el administrador) ----------
+
+def _draft(requester, minutes_ago=0, ticket_id=None, **classification):
+    from datetime import timedelta
+    from uuid import uuid4
+
+    with SessionLocal() as db:
+        draft = models.EmailDraft(message_id=f"<asistente-{uuid4().hex}@test>", requester_id=requester["id"],
+                                  status="confirmed" if ticket_id else "pending_review",
+                                  subject="Correo de cliente@empresa.test 8888-1234", body="Texto",
+                                  ticket_id=ticket_id, created_at=aq._now() - timedelta(minutes=minutes_ago))
+        db.add(draft)
+        db.flush()
+        db.add(models.DraftClassification(draft_id=draft.id, created_at=aq._now(), **classification))
+        db.commit()
+        return draft.id
+
+
+def test_drafts_unclassified_matches_menu(client, make_user, llm, routing_on):
+    admin, requester = make_user("admin"), make_user("requester")
+    _draft(requester, minutes_ago=90, status="pending", pending_reason="low_similarity")
+    nav = client.get("/api/nav/counts", headers=admin["headers"]).json()
+    result = _result(admin, "drafts_unclassified")
+    assert _total(result) == nav["drafts_unclassified"] >= 1
+    facts = "\n".join(result.facts)
+    assert "espera desde hace" in facts
+    assert f"Tickets abiertos sin departamento: {nav['unclassified']}" in facts
+    # Nunca el asunto ni el remitente
+    assert "Correo de" not in facts and "@" not in facts and "8888" not in facts
+
+
+def test_drafts_unclassified_with_switch_off(make_user, llm):
+    result = _result(make_user("admin"), "drafts_unclassified")
+    assert aq.ROUTING_OFF_NOTE in result.facts and result.required == []
+
+
+def test_ai_precision_matches_report(client, make_user, llm, routing_on):
+    admin, requester = make_user("admin"), make_user("requester")
+    dept, _coordinator, _technician = team(make_user)
+    with SessionLocal() as db:
+        ticket = models.Ticket(title="Del correo", description="x", category_id=1, priority_id=1, status="new",
+                               created_by=requester["id"])
+        db.add(ticket)
+        db.commit()
+        ticket_id = ticket.id
+    _draft(requester, ticket_id=ticket_id, status="routed", department_id=dept, ai_department_id=dept,
+           ai_agrees=True)
+    _draft(requester, status="routed", department_id=dept, ai_department_id=dept, ai_agrees=True)
+
+    from datetime import timedelta
+    from app import availability
+    today = availability.office_today()
+    page = client.get("/api/admin/classification/precision", headers=admin["headers"],
+                      params={"from": str(today - timedelta(days=6)), "to": str(today)}).json()
+    result = _result(admin, "ai_precision_week")
+    facts = "\n".join(result.facts)
+    totals = page["totals"]
+    assert f"Confirmados como ticket: {totals['confirmed']}" in facts
+    assert f"Aciertos de la IA (confirmados en el departamento que eligió): {totals['hits']}" in facts
+    assert f"Correos clasificados por la IA: {page['received']}" in facts
+    assert result.required == [f"{totals['accuracy']:g}".replace(".", ",")]
+    assert "Correo de" not in facts and "@" not in facts
+
+
+def test_admin_queries_not_for_coordinator(make_user):
+    with SessionLocal() as db:
+        coordinator = db.get(models.User, make_user("coordinator")["id"])
+        assert aq.resolve(coordinator, "drafts_unclassified") is None
+        assert aq.resolve(coordinator, "ai_precision_week") is None

@@ -89,6 +89,10 @@ QUESTIONS = [
     ((A,), "¿Hay correos sin clasificar?", "drafts_unclassified"),
     ((A,), "¿Qué tan precisa fue la IA esta semana?", "ai_precision_week"),
     ((A,), "Precisión de la clasificación", "ai_precision_week"),
+    # Fase 4: redacciones propias
+    ((A,), "¿Quedan borradores sin departamento?", "drafts_unclassified"),
+    ((A,), "¿Cuánto acertó la IA estos días?", "ai_precision_week"),
+    ((C,), "¿Cuántos correos hay por clasificar?", NONE),
     (ALL, "¿Cuántos tickets se resolvieron esta semana?", "resolved_period"),
     ((A, C), "Resueltos el mes pasado", "resolved_period"),
 ]

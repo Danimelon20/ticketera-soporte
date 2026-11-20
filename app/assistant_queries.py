@@ -16,12 +16,13 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import alerts, auto_assign, availability, chatbot, models, nav, routing
+from . import (alerts, auto_assign, availability, chatbot, classification_report, draft_classification, models, nav,
+               people_activity, routing)
 from .daily_summary import _due_at, _local
 from .overdue_report import duration_text
 from .notifications import STATUS_LABELS
@@ -198,6 +199,7 @@ def _due_soon(db, user, sc, now, period):
 # ---------- Carga y ausencias: los mismos datos que Equipo (/api/team) ----------
 
 ROLE_NAMES = {"technician": "técnico", "coordinator": "coordinador"}
+ROUTING_OFF_NOTE = "«Tickets por departamento» está apagado: los correos no pasan por «Por clasificar»."
 
 
 def _staff(db: Session, user: models.User, sc: Scope, roles: tuple) -> list[models.User]:
@@ -291,6 +293,71 @@ def _staff_away(db: Session, user: models.User, sc: Scope, now: datetime, period
              if off else "") + "."
     text += f" Fuera de su horario ahora: {len(away)}. Disponibles ahora: {len(present)}."
     return Result("staff_away", "Disponibilidad del personal", facts, text, [str(len(off))])
+
+
+# ---------- Correos y precisión (solo el administrador): los mismos datos que su página ----------
+
+def _drafts_unclassified(db: Session, user: models.User, sc: Scope, now: datetime, period) -> Result:
+    """Borradores en «Por clasificar» (el mismo conteo del menú, nav.drafts_unclassified) y el más antiguo; y los
+    tickets abiertos sin departamento. Nunca el asunto, el remitente ni el cuerpo."""
+    unclassified_tickets = routing.unclassified_open_tickets(db).count()
+    label = "Correos por clasificar"
+    if not routing.enforced(db):
+        facts = [ROUTING_OFF_NOTE, f"Tickets abiertos sin departamento: {unclassified_tickets}"]
+        text = f"{ROUTING_OFF_NOTE} Tickets abiertos sin departamento: {unclassified_tickets}."
+        return Result("drafts_unclassified", label, facts, text, [])
+    pending = draft_classification.pending_query(db)
+    total = pending.count()
+    facts = [f"Correos en «Por clasificar»: {total}"]
+    text = f"Hay {total} correo(s) en «Por clasificar»."
+    if total:
+        oldest, _row = pending.first()
+        age = duration_text(int((now - oldest.created_at).total_seconds()))
+        facts.append(f"El más antiguo espera desde hace {age}")
+        text += f" El más antiguo espera desde hace {age}."
+    facts.append(f"Tickets abiertos sin departamento: {unclassified_tickets}")
+    text += f" Tickets abiertos sin departamento: {unclassified_tickets}."
+    return Result("drafts_unclassified", label, facts, text, [str(total)])
+
+
+PRECISION_DAYS = 7
+
+
+def _pct_text(value: float | None) -> str:
+    return f"{value:g}".replace(".", ",") + " %" if value is not None else "sin confirmados todavía"
+
+
+def _ai_precision_week(db: Session, user: models.User, sc: Scope, now: datetime, period) -> Result:
+    """Precisión de la IA de los últimos 7 días de la oficina (hoy incluido): el mismo reporte que
+    /api/classification/precision con ese rango. Sin asuntos ni correcciones: solo números."""
+    today = availability._local_day(now)
+    date_from = today - timedelta(days=PRECISION_DAYS - 1)
+    start, end = people_activity.date_range(date_from, today)
+    report = classification_report.build(db, start, end)
+    totals, pending = report["totals"], report["pending"]
+    accuracy = totals["accuracy"]
+    facts = [
+        f"Periodo: del {date_from:%d/%m/%Y} al {today:%d/%m/%Y}",
+        f"Correos clasificados por la IA: {report['received']}",
+        f"Enviados directo al coordinador: {totals['direct']}",
+        f"Confirmados como ticket: {totals['confirmed']}",
+        f"Aciertos de la IA (confirmados en el departamento que eligió): {totals['hits']}",
+        f"Precisión: {_pct_text(accuracy)}",
+        f"Pendientes de confirmar: {totals['pending']}",
+        f"Transferidos por un coordinador (rebotes): {totals['bounced']}",
+        f"Fueron a «Por clasificar»: {pending['arrived']} (ya decididos: {pending['decided']})",
+    ]
+    if report["few_cases"]:
+        facts.append(f"Pocos casos (menos de {report['min_cases']}): los números todavía no alcanzan para ajustar.")
+    if not report["routing_enforced"]:
+        facts.append("«Tickets por departamento» está apagado: la IA no clasifica correos por departamento.")
+    text = (f"Precisión de la IA del {date_from:%d/%m/%Y} al {today:%d/%m/%Y}: {_pct_text(accuracy)} "
+            f"({totals['hits']} acierto(s) de {totals['confirmed']} confirmado(s)). "
+            f"Correos clasificados: {report['received']}.")
+    if report["few_cases"]:
+        text += f" Son pocos casos (menos de {report['min_cases']})."
+    required = [_pct_text(accuracy).split(" ")[0]] if accuracy is not None else [str(totals["confirmed"])]
+    return Result("ai_precision_week", "Precisión de la IA (7 días)", facts, text, required)
 
 
 # Sinónimos y señales de «fuera del catálogo». Cada elemento es una expresión regular que se busca en la pregunta
@@ -397,6 +464,18 @@ CATALOG = (
           _staff_away,
           cue=r"vacacion|ausen|incapacid|permiso|disponib|no (?:esta|estan) hoy|no vin(?:o|ieron)"
               r"|fuera de (?:su )?horario|de turno|regres|vuelve"),
+    Query("drafts_unclassified", ("admin",),
+          "Correos en «Por clasificar» (los que la IA no envió a un coordinador): cuántos y hace cuánto espera "
+          "el más antiguo; también los tickets abiertos sin departamento. No cubre: precisión de la IA.",
+          ("¿Cuántos correos hay por clasificar?", "¿Hay correos sin clasificar?", "¿Hay borradores esperando?"),
+          _drafts_unclassified,
+          cue=r"correo|borrador|por clasificar|sin clasificar|sin departamento|bandeja"),
+    Query("ai_precision_week", ("admin",),
+          "Precisión de la IA al clasificar correos por departamento en los últimos 7 días: aciertos, "
+          "confirmados y porcentaje. No cubre: correos que esperan en «Por clasificar» ahora.",
+          ("¿Qué tan precisa fue la IA esta semana?", "Precisión de la clasificación", "¿Cuánto acertó la IA?"),
+          _ai_precision_week,
+          cue=r"precis|acert|aciert|exactitud|clasificacion|que tan bien|se equivoc|la ia\b"),
 )
 BY_ID = {q.id: q for q in CATALOG}
 PERIODS: tuple[str, ...] = ()
