@@ -50,6 +50,24 @@ QUESTIONS = [
     ((A, T), "Cuéntame un chiste", NONE),
     ((A,), "¿Cuántas personas trabajan en la empresa?", NONE),
     ((C,), "¿Cuánto cuesta una licencia de Office?", NONE),
+    # Sinónimos informales de sin asignar y vencidos
+    ((A, C), "¿Hay casos que nadie ha tomado?", "open_tickets"),
+    ((A, C), "¿Cuántos siguen sin dueño?", "open_tickets"),
+    (ALL, "¿Algún ticket se pasó de fecha?", "overdue"),
+    ((A, C), "¿Qué solicitudes van fuera de plazo?", "overdue"),
+    ((A, C), "¿Cuáles ya pasaron su fecha?", "overdue"),
+    # Pide algo que el catálogo no tiene: ayuda, nunca los abiertos
+    ((A, C), "¿Qué departamento cerró más tickets este mes?", HELP),
+    ((A, C), "¿Cuál área genera más casos?", HELP),
+    ((A, C), "¿Qué departamento crea más solicitudes?", HELP),
+    ((A, C), "¿Cuántos tickets urgentes hay?", HELP),
+    ((A, C), "¿Hay tickets abiertos de prioridad alta?", HELP),
+    # Negado sigue siendo de abiertos
+    ((A, C), "¿Cuántos tickets no se han cerrado?", "open_tickets"),
+    # Resumen o estado por departamento
+    ((A, C), "Dame un resumen de los tickets por departamento", "open_by_department"),
+    ((A, C), "¿Cuál es el estado de cada área?", "open_by_department"),
+    ((A, C), "¿Cómo están los departamentos?", "open_by_department"),
     # Fases siguientes: se omiten mientras la consulta no exista
     (ALL, "¿Qué tickets están vencidos?", "overdue"),
     ((A, C), "¿Hay tickets atrasados?", "overdue"),

@@ -194,6 +194,39 @@ def _due_soon(db, user, sc, now, period):
     return _due_query(alerts.DUE_SOON, db, user, sc, now)
 
 
+# Sinónimos y señales de «fuera del catálogo». Cada elemento es una expresión regular que se busca en la pregunta
+# ya normalizada (_plain: minúsculas, sin tildes ni ¿¡): se escriben sin tildes y con n en vez de ñ.
+# Sin asignar, en palabras informales: se suman al cue de open_tickets
+UNASSIGNED_SYNONYMS: tuple[str, ...] = (
+    r"sin asignar",
+    r"sin (?:dueno|tomar|responsable)",
+    r"nadie (?:\w+ ){0,2}(?:tomad|agarrad|atend)",   # nadie ha tomado, nadie quiere atenderlos
+)
+# Vencidos, en palabras informales: se suman al cue de overdue
+OVERDUE_SYNONYMS: tuple[str, ...] = (
+    r"fuera de (?:plazo|fecha)",
+    r"\bpas(?:o|aron|ado|ados|ada|adas)\b (?:\w+ ){0,2}(?:fecha|plazo)",   # se (me) paso de fecha, pasaron su fecha
+    r"caducad",
+    r"\bno (?:\w+ ){1,2}a tiempo",   # no se atendieron a tiempo
+)
+# Pide algo que el catálogo no tiene: open_tickets y open_by_department no se ofrecen (la IA respondía con los
+# abiertos, datos de otra cosa). Participios y pretéritos, nunca el infinitivo: «por resolver» es abierto.
+# Con \b para no atrapar «general» ni «creo que». La negación («no resueltos») la descarta _NEGATION_RE.
+OUTSIDE_SIGNALS: tuple[str, ...] = (
+    # Resueltos, cerrados, atendidos
+    r"resuelt", r"resolvi", r"solucionad", r"finalizad",
+    r"cerrad", r"\bcerr(?:o|aron)\b",
+    r"(?<!des)atendid", r"\batend(?:io|ieron)\b",   # «desatendidos» son los que faltan
+    # Quién genera, crea o reporta
+    r"\bgenera(?:n|ron)?\b", r"\bcrea(?:n|ron|dos?|das?)?\b", r"\breporta(?:n|ron|dos?|das?)?\b",
+    # Urgencia o prioridad
+    r"urgen", r"priorid|priorit", r"critic",
+)
+
+def _cue(*parts: str) -> str:
+    return "|".join(parts)
+
+
 @dataclass
 class Query:
     id: str
@@ -205,6 +238,8 @@ class Query:
     cue: str = ""
     # La consulta general (abiertos) no se ofrece si la pregunta trae palabras de una específica
     generic: bool = False
+    # Datos de tickets abiertos ahora: no se ofrece si la pregunta pide algo fuera del catálogo (OUTSIDE_SIGNALS)
+    about_open: bool = False
     uses_period: bool = False
     # Para el técnico (solo lo suyo), si cambia
     own_description: str | None = None
@@ -213,31 +248,39 @@ class Query:
 
 CATALOG = (
     Query("open_tickets", ("admin", "coordinator", "technician"),
-          "Cifras de tickets abiertos: total, nuevos, en proceso, sin asignar.",
+          "Cifras de tickets abiertos o pendientes: total, nuevos, en proceso, sin asignar (que nadie ha tomado). "
+          "No cubre: resueltos, quién los crea, prioridad.",
           ("¿Cuántos tickets hay abiertos?", "Resume el estado del equipo", "¿Cuántos están sin asignar?"),
           _open_tickets_query,
-          cue=r"ticket|caso|solicitud|equipo|pendiente|abiert|asignad|tengo|estado",
+          cue=_cue(r"ticket|caso|solicitud|equipo|pendiente|abiert|asignad|tengo|estado", *UNASSIGNED_SYNONYMS),
           generic=True,
-          own_description="Cifras y lista de TUS tickets abiertos (solo los asignados a ti).",
+          about_open=True,
+          own_description="Cifras y lista de TUS tickets abiertos (solo los asignados a ti). "
+                          "No cubre: resueltos, prioridad.",
           own_examples=("¿Cuántos tickets tengo?", "Resume mis tickets abiertos", "¿Qué tickets tengo asignados?")),
     Query("open_by_department", ("admin", "coordinator"),
-          "Tickets abiertos repartidos por departamento o área.",
-          ("Tickets abiertos por departamento", "¿Qué departamento tiene más tickets?", "Reparto por área"),
+          "Tickets abiertos de cada departamento o área: cuántos tiene cada uno; también el resumen o el estado "
+          "de los tickets por departamento. No cubre: resueltos, qué departamento crea más, prioridad.",
+          ("Tickets abiertos por departamento", "¿Qué departamento tiene más tickets?", "Reparto por área",
+           "Resumen de los tickets por departamento", "Estado de cada área"),
           _open_by_department,
-          cue=r"departament|depto|area|reparto"),
+          cue=r"departament|depto|area|reparto",
+          about_open=True),
     Query("overdue", ("admin", "coordinator", "technician"),
-          "Tickets vencidos (con la fecha límite ya pasada): cuántos y cuáles.",
+          "Tickets vencidos, atrasados o fuera de plazo (la fecha límite ya pasó): cuántos y cuáles. "
+          "No cubre: por vencer, prioridad.",
           ("¿Qué tickets están vencidos?", "¿Hay tickets atrasados?", "¿Cuántos vencidos hay?"),
           _overdue,
-          cue=r"vencid|atrasad|retrasad|fuera de tiempo",
-          own_description="TUS tickets vencidos (con la fecha límite ya pasada).",
+          cue=_cue(r"vencid|atrasad|retrasad|fuera de tiempo", *OVERDUE_SYNONYMS),
+          own_description="TUS tickets vencidos o atrasados (la fecha límite ya pasó). No cubre: por vencer.",
           own_examples=("¿Tengo tickets vencidos?", "¿Cuáles de mis tickets están atrasados?")),
     Query("due_soon", ("admin", "coordinator", "technician"),
-          "Tickets por vencer (cerca de su fecha límite, todavía no vencidos): cuántos y cuáles.",
+          "Tickets por vencer (cerca de su fecha límite, todavía no vencidos): cuántos y cuáles. "
+          "No cubre: ya vencidos, prioridad.",
           ("¿Cuáles están por vencer?", "¿Qué tickets vencen pronto?", "¿Cuántos por vencer hay?"),
           _due_soon,
           cue=r"por vencer|vence|a punto de",
-          own_description="TUS tickets por vencer (cerca de su fecha límite).",
+          own_description="TUS tickets por vencer (cerca de su fecha límite). No cubre: ya vencidos.",
           own_examples=("¿Qué tickets míos vencen pronto?", "¿Tengo tickets por vencer?")),
 )
 BY_ID = {q.id: q for q in CATALOG}
@@ -249,7 +292,17 @@ def allowed_for(user: models.User) -> list[Query]:
 
 
 # Preguntas de cómo hacer algo o qué significa algo: ayuda, aunque nombren tickets
-_HOW_TO_RE = re.compile(r"^(que significa|que es|que hago|que reviso|pasos|por que|como (?!estamos|vamos|va\b|van\b))")
+_HOW_TO_RE = re.compile(
+    r"^(que significa|que es|que hago|que reviso|pasos|por que|como (?!estamos|vamos|va\b|van\b|esta\b|estan\b))")
+
+# Sin señales, (?!) nunca coincide
+_OUTSIDE_RE = re.compile(_cue(*OUTSIDE_SIGNALS) or r"(?!)")
+# «No resueltos», «sin cerrar», «no han sido atendidos», «nadie ha atendido»: siguen abiertos
+_NEGATION_RE = re.compile(r"\b(?:no|sin|nadie|nunca)\b(?: \w+){0,3} $")
+
+
+def _asks_outside(plain: str) -> bool:
+    return any(not _NEGATION_RE.search(plain[:m.start()]) for m in _OUTSIDE_RE.finditer(plain))
 
 
 def _plain(text: str) -> str:
@@ -268,7 +321,10 @@ def candidates(user: models.User, message: str) -> list[Query]:
     # Con palabras de una consulta específica (aunque el rol no la tenga), la general no se ofrece:
     # el modelo pequeño se quedaba con «abiertos» al preguntar por vencidos
     specific = any(re.search(q.cue, plain) for q in CATALOG if not q.generic)
-    return [q for q in allowed_for(user) if re.search(q.cue, plain) and not (q.generic and specific)]
+    # Lo mismo cuando pide algo fuera del catálogo: los abiertos no son la respuesta (mejor ayuda)
+    outside = _asks_outside(plain)
+    return [q for q in allowed_for(user)
+            if re.search(q.cue, plain) and not (q.generic and specific) and not (q.about_open and outside)]
 
 
 def options_for(user: models.User, message: str | None = None) -> list[dict]:

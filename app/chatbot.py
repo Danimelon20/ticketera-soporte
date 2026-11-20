@@ -278,14 +278,13 @@ def stream_llm(system_prompt: str, history: list, message: str):
 HELP = "ayuda"
 SELECT_RULES = (
     "Clasifica la pregunta de un usuario de la Ticketera de Soporte. Elige UNA opción por su id. "
-    "Las opciones de datos son SOLO para preguntas que piden cifras o listas de tickets de la ticketera. "
-    "Pedir un resumen de los tickets o del estado del equipo también es de datos. "
-    "Para todo lo demás (cómo hacer algo, qué significa algo, soporte técnico u otros temas) elige ayuda."
+    "Si la pregunta es sobre los tickets (cuántos, cuáles, si hay, resumen o estado) y una opción de datos lo "
+    "describe, elige esa opción. Elige ayuda para cómo hacer algo, qué significa algo, soporte técnico u otros temas."
 )
-# Una sola opción para lo que no es de datos: la ayuda general ya se niega a lo que no es soporte
-HELP_OPTION = (f"- {HELP}: todo lo que no pide cifras de tickets. Ejemplos: «¿Cómo invito a un técnico?»; "
-               "«¿Qué significa En proceso?»; «Pasos para diagnosticar una red lenta»; «Cuéntame un chiste»; "
-               "«¿Cuántas personas trabajan en la empresa?»")
+# Una sola opción para lo que no es de datos: la ayuda general ya se niega a lo que no es soporte. Sin ejemplos:
+# los que tenía («¿Cuántas personas…?», «Cuéntame un chiste») ya los manda a ayuda el filtro por palabras y solo
+# empujaban al modelo pequeño a elegir ayuda con preguntas de cifras
+HELP_OPTION = f"- {HELP}: lo que no es sobre datos de tickets (cómo hacer algo, soporte técnico u otros temas)."
 
 
 def select_query(message: str, options: list[dict], periods: tuple[str, ...] = ()) -> tuple[str, str | None]:

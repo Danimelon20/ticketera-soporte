@@ -225,6 +225,29 @@ def test_selection_only_offers_allowed_ids(client, make_user, llm):
     # Sin palabras de datos
     ("admin", "Cuéntame un chiste", []),
     ("admin", "¿Cuántas personas trabajan en la empresa?", []),
+    # Sinónimos informales
+    ("admin", "¿Qué hay que nadie ha tomado todavía?", ["open_tickets"]),
+    ("coordinator", "¿Cuántos siguen sin dueño?", ["open_tickets"]),
+    ("admin", "¿Algo se pasó de fecha?", ["overdue"]),
+    ("coordinator", "¿Qué va fuera de plazo?", ["overdue"]),
+    ("technician", "¿Se me pasaron de fecha algunos?", ["overdue"]),
+    ("admin", "¿Cuántos tickets no se atendieron a tiempo?", ["overdue"]),
+    ("coordinator", "¿Hay algo que nadie ha atendido?", ["open_tickets"]),
+    # Pide algo fuera del catálogo: nunca los abiertos (la IA respondía con datos de otra cosa)
+    ("admin", "¿Qué departamento resolvió más tickets?", []),
+    ("coordinator", "¿Qué área cerró más casos este mes?", []),
+    ("admin", "¿Cuál departamento genera más tickets?", []),
+    ("admin", "¿Qué departamento crea más solicitudes?", []),
+    ("coordinator", "¿Quién reporta más tickets?", []),
+    ("admin", "¿Cuántos tickets urgentes hay?", []),
+    ("technician", "¿Cuáles de mis tickets tienen prioridad alta?", []),
+    # Negado sigue siendo abierto; «general» y «desatendidos» no son señales
+    ("admin", "¿Cuántos tickets no se han cerrado?", ["open_tickets"]),
+    ("coordinator", "Casos no resueltos por departamento", ["open_by_department"]),
+    ("admin", "Resumen general de tickets", ["open_tickets"]),
+    ("coordinator", "¿Hay casos desatendidos?", ["open_tickets"]),
+    # Resumen o estado por departamento
+    ("coordinator", "¿Cómo están los departamentos?", ["open_by_department"]),
 ])
 def test_keyword_filter(make_user, role, message, offered):
     user = make_user(role)
